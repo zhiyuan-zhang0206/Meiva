@@ -95,6 +95,7 @@ class RemoteMCPClient:
         *,
         timeout_seconds: float,
         agent_id: int | None,
+        browser_caller: str | None = None,
     ) -> object:
         with self._lock:
             self._req_id += 1
@@ -110,6 +111,7 @@ class RemoteMCPClient:
                         # connection = one agent, and the identity rides on
                         # every request so the service can gate per agent.
                         "agent_id": agent_id,
+                        **({"browser_caller": browser_caller} if browser_caller else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -201,6 +203,7 @@ class RemoteMCPClient:
         *,
         timeout_seconds: float,
         agent_id: int | None,
+        browser_caller: str | None = None,
     ) -> dict[str, object]:
         result = self._request(
             "call_tool",
@@ -211,6 +214,7 @@ class RemoteMCPClient:
             },
             timeout_seconds=timeout_seconds,
             agent_id=agent_id,
+            browser_caller=browser_caller,
         )
         if not is_object_dict(result):
             raise MCPCallError(f"MCP tool result for {server}.{tool} is not an object")

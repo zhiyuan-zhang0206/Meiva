@@ -10,6 +10,7 @@ from pathlib import Path
 
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
+from base.agents.context.browser_identity import hosted_browser_identity
 from base.clock import Timers
 from base.host.boundary.json_values import is_object_dict
 from base.host.remote_hosts import load_remote_hosts, parse_target_selector, resolve_target
@@ -17,6 +18,7 @@ from base.log import logger
 from base.paths import workspace_path
 
 from .remote_files import CallerFiles
+from .remote_pages import REMOTE_TOOLS, require_remote_tool
 from .remote_rpc import RPC_TIMEOUT_S, call_browser_peer
 from .ssh_browser import SshBrowser
 
@@ -33,6 +35,7 @@ class BrowserRoutes:
     headers: Callable[[], Mapping[str, str]]
     timers: Timers
     connect_timeout_s: float
+    verify_caller: Callable[[str, str], dict[str, object]] | None = None
 
 
 async def _peer_request(url: str, headers: Mapping[str, str], body: Mapping[str, object]) -> object:
@@ -49,6 +52,7 @@ class RoutedBrowserSession:
         peer_request: PeerRequest = _peer_request,
     ) -> None:
         self.client_agent_id: int | None = None
+        self.browser_caller: str | None = None
         self._routes = routes
         self._local = local_request
         self._peer = peer_request
@@ -75,9 +79,13 @@ class RoutedBrowserSession:
             )
         return await self._local(request)
 
-    def _catalog(self, raw: object) -> ListToolsResult:
+    def _catalog(self, raw: object, *, remote: bool = False) -> ListToolsResult:
         result = ListToolsResult.model_validate({"tools": raw})
-        return ListToolsResult(tools=[_with_host(tool) for tool in result.tools])
+        return ListToolsResult(
+            tools=[
+                _with_host(tool) for tool in result.tools if not remote or tool.name in REMOTE_TOOLS
+            ]
+        )
 
     async def list_tools(self) -> ListToolsResult:
         async with self._lock:
@@ -121,7 +129,9 @@ class RoutedBrowserSession:
                     tools = await ssh.list_tools()
                 except (RuntimeError, OSError, ValueError):
                     continue
-                return ListToolsResult(tools=[_with_host(tool) for tool in tools])
+                return ListToolsResult(
+                    tools=[_with_host(tool) for tool in tools if tool.name in REMOTE_TOOLS]
+                )
         raise RuntimeError(
             "Chrome tools are unavailable. Run `meiva computer list` to discover targets."
         )
@@ -129,7 +139,7 @@ class RoutedBrowserSession:
     async def _remote_catalog(self, url: str) -> ListToolsResult | None:
         try:
             return self._catalog(
-                await self._peer(url, self._routes.headers(), {"method": "list_tools"})
+                await self._peer(url, self._routes.headers(), {"method": "list_tools"}), remote=True
             )
         except (RuntimeError, OSError, ValueError):
             return None
@@ -141,6 +151,7 @@ class RoutedBrowserSession:
     async def _call_tool(self, name: str, args: Mapping[str, object]) -> CallToolResult:
         arguments = dict(args)
         host = arguments.pop("host", None)
+        caller = self.browser_caller
         agent_id = self.client_agent_id
         kind, _ = parse_target_selector(host)
         if kind == "local":
@@ -159,6 +170,8 @@ class RoutedBrowserSession:
             return await self._call_local(name, arguments, agent_id)
         if agent_id is None or agent_id <= 0:
             raise ValueError("Remote Chrome requires a Meiva agent identity")
+        require_remote_tool(name, arguments)
+        proof = await self._issue(caller, target.canonical_uri, agent_id)
         workspace = workspace_path(self._routes.home, agent_id)
         if target.kind == "ssh":
             config = hosts[target.name]
@@ -186,13 +199,29 @@ class RoutedBrowserSession:
                 "method": "call_tool",
                 "tool": name,
                 "args": files.args,
-                "agent_id": agent_id,
+                "origin": self._routes.local_machine,
+                "proof": proof,
                 "inputs": files.inputs,
             },
         )
         if not is_object_dict(raw):
             raise ValueError("Browser peer returned an invalid tool result")
         return files.receive(CallToolResult.model_validate(raw.get("mcp")), raw.get("files"))
+
+    async def _issue(self, caller: object, target: str, agent_id: int) -> str:
+        if not isinstance(caller, str) or not caller:
+            raise ValueError("Remote Chrome requires an agent-host caller credential")
+        verifier = self._routes.verify_caller
+        if verifier is None:
+            claims = await asyncio.to_thread(
+                hosted_browser_identity, self._routes.home, "issue", caller, target
+            )
+        else:
+            claims = verifier(caller, target)
+        proof = claims.get("proof")
+        if claims.get("agent_id") != agent_id or not isinstance(proof, str):
+            raise ValueError("Chrome caller credential does not belong to this agent")
+        return proof
 
     async def _call_local(
         self,
@@ -207,6 +236,8 @@ class RoutedBrowserSession:
 
 
 def _with_host(tool: Tool) -> Tool:
+    if tool.name not in REMOTE_TOOLS:
+        return tool
     schema = dict(tool.input_schema)
     properties = schema.get("properties")
     schema["properties"] = {

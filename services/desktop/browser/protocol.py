@@ -40,6 +40,7 @@ class WireRequest(TypedDict, total=False):
     method: object
     tool: object
     args: object
+    inputs: object
     agent_id: object
 
 

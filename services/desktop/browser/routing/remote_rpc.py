@@ -15,6 +15,7 @@ from base.host.boundary.untyped import object_of
 from services.desktop.browser.routing.mcp_socket_bridge import LINE_LIMIT, SocketLink
 
 BROWSER_RPC_ROUTE = ("POST", "/browser/rpc")
+BROWSER_PROOF_ROUTE = ("POST", "/browser/verify")
 RPC_TIMEOUT_S = 180.0
 
 
@@ -44,8 +45,9 @@ async def call_browser_peer(
     body: Mapping[str, object],
     *,
     timeout_s: float,
+    proof_request: bool = False,
 ) -> object:
-    endpoint = url.rstrip("/") + BROWSER_RPC_ROUTE[1]
+    endpoint = url.rstrip("/") + (BROWSER_PROOF_ROUTE[1] if proof_request else BROWSER_RPC_ROUTE[1])
     try:
         async with (
             asyncio.timeout(timeout_s),
@@ -60,7 +62,12 @@ async def call_browser_peer(
                 data.extend(chunk)
             raw = object_of(json.loads, data)
     except httpx.HTTPStatusError as exc:
-        raise RuntimeError(f"Browser peer returned HTTP {exc.response.status_code}") from exc
+        status = exc.response.status_code
+        if status == 404:
+            raise RuntimeError(
+                "Browser RPC is unavailable on this runner. Upgrade the runner before using remote Chrome."
+            ) from exc
+        raise RuntimeError(f"Browser peer returned HTTP {status}") from exc
     except (httpx.RequestError, TimeoutError) as exc:
         raise RuntimeError(f"Browser peer did not return a result ({type(exc).__name__})") from exc
     if not is_object_dict(raw) or raw.get("ok") is not True:
@@ -69,12 +76,14 @@ async def call_browser_peer(
     return raw.get("result")
 
 
-def probe_browser_peer(url: str, *, headers: Mapping[str, str]) -> bool | None:
+def probe_browser_peer(url: str, *, headers: Mapping[str, str]) -> bool | str | None:
     try:
         with httpx.Client(trust_env=False, timeout=2.0) as client:
             response = client.post(
                 url.rstrip("/") + BROWSER_RPC_ROUTE[1], headers=headers, json={"method": "status"}
             )
+            if response.status_code == 404:
+                return "upgrade runner"
             response.raise_for_status()
             parsed = object_of(response.json)
     except (httpx.HTTPError, ValueError):

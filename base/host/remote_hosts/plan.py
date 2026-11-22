@@ -222,17 +222,7 @@ def _has_control_chars(value: str) -> bool:
 
 
 def _validate_target_name(raw_name: str, *, raw_host: str) -> str:
-    if (
-        not raw_name
-        or ".." in raw_name
-        or any(
-            ch in ("/", "\\", ":", "@", "?", "#")
-            or ch.isspace()
-            or ord(ch) < 0x20
-            or ord(ch) == 0x7F
-            for ch in raw_name
-        )
-    ):
+    if not _ALIAS_RE.fullmatch(raw_name) or ".." in raw_name:
         raise TargetResolutionError(
             f"Invalid desktop host {raw_host!r}: bare URLs, ports, paths, and raw IPs are "
             "forbidden. Run `meiva computer list` to view registered targets."

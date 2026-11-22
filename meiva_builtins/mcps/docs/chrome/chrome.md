@@ -22,8 +22,11 @@ agent's shared MCP daemon (services.entrypoints.mcp_daemon)
 
 `host="meiva://<machine>"` routes through the registered runner's authenticated
 `/browser/rpc` endpoint, which forwards to its private browser-mcp Unix socket.
-The target daemon validates the calling agent's Tab ownership, including explicit
-`pageId` arguments. The local Chrome service and its Tab registry remain the
+The source agent-host issues a single-use credential for the agent, target, and
+Chrome tool-call purpose. The target redeems it through the registered source
+runner and derives the calling agent from the verified response. The target
+daemon validates that identity's Tab ownership, including explicit `pageId`
+arguments. The local Chrome service and its Tab registry remain the
 owners of the existing page selection and TTL.
 
 `host="ssh://<alias>"` uses a configured SSH target in `$MEIVA_HOME/remote_hosts.toml`:
@@ -40,16 +43,18 @@ binds a random local loopback port, and the local Chrome DevTools MCP process
 connects through the tunnel. It may address Tabs created by its own connection.
 An SSH connection recovery starts with a fresh Tab scope.
 
-Remote file transfer uses paths inside the agent's workspace, with an 8 MiB
-combined artifact limit per call. Supported file arguments cover `upload_file`,
-`take_screenshot`, `take_snapshot`, `evaluate_script`, `get_network_request`,
-performance trace start/stop, `take_heapsnapshot`, and `lighthouse_audit`.
-Uploads stage on the target so Chrome can open them. Submit the file within
-ten minutes on a cluster target, or before the SSH connection ends. Output
-files are returned to the workspace and per-call staging is removed. The pinned
-upstream has no tool for browser-managed downloads or PDF export. Remote tool
-calls reject extension management, service-worker evaluation, screencasts,
-and file-based heap analysis. Use HTTP(S) or `about:blank` for remote navigation.
+Remote file transfer uses paths inside the calling agent's workspace, with an
+8 MiB file limit. The browser executor stages `upload_file` input long enough
+for Chrome to read it after attachment. Submit uploads within ten minutes and
+before an SSH connection ends. The caller writes `take_screenshot` and
+`take_snapshot` artifacts from bounded replies. Remote screenshots capture
+up to 800 by 600 viewport pixels at a bounded scale. Full-page and element
+screenshots remain available through local Chrome. Remote navigation accepts
+HTTP(S) or `about:blank`.
+
+Remote tools use an allowlist of page operations. Browser-wide performance
+tracing, Lighthouse, heap exports, extensions and screencasts stay local.
+The pinned upstream has no browser-managed download or PDF export tool.
 
 ## Page Lifetime (TTL)
 Every page this stack **creates** — an explicit `new_page`, or the auto-created page on a page-less first navigate — carries a hard TTL deadline (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default), kept in `<home>/run/browser-pages.json` (one record per CDP target id, wall-clock epoch seconds) and enforced by the expiry sweep (`services/desktop/browser/page_lifecycle.py:reap_expired_pages`), the only safety net behind the deterministic release on agent exit. Activity never extends it; a page in use across days is bounded by its TTL (reclaimed within a sweep interval). An agent that dies without reaching its exit hook (SIGKILL, OOM, force-terminate), or a dev server that dies under a live agent, leaves its tab in the shared Chrome until that deadline (24h by default).

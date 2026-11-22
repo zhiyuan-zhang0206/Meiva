@@ -27,11 +27,13 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from base.agents.context.browser_identity import BROWSER_CALLER_ENV
 from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.net.resilience import retry_asleep
 from base.host.system.hostport import Host
+from base.lm.harness.registration import HANDLE_ENV
 from base.paths import chrome_mcp_socket, meiva_home
 from services.desktop.browser.routing.mcp_socket_bridge import (
     ReconnectingLink,
@@ -108,6 +110,7 @@ async def _serve(
     timeout_reader: Callable[[], float],
     routes: BrowserRoutes,
     agent_id: int | None,
+    caller: str | None = None,
 ) -> None:
     link = ReconnectingSocketLink(socket_path=socket_path, timeout_reader=timeout_reader)
 
@@ -117,6 +120,7 @@ async def _serve(
 
     session = RoutedBrowserSession(routes, local_request=local_request)
     session.client_agent_id = agent_id
+    session.browser_caller = caller
     await session.start()
 
     async def _list_tools(
@@ -149,6 +153,7 @@ def main() -> None:
                 config, home=home, timers=SYSTEM_TIMERS, host=Host.system(environ=os.environ)
             ),
             agent_id=int(raw_id) if raw_id else None,
+            caller=os.environ.get(BROWSER_CALLER_ENV) or os.environ.get(HANDLE_ENV),
         )
     )
 

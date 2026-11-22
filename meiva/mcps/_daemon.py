@@ -352,6 +352,10 @@ async def _handle_call_tool(
     # respective daemons (page affinity + governance/audit).
     if not isinstance(session, (ClientSession, SerialSession)):
         session.client_agent_id = typed_optional_int_field(req, "agent_id")
+    if not isinstance(
+        session, (ClientSession, SerialSession, BrowserLineSession, ComputerLineSession)
+    ):
+        session.browser_caller = typed_optional_str_field(req, "browser_caller")
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:

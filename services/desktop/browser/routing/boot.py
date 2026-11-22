@@ -32,6 +32,7 @@ def browser_routes_from_boot(
     timers: Timers,
     host: Host,
 ) -> BrowserRoutes:
+    home = home.resolve()
     machine = ConfiguredMachineIdentity(config)
     local_machine: str | None = None
     with suppress(RuntimeError, OSError, ValueError):

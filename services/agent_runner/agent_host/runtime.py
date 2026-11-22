@@ -17,6 +17,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
+from base.agents.context.browser_identity import BrowserAuthority
 from base.agents.inbox.harness_notice import insert_harness_notice
 from base.agents.model.birth_config import uses_harness_model_selection
 from base.api_contracts.agent_contract import Harness
@@ -136,6 +137,7 @@ class HostPolicy:
     # facts it hands its exec children. The `meiva` console script a takeover relay starts is
     # installed beside it, so anything that needs that program derives it from this value.
     python: Path
+    browser_authority: BrowserAuthority | None = None
     workspace_hygiene: WorkspaceHygienePolicy = field(default_factory=WorkspaceHygienePolicy)
     personal_dream: PersonalDreamPolicy = field(default_factory=PersonalDreamPolicy)
 

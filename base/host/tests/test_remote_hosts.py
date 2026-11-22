@@ -171,3 +171,9 @@ def test_is_ip_literal() -> None:
     assert is_ip_literal("127.0.0.1:18792") is True
     assert is_ip_literal("[::1]") is True
     assert is_ip_literal("zzyasus") is False
+
+
+@pytest.mark.parametrize("name", ["node;date", "node$var", "%node", "node|suffix"])
+def test_registered_cluster_targets_still_require_legal_selector_characters(name: str) -> None:
+    with pytest.raises(TargetResolutionError):
+        resolve_target(f"meiva://{name}", ssh_aliases=(), cluster_machines=(name,))

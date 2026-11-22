@@ -66,11 +66,15 @@ from services.desktop.browser.page_lifecycle import (
     renew_page_tool_dump,
     text_of,
 )
+from services.desktop.browser.routing.cdp_screenshot import capture_owned_viewport
 from services.desktop.browser.routing.remote_pages import (
     PAGE_LIST_TOOLS,
+    PAGE_SCOPED_TOOLS,
     authorize_page,
+    reconnected,
     scope_page_list,
 )
+from services.desktop.browser.routing.staging import BrowserStaging
 from services.desktop.browser.routing.wire_server import serve_line
 from services.desktop.browser.tab_groups.grouping import (
     AgentTabGroups,
@@ -164,6 +168,8 @@ class ChromeMcpDaemon:
         # Set by the guard when the upstream session is judged unusable; run() watches
         # it to terminate this unusable daemon.
         self.dead = guard.dead
+        self.staging: BrowserStaging | None = None
+        self.capture_port: int | None = None
 
     # meiva:note
     # Forward to upstream under the guard's verdict (`UpstreamGuard.request`: a dead
@@ -238,10 +244,33 @@ class ChromeMcpDaemon:
             page = None
         if isinstance(context := args.get("isolatedContext"), str):
             args = {**args, "isolatedContext": f"meiva-agent-{agent_id}:{context}"}
-        result = await self._remember_call(name, args, page, agent_id)
+        if (
+            name in PAGE_SCOPED_TOOLS
+            and (selected := _page_id(args.get("pageId")) or page) is not None
+        ):
+            result = await self._call_owned_page(name, args, selected)
+        else:
+            result = await self._remember_call(name, args, page, agent_id)
+        if reconnected(result):
+            self.pages.page_targets.clear()
+            self.pages.affinity.clear()
+            raise ValueError("Remote Chrome reconnected. Open an owned page before calling tools.")
         if name in PAGE_LIST_TOOLS:
             return scope_page_list(result, owns, self.pages.get_agent_page(agent_id))
         return result
+
+    async def _call_owned_page(
+        self,
+        name: str,
+        args: dict[str, object],
+        page: int,
+    ) -> types.CallToolResult:
+        if name == "take_screenshot":
+            target = self.pages.page_targets.get(page)
+            if target is None or self.capture_port is None:
+                raise ValueError("Open an owned Chrome page before taking a screenshot")
+            return await capture_owned_viewport(self.capture_port, target, args)
+        return await self._call(name, {**args, "pageId": page})
 
     # meiva:note
     # Re-pin to this connection's page, dropping affinity if the page vanished.
@@ -509,6 +538,13 @@ async def _serve_daemon_loop(
                 )
             guard = UpstreamGuard(session, clock.timers)
             daemon = ChromeMcpDaemon(session, pages, tab_groups, guard)
+            daemon.capture_port = browser_cdp_port
+            daemon.staging = BrowserStaging(
+                sock.with_suffix(".staging"),
+                lambda tool, args, agent_id: daemon.call_tool_for_agent(
+                    tool, args, agent_id, remote=True
+                ),
+            )
             daemon_ref[0] = daemon
             await _serve_generation(daemon, stop, gateway)
             report_daemon_exit(guard.reason or DeathReason.STOPPED)
@@ -583,7 +619,7 @@ async def run(
         gateway_access=gateway_access,
         default_ttl_seconds=default_ttl_seconds,
         open_upstream=lambda: create_upstream(
-            browser_url, stop, connect_timeout_reader=connect_timeout_reader
+            browser_url, stop, connect_timeout_reader=connect_timeout_reader, explicit_pages=True
         ),
         reapply_session=True,
     )

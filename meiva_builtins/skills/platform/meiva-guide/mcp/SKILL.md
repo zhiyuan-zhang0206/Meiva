@@ -103,9 +103,10 @@ meiva.mcps.chrome.take_snapshot(host=target, filePath="snapshot.txt")
 ```
 
 Omit `host` for local Chrome. Pass the same target to each remote call and
-open a tab before acting on it. The target runner retains an agent's Tab
-selection and TTL for cluster calls. SSH scopes Tab IDs to the client
-connection. If the SSH connection is rebuilt, open a new page.
+open a tab before acting on it. The agent-host supplies a caller credential to hosted execute-code and harness
+sessions. The target runner retains the agent's Tab selection and TTL for
+cluster calls. SSH scopes Tab IDs to the client connection and requests closure
+of its own Tabs at normal teardown. Open a new page after a disconnect or browser reconnect.
 
 Configure `ssh_host`, `os`, and optionally `browser_port` in the host entry
 under `[hosts.<alias>]` in `$MEIVA_HOME/remote_hosts.toml`. Chrome must already

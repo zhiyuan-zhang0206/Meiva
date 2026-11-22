@@ -21,6 +21,7 @@ import contextlib
 import signal
 import subprocess
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -35,6 +36,7 @@ from agent.execution.protocol import (
     write_request,
 )
 from base.agents.context import MeivaContext
+from base.agents.context.browser_identity import BROWSER_CALLER_ENV
 from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.clock import Timers
 from base.deploy.release import editable_install
@@ -347,6 +349,12 @@ async def run_in_subprocess(
         return request_error, None
 
     stream = StreamingTextIO(max_chars=accumulation_max_chars)
+    authority = parent.browser_authority
+    caller = (
+        authority.new_caller(agent_id) if authority is not None and agent_id is not None else None
+    )
+    if caller is not None:
+        parent = replace(parent, environ={**parent.environ, BROWSER_CALLER_ENV: caller})
     try:
         outcome = await run_via_exec_host(
             exec_dir=exec_dir,
@@ -394,6 +402,8 @@ async def run_in_subprocess(
             payload,
         )
     finally:
+        if authority is not None and caller is not None:
+            authority.revoke(caller)
         for path in (request_path, result_path):
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()

@@ -10,6 +10,7 @@ from mcp.types import CallToolResult, ListToolsResult
 
 class BrowserSession(Protocol):
     client_agent_id: int | None
+    browser_caller: str | None
 
     async def start(self) -> None: ...
     async def list_tools(self) -> ListToolsResult: ...

@@ -14,9 +14,13 @@ from services.desktop.browser.mcp_upstream import UPSTREAM_DOWN_MSG
 from services.desktop.browser.page_lifecycle import PageDaemon, handle_release_agent_page
 from services.desktop.browser.protocol import WIRE_REQUEST, Response, WireRequest
 
+from .remote_pages import REMOTE_TOOLS
+from .staging import BrowserStaging
+
 
 class WireBrowser(PageDaemon, Protocol):
     dead: asyncio.Event
+    staging: BrowserStaging | None
 
     async def list_tools(self) -> list[dict[str, object]]: ...
 
@@ -38,14 +42,14 @@ async def _call_tool_response(
     args = raw_args or {}
     agent_id = req.get("agent_id")
     remote = req.get("method") == "call_remote_tool"
+    if remote:
+        inputs = req.get("inputs", {})
+        if type(agent_id) is not int or not is_object_dict(inputs) or daemon.staging is None:
+            raise ValueError("Remote Chrome requires an agent identity and valid staging data")
+        result = await daemon.staging.run(tool, args, inputs, agent_id)
+        return {"id": req_id, "ok": True, "result": result}, conn_page
     if isinstance(agent_id, int) and not isinstance(agent_id, bool):
-        result = await daemon.call_tool_for_agent(tool, args, agent_id, remote=remote)
-    elif remote:
-        return {
-            "id": req_id,
-            "ok": False,
-            "error": "Remote Chrome requires an agent identity",
-        }, conn_page
+        result = await daemon.call_tool_for_agent(tool, args, agent_id)
     else:
         result, conn_page = await page_lifecycle.forward_legacy_call(daemon, tool, args, conn_page)
     return {"id": req_id, "ok": True, "result": result.model_dump(mode="json")}, conn_page
@@ -59,8 +63,11 @@ async def _respond(
     conn_page: int | None,
 ) -> tuple[Response, int | None]:
     try:
-        if method == "list_tools":
-            return {"id": req_id, "ok": True, "result": await daemon.list_tools()}, conn_page
+        if method in {"list_tools", "list_remote_tools"}:
+            tools = await daemon.list_tools()
+            if method == "list_remote_tools":
+                tools = [tool for tool in tools if tool.get("name") in REMOTE_TOOLS]
+            return {"id": req_id, "ok": True, "result": tools}, conn_page
         if method in {"call_tool", "call_remote_tool"}:
             return await _call_tool_response(daemon, req, req_id, conn_page)
         if method == "release_agent_page":

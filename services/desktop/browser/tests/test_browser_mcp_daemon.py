@@ -79,9 +79,10 @@ class FakeUpstream:
                 return err("No page selected")
             self.pages[self.selected] = args.get("url", "about:blank")
             return _ok(f"navigated page {self.selected}")
-        if self.selected is None:
+        page = args.get("pageId", self.selected)
+        if page is None:
             return err("No page selected")
-        return _ok(f"ran {name} on page {self.selected}")
+        return _ok(f"ran {name} on page {page}")
 
     def _listing(self) -> types.CallToolResult:
         lines: list[str] = []

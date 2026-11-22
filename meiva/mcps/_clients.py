@@ -6,7 +6,10 @@ import threading
 from collections.abc import Mapping
 from pathlib import Path
 
+from base.agents.context.browser_identity import BROWSER_CALLER_ENV
 from base.clock import Timers
+from base.lm.harness.registration import HANDLE_ENV
+from base.paths import mcp_daemon_shared_socket
 from meiva.mcps.config import MCPConnectError, ToolInfo
 
 from ._remote import RemoteMCPClient, connect_remote
@@ -15,12 +18,36 @@ from ._remote import RemoteMCPClient, connect_remote
 # meiva:note
 # The context owns the daemon connection and the request timeout its composition root read. `socket_path` is where the machine's MCP daemon listens (`base.paths.mcp_daemon_shared_socket` of the home), given by the composition root; the socket is looked for when the first request dials, since the daemon may start after the context.
 class McpClients:
-    def __init__(self, socket_path: Path, timeout_seconds: float, *, timers: Timers) -> None:
+    def __init__(
+        self,
+        socket_path: Path,
+        timeout_seconds: float,
+        *,
+        timers: Timers,
+        browser_caller: str | None = None,
+    ) -> None:
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
         self.timers = timers
+        self._browser_caller = browser_caller
         self._lock = threading.Lock()
         self._remote: RemoteMCPClient | None = None
+
+    @classmethod
+    def for_home(
+        cls,
+        home: Path,
+        timeout_seconds: float,
+        *,
+        timers: Timers,
+        environ: Mapping[str, str],
+    ) -> McpClients:
+        return cls(
+            Path(mcp_daemon_shared_socket(home)),
+            timeout_seconds,
+            timers=timers,
+            browser_caller=environ.get(BROWSER_CALLER_ENV) or environ.get(HANDLE_ENV),
+        )
 
     def remote(self) -> RemoteMCPClient:
         """Require a daemon socket; never spawn an alternative tool runtime."""
@@ -48,7 +75,12 @@ class McpClients:
         agent_id: int | None,
     ) -> dict[str, object]:
         return self.remote().call_tool(
-            server, tool, args, timeout_seconds=timeout_seconds, agent_id=agent_id
+            server,
+            tool,
+            args,
+            timeout_seconds=timeout_seconds,
+            agent_id=agent_id,
+            browser_caller=self._browser_caller if server == "chrome" and "host" in args else None,
         )
 
     def close(self) -> None:

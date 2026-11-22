@@ -436,6 +436,7 @@ async def test_headless_daemon_can_mount_injected_browser_without_local_socket(
 
     class Browser:
         client_agent_id: int | None = None
+        browser_caller: str | None = None
 
         async def start(self) -> None:
             return None

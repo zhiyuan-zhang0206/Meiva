@@ -14,11 +14,13 @@ import json
 import socket
 import sys
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import JsonValue
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.remote_hosts import RemoteHostConfigError, load_remote_hosts
 from base.paths import computer_mcp_socket
 from cli.boundary.json_body import loads
@@ -130,7 +132,9 @@ def _collect_local_rows(
     return []
 
 
-def _browser_status(*, available: bool | None) -> str:
+def _browser_status(*, available: bool | str | None) -> str:
+    if isinstance(available, str):
+        return available
     if available is None:
         return "unknown"
     return "online" if available else "offline"
@@ -138,18 +142,17 @@ def _browser_status(*, available: bool | None) -> str:
 
 def _probe_cluster_row(
     machine_name: str,
-    ops_url: str | None,
     desc: str | None,
-    cluster_status_probe: Callable[[str], dict[str, object]] | None,
-    browser_status_probe: Callable[[str], bool | None] | None,
+    probed: dict[str, object],
+    *,
+    browser_available: bool | str | None,
 ) -> ComputerTargetRow | None:
     note = (desc or "").strip()
-    browser_available = browser_status_probe(ops_url) if ops_url and browser_status_probe else None
-    probed = cluster_status_probe(ops_url) if ops_url and cluster_status_probe else {}
     if (
         probed.get("ok") is True
         and probed.get("available") is False
         and browser_available is not True
+        and browser_available != "upgrade runner"
     ):
         return None
     peer_os = str(probed.get("os") or "unknown")
@@ -162,6 +165,48 @@ def _probe_cluster_row(
         notes=note,
         browser_status=_browser_status(available=browser_available),
     )
+
+
+def _probe_value(future: Future[object] | None) -> object:
+    if future is None or not future.done() or future.cancelled():
+        return None
+    return future.result()
+
+
+def _cluster_rows(
+    machines: Sequence[tuple[str, str | None, str | None]],
+    computer_probe: Callable[[str], dict[str, object]] | None,
+    browser_probe: Callable[[str], bool | str | None] | None,
+) -> list[ComputerTargetRow]:
+    pool = ThreadPoolExecutor(max_workers=8)
+
+    def run(probe: Callable[[str], object], url: str) -> object:
+        return probe(url)
+
+    computers: dict[str, Future[object]] = {}
+    browsers: dict[str, Future[object]] = {}
+    try:
+        for name, url, _desc in machines:
+            if url and computer_probe is not None:
+                computers[name] = pool.submit(run, computer_probe, url)
+            if url and browser_probe is not None:
+                browsers[name] = pool.submit(run, browser_probe, url)
+        _ = wait([*computers.values(), *browsers.values()], timeout=3.0)
+        rows: list[ComputerTargetRow] = []
+        for name, _url, desc in machines:
+            desktop = _probe_value(computers.get(name))
+            chrome = _probe_value(browsers.get(name))
+            row = _probe_cluster_row(
+                name,
+                desc,
+                desktop if is_object_dict(desktop) else {},
+                browser_available=chrome if isinstance(chrome, bool | str) else None,
+            )
+            if row is not None:
+                rows.append(row)
+        return rows
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _collect_ssh_rows(
@@ -200,7 +245,7 @@ def cmd_computer_list(
     local_description: str | None = None,
     cluster_machines: Sequence[tuple[str, str | None, str | None]] = (),
     cluster_status_probe: Callable[[str], dict[str, object]] | None = None,
-    browser_status_probe: Callable[[str], bool | None] | None = None,
+    browser_status_probe: Callable[[str], bool | str | None] | None = None,
     local_browser_available: bool | None = None,
     ssh_health_probe: Callable[[str], dict[str, object] | None] = probe_win_bridge_health,
     json_output: bool = False,
@@ -212,14 +257,13 @@ def cmd_computer_list(
         local_description,
         browser_available=local_browser_available,
     )
-    for machine_name, ops_url, desc in cluster_machines:
-        if local_machine is not None and machine_name == local_machine:
-            continue
-        row = _probe_cluster_row(
-            machine_name, ops_url, desc, cluster_status_probe, browser_status_probe
+    rows.extend(
+        _cluster_rows(
+            [machine for machine in cluster_machines if machine[0] != local_machine],
+            cluster_status_probe,
+            browser_status_probe,
         )
-        if row is not None:
-            rows.append(row)
+    )
     try:
         rows.extend(_collect_ssh_rows(home, ssh_health_probe))
     except RemoteHostConfigError as exc:

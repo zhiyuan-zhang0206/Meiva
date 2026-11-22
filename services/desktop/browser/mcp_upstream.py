@@ -107,7 +107,9 @@ async def await_stop_or_timeout(stop: asyncio.Event, timeout: float, timers: Tim
             waiter.cancel()
 
 
-def upstream_server_params(browser_url: str) -> StdioServerParameters:
+def upstream_server_params(
+    browser_url: str, *, explicit_pages: bool = False, interop: bool = False
+) -> StdioServerParameters:
     return StdioServerParameters(
         command="npx",
         args=[
@@ -117,6 +119,12 @@ def upstream_server_params(browser_url: str) -> StdioServerParameters:
             browser_url,
             "--allow-unrestricted-paths",
             *_LEAN_FLAGS,
+            *(["--experimental-page-id-routing"] if explicit_pages else []),
+            *(
+                ["--experimental-interop-tools", "--experimental-structured-content"]
+                if interop
+                else []
+            ),
         ],
         env={**get_default_environment(), "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"},
     )
@@ -147,7 +155,12 @@ async def open_upstream(
 
 
 async def create_upstream(
-    browser_url: str, stop: asyncio.Event, *, connect_timeout_reader: Callable[[], float]
+    browser_url: str,
+    stop: asyncio.Event,
+    *,
+    connect_timeout_reader: Callable[[], float],
+    explicit_pages: bool = False,
+    interop: bool = False,
 ) -> tuple[ClientSession, AsyncExitStack]:
     """Create a new chrome-devtools-mcp upstream session.
 
@@ -160,7 +173,7 @@ async def create_upstream(
     the connect immediately instead of waiting out the full connect timeout.
     """
     return await open_upstream(
-        upstream_server_params(browser_url),
+        upstream_server_params(browser_url, explicit_pages=explicit_pages, interop=interop),
         stop,
         connect_timeout_reader=connect_timeout_reader,
     )

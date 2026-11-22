@@ -155,3 +155,35 @@ def test_computer_release_forwards_optional_host(
         }
     ]
     assert capsys.readouterr().out == "released the screen from agent 7507\n"
+
+
+def test_discovery_keeps_browser_only_and_legacy_runner_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    machines = [
+        ("browser-only", "http://browser.test", "Chrome"),
+        ("legacy", "http://legacy.test", "Previous runner"),
+        ("offline", "http://offline.test", "Offline runner"),
+    ]
+    browser = {"http://browser.test": True, "http://legacy.test": "upgrade runner"}
+
+    def probe_desktop(url: str) -> dict[str, object]:
+        return {"ok": url != "http://offline.test", "available": False, "os": "linux"}
+
+    assert (
+        cmd_computer_list(
+            home=tmp_path,
+            platform_system="linux",
+            cluster_machines=machines,
+            browser_status_probe=browser.get,
+            cluster_status_probe=probe_desktop,
+            json_output=True,
+        )
+        == 0
+    )
+    rows = json.loads(capsys.readouterr().out)
+    assert [(row["target"], row["browser_status"]) for row in rows] == [
+        ("meiva://browser-only", "online"),
+        ("meiva://legacy", "upgrade runner"),
+        ("meiva://offline", "unknown"),
+    ]

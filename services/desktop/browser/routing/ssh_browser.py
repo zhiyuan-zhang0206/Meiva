@@ -6,6 +6,8 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
+from typing import Protocol
+from urllib.parse import urlsplit
 
 from mcp import ClientSession
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
@@ -15,18 +17,29 @@ from base.host.remote_hosts import RemoteHostConfig
 from services.desktop.browser.mcp_upstream import create_upstream
 from services.desktop.remote.ssh_tunnel import SshTunnelManager
 
-from .remote_files import CallerFiles, replace_paths, stage_files
+from .cdp_screenshot import capture_owned_viewport
+from .remote_files import CallerFiles, replace_paths
 from .remote_pages import (
     PAGE_LIST_TOOLS,
+    PAGE_SCOPED_TOOLS,
     authorize_page,
+    listed_pages,
     page_number,
+    reconnected,
     scope_page_list,
     selected_page,
+    structured_fields,
 )
 from .remote_rpc import RPC_TIMEOUT_S
 from .ssh_upload import stage_ssh_upload
+from .staging import remote_result
 
-type BrowserAction = Callable[[ClientSession, AsyncExitStack], Awaitable[object]]
+
+class BrowserToolSession(Protocol):
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult: ...
+
+
+type BrowserAction = Callable[[ClientSession, list[AsyncExitStack]], Awaitable[object]]
 
 
 class SshBrowser:
@@ -46,29 +59,29 @@ class SshBrowser:
         self._task: asyncio.Task[Exception | None] | None = None
         self._pages: set[int] = set()
         self._current: int | None = None
-        self._uploads = 0
+        self._cdp_port: int | None = None
 
     async def _run(self, ready: asyncio.Future[None]) -> Exception | None:
         tunnel = SshTunnelManager(timers=self._timers)
         try:
             endpoint = await asyncio.to_thread(tunnel.endpoint_for, self.config, browser=True)
+            self._cdp_port = urlsplit(endpoint).port
             session, upstream = await create_upstream(
-                endpoint, asyncio.Event(), connect_timeout_reader=lambda: self._timeout_s
+                endpoint,
+                asyncio.Event(),
+                connect_timeout_reader=lambda: self._timeout_s,
+                explicit_pages=True,
+                interop=True,
             )
-            async with upstream, AsyncExitStack() as uploads:
-                if ready.cancelled():
-                    return None
-                ready.set_result(None)
-                while True:
-                    action, reply = await self._queue.get()
-                    try:
-                        value = await action(session, uploads)
-                    except Exception as exc:
-                        if not reply.done():
-                            reply.set_exception(exc)
-                    else:
-                        if not reply.done():
-                            reply.set_result(value)
+            async with upstream:
+                uploads: list[AsyncExitStack] = []
+                try:
+                    if ready.cancelled():
+                        return None
+                    ready.set_result(None)
+                    await self._serve(session, uploads)
+                finally:
+                    await self._finish(session, uploads)
         except Exception as exc:
             if not ready.done():
                 ready.set_exception(exc)
@@ -76,15 +89,42 @@ class SshBrowser:
         finally:
             await asyncio.to_thread(tunnel.close_all)
 
+    async def _serve(self, session: ClientSession, uploads: list[AsyncExitStack]) -> None:
+        while True:
+            action, reply = await self._queue.get()
+            try:
+                value = await action(session, uploads)
+            except Exception as exc:
+                if not reply.done():
+                    reply.set_exception(exc)
+            else:
+                if not reply.done():
+                    reply.set_result(value)
+
+    async def _finish(self, session: ClientSession, uploads: list[AsyncExitStack]) -> None:
+        async with asyncio.TaskGroup() as cleanup:
+            for upload in uploads:
+                _ = cleanup.create_task(upload.aclose())
+            _ = cleanup.create_task(self._close_tabs(session))
+
+    async def _close_tabs(self, session: ClientSession) -> None:
+        if not self._pages:
+            return
+        with suppress(RuntimeError, OSError, ValueError):
+            async with asyncio.timeout(2.0):
+                await self._refresh_pages(session)
+                for page in tuple(self._pages):
+                    result = await session.call_tool("close_page", {"pageId": page})
+                    self._require_generation(result)
+
     async def close(self) -> None:
         task, self._task = self._task, None
-        self._pages.clear()
-        self._current = None
-        self._uploads = 0
         if task is not None:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 _ = await task
+        self._pages.clear()
+        self._current = None
 
     async def _request(self, action: BrowserAction) -> object:
         try:
@@ -123,36 +163,70 @@ class SshBrowser:
             reply.cancel()
 
     async def list_tools(self) -> list[Tool]:
-        async def list_tools(session: ClientSession, _uploads: AsyncExitStack) -> object:
+        async def list_tools(session: ClientSession, _uploads: list[AsyncExitStack]) -> object:
             return await session.list_tools()
 
         return ListToolsResult.model_validate(await self._request(list_tools)).tools
 
     async def _paged_call(
         self,
-        session: ClientSession,
+        session: BrowserToolSession,
         name: str,
         args: dict[str, object],
     ) -> CallToolResult:
+        if name != "new_page":
+            await self._refresh_pages(session)
         authorize_page(name, args, self._pages.__contains__)
-        if (
-            (name not in PAGE_LIST_TOOLS or name == "navigate_page")
-            and self._current is None
-            and "pageId" not in args
-        ):
-            if name == "navigate_page" and isinstance(args.get("url"), str):
-                name = "new_page"
-            else:
-                raise ValueError("No remote Chrome page selected. Open a page first.")
+        if name in PAGE_SCOPED_TOOLS:
+            page = page_number(args.get("pageId")) if "pageId" in args else self._current
+            if page is None:
+                raise ValueError("No owned SSH Chrome page selected. Call new_page first.")
+            args = {**args, "pageId": page}
+            if name == "take_screenshot":
+                return await self._screenshot(session, page, args)
         if name == "new_page":
             args = {"background": True, **args}
         result = await session.call_tool(name, args)
+        self._require_generation(result)
         if result.is_error:
+            if name in PAGE_SCOPED_TOOLS:
+                await self._refresh_pages(session)
             return result
         self._remember_page(name, args, result)
         if name in PAGE_LIST_TOOLS:
             return scope_page_list(result, self._pages.__contains__, self._current)
         return result
+
+    async def _screenshot(
+        self,
+        session: BrowserToolSession,
+        page: int,
+        args: Mapping[str, object],
+    ) -> CallToolResult:
+        tab = await session.call_tool("get_tab_id", {"pageId": page})
+        self._require_generation(tab)
+        tab_id = structured_fields(tab).get("tabId")
+        if tab.is_error or not isinstance(tab_id, str) or self._cdp_port is None:
+            await self._refresh_pages(session)
+            raise ValueError("Could not verify the owned SSH Chrome target")
+        return await capture_owned_viewport(self._cdp_port, tab_id, args, tab_target=True)
+
+    def _require_generation(self, result: CallToolResult) -> None:
+        if reconnected(result):
+            self._pages.clear()
+            self._current = None
+            raise ValueError("SSH Chrome reconnected. Open a new page before calling tools.")
+
+    async def _refresh_pages(self, session: BrowserToolSession) -> None:
+        listing = await session.call_tool("list_pages", {})
+        self._require_generation(listing)
+        if listing.is_error:
+            self._pages.clear()
+            self._current = None
+            raise ValueError("SSH Chrome could not verify tab ownership")
+        self._pages.intersection_update(listed_pages(listing))
+        if self._current not in self._pages:
+            self._current = None
 
     def _remember_page(self, name: str, args: Mapping[str, object], result: CallToolResult) -> None:
         if name == "new_page":
@@ -181,9 +255,9 @@ class SshBrowser:
     ) -> CallToolResult:
         files = CallerFiles(workspace, name, args)
 
-        async def call(session: ClientSession, uploads: AsyncExitStack) -> object:
+        async def call(session: ClientSession, uploads: list[AsyncExitStack]) -> object:
             if files.inputs:
-                if self._uploads >= 32:
+                if len(uploads) >= 8:
                     raise ValueError("SSH Chrome reached the connection's upload staging limit")
                 async with AsyncExitStack() as staging:
                     path = await staging.enter_async_context(
@@ -193,17 +267,23 @@ class SshBrowser:
                             files.inputs["filePath"],
                         )
                     )
-                    result = await self._paged_call(session, name, {**files.args, "filePath": path})
+                    try:
+                        result = await self._paged_call(
+                            session, name, {**files.args, "filePath": path}
+                        )
+                    except TimeoutError:
+                        uploads.append(staging.pop_all())
+                        raise
                     if not result.is_error:
-                        _ = uploads.push_async_callback(staging.pop_all().aclose)
-                        self._uploads += 1
+                        uploads.append(staging.pop_all())
                     return replace_paths(result, {path: str(args["filePath"])}).model_dump(
                         mode="json"
                     )
-            with stage_files(name, files.args, {}, parent=workspace) as staged:
-                result = await self._paged_call(session, name, staged.args)
-                if result.is_error:
-                    return result.model_dump(mode="json")
-                return files.receive(result, staged.outputs()).model_dump(mode="json")
+            safe_args = {key: value for key, value in files.args.items() if key != "filePath"}
+            result = await self._paged_call(session, name, safe_args)
+            artifact = remote_result(name, files.args, result)
+            return files.receive(
+                CallToolResult.model_validate(artifact["mcp"]), artifact["files"]
+            ).model_dump(mode="json")
 
         return CallToolResult.model_validate(await self._request(call))

@@ -4,97 +4,66 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import ExitStack
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
-from mcp.types import CallToolResult
-
+from base.agents.context.browser_identity import hosted_browser_identity
+from base.cluster.machine import GatewayAccess, gateway_auth_headers
+from base.cluster.machines import lookup as lookup_machine_url
+from base.daemon.http_transport import ServedRoute
+from base.db import Database
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from services.desktop.browser.routing.remote_files import replace_paths, stage_files
-from services.desktop.browser.routing.remote_rpc import call_browser_socket
+from base.host.remote_hosts import parse_target_selector
+from base.paths import chrome_mcp_socket
+from services.desktop.browser.routing.remote_files import MAX_RPC_BYTES
+from services.desktop.browser.routing.remote_pages import require_remote_tool
+from services.desktop.browser.routing.remote_rpc import (
+    BROWSER_PROOF_ROUTE,
+    BROWSER_RPC_ROUTE,
+    call_browser_peer,
+    call_browser_socket,
+)
 
-from .in_flight import RequestTokens, admitted
+from .computer_rpc import computer_rpc_route
+from .in_flight import RequestTokens, WorkerFutures, admitted
 
-UPLOAD_RETENTION_S = 600
-_MAX_UPLOADS = 32
+type CallerProof = Callable[[str, str], Awaitable[object]]
 
 
 class BrowserRpc:
-    def __init__(
-        self,
-        sock: Path,
-        *,
-        dispatch_sem: asyncio.Semaphore,
-        requests: RequestTokens,
-    ) -> None:
+    def __init__(self, sock: Path, *, requests: RequestTokens, verify: CallerProof) -> None:
         self._socket = sock
-        self._uploads: dict[asyncio.TimerHandle, ExitStack] = {}
-        self._dispatch_sem = dispatch_sem
         self._requests = requests
+        self._verify = verify
 
-    def close(self) -> None:
-        for timer in tuple(self._uploads):
-            self._release(timer)
-
-    def _release(self, timer: asyncio.TimerHandle) -> None:
-        timer.cancel()
-        self._uploads.pop(timer).close()
-
-    def _retain(self, stack: ExitStack) -> asyncio.TimerHandle:
-        def release() -> None:
-            self._release(timer)
-
-        timer = asyncio.get_running_loop().call_later(UPLOAD_RETENTION_S, release)
-        self._uploads[timer] = stack.pop_all()
-        return timer
-
-    async def _tool(self, req: dict[str, object]) -> dict[str, object]:
-        tool, args, agent_id = req.get("tool"), req.get("args"), req.get("agent_id")
-        inputs = req.get("inputs", {})
+    async def _tool(self, req: dict[str, object]) -> object:
+        tool, args = req.get("tool"), req.get("args")
+        origin, proof = req.get("origin"), req.get("proof")
         if not isinstance(tool, str) or not tool or not is_object_dict(args):
             raise ValueError("Browser RPC requires a tool name and object arguments")
-        if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
-            raise ValueError("Remote Chrome requires a positive agent identity")
+        if "agent_id" in req or not isinstance(origin, str) or not isinstance(proof, str):
+            raise ValueError("Browser RPC requires a target-bound caller proof")
+        inputs = req.get("inputs", {})
         if not is_object_dict(inputs) or "host" in args:
             raise ValueError("Invalid remote browser file data or nested host")
-        return await self._forward(tool, args, inputs, agent_id)
-
-    async def _forward(
-        self, tool: str, args: dict[str, object], inputs: dict[str, object], agent_id: int
-    ) -> dict[str, object]:
-        if inputs and len(self._uploads) >= _MAX_UPLOADS:
-            raise ValueError("Remote Chrome upload staging is full. Retry after it expires.")
-        with ExitStack() as scratch:
-            staged = scratch.enter_context(
-                stage_files(tool, args, inputs, parent=self._socket.parent)
-            )
-            retention = self._retain(scratch) if inputs else None
-            try:
-                raw = await call_browser_socket(
-                    self._socket,
-                    {
-                        "method": "call_remote_tool",
-                        "tool": tool,
-                        "args": staged.args,
-                        "agent_id": agent_id,
-                    },
-                )
-            except RuntimeError:
-                if retention is not None and retention in self._uploads:
-                    self._release(retention)
-                raise
-            result = CallToolResult.model_validate(raw)
-            if inputs:
-                if result.is_error and retention is not None and retention in self._uploads:
-                    self._release(retention)
-                result = replace_paths(
-                    result, {str(staged.args["filePath"]): str(args["filePath"])}
-                )
-            return {
-                "mcp": result.model_dump(mode="json", by_alias=True),
-                "files": {} if result.is_error else staged.outputs(),
-            }
+        require_remote_tool(tool, args)
+        agent_id = await self._verify(origin, proof)
+        if type(agent_id) is not int or agent_id <= 0:
+            raise ValueError("Remote Chrome caller proof did not yield an agent identity")
+        return await call_browser_socket(
+            self._socket,
+            {
+                "method": "call_remote_tool",
+                "tool": tool,
+                "args": args,
+                "inputs": inputs,
+                "agent_id": agent_id,
+            },
+        )
 
     async def _dispatch(self, req: dict[str, object]) -> object:
         method = req.get("method")
@@ -107,7 +76,9 @@ class BrowserRpc:
             except (OSError, RuntimeError, ValueError):
                 return False
         if method == "list_tools":
-            return await call_browser_socket(self._socket, {"method": "list_tools"}, timeout_s=2.0)
+            return await call_browser_socket(
+                self._socket, {"method": "list_remote_tools"}, timeout_s=2.0
+            )
         if method == "call_tool":
             return await self._tool(req)
         raise ValueError("Unknown browser RPC method")
@@ -115,12 +86,86 @@ class BrowserRpc:
     async def route(self, body: bytes) -> tuple[int, bytes, str]:
         try:
             req = object_of(json.loads, body)
-            if not is_object_dict(req):
-                req = {}
             with admitted(requests=self._requests):
-                async with self._dispatch_sem:
-                    result = await self._dispatch(req)
-            response: dict[str, object] = {"ok": True, "result": result}
+                result = await self._dispatch(req if is_object_dict(req) else {})
         except (OSError, RuntimeError, ValueError) as exc:
-            response = {"ok": False, "error": str(exc)}
-        return 200, json.dumps(response, ensure_ascii=False).encode(), "application/json"
+            return _reply({"ok": False, "error": str(exc)})
+        return _reply({"ok": True, "result": result})
+
+
+async def redeem_browser_proof(body: bytes, *, home: Path) -> tuple[int, bytes, str]:
+    try:
+        req = object_of(json.loads, body)
+        if not is_object_dict(req):
+            return _reply({"ok": False, "error": "Invalid Chrome proof request"})
+        proof, target = req.get("proof"), req.get("target")
+        if not isinstance(proof, str) or not isinstance(target, str):
+            return _reply({"ok": False, "error": "Invalid Chrome proof request"})
+        claims = await asyncio.to_thread(hosted_browser_identity, home, "redeem", proof, target)
+    except (OSError, RuntimeError, ValueError):
+        return _reply({"ok": False, "error": "The source agent-host rejected the Chrome proof"})
+    return _reply({"ok": True, "result": claims.get("agent_id")})
+
+
+def _reply(value: dict[str, object]) -> tuple[int, bytes, str]:
+    return 200, json.dumps(value, ensure_ascii=False).encode(), "application/json"
+
+
+async def verify_browser_peer(
+    database: Callable[[], Database], access: GatewayAccess, target: str, origin: str, proof: str
+) -> object:
+    kind, source = parse_target_selector(origin)
+    if kind != "short":
+        raise ValueError("Malformed Chrome proof issuer")
+    url = await asyncio.to_thread(lambda: lookup_machine_url(database(), source))
+    return await call_browser_peer(
+        url,
+        gateway_auth_headers(access),
+        {"proof": proof, "target": target},
+        timeout_s=5.0,
+        proof_request=True,
+    )
+
+
+@dataclass(frozen=True)
+class DesktopRoutes:
+    routes: dict[tuple[str, str], ServedRoute]
+    limits: dict[tuple[str, str], int]
+    slots: dict[tuple[str, str], asyncio.Semaphore]
+
+
+def desktop_routes(
+    home: Path,
+    cdp_port: int,
+    machine: str,
+    *,
+    database: Callable[[], Database],
+    access: GatewayAccess,
+    platform_system: str,
+    executor: ThreadPoolExecutor,
+    dispatch_sem: asyncio.Semaphore,
+    requests: RequestTokens,
+    workers: WorkerFutures,
+) -> DesktopRoutes:
+    browser = BrowserRpc(
+        chrome_mcp_socket(home, cdp_port),
+        requests=requests,
+        verify=partial(verify_browser_peer, database, access, f"meiva://{machine}"),
+    )
+    return DesktopRoutes(
+        routes={
+            BROWSER_RPC_ROUTE: browser.route,
+            BROWSER_PROOF_ROUTE: partial(redeem_browser_proof, home=home),
+            ("POST", "/computer/rpc"): partial(
+                computer_rpc_route,
+                home=home,
+                platform_system=platform_system,
+                executor=executor,
+                dispatch_sem=dispatch_sem,
+                requests=requests,
+                workers=workers,
+            ),
+        },
+        limits={BROWSER_RPC_ROUTE: MAX_RPC_BYTES},
+        slots={BROWSER_RPC_ROUTE: asyncio.Semaphore(2), BROWSER_PROOF_ROUTE: asyncio.Semaphore(8)},
+    )

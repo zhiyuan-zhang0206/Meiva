@@ -28,9 +28,11 @@ async def test_headless_listing_and_remote_call_preserve_caller_and_strip_host(
         headers=lambda: {"Authorization": "Bearer fixture"},
         timers=system_clock(),
         connect_timeout_s=2,
+        verify_caller=lambda _caller, _target: {"agent_id": 427, "proof": "proof-127"},
     )
     session = RoutedBrowserSession(routes, local_request=local, peer_request=peer)
     session.client_agent_id = 427
+    session.browser_caller = "verified-fixture"
     tools = await session.list_tools()
     assert "host" in tools.tools[0].input_schema["properties"]
     with pytest.raises(RuntimeError, match="Local Chrome is unavailable"):
@@ -41,7 +43,14 @@ async def test_headless_listing_and_remote_call_preserve_caller_and_strip_host(
     assert received[-1] == (
         "https://runner.test",
         {"Authorization": "Bearer fixture"},
-        {"method": "call_tool", "tool": "take_snapshot", "agent_id": 427, "args": {}, "inputs": {}},
+        {
+            "method": "call_tool",
+            "tool": "take_snapshot",
+            "origin": "ubuntu",
+            "proof": "proof-127",
+            "args": {},
+            "inputs": {},
+        },
     )
 
 

@@ -14,6 +14,7 @@ from base.host.remote_hosts import RemoteHostConfig
 from .remote_files import upload_name
 
 _TIMEOUT_S = 12.0
+_CLEANUP_S = 2.0
 
 
 def _command(config: RemoteHostConfig, filename: str) -> str:
@@ -22,15 +23,33 @@ def _command(config: RemoteHostConfig, filename: str) -> str:
         script = f"""
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$dir = Join-Path ([IO.Path]::GetTempPath()) ('meiva-chrome-' + [Guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($dir)
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = New-Object Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true, $false)
+$rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$acl.AddAccessRule($rule)
+$root = Join-Path ([IO.Path]::GetTempPath()) ('meiva-chrome-uploads-' + $sid.Value)
+[void][IO.Directory]::CreateDirectory($root, $acl)
+if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) {{
+    throw 'Invalid upload root'
+}}
+Set-Acl -LiteralPath $root -AclObject $acl
+Get-ChildItem -LiteralPath $root -Directory -Filter 'upload-*' | Where-Object {{
+    $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddMinutes(-15) -and
+    !($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+}} | Remove-Item -Recurse -Force
+$dir = Join-Path $root ('upload-' + [Guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($dir, $acl)
+$inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::ASCII)
 try {{
     $name = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{filename64}'))
     $file = Join-Path $dir $name
-    [IO.File]::WriteAllBytes($file, [Convert]::FromBase64String([Console]::ReadLine()))
+    $text = $inputReader.ReadLineAsync()
+    if (!$text.Wait(12000)) {{ throw 'Upload input deadline expired' }}
+    [IO.File]::WriteAllBytes($file, [Convert]::FromBase64String($text.Result))
     [Console]::WriteLine($file)
     [Console]::Out.Flush()
-    [void][Console]::ReadLine()
+    [void]$inputReader.ReadLineAsync().Wait(600000)
 }} finally {{
     [IO.Directory]::Delete($dir, $true)
 }}
@@ -41,16 +60,21 @@ try {{
     script = f"""
 set -eu
 umask 077
-dir=$(mktemp -d "${{TMPDIR:-/tmp}}/meiva-chrome.XXXXXXXX")
+root="${{TMPDIR:-/tmp}}/meiva-chrome-uploads-$(id -u)"
+mkdir -p -- "$root"
+test ! -L "$root" && test -O "$root"
+chmod 700 -- "$root"
+find "$root" -mindepth 1 -maxdepth 1 -type d -name 'upload.*' -mmin +15 -exec rm -rf -- {{}} +
+dir=$(mktemp -d "$root/upload.XXXXXXXX")
 trap 'rm -rf -- "$dir"' EXIT
 trap 'exit 1' HUP INT TERM
 file="$dir"/{shlex.quote(filename)}
-IFS= read -r payload
+IFS= read -r -t 12 payload
 printf '%s' "$payload" | {decoder} > "$file"
 printf '%s\\n' "$file"
-IFS= read -r close || true
+IFS= read -r -t 600 close || true
 """
-    return f"sh -c {shlex.quote(script)}"
+    return f"bash -c {shlex.quote(script)}"
 
 
 @asynccontextmanager
@@ -61,6 +85,12 @@ async def stage_ssh_upload(
     process = await asyncio.create_subprocess_exec(
         "ssh",
         "-T",
+        "-S",
+        "none",
+        "-o",
+        "ServerAliveInterval=10",
+        "-o",
+        "ServerAliveCountMax=2",
         "-o",
         "BatchMode=yes",
         "-o",
@@ -90,7 +120,7 @@ async def stage_ssh_upload(
     finally:
         sender.close()
         try:
-            await asyncio.wait_for(process.wait(), timeout=_TIMEOUT_S)
+            await asyncio.wait_for(process.wait(), timeout=_CLEANUP_S)
         except TimeoutError:
             with suppress(ProcessLookupError):
                 process.kill()

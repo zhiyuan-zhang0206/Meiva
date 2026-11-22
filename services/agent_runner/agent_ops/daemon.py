@@ -67,15 +67,12 @@ from ops.cluster_status import ShellNotFoundError, cluster_now
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
-from services.agent_runner.agent_ops.browser_rpc import BrowserRpc
-from services.agent_runner.agent_ops.computer_rpc import computer_rpc_route
+from services.agent_runner.agent_ops.browser_rpc import desktop_routes
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route, workspace_file_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 from services.agent_runner.agent_ops.upload_object import upload_object_route
 from services.agent_runner.agent_ops.workspace_export import workspace_export_route
-from services.desktop.browser.routing.remote_files import MAX_RPC_BYTES
-from services.desktop.browser.routing.remote_rpc import BROWSER_RPC_ROUTE
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
@@ -549,11 +546,6 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
     boot.write_pidfile(config, runtime=runtime_dir, pid=os.getpid())
 
     dispatch_sem = asyncio.Semaphore(config.view.services.ops_concurrency)
-    browser_rpc = BrowserRpc(
-        paths.chrome_mcp_socket(home, config.view.services.browser_cdp_port),
-        dispatch_sem=dispatch_sem,
-        requests=requests,
-    )
     our_machine = local_machine.name()
     try:
         assert_schema_current(config.view.data_plane.db_url)
@@ -575,14 +567,27 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
                 bind_host, config.view.data_plane.transport_encryption, authenticated=True
             )
         endpoint = boot.endpoint(config, runtime=runtime_dir)
+        desktop = desktop_routes(
+            home,
+            config.view.services.browser_cdp_port,
+            our_machine,
+            database=database,
+            access=access,
+            platform_system=host.platform.system,
+            executor=executor,
+            dispatch_sem=dispatch_sem,
+            requests=requests,
+            workers=workers,
+        )
         server = await start_health_server(
             "ops",
             endpoint.health_port,
             home=home,
             host=bind_host,
-            body_limits={BROWSER_RPC_ROUTE: MAX_RPC_BYTES},
+            body_limits=desktop.limits,
+            body_slots=desktop.slots,
             extra_routes={
-                BROWSER_RPC_ROUTE: browser_rpc.route,
+                **desktop.routes,
                 ("POST", "/ops"): functools.partial(
                     ops_route,
                     database=database,
@@ -646,15 +651,6 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
                     requests=requests,
                     workers=workers,
                 ),
-                ("POST", "/computer/rpc"): functools.partial(
-                    computer_rpc_route,
-                    home=home,
-                    platform_system=host.platform.system,
-                    executor=executor,
-                    dispatch_sem=dispatch_sem,
-                    requests=requests,
-                    workers=workers,
-                ),
             },
             liveness=liveness,
             components=lambda: health.ops_components(active_ops),
@@ -697,7 +693,6 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
             await bus.async_redis().aclose()
             await stop_health_server(server)
     finally:
-        browser_rpc.close()
         pool.close()
         boot.shutdown_op_pool(executor)
         boot.remove_pidfile(config, runtime=runtime_dir)
