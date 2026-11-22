@@ -39,6 +39,11 @@ class Harness:
                         return event
                 await asyncio.sleep(0.002)
 
+    async def wait_for_type[T](self, event_type: type[T]) -> T:
+        event: object = await self.wait_for(lambda value: isinstance(value, event_type))
+        assert isinstance(event, event_type)
+        return event
+
     def frames(self) -> list[dict[str, Any]]:
         return [json.loads(line) for line in (self.cwd / "frames.jsonl").read_text().splitlines()]
 
@@ -97,3 +102,26 @@ async def start(
     )
     await session.start(resume=resume)
     return Harness(session, tmp_path)
+
+
+def seed_replay_history(tmp_path: Path) -> None:
+    transcript = (
+        tmp_path
+        / "home/.gemini/antigravity-cli/brain/conv-acp"
+        / ".system_generated/logs/transcript_full.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    rows = (
+        {"type": "PLANNER_RESPONSE", "content": "REPLAYED_OLD_TEXT"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-16T19:38:44Z sender=conv-acp/task-1 priority=MESSAGE_PRIORITY_HIGH content=former timer",
+        },
+        {"type": "PLANNER_RESPONSE", "content": "MEIVA_DISPLAY_TO_USER\nOld native reply"},
+    )
+    _ = transcript.write_text(
+        "".join(
+            json.dumps({"status": "DONE", "created_at": "2026-11-16T19:38:44Z", **row}) + "\n"
+            for row in rows
+        )
+    )

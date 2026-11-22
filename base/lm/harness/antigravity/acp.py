@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.delivery import InputBlock, TextBlock
-from base.lm.harness.events import ToolResult, ToolUse
+from base.lm.harness.events import HarnessCause, ToolResult, ToolUse
 
 
 def input_marker(key: str) -> str:
@@ -97,3 +97,62 @@ class ToolCall:
         return ToolResult(
             self.use.turn_id, self.use.tool_use_id, status == "failed" or is_error, text
         )
+
+
+class UnrecognisedError(Exception):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+_RESTART_MARKER = "have been stopped due to server restart"
+_REMINDER_BLOCK = re.compile(
+    r"\A(?:The following is a <SYSTEM_MESSAGE>[^\n]*\n)?"
+    r"\s*<SYSTEM_MESSAGE>\s*Reminder:[ \t]*(?!\s*</?SYSTEM_MESSAGE>)\S"
+    r"(?:(?!</?SYSTEM_MESSAGE>).)*</SYSTEM_MESSAGE>\s*\Z",
+    re.DOTALL,
+)
+_ENVELOPE = re.compile(
+    r"\A\[Message\] timestamp=(\S+) sender=(\S+) priority=(\S+) content=(.*)\Z", re.DOTALL
+)
+_TASK_SENDER = re.compile(r"/task-\d+\Z")
+_TASK_FINISHED = 'Task id "'
+
+
+@dataclass(frozen=True, slots=True)
+class SystemNotice:
+    text: str
+    cause: HarnessCause
+    sender: str
+
+
+def classify_system_message(content: str) -> SystemNotice | None:
+    if "[Notice]" in content and _RESTART_MARKER in content:
+        return None
+    wrapped = re.search(
+        r"<SYSTEM_MESSAGE>\s*(\[Message\].*?)\s*</SYSTEM_MESSAGE>", content, re.DOTALL
+    )
+    envelope = wrapped.group(1) if wrapped is not None else content
+    found = _ENVELOPE.match(envelope)
+    if found is None:
+        if wrapped is None and _REMINDER_BLOCK.match(content) is not None:
+            return None
+        raise UnrecognisedError(f"system_message:{envelope.split(maxsplit=1)[0]}")
+    sender, text = found.group(2), found.group(4).strip()
+    if sender == "system":
+        return None
+    if not text:
+        raise UnrecognisedError("system_message:empty")
+    return SystemNotice(text=text, cause=_cause(sender, text), sender=sender)
+
+
+def _cause(sender: str, text: str) -> HarnessCause:
+    if _TASK_SENDER.search(sender):
+        return (
+            HarnessCause.BACKGROUND_TASK
+            if text.startswith(_TASK_FINISHED)
+            else HarnessCause.SCHEDULED_WAKE
+        )
+    if sender == "system":
+        return HarnessCause.UNKNOWN
+    return HarnessCause.BACKGROUND_TASK

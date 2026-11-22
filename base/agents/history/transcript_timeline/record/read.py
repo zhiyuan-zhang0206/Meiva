@@ -214,6 +214,35 @@ def read_window(
             )
 
 
+def needs_native_timing_refresh(harness: str, rows: Sequence[FileRow]) -> bool:
+    return harness == "antigravity" and any(
+        row.row.get("type") == "PLANNER_RESPONSE" and row.row.get("meiva_reasoning_ms") is None
+        for row in rows
+    )
+
+
+def read_anchored_reply(
+    file: RecordFile,
+    offset: int,
+    *,
+    harness: str,
+    policy: ReplyPolicy,
+    render_tool: Callable[[str, Mapping[str, object]], str],
+    unread: UnreadRows,
+) -> Projected:
+    row = file.row_at(offset)
+    return _items_of(
+        (row,) if row is not None else (),
+        harness=harness,
+        tail=False,
+        complete_only=True,
+        policy=policy,
+        render_tool=render_tool,
+        load_sent=lambda _until, _wanted: {},
+        unread=unread,
+    )
+
+
 def _items_of(
     rows: Sequence[FileRow],
     *,

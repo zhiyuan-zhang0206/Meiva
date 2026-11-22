@@ -66,6 +66,12 @@ class SubagentReader:
         arguments, output = spawn
         return spawn_events(child, turn_id=turn_id, arguments=arguments, output=output)
 
+    def has_children(self, conversation_id: str | None) -> bool:
+        return conversation_id is not None and bool(self._children(conversation_id))
+
+    def is_child(self, conversation_id: str, child_id: str) -> bool:
+        return any(child.conversation_id == child_id for child in self._children(conversation_id))
+
     def _children(self, conversation_id: str) -> list[Child]:
         directory = (
             resolve_user_home(self.home)

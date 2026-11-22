@@ -10,7 +10,19 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.tests.support import seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
+from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.events import (
+    AssistantText,
+    HarnessCause,
+    ToolUse,
+    TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
+    UnsolicitedOutput,
+    Usage,
+)
 from base.lm.harness.process import PsutilChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
@@ -128,3 +140,162 @@ async def test_close_recovers_an_unsampled_child_that_created_its_own_session(
         assert not probe.is_alive(pid)
     finally:
         await transport.close(broken=True)
+
+
+@pytest.mark.parametrize(
+    ("command", "prefix"),
+    [("native-HIDE", "MEIVA_HIDE_FROM_USER"), ("native-DISPLAY", "MEIVA_DISPLAY_TO_USER")],
+)
+@pytest.mark.parametrize(
+    ("extra_args", "cause"),
+    [((), HarnessCause.SCHEDULED_WAKE), (("--test-native-child",), HarnessCause.BACKGROUND_TASK)],
+)
+async def test_native_task_reply_is_a_harness_turn_without_inbound(
+    tmp_path: Path, command: str, prefix: str, extra_args: tuple[str, ...], cause: HarnessCause
+) -> None:
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, unsolicited=sink.append, extra_args=extra_args)
+    try:
+        await harness.session.deliver([HarnessInput.of("foreground", command)])
+        foreground = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        harness.release()
+        begun = await harness.wait_for(
+            lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS
+        )
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
+        )
+        assert done.turn_id != foreground.turn_id and begun.keys == ()
+        assert begun.cause is cause
+        assert done.text == f"{prefix}\nTIMER_PURPLE"
+        assert done.usage == Usage(267, 3, 0, 30)
+        assert not done.usage_uncertain
+        assert len(harness.prompts()) == 1 and sink == []
+    finally:
+        await harness.stop()
+
+
+async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_path: Path) -> None:
+    sink: list[UnsolicitedOutput] = []
+    seed_replay_history(tmp_path)
+    harness = await start(
+        tmp_path,
+        resume="conv-acp",
+        unsolicited=sink.append,
+        extra_args=("--test-late-load-replay",),
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("new", "resumed")])
+        completed = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert completed.text == "MEIVA_DISPLAY_TO_USER\nFresh reply"
+        assert completed.usage == Usage(250, 3, 0, 30) and not completed.usage_uncertain
+        assert [e.text for e in harness.events if isinstance(e, AssistantText)] == [completed.text]
+        frames = harness.frames()
+        assert [f["method"] for f in frames] == [
+            "initialize",
+            "session/load",
+            "session/set_model",
+            "session/prompt",
+        ]
+        assert frames[2]["params"] == {"sessionId": "conv-acp", "modelId": "gemini-4-hydrogen-low"}
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize(
+    ("command", "usage"),
+    [
+        ("child-overlap", Usage(40, 5, 0, 30)),
+        ("child-no-usage", Usage(40, 3, 0, 30)),
+        ("child-no-usage-incomplete", Usage(40, 0, 0, 30)),
+        ("child-late", Usage(40, 5, 0, 30)),
+        ("child-deferred", Usage(40, 5, 0, 30)),
+    ],
+)
+async def test_subagent_completion_overlaps_a_prompt_without_using_its_usage(
+    tmp_path: Path, command: str, usage: Usage
+) -> None:
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(
+        tmp_path, unsolicited=sink.append, extra_args=("--test-native-child",), reply_seconds=1
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("seed", "child-seed")])
+        seed = await harness.wait_for_type(TurnCompleted)
+        await harness.session.deliver([HarnessInput.of("overlap", command)])
+        foreground = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.text == "FOREGROUND"
+        )
+        if command == "child-deferred":
+            harness.release()
+        native = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        child = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id == native.turn_id
+        )
+        assert child.text == "CHILD CALLBACK" and child.usage == Usage(267, 3, 0, 30)
+        assert foreground.usage == usage
+        assert foreground.usage_uncertain == command.endswith("-incomplete")
+        assert native.cause is HarnessCause.BACKGROUND_TASK and sink == []
+        if command == "child-late":
+            harness.release()
+            await harness.wait_for_marker("child-frame-sent")
+            await harness.session.deliver([HarnessInput.of("next", "next")])
+            await harness.wait_for(
+                lambda event: (
+                    isinstance(event, TurnCompleted)
+                    and event.turn_id not in {seed.turn_id, foreground.turn_id, child.turn_id}
+                )
+            )
+            assert (
+                sum(
+                    isinstance(event, TurnCompleted) and event.text == "CHILD CALLBACK"
+                    for event in harness.events
+                )
+                == 1
+            )
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("command", ["textless", "textless-no-planner-usage"])
+async def test_resumed_textless_turn_completes_despite_late_replay(
+    tmp_path: Path, command: str
+) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append, reply_seconds=1)
+    try:
+        await harness.session.deliver([HarnessInput.of("textless", command)])
+        done = await harness.wait_for_type(TurnCompleted)
+        assert not done.text and done.usage == Usage(10) and not done.usage_uncertain
+        assert not any(isinstance(event, AssistantText) for event in harness.events)
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+async def test_resumed_cancel_keeps_proven_partial_text_and_usage(tmp_path: Path) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(
+        tmp_path, resume="conv-acp", unsolicited=sink.append, extra_args=("--test-cancel-partial",)
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("cancel", "hold")])
+        tool = await harness.wait_for_type(ToolUse)
+        cancel = await harness.session.interrupt(turn_id=tool.turn_id)
+        done = await harness.wait_for_type(TurnCompleted)
+        assert cancel.settled and done.interrupted
+        assert done.text == "VISIBLE PARTIAL" and done.usage == Usage(80, 6, 0, 60)
+        pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("next", "after-cancel")])
+        again = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != done.turn_id
+        )
+        assert again.text == "OK" and harness.session.cli_pid == pid
+        assert sink == []
+    finally:
+        await harness.stop()

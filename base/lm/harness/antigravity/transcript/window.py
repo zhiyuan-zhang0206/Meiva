@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.lm.harness.antigravity.acp import UnrecognisedError, classify_system_message
 from base.lm.harness.antigravity.reconciliation.queue_files import agy_home
-from base.lm.harness.antigravity.transcript.errors import UnrecognisedError
-from base.lm.harness.antigravity.transcript.system_message import classify
 from base.lm.harness.antigravity.transcript.text import background_notice, user_text, without_stamps
 from base.lm.harness.session.transcript.entries import (
     AgentText,
@@ -111,7 +110,7 @@ class EntryParser:
             return self._planner(file.offset, row, stamp, at)
         if kind == "SYSTEM_MESSAGE":
             try:
-                notice = classify(text)
+                notice = classify_system_message(text)
             except UnrecognisedError:
                 return [_unknown(key, order, "SYSTEM_MESSAGE.envelope")]
             if notice is None:

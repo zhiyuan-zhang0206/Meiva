@@ -8,8 +8,12 @@ here to keep a running tool and both inputs through a mid-turn prompt.
 ## Conversation and delivery
 
 `agy acp` exchanges newline-delimited JSON-RPC over stdio. The adapter sends
-`initialize` and either `session/new` or `session/load`. The load response ends history playback. Live frames arriving while the model is being selected are queued. It always reapplies the configured model and reasoning effort
-with the combined model ID in `session/set_model`.
+`initialize` and either `session/new` or `session/load`. The protocol ends history playback at the load response. The adapter queues
+later frames, including while it reapplies the configured model and reasoning effort
+with the combined model ID in `session/set_model`. The first prompt after a
+load verifies output against the newly written input marker and planner rows.
+This keeps late historical chunks outside the new prompt and allows the verified
+planner counters to supply usage when its ACP result omits usage.
 
 Each input is one `session/prompt` with ordered text and base64 image blocks.
 A steer sends another prompt within the foreground turn. On 1.5.14 the previous
@@ -75,13 +79,31 @@ terminal planner row added after the cancellation boundary. A planner row
 already present at cancellation cannot acquire timer ownership by reaching
 DONE afterward.
 
+A completed planner reply whose native ownership is proven can be delivered
+before its ACP text arrives. Its notice row identifies the reply for delivery
+within the generation. An unresolved native notice stays in the projection
+across foreground settlement. When a prompt omits ACP usage, a terminal
+planner row belonging to its input can still close the prompt before a later
+native notice. Available planner usage stays on its own turn, and incomplete
+counts are marked uncertain. A current textless terminal row can close a
+prompt despite unmatched replay. Cancellation settles proved foreground
+evidence immediately, preserving recorded text and usage.
+
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
 that owner's earliest unused row. After terminal ACP and a verified planner
 span, the adapter can recover missing foreground text from that span. Foreground
-completion is independent of unmatched timer chunks. A task-confirmed timer
-reply goes through `UnsolicitedOutput` to the bridge wake sink. Usage updates
-can trigger a transcript read. A future timer still allows foreground input.
+completion is independent of unmatched timer chunks. Outside a prompt,
+unkeyed text only signals that the adapter should inspect the transcript.
+A new native task notice or a callback from a child named by the parent’s
+subagent descriptors identifies a provider-started turn once its planner reply is complete. A transcript boundary captured before loading keeps
+historical task replies outside this scan, even if old text frames arrive
+after the load response. The adapter emits a harness-origin turn, with the
+native notice and reply offsets and planner usage when available. Both buffered
+and live starts point the graph to the exact reply row, even when the timeline
+reader has already passed it. The graph presents the transcript and applies the
+normal reply visibility policy.
+A future timer still allows foreground input.
 A due or triggered timer holds new dispatch and keeps the process alive, and
 an unverified reply at its deadline retires the generation. Cron-like
 calls retain the existing one-day bound. Timers also supply the foreground

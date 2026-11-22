@@ -22,6 +22,8 @@ from base.lm.harness.events import (
     SessionClosed,
     SessionFailed,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
     UnsolicitedSink,
     is_droppable,
@@ -569,18 +571,28 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # ticket becoming active. Left in the queue, an event that belonged to no turn —
     # a provider's report about its own turn, a leftover completion — is read by the
     # next turn as its own outcome, which is how an idle session poisoned a turn it
-    # had nothing to do with (#5663). The stream's own end marker is not a leftover.
+    # had nothing to do with (#5663). Provider-started turns carry their own identity and must reach
+    # the event pump even when new input is dispatched before it drains the queue.
     # meiva:link base/lm/harness/docs/harness.md
     def _discard_unconsumed_events(self) -> None:
+        keep: list[object] = []
+        observed: set[str] = set()
         while True:
             try:
                 event = self._events.get_nowait()
             except asyncio.QueueEmpty:
-                return
+                break
             if not isinstance(event, BridgeEvent):
-                self._events.put_nowait(event)
-                return
-            self._unconsumed_events += 1
+                keep.append(event)
+                break
+            if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
+                observed.add(event.turn_id)
+            if getattr(event, "turn_id", None) in observed:
+                keep.append(event)
+            else:
+                self._unconsumed_events += 1
+        for event in keep:
+            self._events.put_nowait(event)
 
     def _fail_turn(self, turn: ActiveTurn, exc: BaseException) -> None:
         turn.interrupt_ready.set()

@@ -28,7 +28,12 @@ from base.agents.history.transcript_timeline.record.harness import (
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.match import CLAIM_EARLY, CLAIM_SLACK
-from base.agents.history.transcript_timeline.record.read import read_window, reasoning_refresh
+from base.agents.history.transcript_timeline.record.read import (
+    needs_native_timing_refresh,
+    read_anchored_reply,
+    read_window,
+    reasoning_refresh,
+)
 from base.agents.history.transcript_timeline.sent import (
     DELIVERABLE_KINDS,
     load_sent_rows,
@@ -52,6 +57,8 @@ from base.lm.harness import (
     TextDelta,
     ToolResult,
     ToolUse,
+    TurnOrigin,
+    TurnStarted,
 )
 from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
@@ -204,6 +211,8 @@ class ReadTimelineSink:
             self._delivered_output = True
         if isinstance(event, AssistantText):
             self._check_reply(event.text)
+        if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
+            await self._read_logged(anchor=event)
         self._dirty.set()
 
     def _check_reply(self, text: str) -> None:
@@ -317,9 +326,12 @@ class ReadTimelineSink:
             f"in {where} or any other project directory; nothing of this turn can be shown or delivered"
         )
 
-    async def _read_logged(self) -> None:
+    async def _read_logged(self, *, anchor: TurnStarted | None = None) -> None:
         try:
-            await self._read()
+            if anchor is None:
+                await self._read()
+            else:
+                await self._deliver_anchored_reply(anchor)
         except Exception:
             logger.opt(exception=True).warning(
                 "could not read the harness's record for the live timeline; the next read tries again",
@@ -413,7 +425,7 @@ class ReadTimelineSink:
         if not block.rows:
             self._seen_stat = seen
             return None, block.end
-        self._timing_needed = _needs_timing_refresh(self._harness, block.rows)
+        self._timing_needed = needs_native_timing_refresh(self._harness, block.rows)
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
         projected = self._projector.feed(
@@ -507,7 +519,7 @@ class ReadTimelineSink:
                 msg_count=end,
             ).model_dump_json()
         )
-        self._last = max(sent, key=lambda item: item.offset)
+        self._last = max((*carried, *sent), key=lambda item: item.offset)
         self._emit_committed_inbounds(sent)
 
     def _emit_committed_inbounds(self, sent: Sequence[ProjectedItem]) -> None:
@@ -523,8 +535,29 @@ class ReadTimelineSink:
                     InboundCommitted(agent_id=self._agent_id, inbound_id=inbound).model_dump_json()
                 )
 
-    async def _deliver(self, items: Sequence[ProjectedItem]) -> None:
-        floor = await self._delivery_floor()
+    async def _deliver_anchored_reply(self, event: TurnStarted) -> None:
+        start, reply = event.record_start, event.record_reply
+        if start is None or reply is None:
+            return
+        async with self._busy:
+            self._from = start if self._from is None else self._from
+            file = self._resolve()
+            if file is None:
+                return
+            projected = await asyncio.to_thread(
+                read_anchored_reply,
+                file,
+                reply,
+                harness=self._harness,
+                policy=self._policy,
+                render_tool=format_tool_use,
+                unread=self._unread,
+            )
+            self._publish(projected, file.complete_end())
+            await self._deliver(projected.items, anchored=True)
+
+    async def _deliver(self, items: Sequence[ProjectedItem], *, anchored: bool = False) -> None:
+        floor = self._fork_floor or 0 if anchored else await self._delivery_floor()
         replies = [
             (reply_key(self._harness, item.key, self._session_id()), item.item)
             for item in items
@@ -657,15 +690,6 @@ class ReadTimelineSink:
         return self._parent_uuids
 
 
-def _needs_timing_refresh(harness: str, rows: Sequence[FileRow]) -> bool:
-    if harness != Harness.ANTIGRAVITY.value:
-        return False
-    return any(
-        row.row.get("type") == "PLANNER_RESPONSE" and row.row.get("meiva_reasoning_ms") is None
-        for row in rows
-    )
-
-
 def _row_uuid(row: Mapping[str, object]) -> str | None:
     attachment = row.get("attachment")
     if is_object_dict(attachment):
@@ -765,20 +789,4 @@ def _write_fork_floor(path: Path, *, session_id: str, floor: int) -> None:
         raise
 
 
-# meiva:note
-# The live session's id once the CLI has reported it, before that the one the session registry holds for the agent,
-# which is the one the CLI is resuming.
-def session_of(ctx: MeivaContext, agent_id: int, harness: str) -> Callable[[], str | None]:
-    registry = FileSessionRegistry(harness_sessions_dir(home=ctx.require_meiva_home()))
-
-    def current() -> str | None:
-        live = getattr(ctx.harness_bridge, "session_id", None)
-        if isinstance(live, str):
-            return live
-        record = registry.load(agent_id, harness=harness)
-        return None if record is None else record.session_id
-
-    return current
-
-
-__all__ = ["ReadTimelineSink", "session_of"]
+__all__ = ["ReadTimelineSink"]

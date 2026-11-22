@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
@@ -10,7 +11,7 @@ from agent import state as _state
 from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_inbox import settle_stale_interrupts
 from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
-from agent.graph.claim.harness_read_sink import ReadTimelineSink, session_of
+from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_run import ForegroundRun
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.interrupt import (
@@ -32,7 +33,9 @@ from base.lm.harness import (
     fault_is_quota_exhaustion,
     sanitize_error_text,
 )
+from base.lm.harness.registry import FileSessionRegistry
 from base.log import logger
+from base.paths import harness_sessions_dir
 
 HarnessGoto = Literal["claim"]
 
@@ -240,7 +243,7 @@ async def _run_harness_turn(
         agent_id,
         event_publisher,
         non_human_wake=state.non_human_wake,
-        session_id=session_of(ctx, agent_id, ctx.harness.value),
+        session_id=_session_of(ctx, agent_id, ctx.harness.value),
     )
     run = ForegroundRun(
         ctx,
@@ -325,3 +328,16 @@ async def _run_harness_turn(
         },
         goto=CLAIM,
     )
+
+
+def _session_of(ctx: MeivaContext, agent_id: int, harness: str) -> Callable[[], str | None]:
+    registry = FileSessionRegistry(harness_sessions_dir(home=ctx.require_meiva_home()))
+
+    def current() -> str | None:
+        live = getattr(ctx.harness_bridge, "session_id", None)
+        if isinstance(live, str):
+            return live
+        record = registry.load(agent_id, harness=harness)
+        return None if record is None else record.session_id
+
+    return current

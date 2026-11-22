@@ -214,10 +214,18 @@ class Schedules:
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
-    def reply_finished(self, sender: str, prompt: str) -> Schedules:
-        for index, reply in enumerate(self.replies):
+    def reply_finished(self, sender: str, prompt: str | None) -> Schedules:
+        if prompt is None:
+            return self
+        for reply in (*self.replies, *self.background_timers):
             if reply.task_id == sender or (reply.task_id is None and reply.prompt == prompt):
-                return replace(self, replies=(*self.replies[:index], *self.replies[index + 1 :]))
+                return replace(
+                    self,
+                    replies=tuple(timer for timer in self.replies if timer is not reply),
+                    background_timers=tuple(
+                        timer for timer in self.background_timers if timer is not reply
+                    ),
+                )
         return self
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:

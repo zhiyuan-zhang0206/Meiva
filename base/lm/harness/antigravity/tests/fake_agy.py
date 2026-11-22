@@ -105,12 +105,21 @@ def finish_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
+def declare_child(transcript: Path) -> str:
+    sender = "child-conv"
+    descriptors = transcript.parent.parent / "subagents"
+    descriptors.mkdir(exist_ok=True)
+    _ = (descriptors / "child.json").write_text(json.dumps({"conversationId": sender}))
+    return sender
+
+
 def background_notice(transcript: Path) -> None:
+    sender = declare_child(transcript) if "--test-native-child" in sys.argv else SID + "/task-1"
     record(
         transcript,
         {
             "type": "SYSTEM_MESSAGE",
-            "content": f"[Message] sender={SID}/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
+            "content": f"[Message] timestamp={STAMP} sender={sender} priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
         },
     )
 
@@ -142,6 +151,102 @@ def trigger_background(transcript: Path) -> None:
     after_release(
         Path("release"), lambda: finish_background(transcript, early_notice, early_planner)
     )
+
+
+def resumed_prompt(transcript: Path, request: int) -> None:
+    message("REPLAYED_OLD_TEXT")
+    message("MEIVA_DISPLAY_TO_USER\nOld native reply")
+    update("usage_update", used=3, size=10)
+    reply = "MEIVA_DISPLAY_TO_USER\nFresh reply"
+    record(transcript, {**planner_row(reply, tokens=220), "created_at": STAMP})
+    message(reply)
+    result(request, usage=False)
+
+
+def child_overlap(transcript: Path, request: int, command: str) -> None:
+    foreground = planner_row("FOREGROUND")
+    if command == "child-no-usage-incomplete":
+        del foreground["output_tokens"]
+    record(transcript, foreground)
+    background_notice(transcript)
+    deferred = command == "child-deferred"
+    if not deferred:
+        record(transcript, planner_row("CHILD CALLBACK", tokens=237))
+    message("FOREGROUND")
+    if command in {"child-late", "child-deferred"}:
+        result(request)
+
+        def deliver_child() -> None:
+            if deferred:
+                record(transcript, planner_row("CHILD CALLBACK", tokens=237))
+            message("CHILD CALLBACK")
+            update("usage_update", used=2, size=10)
+            Path("child-frame-sent").touch()
+
+        after_release(Path("release"), deliver_child)
+        return
+    message("CHILD CALLBACK")
+    result(request, usage=not command.startswith("child-no-usage"))
+
+
+def textless_prompt(transcript: Path, request: int, command: str) -> None:
+    message("REPLAYED_OLD_TEXT")
+    planner = planner_row("")
+    if command == "textless-no-planner-usage":
+        del planner["output_tokens"]
+    else:
+        planner["output_tokens"] = 0
+    record(transcript, planner)
+    frame(
+        {
+            "id": request,
+            "result": {
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 0},
+            },
+        }
+    )
+
+
+def cancel_prompt(transcript: Path, request: int) -> None:
+    if "--test-cancel-partial" in sys.argv:
+        message("REPLAYED_OLD_TEXT")
+        record(transcript, planner_row("VISIBLE PARTIAL"))
+        message("VISIBLE PARTIAL")
+    result(request, "cancelled", usage=False)
+
+
+def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    if command == "resumed":
+        resumed_prompt(transcript, request)
+        return
+    if command.startswith("child-") and command != "child-seed":
+        child_overlap(transcript, request, command)
+        return
+    if command.startswith("textless"):
+        textless_prompt(transcript, request, command)
+        return
+    if command == "child-seed":
+        _ = declare_child(transcript)
+    native = command.startswith("native-")
+    reply = "FOREGROUND" if native else "OK"
+    record(transcript, planner_row(reply))
+    message(reply)
+    result(request)
+    if native:
+        message(reply)
+        update("usage_update", used=2, size=10)
+        after_release(Path("release"), lambda: native_reply(transcript, command))
+
+
+def native_reply(transcript: Path, command: str) -> None:
+    reply = f"MEIVA_{command.removeprefix('native-')}_TO_USER\nTIMER_PURPLE"
+    if command == "native-HIDE":
+        reply = "MEIVA_HIDE_FROM_USER\nTIMER_PURPLE"
+    background_notice(transcript)
+    record(transcript, planner_row(reply, tokens=237))
+    message(reply)
+    update("usage_update", used=2, size=10)
 
 
 def beginning_of_tool() -> None:
@@ -305,9 +410,7 @@ def handle_prompt(
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
-        record(transcript, planner_row("OK"))
-        message("OK")
-        result(request)
+        plain_prompt(transcript, request, command)
     return original, permission_prompt
 
 
@@ -337,8 +440,9 @@ def setup_session(method: str, request: int) -> None:
         message("REPLAYED_OLD_TEXT")
         update("usage_update", used=1, size=10)
     frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
-    if method == "session/load" and "--test-live-load" in sys.argv:
-        message("LIVE_AFTER_LOAD")
+    if method == "session/load" and "--test-late-load-replay" in sys.argv:
+        message("REPLAYED_OLD_TEXT")
+        message("MEIVA_DISPLAY_TO_USER\nOld native reply")
         update("usage_update", used=2, size=10)
 
 
@@ -373,7 +477,7 @@ def main() -> None:
             frame({"id": request, "result": {}})
         elif method == "session/cancel":
             if original is not None and "--test-ignore-cancel" not in sys.argv:
-                result(original, "cancelled", usage=False)
+                cancel_prompt(transcript, original)
                 original = None
         elif method == "session/prompt":
             original, permission_prompt = handle_prompt(transcript, data, original)
