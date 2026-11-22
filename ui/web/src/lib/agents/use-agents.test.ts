@@ -71,7 +71,7 @@ function setUrlSearch(search: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); setUrlSearch("");
-  useStore.setState({ activeId: null, toast: null, openTasksNotice: null });
+  useStore.setState({ activeId: null, toast: null });
   _qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   vi.mocked(api.getAgentRoster).mockResolvedValue({ agents: MOCK_AGENTS, ancestors: [] });
   vi.mocked(api.getAgent).mockImplementation((id) => Promise.resolve(row(id, "terminated")));
@@ -441,101 +441,6 @@ describe("useAgents.terminate", () => {
     });
     expect(useStore.getState().toast).toBeNull();
     expect(showError).toHaveBeenCalledWith(expect.stringContaining("Terminate failed"));
-  });
-
-  it("open-tasks hint opens the notice state (response field #2488)", async () => {
-    vi.mocked(api.terminateAgent).mockResolvedValue({
-      status: "enqueued",
-      open_tasks: {
-        count: 2,
-        more: 1,
-        tasks: [
-          {
-            id: 12,
-            title: "Ship the hint",
-            status: "in_progress",
-            updated_at: "2026-09-14T05:00:00+00:00",
-          },
-        ],
-      },
-    });
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-
-    await act(async () => {
-      await result.current.terminate(1);
-    });
-
-    expect(useStore.getState().openTasksNotice).toMatchObject({ count: 2, more: 1 });
-  });
-
-  it("count 0 keeps the notice closed", async () => {
-    vi.mocked(api.terminateAgent).mockResolvedValue({
-      status: "enqueued",
-      open_tasks: { count: 0, more: 0, tasks: [] },
-    });
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-
-    await act(async () => {
-      await result.current.terminate(1);
-    });
-
-    expect(useStore.getState().openTasksNotice).toBeNull();
-  });
-
-  it("null hint and an old gateway without the field stay silent", async () => {
-    vi.mocked(api.terminateAgent).mockResolvedValueOnce({
-      status: "enqueued",
-      open_tasks: null,
-    });
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-    await act(async () => {
-      await result.current.terminate(1);
-    });
-    expect(useStore.getState().openTasksNotice).toBeNull();
-
-    vi.mocked(api.terminateAgent).mockResolvedValueOnce({ status: "enqueued" });
-    await act(async () => {
-      await result.current.terminate(1);
-    });
-    expect(useStore.getState().openTasksNotice).toBeNull();
-  });
-
-  it("already_terminated with open tasks still opens the notice", async () => {
-    vi.mocked(api.terminateAgent).mockResolvedValue({
-      status: "already_terminated",
-      open_tasks: {
-        count: 1,
-        more: 0,
-        tasks: [
-          {
-            id: 3,
-            title: "Winding down",
-            status: "in_progress",
-            updated_at: "2026-09-14T05:00:00+00:00",
-          },
-        ],
-      },
-    });
-    const { result } = renderHook(() => useAgents(noop), { wrapper });
-    await waitFor(() => {
-      expect(result.current.activeId).toBe(1);
-    });
-
-    await act(async () => {
-      await result.current.terminate(1);
-    });
-
-    expect(useStore.getState().openTasksNotice).toMatchObject({ count: 1 });
-    expect(useStore.getState().toast).toBe("Already terminated");
   });
 
   it("cache untouched while terminate in flight (no optimistic write)", async () => {

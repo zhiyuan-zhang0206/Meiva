@@ -2,9 +2,6 @@
   "title": "编队",
   "activeTotal": "{active} 个活跃 · 共 {total} 个",
   "backToConversation": "返回对话",
-  "sections": "编队分区",
-  "agents": "Agent",
-  "tasks": "任务",
   "force": {
     "settings": "图布局设置",
     "layout": "布局",
@@ -24,8 +21,7 @@
     "yGravity": "Y 轴重力",
     "coolSpeed": "冷却速度",
     "fillRatio": "填充比例",
-    "padding": "留白",
-    "size": "尺寸"
+    "padding": "留白"
   },
   "forceGraph": {
     "loading": "加载中…",
@@ -47,45 +43,5 @@
     "loading": "加载中…",
     "unavailable": "图不可用。",
     "empty": "没有可绘制的 Agent。"
-  },
-  "task": {
-    "status": {
-      "inProgress": "进行中",
-      "done": "已完成",
-      "canceled": "已取消"
-    },
-    "root": "根任务",
-    "agent": "Agent #{id}",
-    "unowned": "未分配",
-    "user": "用户",
-    "system": "系统",
-    "every": "每 {duration}",
-    "task": "任务 #{id}",
-    "meta": {
-      "status": "状态",
-      "priority": "优先级",
-      "owner": "负责人",
-      "createdBy": "创建者",
-      "parent": "父任务",
-      "reminder": "提醒",
-      "created": "创建时间",
-      "updated": "更新时间",
-      "description": "描述",
-      "result": "结果"
-    },
-    "reminders": "{count} 次提醒",
-    "lastReminder": "上次 {time}",
-    "fullFailed": "无法加载任务全文。",
-    "openOwnerConversation": "双击节点以打开负责人的对话",
-    "stale": "数据过期",
-    "window": "时间窗口",
-    "all": "全部",
-    "loading": "正在加载任务…",
-    "loadFailed": "加载任务失败。",
-    "empty": "尚无任务。",
-    "graph": "图",
-    "kanban": "看板",
-    "taskCount": "{count} 个任务",
-    "legend": "任务图例"
   }
 }

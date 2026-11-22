@@ -15,6 +15,6 @@ continuing would guess at the operator's intent:
   cannot pick a winner between two claimants.
 - The post-load cross-model registry revalidation in the provider loader.
 
-Unloadable `metrics.py`, `inspector.py`, `setup.py`, `plugin.py`, `services.py`
+Unloadable `metrics.py`, `setup.py`, `plugin.py`, `services.py`
 or `default_config.py` code is contained loudly (skipped and reported) at
-runtime; no pre-flight rejects a plugin before it ships. A data face (`metrics.py`, `inspector.py`) is admitted whole or not at all, so a failed one leaves no partial registration.
+runtime; no pre-flight rejects a plugin before it ships. A metrics face (`metrics.py`) is admitted whole or not at all, so a failed one leaves no partial registration.

@@ -556,9 +556,7 @@ export function applySystemEvent(
     // removing one would fall through to the next with the same
     // behavior, and mutation testing could not catch a missing case
     // label (split-out bodies are equivalent mutants). Merged, any
-    // missing case label causes that role event to fall through the
-    // switch → undefined, and downstream setState immediately blows up
-    // (fail loud).
+    // missing case label fails typechecking at the exhaustive check below.
     /* eslint-disable no-fallthrough */
     case "inbound_arrived":
       // Optimistic update removed — inbound_arrived only triggers
@@ -583,10 +581,6 @@ export function applySystemEvent(
     case "question_resolved":
       // inbox feed — useInboxFeed invalidate-refetches on these; they never
       // enter the timeline.
-    case "task_created":
-    case "task_updated":
-      // task board — useTasks invalidate-refetches on these; they never enter
-      // the per-agent timeline.
     case "notification":
     case "timeline_snapshot":
       // meiva:note
@@ -594,6 +588,9 @@ export function applySystemEvent(
       return items;
     /* eslint-enable no-fallthrough */
   }
+  // Archived or version-skewed frames may carry roles this client does not know.
+  const _unrecognizedEvent: never = ev;
+  return items;
 }
 
 /** Merge a server snapshot into the current items (incremental design).

@@ -123,26 +123,26 @@ def test_filters_on_level_agent_regex_and_not_equal(db_conn: psycopg.Connection)
 def test_an_audit_category_reads_audit_events(db_conn: psycopg.Connection) -> None:
     _put(
         db_conn,
-        "task_update",
+        "agent_transfer",
         minutes_before_stop=5,
         table="audit_events",
-        attributes={"status": "done"},
+        attributes={"destination": "runner-a"},
     )
     _put(
         db_conn,
-        "task_update",
+        "agent_transfer",
         minutes_before_stop=6,
         table="audit_events",
-        attributes={"status": "open"},
+        attributes={"destination": "runner-b"},
     )
-    selector = '{service_name="unknown_service", event_name="task_update"}'
+    selector = '{service_name="unknown_service", event_name="agent_transfer"}'
 
-    done = _eval(
+    moved = _eval(
         db_conn,
-        f'sum(count_over_time({selector} | json | category="audit" | attributes_status="done" [1h]))',
+        f'sum(count_over_time({selector} | json | category="audit" | attributes_destination="runner-a" [1h]))',
     )
 
-    assert done[_STOP] == 1
+    assert moved[_STOP] == 1
 
 
 @pytest.mark.parametrize(

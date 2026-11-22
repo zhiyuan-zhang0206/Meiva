@@ -84,12 +84,6 @@ class Spawn(TypedDict):
     fork_checkpoint: str | None
 
 
-class TaskUpdate(TypedDict):
-    """`task_update` payload — task_registry.py; `status` only when changed."""
-
-    status: str
-
-
 class AgentTransfer(TypedDict):
     # meiva:note
     # `transfer` payload — gateway/agents/transfer/router.py.
@@ -142,8 +136,6 @@ EVENTS: dict[str, EventSpec] = {
     "exit": audit_event("exit", "agent process exited"),
     "label_change": audit_event("label_change", "agent label changed"),
     "skill_invoked": audit_event("skill_invoked", "skill invoked by an agent"),
-    "task_create": audit_event("task_create", "task created"),
-    "task_update": audit_event("task_update", "task updated", payload=TaskUpdate),
     "computer_action": audit_event(
         "computer_action",
         "computer-use desktop action (executed or refused)",

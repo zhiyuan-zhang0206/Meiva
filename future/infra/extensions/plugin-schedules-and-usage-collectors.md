@@ -174,7 +174,7 @@ privileges (mirrored in `db/schema.sql` and `base/cluster/authority/groups.py`):
   (`StatCardSpec(id: str, label: str)`). `GET /api/ui/contributions` merges
   static `ui.stats` with `ui_stats.py` declarations for enabled builtin plugins
   against their current config image (fail-soft via `load_report`, matching
-  `inspector.py` and `metrics.py`).
+  `metrics.py`).
 - `meiva plugins inspect` includes the `schedules` surface in `SURFACES` and
   renders the resolved `ScheduleSpec` identifiers (`<name>@<machine>`).
 

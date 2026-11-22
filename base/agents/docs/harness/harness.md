@@ -45,10 +45,6 @@ source's for a fork, the stored one for a restart) and the remaining config fiel
 value, a non-string or a null raises `InvalidConfigOverlay`. `SpawnAgentRequest` does this at
 validation (HTTP 422), so its `config` holds config fields only and `harness` is a derived value;
 the config-field validators reject a `harness` key that was not taken out first as an unknown key.
-The task-assignment router passes the agent spec's `config` through the same request, so it can
-name a harness too; the MCP tool endpoint and the built-in guide spawns still build their bodies
-without one and birth on `meiva`.
-
 ## Birth settlement and restart switching
 
 Harness is a property of the agent initialized at birth and switchable on restart:

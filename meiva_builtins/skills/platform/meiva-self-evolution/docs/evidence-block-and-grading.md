@@ -2,8 +2,8 @@
 
 [meiva-self-evolution skill — Mining regressions from real runs](meiva-self-evolution.md)
 
-`label()` is unchanged: the block only adds fields and `schema_version = 2`.
-Older records lack those keys, and a reader takes a missing grade as `None`.
+New records use `schema_version = 3` and carry the evidence fields below.
+A reader takes a missing grade in pre-evidence records as `None`.
 
 ## Fields
 
@@ -14,7 +14,6 @@ Older records lack those keys, and a reader takes a missing grade as `None`.
 | `task_prompt_chars`, `prompt_source` | stripped prompt length and its `_task_prompt` branch |
 | `final_output_chars`, `terminal_status` | stripped last-message length; `agents_meta.status` |
 | `inbound_total`, `inbound_claimed` | chat inbounds; how many carry `claimed_at` |
-| `task_updates`, `task_state_changes` | `{note, status, results}` receipt counts; those that moved it |
 | `exec_ok`, `exec_failed` | exec event outcomes |
 
 `watchers` is deliberately absent. The `agent_watchers` registry was dropped on
@@ -22,8 +21,7 @@ Older records lack those keys, and a reader takes a missing grade as `None`.
 nothing replaced it: `agents_meta.watchers` survives only as a leftover column in
 long-lived deployments — `jsonb NOT NULL` on every row, empty on every row, and
 not declared in `db/schema.sql`. Rebuilding watcher features on that column is a
-dead end; a real count needs a new table. Receipts are lifetime-scoped while a
-record is window-scoped, so `task_updates` accumulate across an agent's weeks.
+dead end; a real count needs a new table.
 
 ## Grading
 

@@ -1,6 +1,6 @@
 # meiva:note
 # Gateway JSON -> SDK types: the one place that turns a reply row into an
-# `AgentRow`, `Machine`, `Neighbor` or `OpenTasksHint`. The gateway client
+# `AgentRow`, `Machine` or `Neighbor`. The gateway client
 # answers `dict[str, object]`, so every field arrives here as `object`; these
 # readers decide what a row may contain, and a wrong-typed field raises with
 # its name instead of flowing on as a wrong-typed value.
@@ -20,13 +20,10 @@ from meiva.agents.contracts import HarnessAttachment, Machine, Neighbor, ShellSe
 __all_for_meiva__ = [
     "AgentDirectoryPage",
     "AgentRow",
-    "OpenTaskRow",
-    "OpenTasksHint",
     "harness_attachment_from_dict",
     "machines_from_rows",
     "neighbor_from_row",
     "object_rows",
-    "open_tasks_from_dict",
     "row_from_dict",
     "shell_sessions_from_dict",
 ]
@@ -86,37 +83,6 @@ def _relative_time(dt: datetime) -> str:
     zone = current_clock.zone()
     now = current_clock.now().astimezone(zone)
     return row_text.relative_age(dt.astimezone(zone), now=now)
-
-
-@dataclass
-class OpenTaskRow:
-    """One open task a terminated agent still owns: its id, title, status and
-    last update time."""
-
-    id: int
-    title: str
-    status: str
-    updated_at: datetime
-
-    def __str__(self) -> str:
-        return f"#{self.id} | {self.title} | {self.status} | {_relative_time(self.updated_at)}"
-
-
-@dataclass
-class OpenTasksHint:
-    """The open tasks a terminated agent still owns as it goes down: the total
-    `count`, at most the five most recently updated `tasks`, and `more` — how
-    many beyond those five remain."""
-
-    count: int
-    tasks: list[OpenTaskRow]
-    more: int
-
-    def __str__(self) -> str:
-        lines = [f"{self.count} open task(s):", *(str(task) for task in self.tasks)]
-        if self.more:
-            lines.append(f"... and {self.more} more")
-        return "\n".join(lines)
 
 
 def machines_from_rows(rows: Sequence[object]) -> list[Machine]:
@@ -256,25 +222,4 @@ def row_from_dict(data: Mapping[str, object]) -> AgentRow:
         ),
         harness_exit_code=optional_integer(data.get("harness_exit_code"), "harness_exit_code"),
         harness_exit_at=optional_timestamp(data.get("harness_exit_at"), "harness_exit_at"),
-    )
-
-
-def open_tasks_from_dict(data: object) -> OpenTasksHint | None:
-    """Open-tasks dict → OpenTasksHint; null passes through."""
-    if data is None:
-        return None
-    if not is_object_dict(data):
-        raise TypeError(f"open_tasks must be an object, got {type(data).__name__}")
-    return OpenTasksHint(
-        count=integer(data["count"], "count"),
-        tasks=[
-            OpenTaskRow(
-                id=integer(row["id"], "id"),
-                title=text(row["title"], "title"),
-                status=text(row["status"], "status"),
-                updated_at=timestamp(row["updated_at"], "updated_at"),
-            )
-            for row in object_rows(data.get("tasks"), "tasks")
-        ],
-        more=integer(data["more"], "more"),
     )

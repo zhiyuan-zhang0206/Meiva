@@ -28,7 +28,7 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
+from gateway.inspect import _metrics, _plugin_metrics, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
 from gateway.inspect._live import db_rows_blocking, project_heartbeat
@@ -37,7 +37,6 @@ from gateway.inspect.schemas import (
     AgentInspectLive,
     AgentInspectStatistics,
     HeartbeatLastPause,
-    InspectWidgetResult,
     NeighborRow,
     NeighborsResponse,
     PluginMetricResult,
@@ -435,29 +434,4 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
         agent_id,
         registry=registry,
         clock=gateway_clock(request),
-    )
-
-
-# meiva:note
-# The agent's plugin widgets for the inspector panel — the extension
-# surface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;
-# registration mirrors the plugin-metric system).
-#
-# Builds the widget registry in process (shipped builtin plugins'
-# ``inspector.py`` modules imported under their plugin context, restricted
-# to the plugins currently enabled), resolves the closed target vocabulary
-# for this agent — the open question and the queue's task-ownership rule —
-# and projects each widget, dropping a button whose target did not resolve
-# and a widget left without buttons. Unknown agents return 404 like the
-# rest of the /inspect family. Implementation in
-# ``gateway/inspect/_plugin_widgets.py``.
-@router.get("/api/agents/{agent_id}/inspect/widgets")
-async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[InspectWidgetResult]:
-    specs = await asyncio.to_thread(
-        _plugin_widgets.load_inspect_widgets,
-        SHIPPED_PLUGINS_DIR,
-        enabled_plugin_names(home=gateway_state(request).gateway_process.home),
-    )
-    return await asyncio.to_thread(
-        _plugin_widgets.widgets_for_agent, gateway_state(request).db_pool, agent_id, specs=specs
     )

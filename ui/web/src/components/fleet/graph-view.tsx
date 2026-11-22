@@ -11,7 +11,7 @@
 // Rendering / interaction / parameters live in the shared ForceGraph (see
 // force-graph.tsx) — this module is a thin wrapper: it fetches the fleet graph,
 // adapts it to the shared node/edge model, and adds the time-window selector +
-// empty states. The Task Graph renders the same canvas with square nodes.
+// empty states.
 //
 // The shared live-roster read includes precisely the ancestor links needed
 // by live nodes, including on a direct /fleet navigation.
@@ -31,7 +31,6 @@ import { useFleetGraph } from "@/lib/fleet/use-fleet-graph";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 
 import {
-  FORCE_DEFAULTS,
   useForceParams,
 } from "./force-controls";
 import { ForceGraph } from "./force-graph";
@@ -56,10 +55,6 @@ const STATUS_PULSE: Record<PublicAgentStatus, boolean> = {
 // Per-day decay constant for the edge weight (see the backend formula). Held as a
 // constant for now; an advanced settings panel to tune it is deferred.
 const DECAY_LAMBDA = 0.5;
-
-// DB-backed user settings key for this view's force knobs — the Task Graph
-// keeps its own key so the two graphs' tunings stay independent.
-const FORCE_PARAMS_KEY = "display.graph_force_params";
 
 function parentIdOf(spawner: string): number | null {
   if (!spawner.startsWith("agent:")) return null;
@@ -124,7 +119,7 @@ export function GraphView({
 
   // User-tunable force-layout knobs (DB-backed: display.graph_force_params).
   const { params: forceParams, setParams: setForceParams, reset: resetForceParams } =
-    useForceParams(FORCE_PARAMS_KEY, FORCE_DEFAULTS);
+    useForceParams();
 
   // Liveness filter FIRST (user ruling 2026-08-09 #1104): terminated agents
   // never appear in the graph — mirroring the sidebar's agent tree
@@ -300,8 +295,7 @@ export function GraphView({
             <p className={cn("items-center gap-1.5", FLEX)}>
               <span
                 // meiva:note
-                // The canvas carries a bare status string (the task board reuses it with task
-                // statuses), so the card narrows it through the display vocabulary: a known status
+                // Narrow the canvas status through the display vocabulary: a known status
                 // reads its colour and label, and an unknown one shows neither.
                 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
                 className={cn(
@@ -326,7 +320,6 @@ export function GraphView({
       <ForceGraph
         nodes={paintedNodes}
         edges={paintedEdges}
-        shape="circle"
         statusText={STATUS_TEXT}
         selectedId={selectedAgentId}
         onSelect={onSelectAgent}

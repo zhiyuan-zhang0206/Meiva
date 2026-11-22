@@ -68,24 +68,12 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
         return cur.rowcount
 
 
-# meiva:note
-# Retire lifecycle notices and task assignments whose terminated owner cannot
-# claim them, past the same recovery age. Chats are deliberately not swept here:
-# they stay pending for the delivery wake and the watchdog's stranded-wake
-# fallback (`stranded_wake.py`), which retires them on this same clock. Internal
-# assignment notes keep their `delivery_result` failure evidence instead of
-# disappearing, and passive lifecycle notes belong to the next resurrection's
-# native history, so their explicit markers preserve them at any age.
 def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
+    """Consume stale lifecycle notices while preserving explicitly passive notes."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
             pgsql.SQL(
-                "UPDATE inbound_messages m SET status = 'done', claimed_at = now(), "
-                "payload = CASE WHEN m.payload->'task_notification'='true'::jsonb "
-                "AND m.payload->'delivery_resurrect'='true'::jsonb THEN "
-                "m.payload||jsonb_build_object('delivery_result', "
-                "jsonb_build_object('outcome','failed','reason','resurrection_deadline_expired')) "
-                "ELSE m.payload END "
+                "UPDATE inbound_messages m SET status = 'done', claimed_at = now() "
                 "FROM agents_meta am "
                 "WHERE m.agent_id = am.id "
                 "  AND am.status = 'terminated' "

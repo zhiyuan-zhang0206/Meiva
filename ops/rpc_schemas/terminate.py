@@ -1,9 +1,7 @@
-"""Terminate-exchange wire models — request, response, and the open-task hint.
+"""Terminate-exchange wire models — request and response.
 
 The `ops.rpc_schemas` door re-exports these names.
 """
-
-from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -59,28 +57,6 @@ class TerminateAgentRequest(BaseModel):
         return self
 
 
-class OpenTaskRow(BaseModel):
-    """One open task a terminating agent still owns; `updated_at` is ISO-8601.
-
-    The terminate hint shows at most five, most recently updated first."""
-
-    id: int
-    title: str
-    status: Literal["in_progress"]
-    updated_at: str
-
-
-class OpenTasksHint(BaseModel):
-    """The open tasks (in_progress) a terminating agent still owns.
-
-    Advisory only — termination proceeds either way. `tasks` holds at most the
-    five most recently updated rows; `more` counts the ones beyond those."""
-
-    count: int
-    tasks: list[OpenTaskRow]
-    more: int
-
-
 # meiva:note
 # The response reports timing and confirmed IDs for mandatory cleanup without
 # promising that a graceful terminal host has already completed its final step.
@@ -115,6 +91,5 @@ class HarnessAttachment(BaseModel):
 # runner still predates the lifecycle contract.
 class TerminateAgentResponse(BaseModel):
     status: TerminateResult
-    open_tasks: OpenTasksHint | None = None
     shell_sessions: ShellSessionsKill | None = None
     attached: HarnessAttachment | None = None

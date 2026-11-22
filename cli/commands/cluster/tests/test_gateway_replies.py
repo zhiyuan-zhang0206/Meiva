@@ -37,14 +37,13 @@ def test_a_pause_names_what_the_machine_is_hidden_from_and_no_rollout() -> None:
             pause_reason="",
             terminated_agents=2,
             force_marked_agents=1,
-            reassigned_tasks=5,
         ),
     )
 
     assert lines[0] == "runner-a: PAUSED (since 2026-09-27T00:00:00)"
     assert lines[1] == (
         "  agents terminated via the machine's ops server: 2; "
-        "force-marked in DB (machine unreachable): 1; tasks drained to #405: 5"
+        "force-marked in DB (machine unreachable): 1"
     )
     assert "hidden from roster/probe/fan-out/spawn until resumed" in lines[2]
     assert "`meiva cluster resume runner-a`" in lines[2]
@@ -52,7 +51,7 @@ def test_a_pause_names_what_the_machine_is_hidden_from_and_no_rollout() -> None:
 
 
 def test_a_pause_reason_follows_the_verdict() -> None:
-    lines = pause_lines("runner-a", PauseReply("2026-09-27T00:00:00+00:00", "disk swap", 0, 0, 0))
+    lines = pause_lines("runner-a", PauseReply("2026-09-27T00:00:00+00:00", "disk swap", 0, 0))
 
     assert lines[0].endswith("(since 2026-09-27T00:00:00) — disk swap")
 

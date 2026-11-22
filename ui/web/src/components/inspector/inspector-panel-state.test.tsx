@@ -2,27 +2,18 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
   fixture,
   getAgentInspectLive,
   getAgentInspectStatistics,
-  getAgentInspectWidgets,
-  getAgentRoster,
   liveFixture,
   panelState,
   QueryClientProvider,
   render,
-  rosterFixture,
   setupInspectorTest,
-  widgetFixture,
 } from "./inspector-test-mock";
-
-
-
-
 import { InspectorPanel } from "./inspector-panel";
 
 beforeEach(setupInspectorTest);
@@ -163,78 +154,5 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("bad-shell")).toBeTruthy());
     expect(screen.getByText("bad-shell").closest("a")).toBeNull();
-  });
-});
-
-
-describe("InspectorPanel plugin widgets", () => {
-  it("renders a taskList widget as a titled section of fleet-task links", async () => {
-    getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
-    render(<InspectorPanel agentId={1} />);
-
-    expect(await screen.findByText("Tasks")).toBeTruthy();
-    const first = await screen.findByRole("link", { name: /Ship the inspector fix/ });
-    expect(first.getAttribute("href")).toBe("/fleet?task=42");
-    expect(screen.getByRole("link", { name: /Reply to QA/ }).getAttribute("href")).toBe(
-      "/fleet?task=43",
-    );
-  });
-
-  it("puts the fleet task list above the runtime sections", async () => {
-    getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
-    render(<InspectorPanel agentId={1} />);
-
-    const tasks = await screen.findByText("Tasks");
-    const shells = await screen.findByText("Persistent shells");
-    const before = (first: Node, second: Node) =>
-      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(before(tasks, shells)).toBeTruthy();
-  });
-
-  it("slots a widget into the section order (750: between context and activity)", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
-    act(() => {
-      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
-    });
-    getAgentInspectLive.mockResolvedValue(liveFixture());
-    getAgentInspectWidgets.mockResolvedValue([widgetFixture({ order: 750 })]);
-    render(<InspectorPanel agentId={1} />);
-
-    const runLink = await screen.findByRole("link", { name: "Open run timeline" });
-    const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
-    const context = await screen.findByText("Context");
-    const configOverlay = await screen.findByText("Configuration");
-    const activity = screen.getByText("Activity");
-    expect(
-      runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      configOverlay.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      context.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      widgetLink.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    act(() => {
-      useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0);
-    });
-  });
-
-  it("renders no widget area when no plugin registers one", async () => {
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(getAgentInspectWidgets).toHaveBeenCalled());
-    expect(screen.queryByText("Tasks")).toBeNull();
-  });
-
-  it("a widgets fetch failure leaves the rest of the panel intact", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
-    getAgentInspectWidgets.mockRejectedValue(new Error("HTTP 500: widgets unavailable"));
-    render(<InspectorPanel agentId={1} />);
-
-    await screen.findByRole("link", { name: "Open run timeline" });
-    await screen.findAllByText("Activity");
-    expect(screen.queryByText("Tasks")).toBeNull();
   });
 });

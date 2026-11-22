@@ -204,7 +204,6 @@ class TestAiMessageItems:
             NoteTag.LIFECYCLE_RESURRECT,
             NoteTag.LIFECYCLE_FORK,
             NoteTag.NEW_SKILLS,
-            NoteTag.TASK,
             NoteTag.TURN_LOST,
             NoteTag.COMPACT_FAILED,
             NoteTag.WORKSPACE_HYGIENE,

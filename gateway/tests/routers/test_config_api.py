@@ -22,7 +22,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
@@ -681,7 +680,7 @@ def test_put_explicit_self_edits_remote_writable_host_toggle(
     writable=False + remote_writable=True (heartbeat_enabled) is editable there,
     while the Cluster view (machine omitted) rejects it as read-only. Regression:
     the two used to collapse because both resolve target to machine_name(), leaving
-    heartbeat_enabled / task_maintenance_enabled uneditable on a single box."""
+    heartbeat_enabled uneditable on a single box."""
     with gateway_test_client(machine=machine_identity) as client:
         # Cluster view (machine omitted): writable=False -> rejected read-only.
         cluster_resp = client.put("/api/config", json={"heartbeat_enabled": False})
@@ -709,9 +708,11 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
     before_image = image.read_bytes() if image.exists() else None
     with gateway_test_client() as client:
         fields = {field["name"]: field for field in client.get("/api/config").json()["fields"]}
-        assert fields["task_escalate_n"]["owner"] == "meiva_fleet"
+        assert fields["reduce_context_switch"]["owner"] == "meiva_fleet"
         assert fields["llm_model"]["owner"] is None
-        response = client.put("/api/config", json={"task_escalate_n": 7, "llm_model": "unknown"})
+        response = client.put(
+            "/api/config", json={"reduce_context_switch": False, "llm_model": "unknown"}
+        )
     assert response.status_code == 400
     assert "mixes owners" in response.json()["detail"]
     assert unit_env_path().read_bytes() == before_env
@@ -725,65 +726,12 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
     unit_env_path().touch()
     before_env = unit_env_path().read_bytes()
     with gateway_test_client() as client:
-        response = client.put(
-            "/api/config", json={"task_escalate_n": 11, "reduce_context_switch": False}
-        )
-        invalid = client.put("/api/config", json={"task_escalate_n": "wrong"})
+        response = client.put("/api/config", json={"reduce_context_switch": False})
+        invalid = client.put("/api/config", json={"reduce_context_switch": "wrong"})
     assert response.status_code == 200, response.text
     assert response.json()["applied"] is True
-    assert response.json()["restart_required"] == ["agent", "all"]
+    assert response.json()["restart_required"] == ["agent"]
     assert invalid.status_code == 400
     saved = read_config_image(FleetConfig, disk_image_path("meiva_fleet", home=meiva_home()))
-    assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
+    assert saved.reduce_context_switch is False
     assert unit_env_path().read_bytes() == before_env
-
-
-def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
-    *, config_authority: ConfigAuthority, machine_identity: MachineIdentityReader
-) -> None:
-    from base.packages.plugins.config_registration import disk_image_path, read_config_image
-    from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
-    from ops.host_config import config_write_op
-
-    rejected = config_write_op(
-        {"task_maintenance_enabled": False},
-        local=True,
-        authority=config_authority,
-        local_machine=machine_identity.name(),
-        host=fake_host(),
-        home=meiva_home(),
-        now=system_clock().now,
-    )
-    assert rejected.applied is False
-    accepted = config_write_op(
-        {"task_maintenance_enabled": False},
-        local=False,
-        authority=config_authority,
-        local_machine=machine_identity.name(),
-        host=fake_host(),
-        home=meiva_home(),
-        now=system_clock().now,
-    )
-    assert accepted.applied is True
-    assert (
-        read_config_image(
-            FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
-        ).task_maintenance_enabled
-        is False
-    )
-    mixed = config_write_op(
-        {"task_maintenance_enabled": True, "heartbeat_enabled": False},
-        authority=config_authority,
-        local_machine=machine_identity.name(),
-        host=fake_host(),
-        home=meiva_home(),
-        now=system_clock().now,
-    )
-    assert mixed.applied is False
-    assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)
-    assert (
-        read_config_image(
-            FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
-        ).task_maintenance_enabled
-        is False
-    )

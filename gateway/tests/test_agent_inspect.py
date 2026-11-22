@@ -571,7 +571,7 @@ def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Conne
 
 
 # meiva:note
-# ── the plugin surfaces (metrics, widgets) on the real gateway app ────────────
+# The plugin metrics surface on the real gateway app.
 
 
 def test_inspect_metrics_route_serves_the_enabled_registry(db_conn: psycopg.Connection) -> None:
@@ -586,34 +586,12 @@ def test_inspect_metrics_route_serves_the_enabled_registry(db_conn: psycopg.Conn
     assert core <= served
 
 
-def test_inspect_widgets_route_serves_the_widgets_of_the_enabled_plugins(
+def test_inspect_metrics_route_answers_404_for_an_unknown_agent(
     db_conn: psycopg.Connection,
 ) -> None:
-    aid = _insert_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
-            "VALUES ('work', 'd', 'in_progress', %s, 'user') RETURNING id",
-            (aid,),
-        )
-        row = cur.fetchone()
-    assert row is not None
     db_conn.commit()
     with gateway_test_client() as client:
-        response = client.get(f"/api/agents/{aid}/inspect/widgets")
-    assert response.status_code == 200, response.text
-    widgets = response.json()
-    assert [(w["plugin"], w["id"]) for w in widgets] == [("meiva_fleet", "today-tasks")]
-    assert [t["id"] for t in widgets[0]["tasks"]] == [row[0]]
-
-
-@pytest.mark.parametrize("surface", ["metrics", "widgets"])
-def test_inspect_plugin_surfaces_answer_404_for_an_unknown_agent(
-    db_conn: psycopg.Connection, surface: str
-) -> None:
-    db_conn.commit()
-    with gateway_test_client() as client:
-        assert client.get(f"/api/agents/999999/inspect/{surface}").status_code == 404
+        assert client.get("/api/agents/999999/inspect/metrics").status_code == 404
 
 
 def test_inspect_live_returns_owned_and_created_schedules_ordered_and_isolated(

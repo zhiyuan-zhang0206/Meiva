@@ -182,7 +182,7 @@ def serve_gateway(
                 spawns = [r for r in served.requests if r.path == "/api/keyed/v1/agents"]
                 self.reply(200, {"id": served.spawned_agent_id + len(spawns) - 1})
             elif parts.path.endswith("/terminate"):
-                self.reply(200, {"status": "enqueued", "open_tasks": None})
+                self.reply(200, {"status": "enqueued"})
             elif parts.path.endswith("/resurrect"):
                 self.reply(200, {"status": "spawned"})
             elif parts.path.endswith("/messages"):

@@ -12,7 +12,7 @@ subagents, hooks, slash commands, and MCP servers.
 
 | Claude Code | Meiva | Notes |
 |---|---|---|
-| Session (`claude`, `--continue`/`-c`, `--resume` picker) | Agent conversations + the task registry (`meiva.tasks`) | No session picker. Every agent is a long-running process with its own dialog; spawn a fresh agent per task (`meiva.agents.spawn`) instead of resuming an old session. |
+| Session (`claude`, `--continue`/`-c`, `--resume` picker) | Agent conversations and workspace handoff notes | No session picker. Every agent is a long-running process with its own dialog; spawn a fresh agent per task (`meiva.agents.spawn`) instead of resuming an old session. |
 | Project instructions — `CLAUDE.md`, `CLAUDE.local.md`, path-scoped `.claude/rules/` | `AGENTS.md` / `CLAUDE.md` in the repo (Meiva surfaces both); standing rules in the shared memory pool as the feedback kind notes | `@path` imports in CLAUDE.md are Claude-Code-only — Meiva does not expand them; keep files self-contained. |
 | Auto memory (`~/.claude/projects/<project>/memory/`, `/memory`) | Shared memory pool (`~/.meiva/vault/memory`, `meiva memory` CLI) + per-agent `memory/` workspace | Notes are markdown with frontmatter and semantic search; agents write them deliberately instead of Claude Code's automatic MEMORY.md upkeep. |
 | Skills (`.claude/skills/`, `~/.claude/skills/`) | Same Agent Skills `SKILL.md` standard — `meiva skill install <git-url-or-path>` | Verified: unmodified Claude Code skill folders install as-is. The fields Meiva does not act on are `allowed-tools` / `disallowed-tools` and `context: fork` — its single tool is `execute_code`. |
@@ -61,8 +61,7 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
   you relied on approving every action, state your hard gates explicitly
   during onboarding — this is the single largest adjustment.
 - **No session picker.** Conversation state lives with the agent process, not
-  in a resumable session list. Hand off via files and the task registry
-  (`meiva.tasks`), not `claude --continue`.
+  in a resumable session list. Send the next agent the paths to the handoff files.
 - **`allowed-tools` is not enforced.** Every Meiva agent has the full
   capability set (`execute_code` + `meiva.*`). Constrain behavior with prompts,
   role cards, and memory.
@@ -71,7 +70,7 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
 - **Subagents become full agents.** A Claude Code subagent shares your
   project and returns to the main conversation; an Meiva agent is a peer with
   its own workspace. Give it a self-contained prompt and a defined handoff
-  (file path or task id).
+  (workspace path).
 - **Hooks have no runtime equivalent.** Anything that fired on every tool
   call must become a checked-in rule or a CI check instead.
 

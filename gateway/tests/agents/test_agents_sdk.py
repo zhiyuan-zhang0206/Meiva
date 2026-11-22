@@ -7,7 +7,6 @@ low-level lifecycle contracts live in ops/agents/tests/test_agents_internals.py.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 import httpx
 import psycopg
@@ -347,7 +346,6 @@ class TestTerminate:
         assert result == "enqueued"
         assert result == TerminateResult.ENQUEUED
         assert result.status is TerminateResult.ENQUEUED
-        assert result.open_tasks is None
         assert inbound_rows(db_conn, peer_id) == [
             ("record the partial result", "chat", f"agent:{meiva.self.AGENT_ID}"),
             ("", "terminate", f"agent:{meiva.self.AGENT_ID}"),
@@ -380,55 +378,6 @@ class TestTerminate:
             (peer_id,),
         ).fetchone() == ({"kill_all_shell_sessions": True},)
 
-    def test_terminate_reports_open_tasks_hint_with_truncation(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        """`open_tasks` rides the SDK result: the agent's open tasks (newest
-        first), truncated to five rows plus `more`; done/cancelled excluded."""
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
-        peer_id = meiva.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_tasks (title, description, status, created_by, owner) "
-                "VALUES ('already finished', '', 'done', 'user', %s)",
-                (peer_id,),
-            )
-            open_ids: list[int] = []
-            for i in range(6):
-                cur.execute(
-                    "INSERT INTO agent_tasks (title, description, status, created_by, owner, updated_at) "
-                    "VALUES (%s, '', 'in_progress', 'user', %s, now() - make_interval(mins => %s)) "
-                    "RETURNING id",
-                    (f"open task {i}", peer_id, i),
-                )
-                open_ids.append(cur.fetchone()[0])  # type: ignore[index]
-        db_conn.commit()
-
-        result = meiva.agents.terminate(peer_id)
-
-        assert result.status is TerminateResult.ENQUEUED
-        hint = result.open_tasks
-        assert hint is not None
-        assert hint.count == 6
-        assert len(hint.tasks) == 5
-        assert hint.more == 1
-        # Newest first; the closed task is not part of the hint.
-        assert [task.id for task in hint.tasks] == open_ids[:5]
-        assert all(task.status == "in_progress" for task in hint.tasks)
-        assert all(isinstance(task.updated_at, datetime) for task in hint.tasks)
-        assert str(hint).startswith("6 open task(s):")
-
     def test_already_terminated_keeps_old_style_compare(
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
@@ -442,7 +391,6 @@ class TestTerminate:
         assert result == "already_terminated"
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
-        assert result.open_tasks is None
         assert result.shell_sessions is None
 
     # meiva:note
@@ -451,9 +399,7 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         report = {"when": "now", "killed": [2, 5]}
-        answer = completed(
-            {"status": "already_terminated", "open_tasks": None, "shell_sessions": report}
-        )
+        answer = completed({"status": "already_terminated", "shell_sessions": report})
         with runner_ops(
             db_conn, "runner-x", {"spawn-launch": launched, "lifecycle": answer}
         ) as runner:
@@ -480,7 +426,6 @@ class TestTerminate:
             200,
             json={
                 "status": "enqueued",
-                "open_tasks": None,
                 "shell_sessions": {"when": when, "killed": []},
             },
         )

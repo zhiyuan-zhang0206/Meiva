@@ -1,13 +1,9 @@
-exports = ["registry_support.py", "task_registry"]
+exports = ["registry_support.py"]
 
 [uses]
 "test_meiva_fleet_plugin.py" = ["registry_support.py"]
 "test_launched_boot.py" = ["child_launched_boot.py"]
 "test_owned_configuration.py" = ["child_plugin_config.py"]
-"test_task_maintenance_daemon.py" = ["task_registry"]
-"test_task_maintenance_daemon_part2.py" = ["task_registry"]
-"test_task_registry.py" = ["task_registry"]
-"test_validation_meiva_fleet.py" = ["task_registry"]
 
 [external]
-"child_launched_boot.py" = "resolves the plugin namespaces (meiva.tasks, meiva.memory) the SDK installs at run time; they have no module file to import statically"
+"child_launched_boot.py" = "resolves the plugin namespace (meiva.memory) the SDK installs at run time; they have no module file to import statically"

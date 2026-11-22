@@ -18,7 +18,6 @@ export const NOTE_TAGS = [
   "agent_reply",
   "reply_visibility",
   "non_human_wake",
-  "task",
   "compact_reminder",
   "compact_failed",
   "history_dump",

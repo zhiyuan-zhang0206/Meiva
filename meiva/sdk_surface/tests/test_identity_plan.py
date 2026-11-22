@@ -21,8 +21,6 @@ from meiva.sdk_surface.pure.caller.identity_plan import (
     self_action_refusal,
 )
 from meiva.sdk_surface.pure.caller.usage_plan import (
-    actor_id_refusal,
-    lease_refusal,
     usage_identity,
 )
 from meiva.sdk_surface.pure.plans.load_plan import (
@@ -44,9 +42,8 @@ def _caller(
     *,
     actor: str | None = None,
     owns_loop: bool = True,
-    has_lease: bool = False,
 ) -> CallerFacts:
-    return CallerFacts(agent_id=agent_id, actor=actor, owns_loop=owns_loop, has_lease=has_lease)
+    return CallerFacts(agent_id=agent_id, actor=actor, owns_loop=owns_loop)
 
 
 # meiva:note
@@ -108,14 +105,6 @@ def test_self_actions_need_a_loop_owner_with_an_agent_id() -> None:
     )
     assert "established agent identity" in (self_action_refusal(_caller(None), "terminate") or "")
     assert "established agent identity" in (self_action_refusal(None, "terminate") or "")
-
-
-def test_a_borrowed_lease_is_refused_before_the_actor_id_is_checked() -> None:
-    assert lease_refusal(_caller(has_lease=True)) is not None
-    assert lease_refusal(_caller()) is None
-    assert actor_id_refusal(5) is None
-    assert actor_id_refusal(True) == (TypeError, "actor agent id must be an integer")
-    assert actor_id_refusal(0) == (ValueError, "actor agent id must be positive")
 
 
 @pytest.mark.parametrize(

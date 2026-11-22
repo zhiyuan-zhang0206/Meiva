@@ -74,13 +74,12 @@ def test_other_agent_result_endpoint_invalidates_but_own_does_not(tmp_path: Path
 def test_sdk_vector_is_reported_without_invalidating(tmp_path: Path) -> None:
     audit = _audit_module()
     findings = audit.scan(
-        ["meiva.tasks.list(); meiva.agents.get_last_message(7)"],
+        ["meiva.agents.get_last_message(7)"],
         agent_id=42,
         leak_paths=_paths(tmp_path),
     )
     assert {finding.surface for finding in findings} == {"sdk"}
     assert {finding.tool for finding in findings} == {
-        "meiva.tasks.list",
         "meiva.agents.get_last_message",
     }
     assert audit.invalidated(findings) is False

@@ -359,20 +359,6 @@ composer/plugin extension point.
   proxied `source` endpoints + the `page` variant; plus finishing the reserved
   `inspector` surface of `base/telemetry/metrics/plugin_metrics.py`.
 
-  **U4a — inspector widgets (shipped, task #2909)** — the one inspector
-  surface a declaration cannot carry: per-agent interactive targets. A plugin
-  registers `InspectWidgetSpec` at its `inspector.py` import
-  (`base/packages/plugins/surface/inspector.py`); the gateway imports the ENABLED builtin
-  plugins' modules under their `PluginContext` (the plugin-metric loader's
-  shape) and serves `GET /api/agents/{id}/inspect/widgets` with its payload —
-  the agent's active tasks — resolved server-side. The console renders
-  closed-set kinds (`taskList` today) with its own components: no third-party
-  code, no markup — unknown kinds are skipped, never interpreted. Widgets
-  interleave with the panel's built-in sections by an `order` key (keys table
-  in `docs/conventions/extensions/plugin-spec-v2.md`). Deliberate boundary vs U4: this lane is
-  host-rendered closed-set data for targets that exist per agent; U4's
-  sections stay for plugin-served content (markdown/kv/table/page over the
-  plugin's own mount).
 - **U5 — bless the API**: serve `openapi.json` from the gateway + the
   `docs/conventions/` contract page with the stability statement (Lane 1).
 - **U6 — status-panel cards** — **shipped, declaration + values** (task

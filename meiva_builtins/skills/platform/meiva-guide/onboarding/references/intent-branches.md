@@ -21,7 +21,7 @@ they land somewhere.
    evaluation, planning, or coordination needs deliberate attention; these are
    optional, interleaving methods. Use `meiva.skills.meiva_fleet` when peer
    coordination helps. For the first task, one small real step beats a grand
-   plan: create the task (`meiva.tasks.create`) or spawn the first worker,
+   plan: send the assignment or spawn the first worker,
    and tell the user what is running.
 
 ### B. "What can you do?" / vague

@@ -43,17 +43,16 @@ restored by task #3689). All sections are **expanded by default**
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the events-maintenance service's 60s `agent_registry` gauge + its deriv rate, task #2010).
-5. **`meiva_fleet`** — the task-completion-rate panel.
-6. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
+5. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
    skips plus the search latency and the notes injected per pass.
-7. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
+6. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
-8. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
+7. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
    Top-20 cost drill-downs by model and agent. Every panel reads usage-time
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
-9. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
+8. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
    job's Prometheus gauges (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
@@ -227,9 +226,8 @@ of mass-editing targets.
    `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
-Shipped examples: `meiva_builtins/plugins/meiva_fleet/metrics.py` (task completion
-rate), `meiva_builtins/plugins/meiva_memory/metrics.py` (passive-recall runs /
-empty ratio / deadline-skip ratio plus search latency and notes injected).
+The shipped `meiva_builtins/plugins/meiva_memory/metrics.py` declares passive-recall
+runs, empty ratio, deadline-skip ratio, search latency, and notes injected.
 
 ## Layout
 

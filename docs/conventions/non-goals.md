@@ -70,7 +70,7 @@ first and ask "what changed that made it worth doing".
   channels (e.g. X, wired through `meiva mcp install`) for talking to
   individual agents — not a terminal. Meiva is an always-on, multi-agent fleet:
   supervision means seeing which agents exist, their health, the spawn/fork/
-  message graph between them, and task tracking across possibly many
+  message graph between them across possibly many
   concurrent agents — state that does not compress into a terminal's
   single-pane model without dropping most of what supervision needs. A TUI
   good enough to actually supervise a fleet ends up reinventing a windowing

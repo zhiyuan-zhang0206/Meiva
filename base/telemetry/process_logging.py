@@ -325,7 +325,7 @@ _event_sink_id: int | None = None
 # meiva:note
 # Called once at a gateway-style process startup — the gateway itself
 # and every long-running service daemon (agent-host / watchdog / labeler /
-# memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
+# memory_indexer / heartbeat / ops). stderr (human) +
 # file (`<name>.log`) + unified event pipeline. Rows have
 # agent_id NULL (extra agent_id sentinel `-`).
 #

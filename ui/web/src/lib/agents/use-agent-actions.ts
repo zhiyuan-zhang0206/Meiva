@@ -152,12 +152,6 @@ export function useAgentActions(
       };
       useStore.getState().showToast(messages[data.status]);
       track("terminate");
-      // meiva:note
-      // Advisory open-tasks hint: show the notice when agent still owned open tasks.
-      const openTasks = data.open_tasks;
-      if (openTasks && openTasks.count > 0) {
-        useStore.getState().showOpenTasksNotice(openTasks);
-      }
     },
     onError: (e: unknown) => showError(`Terminate failed: ${errMsg(e)}`),
   });

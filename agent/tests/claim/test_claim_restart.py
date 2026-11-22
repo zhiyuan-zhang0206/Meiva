@@ -41,8 +41,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """system_note inbound (task assign/update/reminder delivery) → claim appends
-    a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
+    """A system-note inbound retains its content and tag when claimed."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -55,8 +54,8 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
             "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb) RETURNING id",
             (
                 tid,
-                'Task #1 "my task" is now assigned to you (by agent #405).',
-                '{"note_tag": "task", "task_id": 1}',
+                "Context from a peer.",
+                '{"note_tag": "context"}',
             ),
         )
         inbound_id = first_int(cur.fetchone())
@@ -76,57 +75,14 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     assert len(msgs) == 1
     note = msgs[0]
     assert isinstance(note, HumanMessage)
-    assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content
+    assert "Context from a peer." in note.content
     assert note.additional_kwargs.get("meiva_msg_type") == "system_note"
-    assert note.additional_kwargs.get("meiva_note_tag") == "task"
-    assert note.additional_kwargs.get("meiva_task_id") == 1
+    assert note.additional_kwargs.get("meiva_note_tag") == "context"
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
         cur.execute("SELECT status FROM inbound_messages WHERE id = %s", (inbound_id,))
         status = cur.fetchone()
         assert status is not None and status[0] == "done"
-
-
-async def test_claim_co_batched_task_notes_preserve_task_links(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentityReader,
-):
-    """Co-batched task notes retain their independent timeline links."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    with db_conn.cursor() as cur:
-        cur.executemany(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb)",
-            [
-                (tid, 'Task #1 "first" was updated.', '{"note_tag": "task", "task_id": 1}'),
-                (tid, 'Task #2 "second" was updated.', '{"note_tag": "task", "task_id": 2}'),
-            ],
-        )
-    db_conn.commit()
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
-        thread_config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto == "before_turn"
-    update = command_update(cmd)
-    notes = update_messages(update)
-    assert [note.additional_kwargs.get("meiva_task_id") for note in notes] == [1, 2]
 
 
 async def test_claim_system_note_unknown_tag_fails_loud(

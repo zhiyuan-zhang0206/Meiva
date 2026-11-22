@@ -34,10 +34,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="guarded plain creation requires a verified principal-v1 key; no legacy fallback",
     ),
-    ("POST", "/api/keyed/v1/task-assignments"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="guarded atomic task/agent acceptance; principal-v1 key and no legacy fallback",
-    ),
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/to-user"): RouteContract(),
@@ -118,8 +114,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/cluster/machines/{name}/pause"): RouteContract(
         Idempotency.IDEMPOTENT,
-        note="control-plane op — drains tasks, terminates the machine's agents, "
-        "sets the pause latch (idempotent: re-pause is a safe no-op)",
+        note="control-plane op — sets the pause latch and terminates the machine's agents "
+        "(idempotent: re-pause repeats the sweep)",
     ),
     ("POST", "/api/cluster/machines/{name}/resume"): RouteContract(
         Idempotency.IDEMPOTENT,
@@ -173,7 +169,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="uncached live skeleton — cheap window-independent inspector fields",
     ),
     ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
-    ("GET", "/api/agents/{agent_id}/inspect/widgets"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
     ("GET", "/api/plugins"): RouteContract(
         note="read cluster plugin choices and presentation metadata"
@@ -332,7 +327,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/agents/{agent_id}/system-note"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
+        note="deliver a framework system note as a system marker with caller-controlled resurrection",
     ),
     ("GET", "/api/stats/dashboard"): RouteContract(),
     ("GET", "/api/stats/diagnostics"): RouteContract(),
@@ -342,14 +337,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/system/all"): RouteContract(),
     ("GET", "/api/stream"): RouteContract(
         note="merged SSE (global + active-agent + alerts) — one reconnect replaces three; subscribing mid-pause just idles and the frontend reconciles on open"
-    ),
-    ("GET", "/api/tasks"): RouteContract(),
-    ("GET", "/api/tasks/{task_id}"): RouteContract(
-        note="read-only single task row with its results text — the hover card's read; 404 when no such task",
-    ),
-    ("PATCH", "/api/tasks/{task_id}"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="task patch requires a key; immutable result shares the notification transaction",
     ),
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/timeline/window"): RouteContract(

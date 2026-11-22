@@ -125,8 +125,8 @@ cd "$W"
        check `missing_path` and `git_changed` items from `dream_gather.py`, symbol
        existence, and deleted scripts or retired contracts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
-       machine topology): check active vs. terminated agents, live schedule cron
-       times, and task status so notes naming terminated agents or obsolete
+       machine topology): check active vs. terminated agents and live schedule cron
+       times so notes naming terminated agents or obsolete
        schedules are caught.
      - *Host environment & embedded probes*: check machine configuration and run
        `<!-- fact-check: <cmd> -->` directives.

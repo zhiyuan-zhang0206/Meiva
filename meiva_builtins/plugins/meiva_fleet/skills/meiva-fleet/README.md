@@ -19,37 +19,24 @@ context selection and assignment boundaries.
 The old tenet "any agent reaches the user directly, no relay chain" was over-extended—raw worker output flooded the user queue. The bisection corrects this:
 
 - **Authorization / decisions** (things only the user can determine)—reach the **user directly** from any depth (user sovereignty preserved).
-- **Progress / conclusions**—sent to one's own **delegator** (the agent that spawned / assigned the work, i.e., the parent task's owner) via `send_message` for digestion and aggregation, only later possibly entering the user's view.
+- **Progress / conclusions**—sent to one's own **delegator** (the agent that spawned / assigned the work, i.e., the person or agent that assigned the work) via `send_message` for digestion and aggregation, only later possibly entering the user's view.
 - **Milestone-based messaging (user ruling 2026-09-03):** peer
   `send_message` traffic is milestone-based by default — real milestones,
   blockers, completion, or genuine requests. Routine progress pings and
   bare acknowledgments are noise (each message costs the recipient a
-  turn). Task-assignment delivery stays full-text: a summary-plus-link
-  redesign would cost an extra round-trip.
+  turn).
 - No task, no delegator: deliver directly; do not fabricate a hierarchy just to forward.
 - Each shared milestone has one reporter and one action owner named in the
   brief. Other participants report changes instead of relaying an unchanged
-  result or copying it into the action owner's task log; non-owner task
-  writes can notify that owner too.
-
-## Task ↔ Fleet Interaction Rules
-
-The task registry is the durable record of work; the spawn graph is the transient communication network. Fleet reaction rules when task state changes:
-
-- **created** (with `parent`) — the parent task's owner implicitly oversees the creator; no automatic message.
-- **done** → notify the delegator: task id + result location (file/PR/page) + a one-line summary, then end your own process (`meiva.self.terminate()`) — the notification plus recorded results is the handoff, and a follow-up message from the delegator resurrects you with context intact; if the delegator is unknown (no owning task), record the completion in the task's results.
-- **blocked** → there is no blocked status: stay `in_progress`, record the blocker in `content`, escalate to the delegator; exceptions requiring user decision reach `meiva.ui.ask(...)` directly.
-- **reassign** → `meiva.tasks.update(owner=)` automatically notifies both old and new owners (see [Task Notification](../../docs/tasks/task_notification.md)).
-- **cancelled** → clean up active child tasks, notify the working agent.
-- **remind_interval_seconds** (default 30min) overdue without update → daemon nags the owner; after 3 unanswered escalations: if there is a parent task owner, notify them; if no parent owner (top-level task whose parent is the ownerless system root), nothing is sent: the daemon never writes a user notice.
+  result.
 
 ## Autonomous Batch Work (Autonomy Dial Implementation)
 
 The Autonomy axis of the Two Dials (who consumes evidence to make decisions) conventions during batch autonomous work:
 
-- **One approval buys high Autonomy**: before batch autonomy, package the scope + task list (`meiva.tasks.create()` items) + budget cap into a **single** `meiva.ui.ask(...)`; the user's reply authorizes it, and **the original text is recorded** into the driving task's `description`. After approval, do not ask step-by-step; whether the user is online does not change behavior.
+- **One approval buys high Autonomy**: before batch autonomy, package the scope, intended work and budget cap into a **single** `meiva.ui.ask(...)`; the user's reply authorizes it, and **the original text is recorded** into the agreed handoff record. After approval, do not ask step-by-step; whether the user is online does not change behavior.
 - **Safety boundary** (the authorization broadens what can be done, does not remove guardrails): only produce PRs without merging, do not send outward messages, do not touch prod, do not spend money beyond the authorization.
-- **Usage reminders**: the independent `meiva-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff. Task records and task escalation do not attribute or enforce costs.
+- **Usage reminders**: the independent `meiva-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff.
 
 ## Reference Sub-documents
 
@@ -60,4 +47,4 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 ## Key Dependencies
 
 - [interruption discipline skill](../reduce-context-switch-for-human/README.md) — the same bisection on the notification queue side
-- [Ask](../../docs/ask.md) / [Tasks](../../docs/tasks/tasks.md) / [Spawn](../../docs/spawn.md) / [Neighbors](../../docs/neighbors/neighbors.md) — the SDK primitives orchestrated by the skill
+- [Ask](../../docs/ask.md) / [Spawn](../../docs/spawn.md) / [Neighbors](../../docs/neighbors/neighbors.md) — the SDK primitives orchestrated by the skill

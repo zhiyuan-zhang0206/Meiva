@@ -96,8 +96,8 @@ def test_a_removed_module_attribute_is_red() -> None:
         "def connect(gate: ProcessDbGate):\n"
         "    Database.from_settings(gate=gate).connect()\n",
         "import meiva\nmeiva.agents.spawn(prompt='x', label='lead')\n",
-        "import meiva\nresults = meiva.tasks.get('x').results\n",
-        "import meiva\n\ndef scan(task_id):\n    return meiva.tasks.get(task_id).results\n",
+        "import meiva\nresults = meiva.memory.search('x')\n",
+        "import meiva\n\ndef scan(task_id):\n    return meiva.memory.search(task_id)\n",
         "import json\njson.dumps()\n",
         "import os\nos.getpid(1)\n",
     ],

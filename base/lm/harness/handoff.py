@@ -247,14 +247,6 @@ class Handoff:
                     "print(meiva.agents.list_agents())",
                 ]
             )
-        if "meiva.tasks" in names:
-            lines.extend(
-                [
-                    "",
-                    "# Inspect or update shared cluster tasks",
-                    "meiva.help(meiva.tasks)",
-                ]
-            )
         if "meiva.memory" in names:
             lines.extend(
                 [
@@ -278,8 +270,8 @@ class Handoff:
             "",
             "## Meiva & Your Cluster Identity",
             "You are connected to **Meiva**, a multi-agent platform that coordinates agents "
-            "across a **Meiva Cluster** of machines, persistent workspaces, shared task "
-            "queues, and shared memory. Within this cluster, your identity and home directory "
+            "across a **Meiva Cluster** of machines, persistent workspaces, schedules, "
+            "and shared memory. Within this cluster, your identity and home directory "
             "are:",
             f"- agent id: {self.agent_id}",
             f"- label: {self.label or 'unassigned'}",

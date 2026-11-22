@@ -26,7 +26,7 @@
     "config-sdk": "Agent SDK",
     "config-agent-infra": "Agent DB & infra",
     "config-daemon-heartbeat": "Daemon: heartbeat",
-    "config-daemon-tasks": "Daemon: tasks & events",
+    "config-daemon-events": "Daemon: events",
     "config-gateway": "Gateway",
     "config-connection": "Connection",
     "config-dataplane": "Data plane",

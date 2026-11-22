@@ -324,6 +324,49 @@ def test_inject_skips_fetch_on_fresh_snapshot(home: Path) -> None:
     assert env["MEIVA_GATEWAY_HEALTH_URL"] == f"{gateway.url}/api/health"
 
 
+def _fleet_projection(*, legacy: bool = False) -> str:
+    fleet: dict[str, object] = {"reduce_context_switch": False}
+    if legacy:
+        fleet["task_escalate_n"] = 3
+    return json.dumps(
+        {
+            "meiva_fleet": fleet,
+            "lm_typesafe": {"local_endpoint": "", "local_models": {}},
+            "meiva_usage": {"collectors": []},
+        }
+    )
+
+
+def test_rejects_a_fleet_projection_with_retired_fields_before_writing(home: Path) -> None:
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+    with (
+        serve_json({PLUGIN_CLUSTER_CONFIG_ENV: _fleet_projection(legacy=True)}) as gateway,
+        pytest.raises(bootstrap.BootstrapFetchError, match="meiva_fleet"),
+    ):
+        _resolve({"MEIVA_GATEWAY_URL": gateway.url}, home)
+    assert not bootstrap.snapshot_path(home).exists()
+
+
+def test_recovers_immediately_from_a_fresh_v4_with_the_old_fleet_projection(home: Path) -> None:
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+    payload = {PLUGIN_CLUSTER_CONFIG_ENV: _fleet_projection()}
+    with serve_json(payload) as gateway:
+        _write_snapshot(
+            home,
+            base_url=gateway.url,
+            age_s=1.0,
+            version=4,
+            values={
+                PLUGIN_CLUSTER_CONFIG_ENV: _fleet_projection(legacy=True),
+            },
+        )
+        assert _resolve({"MEIVA_GATEWAY_URL": gateway.url}, home) == payload
+        assert len(gateway.requests) == 1
+        assert bootstrap.read_config_snapshot(gateway.url, home=home, now=_NOW) == (payload, 0.0)
+
+
 def test_the_snapshot_freshness_window_is_a_tuning_value(home: Path) -> None:
     with serve_json({"MEIVA_DB_URL": "postgresql://fetched/x"}) as gateway:
         _write_snapshot(

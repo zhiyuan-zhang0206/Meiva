@@ -1,4 +1,4 @@
-exports = ["creation.py", "task.py"]
+exports = ["creation.py"]
 
 [purity]
 "__init__.py" = "strict"

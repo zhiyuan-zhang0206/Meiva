@@ -24,7 +24,6 @@ import psycopg
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import sql
-from psycopg.types.json import Jsonb
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster import (
@@ -519,39 +518,6 @@ def exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
         (agent_id,),
     ).fetchone()
     assert row == (1800,)
-
-
-def exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The task-receipt tombstones the SDK task mutations write from the
-    runner process: meiva.tasks.update/log and meiva.tasks.create retain one row
-    per accepted operation (idempotency admission + replay).
-    Regression for the 2026-10-10 fleet-wide task-write outage: the two tables
-    shipped with the 2026-10-07 migrations without a runner grant and every
-    receipt INSERT failed with InsufficientPrivilege until prod was patched by
-    hand. UPDATE/DELETE stay ungranted — receipts are immutable tombstones.
-    """
-    conn.execute(
-        "INSERT INTO task_update_receipts (actor_agent_id, task_id, operation_key, request)"
-        " VALUES (%s, 41, 'exercise-update', %s)",
-        (agent_id, Jsonb({"status": "done"})),
-    )
-    row = conn.execute(
-        "SELECT request FROM task_update_receipts"
-        " WHERE actor_agent_id = %s AND task_id = 41 AND operation_key = 'exercise-update'",
-        (agent_id,),
-    ).fetchone()
-    assert row == ({"status": "done"},)
-    conn.execute(
-        "INSERT INTO task_creation_receipts (actor_agent_id, operation_key, request, result)"
-        " VALUES (%s, 'exercise-create', %s, %s)",
-        (agent_id, Jsonb({"title": "t"}), Jsonb({"id": 41})),
-    )
-    created = conn.execute(
-        "SELECT result FROM task_creation_receipts"
-        " WHERE actor_agent_id = %s AND operation_key = 'exercise-create'",
-        (agent_id,),
-    ).fetchone()
-    assert created == ({"id": 41},)
 
 
 def exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:

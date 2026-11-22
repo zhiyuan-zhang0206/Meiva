@@ -25,7 +25,7 @@ The listener registers each explicit open, eager-open, consume and handle
 cleanup Task. In-flight results belong to their caller. An unclaimed result,
 including completion in the same tick as caller cancellation, belongs to the
 listener. Abandoned tasks remain known until completion; this is local
-ownership of one consumer's work, not a global task registry or supervisor.
+ownership of one consumer's work.
 
 `stop(timeout=2.0)` stops admission, invalidates the connection generation,
 cancels active operations once and waits for known work with `asyncio.wait`.

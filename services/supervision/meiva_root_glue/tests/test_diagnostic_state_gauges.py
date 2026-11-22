@@ -54,24 +54,24 @@ async def test_diagnostic_state_gauge_reflects_latest_definitive_sample_and_reco
 ) -> None:
     verdict = DaemonProbe.down("129 reminder notice(s) delivered in 24h without telemetry")
     monitor = DiagnosticMonitor(
-        [Diagnostic("task-telemetry", lambda: verdict, interval_s=0.001)],
+        [Diagnostic("diagnostic-canary", lambda: verdict, interval_s=0.001)],
         clock=system_clock(),
     )
     await monitor.run_round()
     states = [e.attributes for e in emitted_events if e.event_name == "root_diagnostic_state"]
-    assert states == [{"diagnostic": "task-telemetry", "ok": 0}]
+    assert states == [{"diagnostic": "diagnostic-canary", "ok": 0}]
 
     verdict = DaemonProbe.unavailable("db busy")
     await asyncio.sleep(0.002)
     await monitor.run_round()
     states = [e.attributes for e in emitted_events if e.event_name == "root_diagnostic_state"]
-    assert states[-1] == {"diagnostic": "task-telemetry", "ok": 0}
+    assert states[-1] == {"diagnostic": "diagnostic-canary", "ok": 0}
 
     verdict = DaemonProbe.up("129 reminder notice(s) delivered and 129 stored")
     await asyncio.sleep(0.002)
     await monitor.run_round()
     states = [e.attributes for e in emitted_events if e.event_name == "root_diagnostic_state"]
-    assert states[-1] == {"diagnostic": "task-telemetry", "ok": 1}
+    assert states[-1] == {"diagnostic": "diagnostic-canary", "ok": 1}
 
 
 async def test_root_health_round_emits_trace_recording_disabled_gauge(

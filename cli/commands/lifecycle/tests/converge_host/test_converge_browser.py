@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -230,9 +231,19 @@ def test_step_registered_agent_runner_only() -> None:
     assert step.requires_unit_config is True
 
 
-def test_plugin_config_images_step_agent_runner_only() -> None:
-    """Plugin config images are read only by agent processes (agent-runners); the
-    step must not run on a gateway."""
+def test_plugin_config_images_converge_on_a_pure_gateway(ctx: ConvergeCtx) -> None:
+    image = ctx.meiva_home / "configs" / "meiva_fleet" / "config.json"
+    image.parent.mkdir(parents=True)
+    image.write_text('{"reduce_context_switch": false, "task_maintenance_enabled": false}')
     step = next(s for s in cv.CONVERGE_STEPS if s.name == "plugin config images")
-    assert step.roles == frozenset({"agent-runner"})
-    assert step.requires_unit_config is True
+    cv.run_converge(replace(ctx, roles=frozenset({"gateway"})), (step,), prod_install=False)
+    assert json.loads(image.read_text()) == {"reduce_context_switch": False}
+
+
+def test_plugin_image_reconcile_failure_blocks_a_pure_gateway(ctx: ConvergeCtx) -> None:
+    image = ctx.meiva_home / "configs" / "meiva_fleet" / "config.json"
+    image.parent.mkdir(parents=True)
+    image.write_text("not JSON")
+    step = next(s for s in cv.CONVERGE_STEPS if s.name == "plugin config images")
+    with pytest.raises(RuntimeError, match=r"plugin config images: .*meiva_fleet"):
+        cv.run_converge(replace(ctx, roles=frozenset({"gateway"})), (step,), prod_install=False)

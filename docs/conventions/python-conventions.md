@@ -427,10 +427,7 @@ A public SDK function must meet at least one of two tests:
    protocol, authorization, an atomic multi-step operation, lifecycle, or
    framework-internal state.
 2. It makes a frequent operation shorter or harder to misuse. The typical case
-   is a narrow signature: `meiva.tasks.log` takes only a progress note, so an
-   agent cannot resend an already-written result through `update`;
-   `meiva.tasks.create_and_assign` joins creating a task and assigning it into
-   one step.
+   is a narrow signature that exposes only the fields the caller needs to change.
 
 A function that meets neither and only renames another entry is deleted. A rule
 that can sit on the underlying API belongs there (the `skill_invoked`

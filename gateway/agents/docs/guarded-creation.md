@@ -25,8 +25,7 @@ the original historical acceptance without forwarding a launch. Replay never
 rotates an attempt, restores operator config or creates another first prompt.
 The retained snapshot has no target FK or automatic expiry. This is the only
 agent creation route: the browser, CLI, scripts, SDK and examples all
-use it, and every other creation entry (guarded drafts, the MCP tool and task
-assignment) records its birth through the same snapshot owner.
+use it, and every other creation entry (guarded drafts and the MCP tool) records its birth through the same snapshot owner.
 
 The SDK requires a caller key for every creation or fork and always uses this
 path. The former `require_idempotency` mode flag has been removed. Forks use the

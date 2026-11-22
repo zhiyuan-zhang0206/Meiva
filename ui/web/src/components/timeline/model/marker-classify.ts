@@ -3,6 +3,7 @@ import { NOTE_TAGS } from "@/lib/contracts/constants-generated";
 export type NoteTag = (typeof NOTE_TAGS)[number];
 
 const NOTE_TAG_SET: ReadonlySet<string> = new Set(NOTE_TAGS);
+const ARCHIVED_TASK_NOTE = "task";
 
 function isNoteTag(s: string): s is NoteTag {
   return NOTE_TAG_SET.has(s);
@@ -32,7 +33,6 @@ export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }
   | { readonly kind: "memory" }
-  | { readonly kind: "task" }
   | { readonly kind: "background_task" }
   | { readonly kind: "note" }
   | { readonly kind: "system_notice" }
@@ -41,7 +41,7 @@ export type MarkerClass =
 
 // meiva:note
 // Every rendered system_marker maps to a collapsible card family: background_task /
-// task-notification, NoteTag families (task, lifecycle, memory, note), payload-typed
+// task-notification, NoteTag families (lifecycle, memory, note), payload-typed
 // error: / status: notices, and an unrecognized fallback card so no status or receipt
 // dumps bare text into the timeline.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
@@ -49,9 +49,7 @@ export function classifyMarker(source: string | null, payload?: string): MarkerC
   if (source === "background_task" || source === "task-notification") {
     return { kind: "background_task" };
   }
-  if (source === "task") {
-    return { kind: "task" };
-  }
+  if (source === ARCHIVED_TASK_NOTE) return { kind: "note" };
   if (source !== null && isNoteTag(source)) {
     if (isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
     if (MEMORY_SOURCES.has(source)) return { kind: "memory" };
@@ -85,6 +83,6 @@ export function isSilentEphemeralPayload(payload: string): boolean {
 // like machinery still renders.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function isSilentMarker(source: string | null, payload: string): boolean {
-  if (source !== null && isNoteTag(source)) return false;
+  if (source === ARCHIVED_TASK_NOTE || (source !== null && isNoteTag(source))) return false;
   return isSilentEphemeralPayload(payload);
 }

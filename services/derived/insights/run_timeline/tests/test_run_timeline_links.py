@@ -123,7 +123,7 @@ def test_a_chat_message_goes_from_its_source_to_the_agent_it_was_written_to(
     assert not hasattr(link, "preview")
 
 
-def test_only_chat_messages_are_links_a_task_assignment_is_not(
+def test_only_chat_messages_are_links(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     chat = message(db_conn, receiver=receiver, sender=405, hours_ago=3)

@@ -9,7 +9,7 @@ instead of asking; an agent that declares intent beats a prompt that asks it to.
 
 A completed model response without a tool call may end quietly, including
 a reasoning-only response. Silence alone does not authorize another model
-call or a forced completion message. Explicit wake-ups and task reminders
+call or a forced completion message. Explicit wake-ups and scheduled reminders
 continue to supervise outstanding work.
 
 ## Mechanisms
@@ -24,10 +24,8 @@ continue to supervise outstanding work.
    call the live skill index is diffed against the snapshot the context window
    was built from; skills installed since are named in one system note, so an
    agent cannot silently rebuild a capability it already has.
-3. **Task progress reminders** — the gateway tasks API (`remind_interval_seconds`).
-   The owner of an in-progress task is periodically reminded to post progress;
-   reminders cannot be disabled (capped at 24 h), so a task that goes dark is a
-   visible fact.
+3. **Scheduled follow-up** — set a schedule for timed or recurring checks on
+   outstanding work. Deliver results through the applicable user or peer channel.
 4. **Delivery semantics** — a bare text turn delivers nothing:
    `meiva.agents.send_message` (peers) and a reply that carries the user-display prefix (the user) are the only
    delivery verbs, so "not done yet" must be said out loud and silence reads as

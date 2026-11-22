@@ -39,7 +39,7 @@ Exactly one layer owns a call's row. The factory owns it by default. A caller th
 
 ## Selecting usage scopes
 
-LLM usage is attributed to agents, not Fleet task records. The independent
+LLM usage is attributed to agents. The independent
 `meiva-being-a-long-running-agent` [usage script](../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md)
 selects IDs, windows, and birth ancestry. `base/telemetry/metrics/usage.py` owns its
 read-only aggregation over retained events or lifetime ledger + tail. Threshold

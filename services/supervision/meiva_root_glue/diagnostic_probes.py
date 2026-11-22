@@ -11,7 +11,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from base.clock import Clock
@@ -19,7 +18,6 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from base.db import Database
-from base.host.boundary.untyped import object_of
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
@@ -276,81 +274,6 @@ def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], Da
     return probe
 
 
-# meiva:note
-# The reminder record the stall diagnostics read: the digests the task-maintenance daemon
-# delivered, and the telemetry rows each delivery emits. The delivered count is the
-# daemon's own durable record, so a fleet with nothing due reports a quiet healthy sample
-# instead of an alarm. Delivery without stored telemetry is the failure this exists for —
-# from 2026-10-03 the daemon kept delivering >100 digests a day while a storage filter
-# (events without `persist`) dropped every row, and nothing said so.
-#
-# One day is the window because the fleet's own delivery rate makes it unambiguous: the
-# daemon delivered 45-130 check-in digests in every 24 hours measured, so a day of
-# deliveries with no stored row is a broken record, never a quiet stretch.
-TASK_TELEMETRY_WINDOW_HOURS = 24
-
-
-_TASK_TELEMETRY_SQL = """
-SELECT
-    (SELECT count(*) FROM inbound_messages
-      WHERE kind = 'system_note' AND payload->>'note_tag' = 'task'
-        AND created_at > now() - make_interval(hours => %s)),
-    (SELECT count(*) FROM telemetry_events
-      WHERE event_name IN ('task_reminder_digest', 'task_reminder_rerouted', 'task_escalation')
-        AND ts > now() - make_interval(hours => %s))
-"""
-
-
-def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
-    return isinstance(value, tuple)
-
-
-# meiva:note
-# The (delivered, stored) pair of the one-row answer; no row reads as (0, 0), any other shape is
-# a TypeError.
-def _counts(row: object) -> tuple[int, int]:
-    if row is None:
-        return 0, 0
-    if not _is_tuple(row) or len(row) != 2:
-        raise TypeError("the reminder record answered with an unexpected row")
-    delivered, stored = row
-    if not isinstance(delivered, int) or not isinstance(stored, int):
-        raise TypeError("the reminder record counts must be integers")
-    return delivered, stored
-
-
-# meiva:note
-# Both sides in one round trip: a sample is one instant of the record, so a delivery cannot
-# be counted on one side and missed on the other by a read that straddled it. The delivered
-# side is read from `inbound_messages` because that row is written in the same transaction
-# as the counter advance, while the telemetry the delivery emits is emitted after commit.
-def task_telemetry(database: Callable[[], Database]) -> Callable[[], DaemonProbe]:
-    def probe() -> DaemonProbe:
-        import psycopg
-
-        try:
-            with database().connect(autocommit=True) as conn, conn.cursor() as cur:
-                cur.execute(
-                    _TASK_TELEMETRY_SQL,
-                    (TASK_TELEMETRY_WINDOW_HOURS, TASK_TELEMETRY_WINDOW_HOURS),
-                )
-                row = object_of(cur.fetchone)
-        except psycopg.Error as exc:
-            return DaemonProbe.unavailable(f"reminder record unread: {type(exc).__name__}")
-        delivered, stored = _counts(row)
-        if delivered and not stored:
-            return DaemonProbe.down(
-                f"{delivered} reminder notice(s) delivered in {TASK_TELEMETRY_WINDOW_HOURS}h "
-                "but telemetry_events holds no task reminder or escalation row"
-            )
-        return DaemonProbe.up(
-            f"{delivered} reminder notice(s) delivered and {stored} task telemetry row(s) "
-            f"stored in {TASK_TELEMETRY_WINDOW_HOURS}h"
-        )
-
-    return probe
-
-
 class StationProbe:
     """Gateway-only remote protocol observation."""
 
@@ -493,10 +416,6 @@ def build_diagnostics(
                 checks.append(
                     Diagnostic("pgbouncer", partial(pgbouncer, machine=machine, home=config.home))
                 )
-        # meiva:note
-        # Cluster-wide record, one observer: the delivery comparison reads the whole fleet's
-        # rows, so any other host's root would report the same finding.
-        checks.append(Diagnostic("task-telemetry", task_telemetry(database), interval_s=3600))
         obs_url = config.observability_url.strip()
         if obs_url:
             station = StationProbe(

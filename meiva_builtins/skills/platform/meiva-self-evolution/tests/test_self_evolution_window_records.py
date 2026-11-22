@@ -74,7 +74,6 @@ def test_window_records_builds_one_record_per_selected_agent_in_order() -> None:
             1: [{"source": "user", "content": "task", "is_broadcast": False, "claimed": True}]
         },
         meta={1: meta, 2: meta, 3: meta},
-        receipts={2: record_mod.TaskReceipts(1, 0, 0, 0)},
         transcripts={1: [], 2: [{"type": "human", "content": "from transcript"}]},
         skills={1: ["meiva-goal"], 2: []},
     )
@@ -87,4 +86,4 @@ def test_window_records_builds_one_record_per_selected_agent_in_order() -> None:
     assert by_id[1]["task_prompt"] == "task"
     assert by_id[1]["skills_touched"] == ["meiva-goal"]
     assert by_id[2]["task_prompt"] == "from transcript"
-    assert by_id[2]["evidence"]["task_updates"]["note"] == 1
+    assert by_id[1]["evidence"]["inbound_claimed"] == 1

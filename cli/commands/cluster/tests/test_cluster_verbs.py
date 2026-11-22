@@ -159,7 +159,6 @@ def test_pausing_posts_the_reason_and_prints_what_the_gateway_did(
         "pause_reason": "disk swap",
         "terminated_agents": 3,
         "force_marked_agents": 1,
-        "reassigned_tasks": 4,
     }
     with serving({("POST", "/api/cluster/machines/runner-a/pause"): Reply(body=reply)}) as gateway:
         rc = cmd_cluster_pause("runner-a", reason="disk swap", access=access_to(gateway.url))
@@ -170,7 +169,6 @@ def test_pausing_posts_the_reason_and_prints_what_the_gateway_did(
     out = capsys.readouterr().out
     assert "runner-a: PAUSED (since 2026-09-27T00:00:00) — disk swap" in out
     assert "terminated via the machine's ops server: 3" in out
-    assert "tasks drained to #405: 4" in out
 
 
 def test_pausing_without_a_reason_sends_an_empty_one(capsys: pytest.CaptureFixture[str]) -> None:
@@ -179,7 +177,6 @@ def test_pausing_without_a_reason_sends_an_empty_one(capsys: pytest.CaptureFixtu
         "pause_reason": "",
         "terminated_agents": 0,
         "force_marked_agents": 0,
-        "reassigned_tasks": 0,
     }
     with serving({("POST", "/api/cluster/machines/runner-a/pause"): Reply(body=reply)}) as gateway:
         assert cmd_cluster_pause("runner-a", reason=None, access=access_to(gateway.url)) == 0

@@ -140,74 +140,16 @@ def test_keyed_route_retries_an_ambiguous_outcome_under_one_key(
     _assert_one_logical_key(retry_gateway.received, "intent-1")
 
 
-@pytest.mark.parametrize("failure", ["timeout", "server_error"])
-def test_keyed_patch_retries_an_ambiguous_outcome_under_the_caller_key(
-    retry_gateway: GatewayStub, lost_response: Event, failure: str
-) -> None:
-    _ambiguous_response(retry_gateway, "PATCH", "/api/tasks/1", failure, lost_response)
-    if failure == "timeout":
-        with pytest.raises(GatewayUnavailable):
-            transport.patch(
-                "/api/tasks/1",
-                {"priority": "P1"},
-                idempotency_key="original",
-                context=process_context.current_context(),
-            )
-    else:
-        response = transport.patch(
-            "/api/tasks/1",
-            {"priority": "P1"},
-            idempotency_key="original",
-            context=process_context.current_context(),
-        )
-        assert response.status_code == 503
-    _assert_one_logical_key(retry_gateway.received, "original")
-
-
-def test_keyed_post_and_patch_mint_a_key_when_none_is_pinned(retry_gateway: GatewayStub) -> None:
-    retry_gateway.reply("PATCH", "/api/tasks/1", {})
+def test_keyed_post_mints_a_key_when_none_is_pinned(retry_gateway: GatewayStub) -> None:
     retry_gateway.reply("POST", "/api/agents/1/system-note", {})
-    transport.patch("/api/tasks/1", {"priority": "P1"}, context=process_context.current_context())
     transport.post("/api/agents/1/system-note", {}, context=process_context.current_context())
-    assert len(retry_gateway.received) == 2
+    assert len(retry_gateway.received) == 1
     # meiva:note
     # The keys are the fixture's own draws: one per call, in call order, from the context's seeded
     # generator -- the identifier comes from the carrier, not from the transport.
     seeded = seeded_rng()
     assert [request.headers["Idempotency-Key"] for request in retry_gateway.received] == [
         new_uuid(seeded).hex,
-        new_uuid(seeded).hex,
     ]
     for request in retry_gateway.received:
         assert request.headers["Idempotency-Scope"] == "principal-v1"
-
-
-@pytest.mark.parametrize("key", ["", "x" * 129, 17])
-def test_task_patch_rejects_invalid_caller_key_before_network(
-    retry_gateway: GatewayStub, key: object
-) -> None:
-    retry_gateway.reply("PATCH", "/api/tasks/1", {})
-    # meiva:note
-    # Raw invalid keys deliberately cross the typed API to exercise rejection before HTTP.
-    with pytest.raises((TypeError, ValueError), match="idempotency key"):
-        transport.patch(
-            "/api/tasks/1",
-            idempotency_key=key,  # pyright: ignore[reportArgumentType]
-            context=process_context.current_context(),
-        )
-    assert retry_gateway.received == []
-
-
-def test_keyed_patch_sends_the_principal_scope_with_the_caller_key(
-    retry_gateway: GatewayStub,
-) -> None:
-    retry_gateway.reply("PATCH", "/api/tasks/3", {})
-    transport.patch(
-        "/api/tasks/3",
-        {"title": "x"},
-        idempotency_key="intent-1",
-        context=process_context.current_context(),
-    )
-    [request] = retry_gateway.received
-    assert request.headers["Idempotency-Key"] == "intent-1"
-    assert request.headers["Idempotency-Scope"] == "principal-v1"

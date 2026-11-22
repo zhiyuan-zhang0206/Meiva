@@ -233,7 +233,7 @@ def test_a_malformed_spec_fails_where_it_is_written(
 
 def test_the_roster_has_standard_daemons_and_each_one_has_a_port_slot() -> None:
     specs = _healthz_specs()
-    assert len(specs) >= 11
+    assert len(specs) >= 10
     for spec in specs.values():
         assert spec.health_name in DEFAULT_PORTS, spec.session
 

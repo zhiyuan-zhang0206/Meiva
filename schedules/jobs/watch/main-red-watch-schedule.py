@@ -601,7 +601,7 @@ def _uncertified_commits(run_process: RunProcess) -> tuple[int | None, str | Non
 # meiva:note
 # The notice the watch owes whoever acts on its alerts: new `main-red` GitHub Issues (with link)
 # and the one-shot first-suspect notice reach the report lead via agent messaging rather than
-# retired `meiva.tasks`.
+# retired task tracker.
 def _notify_lead(text: str, report_agent: int) -> None:
     meiva.agents.send_message(report_agent, text)
 

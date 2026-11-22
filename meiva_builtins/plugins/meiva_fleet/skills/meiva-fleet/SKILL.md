@@ -1,16 +1,15 @@
 ---
 name: meiva-fleet
-description: "Coordinates Meiva Fleet tasks after collaboration is chosen. Use when assigning work, tracking delegated tasks, or reporting blockers in Fleet."
+description: "Coordinates Meiva agents through assignments, peer messages, and handoffs. Use when delegating work, reporting progress, or handling blockers."
 ---
 
 # Working in a Fleet
 
 Fleet is one optional implementation of collaboration. Use `meiva-workflow` to
 choose how to work; direct execution, peer cooperation, and script orchestration
-remain valid. Loading this skill does not require task creation or a manager
-role. The procedures below apply to chosen Fleet work. Read the
+remain valid. Read the
 [operating contract](reference/operating-contract.md) before using its labels,
-questions, delegation, or task tracking; it owns detailed operating obligations.
+questions or delegation; it owns detailed operating obligations.
 
 A **fleet** is a graph of agents working toward a human's goals, supervised from one **fleet view** — a live picture of who is responsible for what, and what each is doing right now. The human steers *decomposition* (how the work is split) and judges *results* (what came back), without opening any agent's conversation. You are one node in that graph: you may direct other agents and be directed by them at any moment, and the relationships that matter are who is talking to whom right now, not any fixed rank.
 
@@ -28,69 +27,17 @@ itself mean the agent can take on more work now. Consult nearby peers when
 ownership is unclear, rather than requiring a round of questions before every
 spawn. Keep delegated work within the accepted task's scope.
 
-## Task ↔ Fleet Interactions
+## Coordination and follow-up
 
-The task registry is the durable record of work; the spawn graph is the ephemeral web of who is talking to whom. When a task changes state, the fleet reacts — here are the rules that connect the two.
+Send assignments, blockers and results with `meiva.agents.send_message`. Include
+the expected outcome, stage of work and any artifact paths the recipient needs.
+Use `meiva.self.terminate(message=...)` to finish and report the result to your
+nearest living birth ancestor. Send the delegator a direct report when they are a different agent.
 
-### Future-signal tasks
+Use schedules for timed follow-up and recurring checks. Track repository defects and
+CI failures in GitHub Issues. Keep durable decisions and handoff context in the
+workspace's `memory/MEMORY.md`.
 
-When you choose Fleet task tracking for a noticed signal that needs work beyond this turn, create a concrete task directly. Registry availability alone does not require a task; signals that can be resolved now or need only a decision take those actions instead. A task is a commitment, not a parking lot.
-
-- Put the task under the current responsibility chain with `parent` unless it is genuinely top-level, and give it an owner: yourself by default or a known agent when that agent should do the work.
-- Put the motivating evidence and what done looks like in the description, so the task carries the signal that created it.
-- Before creating, list the parent's active children. If an equivalent open task exists, append your evidence to it and notify its owner rather than creating a duplicate.
-
-The lifecycle rules below govern the resulting task, including the business delivery to its delegator when it is done.
-
-### Task Created
-
-When `meiva.tasks.create()` is called with a `parent`, the parent task's delegator (its owner) is implicitly overseeing the creator. No automatic message is sent — the parent-task owner discovers the new subtask by listing tasks with `parent=...`. When the task is created as part of a fleet delegation (an orchestrator spawns a worker and tells it to self-assign), the orchestrator should already be watching via the goal pattern.
-
-### Task Status Done → Notify Delegator
-
-When a worker sets a task to **done**, it must notify the agent that delegated the task — the orchestrator / delegator that spawned it or assigned it the work. Use `meiva.agents.send_message(delegator_id, ...)` with:
-- The task id and title
-- Where the result lives (file path, PR link, served page)
-- A one-line summary of the outcome
-
-The delegator receives this and can verify, merge, or reduce without polling. If the delegator is unknown (an unowned task finished by a claimer), record the completion in the task's results — no one is waiting.
-
-Then **end your own process** (`meiva.self.terminate()`). The notification plus the recorded task results are the handoff — do not idle waiting to be terminated by the delegator. If a follow-up is needed, the delegator messages you, and that message resurrects you with your context intact.
-
-### Task Blocked → Escalate to Delegator
-
-A worker that hits a blocker does **not** create a "blocked" status (there is no such state). Instead:
-1. Leave the task `in_progress`
-2. Update `content` with the blocker description and what is needed to unblock
-3. Send the delegator a message describing the block and what decision or resource is needed — this is an escalation, not a failure
-
-If the delegator cannot resolve the block either, they escalate further up the task tree. When a block needs the user's decision (irreversible action, spending, outward-facing), use `meiva.ui.ask(...)` — do not route user decisions through the agent chain.
-
-### Task Reassign → Notify Old and New Owner
-
-When `meiva.tasks.update(id, owner=...)` moves a task:
-- The **new owner** receives: "Task #N 'Title' is now assigned to you (by agent #X)." It should read the task's `description` and `results`, then begin or decline.
-- The **old owner** receives: "Task #N 'Title' you owned is no longer assigned to you."
-- The **delegator** (parent task's owner) is **not** automatically notified — they see the owner change when they next check. If the reassignment is significant (a hand-off to a specialist), the old owner should message the delegator separately.
-
-This is handled automatically by `meiva.tasks.update()` — the caller only needs to pass `owner=`. The function skips terminated agents and never notifies the caller about themselves.
-
-### Task Cancelled → Clean Up Dependencies
-
-When a task is cancelled:
-1. The canceller should check for active subtasks (`meiva.tasks.list(parent=task_id, status="in_progress")`) and cancel or reassign them — orphaned subtasks with a cancelled parent are ambiguous.
-2. Any agent actively working on a now-cancelled task should be messaged so it can stop or pivot.
-
-### Reminder Mechanism
-
-A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if the task is not updated within that window — a chat message telling the owner the task has gone quiet. New tasks use the priority-based default reminder interval unless an explicit interval is supplied; `None` also selects that default, and reminders cannot be turned off. Under the default reminder-reset policy, `meiva.tasks.update()` restarts the reminder window and counters when status, results, owner, priority or parent actually changes, or when a note is appended. Renaming the task or editing only its description or interval does not restart the window. A parent-only reparent restarts the window when the parent changes, while remaining silent to the owner (no notification or resurrection). The daemon also escalates to the parent task's owner once a task has gone three of its own reminder cadences without a state change (and at least one reminder reached the owner) — the threshold counts silence, not delivered reminders. Reminders are useful for:
-- Long-running tasks where the orchestrator wants a periodic pulse
-- Tasks assigned to agents that might stall silently
-- Health checks on delegation chains
-
-The reminder is sent at most once per overdue window — updating the task resets the window, so an agent that reports progress regularly never gets pinged.
-
-Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After three reminder cadences of silence the daemon escalates to the nearest live manager; when no live agent owns an ancestor task it sends nothing, so a top-level task that matters needs its owner (or you) to ask the user with `meiva.ui.ask`.
 ## Two Roles
 
 **Orchestrator** (coordinating delegated work) and **worker** (carrying out an accepted mission) are optional descriptions of current work, not exhaustive agent types or fixed identities. An agent may execute directly, collaborate as a peer, or combine these activities without adopting either role.
@@ -104,15 +51,13 @@ Reminders fire automatically — the cluster runs a task-maintenance daemon that
 
 The Fleet system prompt keeps message-delivery semantics resident. The
 [operating contract](reference/operating-contract.md) owns detailed coordination,
-completion, and task procedures. Use `send_message` for peer delivery,
-`meiva.ui.ask` for the user, and task updates for the durable record.
+and handoff procedures. Use `send_message` for peer delivery and
+`meiva.ui.ask` for user decisions.
 
 For each milestone, name its reporter and the agent that must act in the brief.
-Publish the result in its existing artifact or task record and send that owner
-its reference with a concise explanation of what changed and what is needed.
+Save the result in its artifact and send its path with what changed and what is needed.
 Combine related findings; other participants send only additional evidence,
-blockers, or changed results. Do not append an unchanged milestone to another
-agent's task log merely to record forwarding: that write can notify its owner.
+blockers, or changed results.
 
 When a requester needs your acceptance or timing to coordinate, communicate
 that commitment. Otherwise, act on received messages without a courtesy reply.
@@ -138,7 +83,7 @@ A small parallel delegation you eyeball yourself is just **low Effort + low Auto
 
 **Setting Autonomy is not a config flag — it is a message.** When you want the user to make a reduce-point call, you do not write a new state field; you `meiva.ui.ask(...)`; their answer arrives as a message. The user "turning the dial down" on a node is simply you waiting for their decision. No shared mutable state, no schema — the existing message paths *are* the dial.
 
-**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `meiva.ui.ask(...)`: the scope and intended work (registry tasks if you chose task tracking), and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the agreed handoff record (the task's `description` when using registry tracking), so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
+**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `meiva.ui.ask(...)`: the scope and intended work, and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the agreed handoff record, so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
 
 ## Autonomy's boundaries
 
@@ -149,13 +94,11 @@ Authorization widens what you may do on your own; it does not remove the rails. 
 - **Don't touch prod** — no deploys, no prod data-plane writes, no rollout.
 - **Spend only what was authorized** — the budget in the approval is a ceiling, not a target.
 
-Usage reminders are independent of Fleet task records. Load `meiva-being-a-long-running-agent` for
+Load `meiva-being-a-long-running-agent` for
 its agent usage script: choose IDs, a time window, and spawn/fork birth lineage,
 then notify the peers responsible for the work when the agreed threshold is
 reached. The receiving agent decides how to converge, finish a safe unit,
-preserve results, prepare a handoff, or ask for a revised budget. Task ownership
-and reminder escalation do not meter or enforce spending. No automatic kill is
-part of a budget reminder.
+preserve results, prepare a handoff, or ask for a revised budget.
 
 ## Reaching the User vs Another Agent
 
@@ -166,7 +109,7 @@ The **user** is the only one who can authorize what no agent may decide alone �
 
 ## Reporting
 
-Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.ask` is the question channel: when a question needs a user answer, post it to the user's queue. Ordinary information and results use the configured publish/text delivery protocol. Don't promote routine progress; don't bury a decision that needs an answer.
+Your messages and artifacts record how the work progressed. `meiva.ui.ask` is the question channel: when a question needs a user answer, post it to the user's queue. Ordinary information and results use the configured publish/text delivery protocol. Don't promote routine progress; don't bury a decision that needs an answer.
 
 ### Message discipline: milestone-based, no noise
 
@@ -175,7 +118,7 @@ ruling 2026-09-03). So send only when there is a real reason:
 
 - **Send** at a milestone (a stage finished, a decision made, a result
   landed), at a **blocker** (something only the other side can resolve), at
-  **completion** (with the delivered result — see Task Status Done above),
+  **completion** (with the delivered result — include the artifact path),
   or for a genuine **request** for something you need.
 - **Do not send** routine progress ("still working", "step 3 of 7 done"),
   and **do not send pure acknowledgments** ("ok", "got it"). A message that
@@ -184,8 +127,6 @@ ruling 2026-09-03). So send only when there is a real reason:
 
 A delegator decides the exception — "ping me when the branch is pushed" is
 a valid line in a brief — but the default is silence between milestones.
-(Task-assignment delivery stays full-text by design; a summary-plus-link
-redesign was rejected because it costs an extra round-trip.)
 
 Use Ask for questions only the user can answer, in live and asynchronous
 conversations. Deliver qualifying information once through the configured

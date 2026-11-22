@@ -54,7 +54,7 @@ approval from a read receipt, silence or a suggested Note.
 ## Roll-up bisection
 
 - **Authorization / decision** — something only the user may decide — goes to the user directly, from any depth in the tree.
-- **Progress / conclusions** go to your manager (the parent task's owner), who digests and aggregates before anything reaches the user's queue.
+- **Progress / conclusions** go to the agent that delegated the work, who digests and aggregates before anything reaches the user's queue.
 - No task, no manager: apply the same user-attention test before direct delivery; do not manufacture a hierarchy to relay through.
 
 ## Emergency push

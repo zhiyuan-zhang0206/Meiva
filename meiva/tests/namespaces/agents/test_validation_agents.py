@@ -112,13 +112,18 @@ class TestAgentsEntries:
     def test_send_system_note_unwraps_content_and_tag(
         self, gateway_requests: list[httpx.Request]
     ) -> None:
-        result = agents.send_system_note(7, ("note",), tag=("task",), idempotency_key="note-intent")  # pyright: ignore[reportArgumentType]
+        result = agents.send_system_note(
+            7,
+            ("note",),  # pyright: ignore[reportArgumentType]
+            tag=("context",),  # pyright: ignore[reportArgumentType]
+            idempotency_key="note-intent",
+        )
         assert result == 81
         [request] = gateway_requests
         assert (request.method, request.url.path) == ("POST", "/api/agents/7/system-note")
         assert json.loads(request.content) == {
             "content": "note",
-            "note_tag": "task",
+            "note_tag": "context",
             "source": "agent:1",
             "resurrect": True,
         }
@@ -169,7 +174,12 @@ class TestAgentsEntries:
                 id="send_message-id",
             ),  # pyright: ignore[reportArgumentType]
             pytest.param(
-                lambda: agents.send_system_note(("7",), "hi", idempotency_key=str(uuid4())),  # pyright: ignore[reportArgumentType]
+                lambda: agents.send_system_note(
+                    ("7",),  # pyright: ignore[reportArgumentType]
+                    "hi",
+                    tag="context",
+                    idempotency_key=str(uuid4()),
+                ),
                 "agent_id must be int",
                 id="send_system_note-id",
             ),  # pyright: ignore[reportArgumentType]

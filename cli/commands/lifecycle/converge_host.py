@@ -116,7 +116,14 @@ def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:
     from base.packages.plugin_config_admin import update_all_disk_images
     from base.packages.plugins.enable_config import discover_plugins
 
-    update_all_disk_images(plugin_dirs=discover_plugins(home=ctx.meiva_home), home=ctx.meiva_home)
+    result = update_all_disk_images(
+        plugin_dirs=discover_plugins(home=ctx.meiva_home), home=ctx.meiva_home
+    )
+    failures = [
+        f"{entry.name}: {entry.detail}" for entry in result.entries if entry.status == "error"
+    ]
+    if failures:
+        raise RuntimeError("plugin config reconciliation failed: " + ", ".join(failures))
 
 
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
@@ -492,13 +499,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         warn_untracked_migrations,
         roles=frozenset({"gateway"}),
     ),
-    # Plugin config images are read only by agent processes, which run on
-    # agent-runners. The gateway never loads a plugin, so materializing its
-    # disk images there is dead work (and feeds the inventory leak).
     ConvergeStep(
         "plugin config images",
         _ensure_plugin_config_images,
-        roles=frozenset({"agent-runner"}),
+        roles=frozenset({"gateway", "agent-runner"}),
         requires_unit_config=True,
     ),
     # Skills load in agent processes only, from the single $MEIVA_HOME/skills/

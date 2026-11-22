@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from .choices import FleetArgs, start_flags
 from .fleet_verify import verify
 from .oneshot import start_script
+from .plan.gateway_commands import bootstrap_command
 from .plan.host_commands import INCOMPLETE
 from .plan.host_failures import (
     NOT_ATTEMPTED_WITHOUT_GATEWAY,
@@ -63,6 +64,19 @@ def _start_one(
     return None
 
 
+def _check_gateway_bootstrap(s: Session, gateway: str) -> HostFailure | None:
+    try:
+        s.run(
+            gateway,
+            bootstrap_command(),
+            effect=False,
+            stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
+        )
+    except FailedError as exc:
+        return HostFailure(gateway, "bootstrap", str(exc))
+    return None
+
+
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     # meiva:note
@@ -74,16 +88,20 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     hosts = start_order(args.gateway, tuple(args.runner))
     started: set[str] = set()
     gateway_failure = _start_one(s, args, args.gateway, window)
+    if gateway_failure is None:
+        started.add(args.gateway)
+        if not args.dry_run:
+            gateway_failure = _check_gateway_bootstrap(s, args.gateway)
+    runners = tuple(args.runner)
     if gateway_failure is not None:
         failures.append(gateway_failure)
         s.say(f"PARTIAL: {gateway_failure.line()}")
-    else:
-        started.add(args.gateway)
-    runners = tuple(args.runner)
-    if gateway_failure is not None:
-        runner_outcomes = [
-            HostFailure(alias, "start", NOT_ATTEMPTED_WITHOUT_GATEWAY) for alias in runners
-        ]
+        reason = (
+            "not attempted: the gateway failed its authenticated bootstrap check"
+            if gateway_failure.step == "bootstrap"
+            else NOT_ATTEMPTED_WITHOUT_GATEWAY
+        )
+        runner_outcomes = [HostFailure(alias, "start", reason) for alias in runners]
     else:
         runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
     for alias, failure in zip(runners, runner_outcomes, strict=True):

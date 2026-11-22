@@ -1,6 +1,4 @@
 {
-  "widgetsUnavailable": "检查器扩展暂不可用",
-  "retryWidgets": "重试扩展",
   "title": "检查器",
   "toggle": "检查",
   "closeInspector": "关闭检查器",
@@ -18,7 +16,6 @@
   "retrying": "重试中…",
   "noData": "无数据",
   "sectionPage": "页面",
-  "sectionTasks": "任务",
   "sectionShells": "持久 Shell",
   "sectionSchedules": "定时任务",
   "scheduleScopeCluster": "集群",

@@ -37,7 +37,6 @@ class NoteTag(StrEnum):
     AGENT_REPLY = "agent_reply"
     REPLY_VISIBILITY = "reply_visibility"
     NON_HUMAN_WAKE = "non_human_wake"
-    TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
     COMPACT_FAILED = "compact_failed"
     HISTORY_DUMP = "history_dump"
@@ -111,7 +110,6 @@ class MeivaMessageKwargs(TypedDict, total=False):
     meiva_image_uploads: list[dict[str, object]]
     meiva_upload_files: list[dict[str, object]]
     meiva_note_tag: str
-    meiva_task_id: int
     meiva_exec_ms: int | None
     meiva_exec_status: str
     meiva_exec_started_at: str | None

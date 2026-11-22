@@ -129,6 +129,7 @@ def test_index_and_reader_live_outside_the_config_package() -> None:
         "per_agent_fields",
         "sensitive_fields",
         "required_fields",
+        "builtin_cluster_config_fields",
     }
     assert set(raw["lite_fields"]) == set(LITE_FIELDS)
     assert isinstance(PER_AGENT_FIELDS, frozenset) and isinstance(REQUIRED_FIELDS, frozenset)

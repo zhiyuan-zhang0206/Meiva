@@ -14,7 +14,6 @@ _FIXED_PORTS: Mapping[str, int] = {
     "labeler": 8103,
     "memory_indexer": 8105,
     "heartbeat": 8107,
-    "task_maintenance": 8108,
     "events_maintenance": 8109,
     "delivery_watchdog": 8110,
     "ops": 8113,

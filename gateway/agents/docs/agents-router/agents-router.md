@@ -29,8 +29,7 @@ Lifecycle handlers pass the actual request app's database, pool and `GatewayConf
 config carries the dispatch budget (`lifecycle_attempt_timeout_seconds`,
 `lifecycle_retries`, `lifecycle_deadline_seconds`: an offline runner becomes a named 502
 inside the caller's window). MCP termination reaches the same handler through the app, so
-`terminate_agent_with_open_tasks` serves the advisory task hint and shell TTL cleanup for
-both. Forward helpers do not import the assembled `gateway.app`.
+`post_agent_terminate` serves shell TTL cleanup for both. Forward helpers do not import the assembled `gateway.app`.
 
 `gateway/agents/launch/forward.py` holds the effects (the registry read, the dispatch and the
 clock bound around it); every decision is a pure function in a strict module:
@@ -103,8 +102,7 @@ comes back and nothing new is queued. That key space is cluster-wide, so a calle
 scopes its own keys by sender and target. The 1 MiB
 message limit bounds pending/checkpoint storage and telemetry volume.
 
-Termination's open-task hint and shell-TTL cleanup are advisory after acceptance.
-Failed hint/cleanup work is logged; it cannot undo or block accepted termination.
+The gateway logs shell TTL cleanup failures after accepting termination.
 The TTL reaper eventually retires leftover shell rows. Label edits and their audit
 fact commit together; agent-attributed edits also reach the active impersonation
 lease log through the shared audit owner.

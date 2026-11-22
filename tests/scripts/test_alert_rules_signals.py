@@ -178,7 +178,7 @@ def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
         assert "keep_firing_for" not in rule
 
 
-@pytest.mark.parametrize("diagnostic", ["venv", "browser-reach", "task-telemetry"])
+@pytest.mark.parametrize("diagnostic", ["venv", "browser-reach"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
     rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
     assert "by (machine)" in _query(rule)

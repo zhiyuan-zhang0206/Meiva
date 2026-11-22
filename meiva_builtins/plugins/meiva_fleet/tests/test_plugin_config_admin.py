@@ -46,9 +46,6 @@ def test_metadata_uses_plugin_owner_and_preserves_host_cluster_policy() -> None:
         if field.owner == "meiva_fleet"
     }
     assert set(fields) == set(FleetConfig.model_fields)
-    assert fields["task_maintenance_enabled"].scope == "host"
-    assert fields["task_maintenance_enabled"].remote_writable is True
-    assert fields["task_maintenance_enabled"].writable is False
     assert fields["reduce_context_switch"].scope == "cluster-pinned"
     assert fields["reduce_context_switch"].per_agent is False
     assert fields["reduce_context_switch"].restart_required == "agent"
@@ -58,9 +55,9 @@ def test_metadata_uses_plugin_owner_and_preserves_host_cluster_policy() -> None:
 def test_mixed_owner_patch_fails_before_any_image_write(tmp_path: Path) -> None:
     image = tmp_path / "config.json"
     with pytest.raises(InvalidConfigOverlay, match="mixes owners"):
-        patch_owner({"task_escalate_n", "llm_model"}, home=meiva_home())
+        patch_owner({"reduce_context_switch", "llm_model"}, home=meiva_home())
     assert not image.exists()
-    actual = patch_owner({"task_escalate_n"}, home=meiva_home())
+    actual = patch_owner({"reduce_context_switch"}, home=meiva_home())
     assert actual is not None and actual.name == "meiva_fleet"
     assert patch_owner({"llm_model"}, home=meiva_home()) is None
 
@@ -77,7 +74,7 @@ from base.packages.plugins.extensions import PluginContributions
 
 
 class SecondFleetConfig(BaseModel):
-    task_escalate_n: int = Field(default=3, json_schema_extra={"scope": "cluster-pinned"})
+    reduce_context_switch: bool = Field(default=True, json_schema_extra={"scope": "cluster-pinned"})
 
 
 def contribute() -> PluginContributions:
@@ -91,7 +88,7 @@ def test_duplicate_declaration_is_not_a_request_rejection(unit_home: Path) -> No
     (second / "plugin.py").write_text("")
     (second / "default_config.py").write_text(_SECOND_FACE)
     with pytest.raises(ValueError, match="more than one declaration owner") as refused:
-        patch_owner({"task_escalate_n"}, home=unit_home)
+        patch_owner({"reduce_context_switch"}, home=unit_home)
     assert not isinstance(refused.value, InvalidConfigOverlay)
     assert not disk_image_path("meiva_fleet", home=unit_home).exists()
     assert not disk_image_path("second_fleet", home=unit_home).exists()
@@ -100,25 +97,26 @@ def test_duplicate_declaration_is_not_a_request_rejection(unit_home: Path) -> No
 def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:
     image = tmp_path / "config.json"
     declaration = owner(image)
-    write_plugin_patch(declaration, {"task_escalate_n": 8}, set(), expected_digest=None)
+    write_plugin_patch(declaration, {"reduce_context_switch": False}, set(), expected_digest=None)
     saved = image.read_bytes()
     revision = image_digest(image)
     with pytest.raises(InvalidConfigOverlay):
         write_plugin_patch(
-            declaration, {"task_escalate_n": "nonsense"}, set(), expected_digest=None
+            declaration, {"reduce_context_switch": "nonsense"}, set(), expected_digest=None
         )
     assert image.read_bytes() == saved
     write_plugin_patch(
-        declaration, {"reduce_context_switch": False}, set(), expected_digest=revision
+        declaration, {"reduce_context_switch": True}, set(), expected_digest=revision
     )
     saved = image.read_bytes()
     with pytest.raises(PluginConfigChangedError, match="changed"):
-        write_plugin_patch(declaration, {"task_escalate_n": 9}, set(), expected_digest=revision)
+        write_plugin_patch(
+            declaration, {"reduce_context_switch": True}, set(), expected_digest=revision
+        )
     assert image.read_bytes() == saved
     with pytest.raises(PluginConfigChangedError, match="changed"):
         write_config_image(declaration, FleetConfig(), expected_digest=revision)
     values = json.loads(image.read_text())
-    assert values["task_escalate_n"] == 8
-    assert values["reduce_context_switch"] is False
-    write_plugin_patch(declaration, {}, {"task_escalate_n"}, expected_digest=None)
-    assert json.loads(image.read_text())["task_escalate_n"] == 3
+    assert values["reduce_context_switch"] is True
+    write_plugin_patch(declaration, {}, {"reduce_context_switch"}, expected_digest=None)
+    assert json.loads(image.read_text())["reduce_context_switch"] is True

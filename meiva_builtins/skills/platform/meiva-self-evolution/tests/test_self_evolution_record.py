@@ -292,8 +292,6 @@ _EVIDENCE_FIELDS = frozenset(
         "terminal_status",
         "inbound_total",
         "inbound_claimed",
-        "task_updates",
-        "task_state_changes",
         "exec_ok",
         "exec_failed",
     }
@@ -317,7 +315,6 @@ def _evidence_record(
     events: Sequence[tuple[str, dict[str, Any]]],
     inbounds: Sequence[dict[str, Any]],
     status: str | None,
-    task_receipts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return record.build_record(
         _run(
@@ -325,9 +322,6 @@ def _evidence_record(
             events=tuple(events),
             inbounds=tuple(inbounds),
             meta=record_module.AgentMeta("user", status, "delivered"),
-            task_receipts=(
-                record_module.TaskReceipts(**task_receipts) if task_receipts is not None else None
-            ),
         )
     )
 
@@ -338,7 +332,7 @@ def test_evidence_grade_none_without_telemetry(record: Any) -> None:
     assert rec["evidence"]["telemetry_events"] == 0
     assert rec["evidence_grade"] == "none"
     assert rec["unknown_reason"] == "no_telemetry"
-    assert rec["schema_version"] == 2
+    assert rec["schema_version"] == 3
 
 
 def test_evidence_grade_partial_without_terminal_status(record: Any) -> None:
@@ -413,13 +407,12 @@ def test_legacy_record_without_evidence_keeps_downstream_reads(record: Any) -> N
     assert rubric_module.scores(legacy) == rubric_module.scores(rec)
 
 
-def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> None:
+def test_evidence_block_reports_prompt_source_and_inbound_counts(record: Any) -> None:
     rec = record.build_record(
         _run(
             week="2026-10-17",
             inbounds=(_inbound("agent:12", "peer brief"),),
             meta=record_module.AgentMeta("agent:12", "idling", "delivered"),
-            task_receipts=record_module.TaskReceipts(3, 1, 2, 1),
         )
     )
 
@@ -427,21 +420,13 @@ def test_evidence_block_reports_prompt_source_and_task_receipts(record: Any) -> 
     assert evidence["prompt_source"] == "spawner"
     assert evidence["inbound_total"] == 1
     assert evidence["inbound_claimed"] == 0
-    assert evidence["task_updates"] == {"note": 3, "status": 1, "results": 2}
-    assert evidence["task_state_changes"] == 1
     assert set(evidence) == _EVIDENCE_FIELDS
-
-    no_receipts = record.build_record(
-        _run(week="2026-10-17", meta=record_module.AgentMeta("user", "terminated", "delivered"))
-    )["evidence"]
-    assert no_receipts["task_updates"] == {"note": 0, "status": 0, "results": 0}
-    assert no_receipts["task_state_changes"] == 0
 
 
 def test_record_inputs_capture_source_rows_before_later_mutation(record: Any) -> None:
-    plugins = ["fleet"]
+    plugins = ["meiva_memory"]
     models = ["model"]
-    activation = {"plugin": plugins, "surface": "sdk", "identifier": "tasks"}
+    activation = {"plugin": plugins, "surface": "sdk", "identifier": "memory"}
     usage: dict[str, object] = {"model": models, "in_total": 3, "out_total": 4}
     transcript = {"type": "human", "content": "original prompt"}
     inbound = _inbound("user", "original inbound")
@@ -459,7 +444,7 @@ def test_record_inputs_capture_source_rows_before_later_mutation(record: Any) ->
     assert record.build_record(run) == original
     assert original["evidence"]["telemetry_events"] == 3
     assert original["tokens_in"] == 3
-    assert original["plugins_activated"] == {"['fleet']/sdk/tasks": 1}
+    assert original["plugins_activated"] == {"['meiva_memory']/sdk/memory": 1}
 
 
 def test_record_output_never_aliases_the_retained_input_facts(record: Any) -> None:

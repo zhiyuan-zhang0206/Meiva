@@ -32,15 +32,12 @@ Health remains process liveness, not an assertion that model operations work.
 Reply suggestions and HTTP MCP tools receive a catalog reader so their
 construction does not force model availability. Their request boundaries are
 owned by [Reply Suggestion](../../agents/docs/reply-suggestion/reply-suggestion.md) and
-[Gateway /mcp endpoint — a thin forwarder onto the HTTP API](../../mcp_server/docs/mcp-endpoint/mcp-endpoint.md). Existing task-assignment
-receipts are returned before model-dependent launch observation; a launch
-failure cannot erase accepted work.
+[Gateway /mcp endpoint — a thin forwarder onto the HTTP API](../../mcp_server/docs/mcp-endpoint/mcp-endpoint.md).
 
 Repair provider code/configuration or the enabled set, then restart the gateway
 to build a new atomic catalog. No hot catalog reload, plugin disable heuristic,
 service-roster deletion or automatic model fallback is implied.
 
 Integration coverage lives in `gateway/tests/bootstrap/catalog/test_provider_startup.py`,
-`test_model_failure_routes.py`, `gateway/tests/bootstrap/catalog/test_mcp_model_failure.py`
-and `gateway/tests/lifecycle/test_task_assignments.py`. These tests use isolated
+`test_model_failure_routes.py` and `gateway/tests/bootstrap/catalog/test_mcp_model_failure.py`. These tests use isolated
 homes and database fixtures; they do not establish a deployed cluster's health.

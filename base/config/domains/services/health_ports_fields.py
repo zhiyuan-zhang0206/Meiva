@@ -67,9 +67,6 @@ class ServiceHealthPortFields:
     delivery_watchdog_health_port: int | None = health_port_field(
         "delivery_watchdog", title="Message watchdog health port"
     )
-    task_maintenance_health_port: int | None = health_port_field(
-        "task_maintenance", title="Task maintenance service health port"
-    )
     events_maintenance_health_port: int | None = health_port_field(
         "events_maintenance", title="Event maintenance service health port"
     )

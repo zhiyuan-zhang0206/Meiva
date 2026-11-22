@@ -56,12 +56,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 
   "display.stats_window_hours": 24,
 
-  "display.fleet_left_view": "graph",
-  "display.task_graph_mode": "graph",
-  "display.task_show_done": false,
-  "display.task_show_canceled": false,
 
-  "display.task_window": "24h",
 
   "display.shell_terminal_theme": "system",
   "display.theme": "system",
@@ -89,39 +84,3 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 export type ToUserDocument = Schemas["ToUserDocument"];
 export type WorkspaceFileResponse = Schemas["WorkspaceFileResponse"];
 export type WorkspaceDirListing = Schemas["WorkspaceDirListing"];
-
-type TaskStatus = Schemas["TaskStatus"];
-
-export type TaskPriority = "P0" | "P1" | "P2" | "P3";
-
-export interface TaskSummaryRow {
-  readonly id: number;
-  readonly parent_id: number | null;
-  readonly title: string;
-  readonly status: TaskStatus;
-  readonly priority: TaskPriority;
-  readonly owner: number | null;
-  readonly owner_label?: string | null;
-  readonly created_by: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly remind_interval_seconds?: number | null;
-  readonly last_reminded_at?: string | null;
-  readonly reminder_count: number;
-  readonly ghost?: boolean;
-}
-
-export interface TaskRow extends TaskSummaryRow {
-  readonly description: string;
-  readonly results: string | null;
-}
-
-export interface TaskGraphRow extends TaskSummaryRow {
-  readonly description: string;
-}
-
-export type TaskFields = "full" | "summary" | "graph";
-
-export interface TaskListResponse<T extends TaskSummaryRow = TaskSummaryRow> {
-  readonly tasks: readonly T[];
-}

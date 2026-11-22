@@ -302,38 +302,11 @@ class TestLifecycle:
     def test_terminate_returns_status(self, bound_wire: GatewayWire, wire_status: str):
         from meiva.gateway_client import terminate
 
-        bound_wire.stub.reply(
-            "POST", "/api/agents/42/terminate", {"status": wire_status, "open_tasks": None}
-        )
+        bound_wire.stub.reply("POST", "/api/agents/42/terminate", {"status": wire_status})
 
         result = terminate(42, source="agent:1", force=True)
-        # The client hands back the full wire payload — status plus the
-        # open-tasks hint — no longer just the status string (task #3361).
-        assert result == {"status": wire_status, "open_tasks": None}
+        assert result == {"status": wire_status}
         assert bound_wire.sent[0].body == {"source": "agent:1", "force": True}
-
-    def test_terminate_passes_open_tasks_hint_through(self, bound_wire: GatewayWire):
-        """A non-null hint rides the client verbatim; the SDK converts it."""
-        from meiva.gateway_client import terminate
-
-        hint = {
-            "count": 6,
-            "tasks": [
-                {
-                    "id": 11,
-                    "title": "sync terminate tests",
-                    "status": "in_progress",
-                    "updated_at": "2026-09-14T05:00:00+00:00",
-                }
-            ],
-            "more": 1,
-        }
-        bound_wire.stub.reply(
-            "POST", "/api/agents/42/terminate", {"status": "enqueued", "open_tasks": hint}
-        )
-
-        result = terminate(42, source="agent:1")
-        assert result == {"status": "enqueued", "open_tasks": hint}
 
     def test_restart_returns_status(self, bound_wire: GatewayWire):
         from dataclasses import replace

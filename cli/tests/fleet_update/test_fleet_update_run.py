@@ -169,6 +169,19 @@ def test_a_gateway_that_fails_to_start_leaves_the_runners_untried(
     assert not cluster.silence_open
 
 
+def test_a_gateway_with_failed_bootstrap_leaves_the_runners_untried(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("bootstrap", "gw")] = 1
+    assert run("up") == PARTIAL_FAILURE_EXIT
+    assert _effect_aliases(cluster, "start", "oneshot") == ["gw"]
+    output = capsys.readouterr().out
+    assert "matrix: gw failed at 'bootstrap'" in output
+    assert "not attempted: the gateway failed its authenticated bootstrap check" in output
+
+
 def test_run_dry_run_plans_both_halves_without_mutation(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:

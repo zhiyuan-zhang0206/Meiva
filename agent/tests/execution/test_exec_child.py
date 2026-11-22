@@ -531,18 +531,18 @@ def test_child_applies_per_agent_eval_isolation_from_the_framework_overlay(tmp_p
         (
             "import meiva\n"
             "try:\n"
-            "    meiva.tasks\n"
+            "    meiva.ui\n"
             "except AttributeError as error:\n"
-            "    print('tasks unavailable:', type(error).__name__)\n"
+            "    print('ui unavailable:', type(error).__name__)\n"
             "else:\n"
-            "    print('tasks available')\n"
+            "    print('ui available')\n"
         ),
         config_overlay={"eval_isolation": True},
     )
 
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).kind == "done"
-    assert "tasks unavailable" in proc.stdout
+    assert "ui unavailable" in proc.stdout
 
 
 def _declare_machine_name(tmp_path: Path) -> None:

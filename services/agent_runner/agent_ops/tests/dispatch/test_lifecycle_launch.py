@@ -106,7 +106,6 @@ async def test_lifecycle_enqueues_the_termination_of_a_real_agent(
         "completed",
         {
             "status": "enqueued",
-            "open_tasks": None,
             "shell_sessions": {"when": "at_exit", "killed": []},
             "attached": None,
         },

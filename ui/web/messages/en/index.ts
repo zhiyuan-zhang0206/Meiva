@@ -19,7 +19,6 @@ import login from "./interface/login.json";
 import markers from "./agents/markers.json";
 import nav from "./interface/nav.json";
 import questionDetail from "./interface/questionDetail.json";
-import openTasksNotice from "./interface/openTasksNotice.json";
 import pendingStrip from "./agents/pendingStrip.json";
 import runTimeline from "./agents/runTimeline.json";
 import schedules from "./operations/schedules.json";
@@ -47,7 +46,6 @@ const messages = {
   markers,
   nav,
   questionDetail,
-  openTasksNotice,
   pendingStrip,
   runTimeline,
   schedules,

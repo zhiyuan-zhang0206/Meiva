@@ -166,7 +166,7 @@ _init_complete = False
 
 
 # meiva:note
-# Idempotently load plugin namespaces (`meiva.tasks` etc.) into *this* process. The entry
+# Idempotently load plugin namespaces (`meiva.memory` etc.) into *this* process. The entry
 # point for a process an agent launched: a schedule bootstrap calls it explicitly
 # before running agent code. A persistent-shell child completes the same composition before its
 # first parent import returns; `__getattr__` remains the backstop for a deferred plugin load.

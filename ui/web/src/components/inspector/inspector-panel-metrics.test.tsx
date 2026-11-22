@@ -10,7 +10,6 @@ import {
   fixture,
   getAgentInspectLive,
   getAgentInspectStatistics,
-  getAgentInspectWidgets,
   getAgentRoster,
   liveFixture,
   QueryClientProvider,
@@ -213,14 +212,14 @@ describe("Inspector read ownership", () => {
     await waitFor(() => expect(getAgentInspectLive).toHaveBeenCalledWith(2, expect.any(AbortSignal)));
 
     const inspectorEntries = () => client.getQueryCache().getAll().filter((query) => String(query.queryKey[0]).startsWith("agent-inspect"));
-    await waitFor(() => expect(inspectorEntries()).toHaveLength(6));
+    await waitFor(() => expect(inspectorEntries()).toHaveLength(4));
     expect(new Set(inspectorEntries().map((query) => query.queryKey[1]))).toEqual(new Set([1, 2]));
 
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
     expect(screen.getByText("dev-server")).toBeTruthy();
 
     view.unmount();
-    expect(inspectorEntries()).toHaveLength(6);
+    expect(inspectorEntries()).toHaveLength(4);
   });
 
   it("a back-switch revalidates at most the two live reads and never shows a cold pending tell", async () => {
@@ -238,9 +237,6 @@ describe("Inspector read ownership", () => {
       getAgentInspectLive.mock.calls.filter(([calledId]) => calledId === id).length;
     const statsCalls = (id: number) =>
       getAgentInspectStatistics.mock.calls.filter(([calledId]) => calledId === id).length;
-    const widgetCalls = (id: number) =>
-      getAgentInspectWidgets.mock.calls.filter(([calledId]) => calledId === id).length;
-    expect(widgetCalls(1)).toBe(1);
     const liveBefore = liveCalls(1);
     const statsBefore = statsCalls(1);
 
@@ -251,7 +247,6 @@ describe("Inspector read ownership", () => {
     await waitFor(() => expect(liveCalls(1)).toBe(liveBefore + 1));
     const revalidated = liveCalls(1) - liveBefore + (statsCalls(1) - statsBefore);
     expect(revalidated).toBeLessThanOrEqual(BACK_VISIT_REVALIDATE_MAX);
-    expect(widgetCalls(1)).toBe(1);
   });
 });
 

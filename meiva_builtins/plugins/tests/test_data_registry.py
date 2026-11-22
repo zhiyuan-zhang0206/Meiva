@@ -1,4 +1,4 @@
-"""The data registry (metrics + inspector widgets) and the manifest gate on its faces.
+"""The plugin metrics registry and the manifest gate on its faces.
 
 `load_declaration` is the fail-soft import of one face; `build_data_registry` admits each
 declaration atomically. A failure is reported through `load_report` and costs only that plugin
@@ -16,16 +16,12 @@ import pytest
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.data_registry import (
     METRICS_KEY,
-    WIDGETS_KEY,
     DeclaredFace,
     build_data_registry,
     load_declaration,
 )
 from base.packages.plugins.extensions import PluginContributions
-from base.packages.plugins.surface.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
-from meiva_builtins.plugins.meiva_fleet import inspector as fleet_inspector
-from meiva_builtins.plugins.meiva_fleet import metrics as fleet_metrics
 from meiva_builtins.plugins.meiva_memory import metrics as memory_metrics
 
 Failures = Callable[[], list[tuple[str, BaseException]]]
@@ -57,18 +53,11 @@ def _metric(name: str = "demo_metric", **over: Any) -> MetricSpec:
     return MetricSpec(**data)
 
 
-def _widget(widget_id: str = "demo-widget", **over: Any) -> InspectWidgetSpec:
-    data: dict[str, Any] = {"id": widget_id, "kind": "taskList", "order": 150}
-    data.update(over)
-    return InspectWidgetSpec(**data)
-
-
 def _face(
     plugin: str,
     metrics: tuple[MetricSpec, ...] = (),
-    widgets: tuple[InspectWidgetSpec, ...] = (),
 ) -> DeclaredFace:
-    return DeclaredFace(plugin, PluginContributions(metrics=metrics, inspect_widgets=widgets))
+    return DeclaredFace(plugin, PluginContributions(metrics=metrics))
 
 
 def _module(**attrs: Any) -> ModuleType:
@@ -158,15 +147,10 @@ def _gated(plugin_dir: Path, key: str, contributions: PluginContributions) -> De
 
 def test_a_matching_manifest_is_admitted(tmp_path: Path, reported: Failures) -> None:
     plugin_dir = tmp_path / "demo"
-    _write_manifest(plugin_dir, metrics=["demo_metric"], inspectWidgets=["demo-widget"])
+    _write_manifest(plugin_dir, metrics=["demo_metric"])
 
     metrics_face = _gated(plugin_dir, METRICS_KEY, PluginContributions(metrics=(_metric(),)))
-    widgets_face = _gated(
-        plugin_dir, WIDGETS_KEY, PluginContributions(inspect_widgets=(_widget(),))
-    )
-
     assert metrics_face is not None
-    assert widgets_face is not None
     assert reported() == []
 
 
@@ -191,22 +175,6 @@ def test_a_metric_the_declaration_does_not_provide_is_refused(
     assert "'ghost_metric' is declared but the plugin does not provide it" in str(reported()[0][1])
 
 
-def test_a_widget_mismatch_is_refused_in_both_directions(
-    tmp_path: Path, reported: Failures
-) -> None:
-    undeclared = tmp_path / "undeclared"
-    _write_manifest(undeclared, inspectWidgets=[])
-    missing = tmp_path / "missing"
-    _write_manifest(missing, inspectWidgets=["demo-widget", "ghost-widget"])
-    contributions = PluginContributions(inspect_widgets=(_widget(),))
-
-    assert _gated(undeclared, WIDGETS_KEY, contributions) is None
-    assert _gated(missing, WIDGETS_KEY, contributions) is None
-    assert [name for name, _ in reported()] == ["undeclared", "missing"]
-    assert "is provided but not declared" in str(reported()[0][1])
-    assert "is declared but the plugin does not provide it" in str(reported()[1][1])
-
-
 def test_a_plugin_without_a_manifest_is_refused(tmp_path: Path, reported: Failures) -> None:
     plugin_dir = tmp_path / "demo"
     plugin_dir.mkdir()
@@ -217,16 +185,11 @@ def test_a_plugin_without_a_manifest_is_refused(tmp_path: Path, reported: Failur
 
 
 def test_a_face_is_gated_only_on_its_own_key(tmp_path: Path, reported: Failures) -> None:
-    # The manifest declares a widget the metrics face cannot see, and a metric the widgets face
-    # cannot see: each face still loads, because it is judged on its own key alone.
+    # The metrics face can load without checking the declared SDK namespace.
     plugin_dir = tmp_path / "demo"
-    _write_manifest(plugin_dir, metrics=["demo_metric"], inspectWidgets=["demo-widget"])
+    _write_manifest(plugin_dir, metrics=["demo_metric"], sdkNamespaces=["example"])
 
     assert _gated(plugin_dir, METRICS_KEY, PluginContributions(metrics=(_metric(),))) is not None
-    assert (
-        _gated(plugin_dir, WIDGETS_KEY, PluginContributions(inspect_widgets=(_widget(),)))
-        is not None
-    )
     assert reported() == []
 
 
@@ -236,13 +199,10 @@ def test_a_face_is_gated_only_on_its_own_key(tmp_path: Path, reported: Failures)
 def test_admission_fills_the_plugin_over_what_a_spec_claims(
     reported: Failures,
 ) -> None:
-    registry, refused = build_data_registry(
-        [_face("demo", (_metric(plugin="other"),), (_widget(plugin="other"),))]
-    )
+    registry, refused = build_data_registry([_face("demo", (_metric(plugin="other"),))])
 
     assert refused == []
     assert [(m.name, m.plugin) for m in registry.metrics()] == [("demo_metric", "demo")]
-    assert [(w.id, w.plugin) for w in registry.inspect_widgets()] == [("demo-widget", "demo")]
     assert reported() == []
 
 
@@ -250,7 +210,7 @@ def test_a_duplicate_metric_across_plugins_refuses_the_second_and_keeps_the_firs
     reported: Failures,
 ) -> None:
     first = _face("first", (_metric("shared"), _metric("first_only")))
-    second = _face("second", (_metric("second_only"), _metric("shared")), (_widget(),))
+    second = _face("second", (_metric("second_only"), _metric("shared")))
 
     registry, refused = build_data_registry([first, second])
 
@@ -259,8 +219,6 @@ def test_a_duplicate_metric_across_plugins_refuses_the_second_and_keeps_the_firs
         ("shared", "first"),
         ("first_only", "first"),
     ]
-    # Atomic: the refused plugin's other metric and its widget are not admitted either.
-    assert list(registry.inspect_widgets()) == []
     assert [name for name, _ in reported()] == ["second"]
     assert "'shared'" in str(reported()[0][1])
 
@@ -287,22 +245,6 @@ def test_an_invalid_query_template_refuses_the_plugin(
     assert refused == ["bad_plugin"]
     assert [m.name for m in registry.metrics()] == ["good"]
     assert [name for name, _ in reported()] == ["bad_plugin"]
-
-
-def test_a_duplicate_widget_id_refuses_the_plugin(
-    reported: Failures,
-) -> None:
-    registry, refused = build_data_registry(
-        [
-            _face("dup", (_metric("dup_metric"),), (_widget("same"), _widget("same"))),
-            _face("ok", widgets=(_widget("same"),)),
-        ]
-    )
-
-    assert refused == ["dup"]
-    assert list(registry.metrics()) == []
-    assert [(w.plugin, w.id) for w in registry.inspect_widgets()] == [("ok", "same")]
-    assert [name for name, _ in reported()] == ["dup"]
 
 
 def test_input_order_is_preserved_and_none_entries_are_skipped(
@@ -334,17 +276,9 @@ def test_a_refusal_is_reported_through_load_report(
 # ── the shipped plugins ───────────────────────────────────────────────────────
 
 
-_SHIPPED_METRICS = (
-    ("meiva_fleet", fleet_metrics),
-    ("meiva_memory", memory_metrics),
-)
-
-
-@pytest.mark.parametrize(("plugin", "module"), _SHIPPED_METRICS)
-def test_shipped_metrics_faces_declare_admitted_specs(
-    plugin: str, module: ModuleType, reported: Failures
-) -> None:
-    face = load_declaration(plugin, lambda: module)
+def test_shipped_metrics_face_declares_admitted_specs(reported: Failures) -> None:
+    plugin = "meiva_memory"
+    face = load_declaration(plugin, lambda: memory_metrics)
     assert face is not None
     declared = face.contributions.metrics
     assert declared
@@ -354,31 +288,4 @@ def test_shipped_metrics_faces_declare_admitted_specs(
     assert refused == []
     assert [m.name for m in registry.metrics()] == [m.name for m in declared]
     assert {m.plugin for m in registry.metrics()} == {plugin}
-    assert reported() == []
-
-
-def test_shipped_metrics_faces_do_not_collide(
-    reported: Failures,
-) -> None:
-    faces = [load_declaration(plugin, lambda m=module: m) for plugin, module in _SHIPPED_METRICS]
-
-    _, refused = build_data_registry(faces)
-
-    assert refused == []
-    assert reported() == []
-
-
-def test_the_fleet_inspector_face_declares_an_admitted_widget(
-    reported: Failures,
-) -> None:
-    face = load_declaration("meiva_fleet", lambda: fleet_inspector)
-    assert face is not None
-    assert face.contributions.inspect_widgets
-
-    registry, refused = build_data_registry([face])
-
-    assert refused == []
-    assert [(w.plugin, w.id) for w in registry.inspect_widgets()] == [
-        ("meiva_fleet", w.id) for w in face.contributions.inspect_widgets
-    ]
     assert reported() == []

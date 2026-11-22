@@ -4,9 +4,7 @@ import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Query, Request
@@ -25,14 +23,13 @@ from base.api_contracts.agent_contract import (
     ProbedHarnessModel,
 )
 from base.db import Database
-from base.db.rows import query_all, query_one
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.launch.forward import forward_to_home_machine
 from gateway.http.config import (
-    GatewayConfig,
     gateway_config,
     gateway_ensure_harnesses,
     gateway_rpc,
@@ -40,14 +37,11 @@ from gateway.http.config import (
 )
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import HarnessAvailability
-from ops.cluster.rpc import RpcClient
 from ops.lifecycle.delivery import deliver_interrupt
 from ops.rpc_schemas import (
     CompactAgentResponse,
     InterruptAgentRequest,
     InterruptAgentResponse,
-    OpenTaskRow,
-    OpenTasksHint,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -61,12 +55,9 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
-_OPEN_TASKS_SHOWN = 5
-
-
 @router.post(
     "/api/agents/{agent_id}/terminate",
-    description="Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is recorded on the agent (queued as pending chat for\nlater resurrection and carried on the termination marker/audit without\ncausing another model turn) and included in the `agent_terminated` system\nnote delivered to the agent's nearest living birth ancestor (skipped only\nwhen the caller itself is that nearest living ancestor). Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404. Every\ntermination closes the agent's shell sessions on its home machine, silently;\n`shell_sessions` says whether that already happened (`now`, with the killed\nids) or happens right before a graceful termination applies (`at_exit`).\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.\n\n`attached` reports the harness registration the agent's home machine held when the request was handled: the row the harness attachment proves against, carrying the controller pid and that row's expiry, or null when there is none or it could not be read. Also advisory — a controller still driving the agent never blocks the terminate, and the caller decides what the fact means.",
+    description="Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is recorded on the agent (queued as pending chat for\nlater resurrection and carried on the termination marker/audit without\ncausing another model turn) and included in the `agent_terminated` system\nnote delivered to the agent's nearest living birth ancestor (skipped only\nwhen the caller itself is that nearest living ancestor). Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404. Every\ntermination closes the agent's shell sessions on its home machine, silently;\n`shell_sessions` says whether that already happened (`now`, with the killed\nids) or happens right before a graceful termination applies (`at_exit`).\n\n`attached` reports the harness registration the agent's home machine held when the request was handled: the row the harness attachment proves against, carrying the controller pid and that row's expiry, or null when there is none or it could not be read. Also advisory — a controller still driving the agent never blocks the terminate, and the caller decides what the fact means.",
 )
 async def post_agent_terminate(
     agent_id: int,
@@ -74,48 +65,21 @@ async def post_agent_terminate(
     body: TerminateAgentRequest = Body(default_factory=TerminateAgentRequest),  # noqa: B008
 ) -> TerminateAgentResponse:
 
-    return await terminate_agent_with_open_tasks(
-        agent_id,
-        body,
-        gateway_state(request).db_pool,
-        db=gateway_state(request).db,
-        config=gateway_state(request).gateway_config,
-        rpc=gateway_rpc(request),
-    )
-
-
-async def terminate_agent_with_open_tasks(
-    agent_id: int,
-    body: TerminateAgentRequest,
-    pool: ConnectionPool,
-    *,
-    db: Database,
-    config: GatewayConfig,
-    rpc: RpcClient,
-) -> TerminateAgentResponse:
-
+    state = gateway_state(request)
+    pool = state.db_pool
     forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/terminate",
         body.model_dump(),
-        db=db,
+        db=state.db,
         pool=pool,
-        config=config,
-        rpc=rpc,
+        config=state.gateway_config,
+        rpc=gateway_rpc(request),
     )
     response = TerminateAgentResponse.model_validate(forwarded)
     if response.shell_sessions is not None and response.shell_sessions.killed:
         await _drop_killed_shell_ttls(pool, agent_id, response.shell_sessions.killed)
-    try:
-        hint = await asyncio.to_thread(_open_tasks_hint_blocking, pool, agent_id)
-    except (psycopg.Error, PoolTimeout) as exc:
-        _log.error(
-            "[lifecycle] open-tasks hint for terminate of agent %s failed: %r",
-            agent_id,
-            exc,
-        )
-        return response
-    return response.model_copy(update={"open_tasks": hint})
+    return response
 
 
 async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: list[int]) -> None:
@@ -140,16 +104,6 @@ async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: l
 
 
 # meiva:note
-# An in-progress task the agent owns, as the restart hint lists it.
-@dataclass(frozen=True)
-class _OpenTaskDbRow:
-    id: int
-    title: str
-    status: Literal["in_progress"]
-    updated_at: datetime
-
-
-# meiva:note
 # The agent's status and stored harness; `harness` is NULL for a row born before the column.
 @dataclass(frozen=True)
 class _AgentRunRow:
@@ -164,32 +118,6 @@ class _RestartMetaRow:
     status: str
     harness: object
     machine: str
-
-
-def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksHint | None:
-
-    with pool.connection() as conn:
-        rows = query_all(
-            conn,
-            _OpenTaskDbRow,
-            "SELECT id, title, status, updated_at FROM agent_tasks "
-            "WHERE owner = %s AND status = 'in_progress' "
-            "ORDER BY updated_at DESC, id DESC",
-            (agent_id,),
-        )
-    if not rows:
-        return None
-    shown = rows[:_OPEN_TASKS_SHOWN]
-    return OpenTasksHint(
-        count=len(rows),
-        tasks=[
-            OpenTaskRow(
-                id=row.id, title=row.title, status=row.status, updated_at=row.updated_at.isoformat()
-            )
-            for row in shown
-        ],
-        more=len(rows) - len(shown),
-    )
 
 
 @router.post(

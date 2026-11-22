@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +19,6 @@ WORKFLOW = ROOT / ".github/workflows/attribution-gate.yml"
 TEMPLATE = ROOT / ".github/PULL_REQUEST_TEMPLATE.md"
 STEP = "Reconcile the description comments"
 MARKER = "<!-- meiva-attribution-gate -->"
-CLOSES = "<!-- meiva-closes-task -->"
 REPO = "owner/repository"
 BOT = "github-actions[bot]"
 
@@ -207,7 +205,7 @@ def deleted(run: Run) -> list[list[str]]:
 
 
 def test_a_meiva_branch_without_attribution_gets_one_comment(tmp_path: Path) -> None:
-    run = run_gate(tmp_path, body="## What and why\n\nSomething changed.\n\nCloses-task: none\n")
+    run = run_gate(tmp_path, body="## What and why\n\nSomething changed.\n\n")
     assert run.result.returncode == 0, run.result.stderr
     assert len(run.comments) == 1
     assert MARKER in str(run.comments[0]["body"])
@@ -215,9 +213,7 @@ def test_a_meiva_branch_without_attribution_gets_one_comment(tmp_path: Path) -> 
 
 
 def test_an_agent_id_gets_no_comment(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path, body="What changed.\n\nCo-authored-by: Meiva #7317\nCloses-task: none\n"
-    )
+    run = run_gate(tmp_path, body="What changed.\n\nCo-authored-by: Meiva #7317\n")
     assert run.result.returncode == 0, run.result.stderr
     assert run.comments == []
     assert not posted(run)
@@ -227,14 +223,14 @@ def test_an_agent_id_gets_no_comment(tmp_path: Path) -> None:
 # The template's own `<id>` placeholder is not attribution: a comment that accepted it would
 # announce itself satisfied for every pull request filed from the template.
 def test_the_agent_id_needs_digits(tmp_path: Path) -> None:
-    run = run_gate(tmp_path, body="Co-authored-by: Meiva #<id>\nCloses-task: none\n")
+    run = run_gate(tmp_path, body="Co-authored-by: Meiva #<id>\n")
     assert len(run.comments) == 1
 
 
 def test_an_added_agent_id_deletes_the_comment(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="Fixed.\n\nCo-authored-by: Meiva #7317\nCloses-task: none\n",
+        body="Fixed.\n\nCo-authored-by: Meiva #7317\n",
         comments=(bot_comment(f"{MARKER}\nThis pull request names no agent.\n"),),
     )
     assert run.result.returncode == 0, run.result.stderr
@@ -245,7 +241,7 @@ def test_an_added_agent_id_deletes_the_comment(tmp_path: Path) -> None:
 def test_the_human_exit_deletes_the_comment(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="Owner's own work.\n\nMeiva: none\nCloses-task: none\n",
+        body="Owner's own work.\n\nMeiva: none\n",
         comments=(bot_comment(f"{MARKER}\n"),),
     )
     assert run.result.returncode == 0, run.result.stderr
@@ -255,7 +251,7 @@ def test_the_human_exit_deletes_the_comment(tmp_path: Path) -> None:
 def test_the_human_exit_tolerates_padding_and_case(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="Owner's own work.\n\n   MEIVA:  None   \nCloses-task: none\n",
+        body="Owner's own work.\n\n   MEIVA:  None   \n",
         comments=(bot_comment(f"{MARKER}\n"),),
     )
     assert run.comments == []
@@ -269,15 +265,13 @@ def test_a_description_that_merely_mentions_the_exit_still_gets_the_comment(
 ) -> None:
     run = run_gate(
         tmp_path,
-        body="The owner wrote this, so it uses the `Meiva: none` line as the template says.\nCloses-task: none\n",
+        body="The owner wrote this, so it uses the `Meiva: none` line as the template says.\n",
     )
     assert len(run.comments) == 1
 
 
 def test_a_branch_outside_the_convention_gets_no_comment(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path, body="No attribution here.\n\nCloses-task: none\n", head_ref="fix-the-gate"
-    )
+    run = run_gate(tmp_path, body="No attribution here.\n\n", head_ref="fix-the-gate")
     assert run.result.returncode == 0, run.result.stderr
     assert run.comments == []
 
@@ -285,7 +279,7 @@ def test_a_branch_outside_the_convention_gets_no_comment(tmp_path: Path) -> None
 def test_a_branch_outside_the_convention_removes_a_leftover_comment(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="No attribution here.\n\nCloses-task: none\n",
+        body="No attribution here.\n\n",
         head_ref="fix-the-gate",
         comments=(bot_comment(f"{MARKER}\n"),),
     )
@@ -295,7 +289,7 @@ def test_a_branch_outside_the_convention_removes_a_leftover_comment(tmp_path: Pa
 def test_two_comments_become_one_and_keep_the_first(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="No attribution here.\n\nCloses-task: none\n",
+        body="No attribution here.\n\n",
         comments=(bot_comment(f"{MARKER}\nfirst\n"), bot_comment(f"{MARKER}\nsecond\n")),
     )
     assert [comment["id"] for comment in run.comments] == [1000]
@@ -304,7 +298,7 @@ def test_two_comments_become_one_and_keep_the_first(tmp_path: Path) -> None:
 def test_an_unrelated_comment_is_left_alone(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="Fixed.\n\nCo-authored-by: Meiva #7317\nCloses-task: none\n",
+        body="Fixed.\n\nCo-authored-by: Meiva #7317\n",
         comments=(("a-person", "Unrelated review note.\n"),),
     )
     assert [comment["body"] for comment in run.comments] == ["Unrelated review note.\n"]
@@ -316,7 +310,7 @@ def test_an_unrelated_comment_is_left_alone(tmp_path: Path) -> None:
 def test_a_comment_quoting_the_marker_is_left_alone(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="Fixed.\n\nCo-authored-by: Meiva #7317\nCloses-task: none\n",
+        body="Fixed.\n\nCo-authored-by: Meiva #7317\n",
         comments=(("a-person", f"{MARKER}\nWhat does this mean?\n"),),
     )
     assert [comment["body"] for comment in run.comments] == [f"{MARKER}\nWhat does this mean?\n"]
@@ -325,7 +319,7 @@ def test_a_comment_quoting_the_marker_is_left_alone(tmp_path: Path) -> None:
 def test_a_second_run_keeps_the_single_comment(tmp_path: Path) -> None:
     run = run_gate(
         tmp_path,
-        body="No attribution here.\n\nCloses-task: none\n",
+        body="No attribution here.\n\n",
         comments=(bot_comment(f"{MARKER}\nThis pull request names no agent.\n"),),
     )
     assert [comment["id"] for comment in run.comments] == [1000]
@@ -340,7 +334,6 @@ def test_the_committed_template_does_not_satisfy_the_gate(tmp_path: Path) -> Non
     run = run_gate(tmp_path, body=TEMPLATE.read_text())
     bodies = [str(comment["body"]) for comment in run.comments]
     assert any(MARKER in body for body in bodies)
-    assert any(CLOSES in body for body in bodies)
 
 
 # meiva:note
@@ -372,9 +365,7 @@ def test_the_template_requires_the_attribution_line() -> None:
 # A shared account cannot prove who wrote a branch, so a failed call here may not become a red
 # check: every step of the job must continue on error.
 def test_a_failed_api_call_cannot_fail_the_job(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path, body="No attribution here.\n\nCloses-task: none\n", api_result="failure"
-    )
+    run = run_gate(tmp_path, body="No attribution here.\n\n", api_result="failure")
     assert run.result.returncode != 0
     workflow = yaml.safe_load(WORKFLOW.read_text())
     steps = workflow["jobs"]["attribution"]["steps"]
@@ -399,121 +390,3 @@ def test_the_job_runs_no_action_and_only_comments() -> None:
     steps = workflow["jobs"]["attribution"]["steps"]
     assert not [step for step in steps if "uses" in step]
     assert "set -euo pipefail" in steps[0]["run"]
-
-
-def closes_comments(run: Run) -> list[dict[str, object]]:
-    return [comment for comment in run.comments if CLOSES in str(comment["body"])]
-
-
-def test_a_description_without_the_closes_line_gets_one_comment(tmp_path: Path) -> None:
-    run = run_gate(tmp_path, body="What changed.\n\nCo-authored-by: Meiva #7317\n")
-    assert run.result.returncode == 0, run.result.stderr
-    assert len(closes_comments(run)) == 1
-    assert "Closes-task: #<task-id>" in posted(run)[0][-1]
-
-
-@pytest.mark.parametrize(
-    "line", ["Closes-task: #6076", "Closes-task: none", "   closes-task:   #7   "]
-)
-def test_the_closes_line_satisfies_the_gate(tmp_path: Path, line: str) -> None:
-    run = run_gate(tmp_path, body=f"What changed.\n\nCo-authored-by: Meiva #7317\n{line}\n")
-    assert closes_comments(run) == []
-
-
-# meiva:note
-# Only a line of its own states an intention. The old `Task:` field, a bare heading and a sentence
-# that mentions the field are all references, and a reference cannot tell a finished task from one
-# this change only touches.
-@pytest.mark.parametrize(
-    "body",
-    [
-        "What changed.\n\nCo-authored-by: Meiva #7317\nTask: #6076\n",
-        "What changed.\n\nCo-authored-by: Meiva #7317\nCloses-task: \n",
-        "What changed.\n\nCo-authored-by: Meiva #7317\nThis closes-task: #12 inline.\n",
-    ],
-)
-def test_a_reference_to_the_task_is_not_a_close(tmp_path: Path, body: str) -> None:
-    run = run_gate(tmp_path, body=body)
-    assert len(closes_comments(run)) == 1
-
-
-def test_adding_the_closes_line_deletes_only_its_own_comment(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path,
-        body="What changed.\n\nCloses-task: #6076\n",
-        comments=(
-            bot_comment(f"{MARKER}\nThis pull request names no agent.\n"),
-            bot_comment(f"{CLOSES}\nThis pull request states no closing task.\n"),
-        ),
-    )
-    assert [str(comment["body"]) for comment in run.comments] == [
-        f"{MARKER}\nThis pull request names no agent.\n"
-    ]
-    assert len(deleted(run)) == 1
-
-
-def test_a_second_run_of_the_closes_gate_keeps_the_single_comment(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path,
-        body="What changed.\n\nCo-authored-by: Meiva #7317\n",
-        comments=(bot_comment(f"{CLOSES}\nThis pull request states no closing task.\n"),),
-    )
-    assert closes_comments(run) and len(closes_comments(run)) == 1
-    assert not posted(run)
-    assert not deleted(run)
-
-
-def test_the_template_requires_the_closes_line() -> None:
-    assert "Closes-task: #<id>" in TEMPLATE.read_text()
-
-
-# meiva:note
-# A fenced block is a quotation: a description that pastes the template or a document carries the
-# line without stating anything, and reading it would let a documentation change announce a task it
-# never touched.
-def test_a_closes_line_inside_a_fence_is_a_quotation(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path,
-        body="What changed.\n\n```text\nCloses-task: #6076\n```\n",
-    )
-    assert len(closes_comments(run)) == 1
-
-
-def test_a_tilde_fence_is_a_quotation_too(tmp_path: Path) -> None:
-    run = run_gate(tmp_path, body="What changed.\n\n~~~\nCloses-task: none\n~~~\n")
-    assert len(closes_comments(run)) == 1
-
-
-# meiva:note
-# Two different values state two different intentions, and a reader cannot tell which one the merge
-# performs: ambiguity is not a satisfied field.
-def test_two_different_closes_lines_stay_ambiguous(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path,
-        body="What changed.\n\nCloses-task: #6076\nCloses-task: #6077\n",
-    )
-    assert len(closes_comments(run)) == 1
-
-
-def test_the_same_closes_line_twice_is_one_statement(tmp_path: Path) -> None:
-    run = run_gate(
-        tmp_path,
-        body="What changed.\n\nCloses-task: #6076\nCloses-task: #6076\nCo-authored-by: Meiva #7317\n",
-    )
-    assert closes_comments(run) == []
-
-
-# meiva:note
-# CommonMark closes a fence only with the same character and a run at least as long as the opener, so
-# a `~~~` line inside a ``` block does not end it. A description that quotes an example of both kinds
-# would otherwise announce the task its example names.
-def test_a_tilde_line_inside_a_backtick_fence_does_not_close_it(tmp_path: Path) -> None:
-    body = "What changed.\n\n````markdown\n~~~\nCloses-task: #1234\n```\n````\n"
-    run = run_gate(tmp_path, body=body)
-    assert len(closes_comments(run)) == 1
-
-
-def test_a_shorter_run_does_not_close_the_fence(tmp_path: Path) -> None:
-    body = "What changed.\n\n````text\nCloses-task: #1234\n```\n````\n"
-    run = run_gate(tmp_path, body=body)
-    assert len(closes_comments(run)) == 1

@@ -76,6 +76,7 @@ _EMPTY_INDEX: dict[str, object] = {
     "per_agent_fields": [],
     "sensitive_fields": [],
     "required_fields": [],
+    "builtin_cluster_config_fields": {},
 }
 
 
@@ -122,8 +123,9 @@ def _ensure_index_present() -> None:
 # declarations, never from the environment.
 from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
+_scratch_home: Path | None = None
 if __name__ == "__main__":
-    enter_scratch_home()
+    _scratch_home = enter_scratch_home()
 # meiva:note
 # A hook runs this file, and the scratch-home rule keeps every `base.*` import below `enter_scratch_home()`: this one is only needed by `_ensure_index_present`, which runs next.
 from base.host.boundary.untyped import object_of  # noqa: E402
@@ -139,6 +141,8 @@ from base.config.config_registry import (  # noqa: E402 — must follow the boot
 # meiva:note
 # `FieldRef.info` is the registry's narrow `FieldInfoLike` view, not pydantic's `FieldInfo`, so the signatures here name the registry's types to say what they read of an entry instead of reaching for pydantic's `Any`-typed attributes.
 from base.config.profiles import FieldInfoLike, FieldRef  # noqa: E402
+from base.host.boundary.json_values import is_object_dict  # noqa: E402
+from base.packages.plugins.config_registration import plugin_bootstrap_config  # noqa: E402
 
 
 class LiteField(NamedTuple):
@@ -423,7 +427,19 @@ def _collect() -> tuple[
     return lite, domains, aliases, scopes, capabilities, per_agent, _sensitive_fields(reg), required
 
 
-def render() -> str:
+def _builtin_cluster_config_fields(*, home: Path) -> dict[str, list[str]]:
+    packet = object_of(json.loads, plugin_bootstrap_config(home=home))
+    if not is_object_dict(packet):
+        raise TypeError("built-in plugin cluster config must be a JSON object")
+    fields: dict[str, list[str]] = {}
+    for plugin, values in packet.items():
+        if not is_object_dict(values):
+            raise TypeError(f"built-in cluster config for {plugin!r} must be a JSON object")
+        fields[plugin] = sorted(values)
+    return fields
+
+
+def render(*, home: Path) -> str:
     """Render the whole config-lite index as JSON (byte-stable; `--check` diffs it)."""
     lite, domains, aliases, scopes, capabilities, per_agent, sensitive, required = _collect()
     payload: dict[str, object] = {
@@ -439,12 +455,13 @@ def render() -> str:
         "per_agent_fields": per_agent,
         "sensitive_fields": sensitive,
         "required_fields": required,
+        "builtin_cluster_config_fields": _builtin_cluster_config_fields(home=home),
     }
     return json.dumps(payload, indent=2) + "\n"
 
 
-def main(*, check: bool = False, out: str | None = None) -> int:
-    rendered = render()
+def main(*, home: Path, check: bool = False, out: str | None = None) -> int:
+    rendered = render(home=home)
     target = Path(out) if out else _OUT
     if check:
         current = target.read_text(encoding="utf-8")
@@ -461,6 +478,6 @@ def main(*, check: bool = False, out: str | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and _scratch_home is not None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    sys.exit(main(check="--check" in sys.argv, out=args[0] if args else None))
+    sys.exit(main(home=_scratch_home, check="--check" in sys.argv, out=args[0] if args else None))

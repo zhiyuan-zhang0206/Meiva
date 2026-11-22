@@ -29,6 +29,8 @@ _ROSTER = {
 @dataclass
 class Gateway:
     url: str = ""
+    bootstrap_status: int = 200
+    bootstrap_payload: dict[str, str] = field(default_factory=dict[str, str])
     secret: str = field(default_factory=lambda: uuid.uuid4().hex)
     calls: list[tuple[str, str, dict[str, str], object]] = field(
         default_factory=list[tuple[str, str, dict[str, str], object]]
@@ -37,6 +39,8 @@ class Gateway:
     def respond(self, method: str, path: str) -> tuple[int, object]:
         if (method, path) == ("GET", "/api/cluster/roster?fresh=true"):
             return 200, [{**_ROSTER, "not_in_public_summary": "discard"}]
+        if (method, path) == ("GET", "/api/bootstrap"):
+            return self.bootstrap_status, self.bootstrap_payload
         return 404, {"error": "unexpected request"}
 
 
@@ -123,3 +127,27 @@ def test_gateway_program_refuses_unknown_verb_without_calling_gateway(
     assert "usage: fleet_gateway.py roster" in proc.stderr
     assert gateway.calls == []
     assert gateway.secret not in proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("status", [200, 500])
+def test_bootstrap_program_authenticates_and_leaves_the_payload_out_of_logs(
+    tmp_path: Path, gateway: Gateway, status: int
+) -> None:
+    gateway.bootstrap_status = status
+    gateway.bootstrap_payload = {
+        "MEIVA_PLUGIN_CLUSTER_CONFIG": json.dumps(
+            {
+                "lm_typesafe": {"local_endpoint": "", "local_models": {}},
+                "meiva_fleet": {"reduce_context_switch": True},
+                "meiva_usage": {"collectors": []},
+            }
+        ),
+        "PROVIDER_KEY": "fixture-marker-not-for-logs",
+    }
+    proc = run_program(tmp_path, gateway, "bootstrap")
+    assert (proc.returncode == 0) is (status == 200), proc.stderr
+    [(method, path, headers, body)] = gateway.calls
+    assert (method, path, body) == ("GET", "/api/bootstrap", None)
+    assert headers["authorization"] == f"Bearer {gateway.secret}"
+    assert gateway.secret not in proc.stdout + proc.stderr
+    assert "fixture-marker-not-for-logs" not in proc.stdout + proc.stderr

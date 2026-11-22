@@ -47,7 +47,7 @@ export interface CardConfig {
   // meiva:note
   // Default body visibility within an opened TurnBlock, live or settled alike (user ruling
   // 2026-11-22): only the agent's text output (`agent_chat`) opens by default; every other
-  // secondary card (attach, system inbound, notes, memory, lifecycle, tasks, notices, errors)
+  // secondary card (attach, system inbound, notes, memory, lifecycle, notices, errors)
   // starts collapsed.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly fixedDefault: boolean;

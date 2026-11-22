@@ -2,9 +2,7 @@
 
 Polls `agents` rows whose label is unset (NULL or empty string — the two
 are the same "not set" state) and not user-owned every second, takes the
-first request-bearing inbound as the prompt — a chat message, or a
-task-tagged system note (task assignment briefs arrive as system notes
-since the 2026-08-27 task-notification change) — and calls
+first chat inbound as the prompt and calls
 `generate_label_async` to generate a short name. Fully decoupled from
 the Gateway; can be deployed independently.
 
@@ -113,18 +111,6 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return labeler_endpoint(config, runtime=runtime).pidfile
 
 
-# The inbound condition a label prompt may come from: a chat peer message,
-# or a system note carrying a task notification (note_tag='task'). Task
-# assignment briefs — the delegator's request a fresh worker exists for —
-# have arrived as system notes since 2026-08-27 (Task #1838); a worker whose
-# only inbound is its assignment would otherwise never get a labelable
-# prompt. Heartbeat / impersonation / lifecycle notes carry other or no
-# note_tag and stay excluded.
-_PROMPT_INBOUND_CONDITION = (
-    "(im.kind = 'chat' OR (im.kind = 'system_note' AND im.payload->>'note_tag' = 'task'))"
-)
-
-
 def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[int, str | None]]:
     """Poll up to 10 newest agents that still need a label, returning each
     `(agent_id, first_eligible_prompt)`.
@@ -146,9 +132,9 @@ def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[in
     (task #3696 exception inventory).
     """
     cur.execute(
-        "SELECT t.id, "  # noqa: S608 — _PROMPT_INBOUND_CONDITION is a module constant, never user input
+        "SELECT t.id, "
         "(SELECT im.content FROM inbound_messages im "
-        f" WHERE im.agent_id = t.id AND {_PROMPT_INBOUND_CONDITION} "
+        " WHERE im.agent_id = t.id AND im.kind = 'chat' "
         " ORDER BY im.id LIMIT 1) AS prompt "
         "FROM agents t "
         "WHERE (t.label IS NULL OR t.label = '') "
@@ -156,7 +142,7 @@ def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[in
         "AND NOT (t.id = ANY(%s::bigint[])) "
         "AND EXISTS ("
         "  SELECT 1 FROM inbound_messages im "
-        f"  WHERE im.agent_id = t.id AND {_PROMPT_INBOUND_CONDITION}"
+        "  WHERE im.agent_id = t.id AND im.kind = 'chat'"
         ") "
         "ORDER BY t.id DESC "
         "LIMIT 10",

@@ -213,7 +213,7 @@ class PluginLoadFailed(TypedDict):
     One row per plugin that could not be loaded at a plugin-code load site
     reporting through this canonical reporter: `plugin.py` at host boot or
     graph build, `provider.py`, `services.py`, `setup.py`, a built-in
-    plugin's `metrics.py`, the gateway plugin inspector's `inspector.py`, a
+    plugin's `metrics.py`, or a
     dangling config entry. Two contained sites stay off this reporter (not
     oversights): `default_config.py` images surface as `error` entries on the
     plugin-update result, and the runtime config readers' dangling warning is

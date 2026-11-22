@@ -19,11 +19,9 @@ def fleet_registry() -> ExtensionRegistry:
 @contextmanager
 def installed_fleet_surface() -> Generator[ExtensionRegistry]:
     from meiva.sdk_surface import install
-    from meiva_builtins.plugins.meiva_fleet import agent_runtime, default_config, plugin
+    from meiva_builtins.plugins.meiva_fleet import agent_runtime, default_config
 
-    contributions = (
-        plugin.contribute().merged(default_config.contribute()).merged(agent_runtime.contribute())
-    )
+    contributions = default_config.contribute().merged(agent_runtime.contribute())
     with pytest.MonkeyPatch.context() as environment:
         _deliver_cluster_config(environment, default_config.FleetConfig())
         admitted = install.install(
@@ -40,7 +38,7 @@ def installed_fleet_surface() -> Generator[ExtensionRegistry]:
 def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
     from base.packages.plugins.config_registration import disk_image_path
     from meiva.sdk_surface import install
-    from meiva_builtins.plugins.meiva_fleet import agent_runtime, default_config, plugin
+    from meiva_builtins.plugins.meiva_fleet import agent_runtime, default_config
 
     path = disk_image_path("meiva_fleet", home=meiva_home())
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,9 +46,7 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
         default_config.FleetConfig(reduce_context_switch=reduce_context_switch).model_dump_json()
     )
     install.uninstall()
-    contributions = (
-        plugin.contribute().merged(default_config.contribute()).merged(agent_runtime.contribute())
-    )
+    contributions = default_config.contribute().merged(agent_runtime.contribute())
     with pytest.MonkeyPatch.context() as environment:
         _deliver_cluster_config(
             environment, default_config.FleetConfig(reduce_context_switch=reduce_context_switch)
@@ -63,9 +59,7 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
 
 
 # meiva:note
-# Deliver the projection the gateway would send: the declared cluster-scoped fields only. A
-# host-scoped field (the daemon gate, the reminder-window policy) stays on its own machine's image
-# and never travels in the boot packet.
+# Deliver the cluster-scoped configuration as it would appear in the gateway's bootstrap packet.
 def _deliver_cluster_config(environment: pytest.MonkeyPatch, config: object) -> None:
     import json
 

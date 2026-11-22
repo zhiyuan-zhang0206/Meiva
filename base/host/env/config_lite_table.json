@@ -500,7 +500,6 @@
     "sse_throttle_rate": "gateway",
     "status_probe_timeout_seconds": "gateway",
     "system_prompt_extra": "agent",
-    "task_maintenance_health_port": "services",
     "telemetry_grafana_url": "observability",
     "telemetry_loki_url": "observability",
     "telemetry_otlp_child_defer": "observability",
@@ -895,7 +894,6 @@
     "sse_throttle_rate": "MEIVA_SSE_THROTTLE_RATE",
     "status_probe_timeout_seconds": "MEIVA_STATUS_PROBE_TIMEOUT_SECONDS",
     "system_prompt_extra": "MEIVA_SYSTEM_PROMPT_EXTRA",
-    "task_maintenance_health_port": "MEIVA_TASK_MAINTENANCE_HEALTH_PORT",
     "telemetry_grafana_url": "MEIVA_TELEMETRY_GRAFANA_URL",
     "telemetry_loki_url": "MEIVA_TELEMETRY_LOKI_URL",
     "telemetry_otlp_child_defer": "MEIVA_TELEMETRY_OTLP_CHILD_DEFER",
@@ -1290,7 +1288,6 @@
     "sse_throttle_rate": "cluster-pinned",
     "status_probe_timeout_seconds": "cluster-pinned",
     "system_prompt_extra": "cluster-default",
-    "task_maintenance_health_port": "host",
     "telemetry_grafana_url": "cluster-pinned",
     "telemetry_loki_url": "cluster-pinned",
     "telemetry_otlp_child_defer": "cluster-pinned",
@@ -1685,7 +1682,6 @@
     "sse_throttle_rate": "gateway",
     "status_probe_timeout_seconds": "gateway",
     "system_prompt_extra": "agent-runner",
-    "task_maintenance_health_port": "gateway",
     "telemetry_grafana_url": "common",
     "telemetry_loki_url": "common",
     "telemetry_otlp_child_defer": "common",
@@ -1827,5 +1823,17 @@
   "required_fields": [
     "db_url",
     "redis_url"
-  ]
+  ],
+  "builtin_cluster_config_fields": {
+    "lm_typesafe": [
+      "local_endpoint",
+      "local_models"
+    ],
+    "meiva_fleet": [
+      "reduce_context_switch"
+    ],
+    "meiva_usage": [
+      "collectors"
+    ]
+  }
 }

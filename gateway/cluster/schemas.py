@@ -133,11 +133,9 @@ class MachinePauseRequest(BaseModel):
 class MachinePauseResponse(BaseModel):
     """POST /api/cluster/machines/{name}/pause response — what the pause did.
 
-    The pause is the three-step operator act: drain (reassign in_progress
-    tasks owned by the machine's agents to the drain owner), terminate every
-    live agent on the machine (graceful via its ops server; agents whose
-    graceful terminate could not be enqueued — machine already unreachable —
-    are force-marked terminated in the shared DB), then set the pause latch.
+    The pause sets the admission latch, then force-terminates the machine's agents
+    through its ops server. When the server cannot take the request, the gateway
+    force-marks the agent terminated in the shared DB.
     `paused_at`/`pause_reason` are the row values after the latch write.
     Idempotent: pausing an already-paused machine terminates nothing (its
     agents are already terminated) and returns the existing latch values.
@@ -149,7 +147,6 @@ class MachinePauseResponse(BaseModel):
     paused: bool  # True = the machine now carries the pause latch
     terminated_agents: int  # killed + marked terminated via the machine's ops server
     force_marked_agents: int  # ops unreachable; row force-marked terminated in the DB
-    reassigned_tasks: int  # in_progress tasks drained to the drain owner
     paused_at: datetime | None = None
     pause_reason: str | None = None
 

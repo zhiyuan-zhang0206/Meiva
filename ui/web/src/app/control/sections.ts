@@ -70,7 +70,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "config-sdk", label: "Agent SDK", labelKey: "config-sdk" },
       { id: "config-agent-infra", label: "Agent DB & infra", labelKey: "config-agent-infra" },
       { id: "config-daemon-heartbeat", label: "Daemon: heartbeat", labelKey: "config-daemon-heartbeat" },
-      { id: "config-daemon-tasks", label: "Daemon: tasks & events", labelKey: "config-daemon-tasks" },
+      { id: "config-daemon-events", label: "Daemon: events", labelKey: "config-daemon-events" },
       { id: "config-gateway", label: "Gateway", labelKey: "config-gateway" },
       { id: "config-connection", label: "Connection", labelKey: "config-connection" },
       { id: "config-dataplane", label: "Data plane", labelKey: "config-dataplane" },

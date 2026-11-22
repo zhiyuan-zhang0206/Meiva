@@ -1,4 +1,4 @@
-"""SDK system notes retain agent attribution and task tags through actual Gateway routes."""
+"""SDK system notes retain agent attribution and explicit tags through actual Gateway routes."""
 
 from uuid import uuid4
 
@@ -19,7 +19,7 @@ from meiva.tests.fixtures.pin_agent import pin_agent
 
 
 class TestSendSystemNote:
-    def test_send_system_note_inserts_system_note_inbound_with_task_tag(
+    def test_send_system_note_inserts_system_note_inbound_with_explicit_tag(
         self,
         db_conn: psycopg.Connection,
         *,
@@ -28,7 +28,7 @@ class TestSendSystemNote:
         machine_identity: MachineIdentityReader,
     ) -> None:
         """send_system_note posts a kind='system_note' inbound (agent source +
-        task note tag) — never a peer chat row."""
+        explicit note tag) — never a peer chat row."""
         pin_agent(
             spawn_agent(
                 config_authority=config_authority,
@@ -40,7 +40,8 @@ class TestSendSystemNote:
 
         inbound_id = meiva.agents.send_system_note(
             peer_id,
-            'Task #1 "t" is now assigned to you (by agent #1).',
+            "Context was refreshed.",
+            tag="context",
             idempotency_key=str(uuid4()),
         )
         assert isinstance(inbound_id, int)
@@ -55,48 +56,8 @@ class TestSendSystemNote:
         content, kind, source, payload = rows[0]
         assert kind == "system_note"
         assert source == f"agent:{meiva.self.AGENT_ID}"
-        assert "assigned to you" in content
-        assert payload == {"note_tag": "task", "delivery_resurrect": True}
-
-    def test_send_system_note_preserves_explicit_task_id(
-        self,
-        db_conn: psycopg.Connection,
-        *,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        pin_agent(
-            spawn_agent(
-                config_authority=config_authority,
-                database_gate=database_gate,
-                local_machine=machine_identity,
-            )
-        )
-        peer_id = meiva.agents.spawn()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_tasks (title, description, created_by, owner) "
-                "VALUES ('task note target', 'd', 'user', %s) RETURNING id",
-                (peer_id,),
-            )
-            row = cur.fetchone()
-        assert row is not None
-        task_id = row[0]
-        db_conn.commit()
-
-        meiva.agents.send_system_note(
-            peer_id,
-            'Task #42 "t" is now assigned to you.',
-            task_id=task_id,
-            idempotency_key=str(uuid4()),
-        )
-
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT payload FROM inbound_messages WHERE agent_id = %s", (peer_id,))
-            row = cur.fetchone()
-        assert row is not None
-        assert row[0] == {"note_tag": "task", "task_id": task_id, "delivery_resurrect": True}
+        assert content == "Context was refreshed."
+        assert payload == {"note_tag": "context", "delivery_resurrect": True}
 
     def test_send_system_note_to_terminated_is_fine(
         self,
@@ -106,7 +67,7 @@ class TestSendSystemNote:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        """A note with resurrect=True (task assignment) reaches a terminated
+        """A note with resurrect=True reaches a terminated
         agent — auto-resurrect is the gateway delivery detail, the SDK just
         posts the note and returns its id."""
         pin_agent(
@@ -122,7 +83,7 @@ class TestSendSystemNote:
         db_conn.commit()
 
         inbound_id = meiva.agents.send_system_note(
-            peer_id, 'Task #1 "t" is now assigned to you.', idempotency_key=str(uuid4())
+            peer_id, "Context was refreshed.", tag="context", idempotency_key=str(uuid4())
         )
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
@@ -149,16 +110,21 @@ class TestSendSystemNote:
         )
         peer_id = meiva.agents.spawn()
 
-        # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
+        # Runtime value of `("Context was " "refreshed.",)`: implicit
         # concatenation plus trailing comma.
-        content: object = ("Task #1 is now assigned to you.",)
-        inbound_id = meiva.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        content: object = ("Context was refreshed.",)
+        inbound_id = meiva.agents.send_system_note(
+            peer_id,
+            content,  # pyright: ignore[reportArgumentType]
+            tag="context",
+            idempotency_key=str(uuid4()),
+        )
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
             rows = cur.fetchall()
         assert len(rows) == 1
-        assert rows[0][0] == "Task #1 is now assigned to you."
+        assert rows[0][0] == "Context was refreshed."
 
     def test_send_system_note_rejects_multi_element_content(
         self,
@@ -178,9 +144,14 @@ class TestSendSystemNote:
         )
         peer_id = meiva.agents.spawn()
 
-        content: object = ("Task #1 is now ", "assigned to you.")
+        content: object = ("Context was ", "refreshed.")
         with pytest.raises(TypeError, match="content must be a string"):
-            meiva.agents.send_system_note(peer_id, content, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            meiva.agents.send_system_note(
+                peer_id,
+                content,  # pyright: ignore[reportArgumentType]
+                tag="context",
+                idempotency_key=str(uuid4()),
+            )
 
     def test_send_system_note_to_nonexistent_raises(
         self,
@@ -198,4 +169,6 @@ class TestSendSystemNote:
             )
         )
         with pytest.raises(AgentNotFound):
-            meiva.agents.send_system_note(9999, "ghost", idempotency_key=str(uuid4()))
+            meiva.agents.send_system_note(
+                9999, "ghost", tag="context", idempotency_key=str(uuid4())
+            )

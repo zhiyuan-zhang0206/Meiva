@@ -15,7 +15,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_images import DiskPluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugins.extensions import EMPTY
 from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
@@ -50,12 +50,10 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:
-    from meiva_builtins.plugins.meiva_fleet import plugin as fleet
-
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
     install.install(
-        ExtensionRegistry((("meiva_fleet", fleet.contribute()),)),
+        EMPTY,
         catalog=model_catalog,
         authority=config_authority,
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
@@ -72,7 +70,7 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         )
     )
 
-    for module in ["shell", "files", "agents", "tasks"]:
+    for module in ["shell", "files", "agents"]:
         assert f"## meiva.{module}\n" in text
     for module in ["memory", "self", "ui", "schedules", "web", "shell.sessions"]:
         assert f"## meiva.{module}\n" not in text

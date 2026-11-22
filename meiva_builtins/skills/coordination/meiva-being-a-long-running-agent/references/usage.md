@@ -2,7 +2,7 @@
 
 Use `scripts/agent_usage.py` from this skill's directory on Meiva's Python, with
 cluster database access. It is independent of Fleet and never terminates peers.
-Choose IDs based on the work you intend to observe, not task ownership.
+Choose agents responsible for the work you intend to observe.
 
 ```sh
 python <skill-dir>/scripts/agent_usage.py \

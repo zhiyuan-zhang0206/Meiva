@@ -60,7 +60,6 @@ from cli.parsers.query import (
     add_events_parser,
     add_metrics_parser,
     add_stats_parser,
-    add_tasks_parser,
 )
 from cli.parsers.update import add_update_parser
 
@@ -99,7 +98,6 @@ def build_parser(
     add_events_parser(sub)
     add_metrics_parser(sub)
     add_stats_parser(sub)
-    add_tasks_parser(sub)
     add_jobs_parser(sub)
     add_logs_parser(sub)
     add_agents_parser(sub)

@@ -34,14 +34,14 @@ meiva.agents.send_message(spawner_id, "Done. Output at ~/path/to/result.md. Key 
 
 When you need something, say what happened, what you did (with the pointer), what
 you need, and what slips if they don't act. A plain delivery states the result and
-its path; it needs no ask. If it is only progress, write it to the task record or
+its path; it needs no ask. If it is only progress, write it in
 your working notes. Ask once; if the answer hasn't come, wait — don't resend.
 
 Report the **aggregate**, not raw lines. "Auth branch converging, one open question on token TTL" — not five collaborators' raw output. Your delegator aggregates across workers before reporting results to the user.
 
 Follow the brief's [single reporter contract](../SKILL.md#one-reporter-per-milestone).
 If the designated reporter already informed the agent that must act, do not
-forward that same milestone or duplicate it in the task log. New findings,
+forward that same milestone. New findings,
 blockers, changed results, and your eventual delivery still need reporting.
 
 ### To the User
@@ -76,6 +76,6 @@ The user is the only one who can authorize irreversible, outward-facing, or mone
 | Go silent when stuck | Report the blocker and what you need — immediately |
 | Send routine progress pings or bare acknowledgments | Stay silent between milestones; report milestones, blockers, completion, or a real need |
 | Wait for step-by-step instructions | Decide the how yourself; you were given a goal, not a recipe |
-| Bury a result in conversation text no one is sent | `send_message` your delegator and record it in the task's results |
+| Bury a result in conversation text no one is sent | `send_message` your delegator with the artifact path |
 | Ping the user with raw per-worker results | Roll results up to your delegator; go direct only for the user's decisions |
 | Idle after delivering, waiting to be terminated | Deliver, then end your own process — or explain why you must stay alive |

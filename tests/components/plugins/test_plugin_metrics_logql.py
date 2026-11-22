@@ -28,7 +28,7 @@ def _load_core() -> list[MetricSpec]:
 
 def test_shipped_plugin_metrics_are_logql() -> None:
     specs = registered_metrics()
-    assert len(specs) == 9
+    assert len(specs) == 7
     names = {spec.name for spec in specs}
     assert {
         "meiva_memory_recall_search_latency_ms",
@@ -54,13 +54,13 @@ def test_rendered_queries_target_the_event_stream() -> None:
 
 
 def test_agent_placeholder_renders_per_agent() -> None:
-    for spec in registered_metrics():
-        rendered = render_query(spec)
-        if "{{agent_id}}" in rendered:
-            assert "grafana" not in spec.output
-            agent_render = render_query(spec, agent_id=123)
-            assert "{{agent_id}}" not in agent_render
-            assert 'agent_id="123"' in agent_render
+    parameterized = [spec for spec in registered_metrics() if "{{agent_id}}" in render_query(spec)]
+    assert parameterized
+    for spec in parameterized:
+        assert "grafana" not in spec.output
+        agent_render = render_query(spec, agent_id=123)
+        assert "{{agent_id}}" not in agent_render
+        assert 'agent_id="123"' in agent_render
 
 
 def test_dashboard_json_matches_registrations() -> None:
@@ -169,7 +169,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
         _assert_dashboard_panel_matches_spec(panels_by_title[render_title(spec)], spec)
 
 
-def test_dashboard_has_142_loki_targets() -> None:
+def test_dashboard_has_141_loki_targets() -> None:
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -178,7 +178,7 @@ def test_dashboard_has_142_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 142
+    assert len(loki_targets) == 141
 
 
 def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:

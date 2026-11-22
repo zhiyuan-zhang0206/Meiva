@@ -9,7 +9,6 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from base.agents.incarnation.tests.test_runner_role import (
     assert_alert_writes_denied,
     exercise_pause_grants,
-    exercise_task_receipt_grants,
     exercise_understanding_node_grants,
     exercise_understanding_queue_grants,
     grant_runner,
@@ -21,7 +20,7 @@ from base.agents.incarnation.tests.test_runner_role import (
 )
 
 
-def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one grant-matrix litany; each line is one exercised surface
+def test_runner_grant_matrix(runner_db: str) -> None:
     """The design's grant matrix, exercised as meiva_runner over the wire."""
     grant_runner(runner_db)
 
@@ -72,16 +71,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # agents is gateway-written only: labels go through the gateway API
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))
-        # SDK write surfaces the runner process uses directly:
-        # meiva.tasks (INSERT + UPDATE) ...
-        conn.execute(
-            "INSERT INTO agent_tasks (title, description, created_by) VALUES ('t1', 'd', '123')"
-        )
-        conn.execute("UPDATE agent_tasks SET status = 'done' WHERE title = 't1'")
-        # DELETE stays table-scoped: the understanding-node reconciliation
-        # added one DELETE surface, not a blanket delete on writable tables.
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("DELETE FROM agent_tasks WHERE title = 't1'")
         # meiva:note
         # Persistent-shell ownership stays with the runner through terminal
         # cleanup: it creates and renews TTL rows, then deletes only rows whose
@@ -109,12 +98,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # table shipped without a runner grant and every pause_heartbeat
         # INSERT failed with InsufficientPrivilege)
         exercise_pause_grants(conn, agent_id)
-        # the task-receipt tombstones meiva.tasks.update/log/create append in
-        # their own transaction (operation-key admission and replay) —
-        # regression for the 2026-10-10 task-write outage, where the tables
-        # shipped without a runner grant and every receipt INSERT failed with
-        # InsufficientPrivilege
-        exercise_task_receipt_grants(conn, agent_id)
         # the understanding-layer build (INSERT + UPDATE + SELECT; the manual
         # first-run / ad-hoc regeneration path runs from the runner side —
         # task #3704)

@@ -11,6 +11,10 @@ import shlex
 from .host_commands import HOME, MEIVA, PROGRAM, PYTHON
 
 
+def bootstrap_command() -> str:
+    return f"{PROGRAM} bootstrap"
+
+
 def roster_command() -> str:
     return f"{PROGRAM} roster"
 

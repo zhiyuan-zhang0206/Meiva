@@ -57,7 +57,7 @@ silently winning.
 **Plugin directories are the deliberate exception: they stay underscore on
 disk** (`meiva_builtins/plugins/meiva_code/`), because they are real Python
 packages — `__init__.py`, `from . import _code_namespace`, and `python -m
-meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon` all require a legal
+meiva_builtins.plugins.meiva_memory` all require a legal
 module path. Name ≠ directory here: `identifier()` folds the namespace segment
 so the surface still reads `meiva-memory:consolidation` and `meiva-fleet`, and the skills a
 plugin carries are dash-named like any other.

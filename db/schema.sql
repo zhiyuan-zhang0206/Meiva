@@ -27,7 +27,7 @@
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
 --     its own label); machine_units and machines (unit registration);
 --     api_idempotency (runner /ops dedupe);
---     agent_tasks (task SDK lifecycle) and agent_shell_ttls (runner INSERT,
+--     agent_shell_ttls (runner INSERT,
 --     UPDATE and DELETE for persistent-shell creation, renewal, and terminal
 --     cleanup); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
@@ -315,7 +315,7 @@ CREATE TABLE inbound_messages (
     kind       TEXT NOT NULL DEFAULT 'chat'
                CONSTRAINT inbound_messages_kind_check CHECK (kind IN (
                    'chat',              -- conversation message from user / peer agent
-                   'system_note',       -- framework system notification (task assign/update/reminder); claim renders as a system note
+                   'system_note',       -- framework system notification; claim renders as a system note
                    'compact_summary',   -- written by agent meiva.compact(summary); on claim, directly replaces messages
                    'compact_request',   -- triggered by UI "/compact" / admin; on claim, runs the backend LLM to generate a summary, then replaces
                    'interrupt',         -- an external harness's interrupt request (the history note and the message are their own rows); claim halts to idle (agent stays alive, resumable)
@@ -846,64 +846,6 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
 -- lives in the Loki archive stream (parity-verified import, 365d retention),
 -- and the cold pg_dump archive is the long-term copy. The baseline omits the
 -- table so fresh databases contain only the current read models.
-
--- ─────────────── agent_tasks (the task registry) ───────────────
--- Persistent, process-decoupled work items agents hand off to each other.
--- owner / created_by name an agent by agents.id; created_by is TEXT because the
--- seeded root carries 'system' (and historical rows may carry 'user').
--- Ownership moves freely (a column, not derived from the spawn graph); parent_id
--- forms an arbitrary-depth subtask tree. Owner liveness is read from
--- agents_meta.status at query time, not tracked here.
-CREATE TABLE agent_tasks (
-    id          BIGSERIAL PRIMARY KEY,
-    parent_id   BIGINT REFERENCES agent_tasks(id),      -- parent task; every task descends from the root, so NULL marks only the root itself (task_registry.create() requires an explicit parent)
-    title       TEXT NOT NULL,                          -- short one-line name, shown in listings; renameable via update()/PATCH, unique among in_progress tasks (app-level check)
-    description TEXT NOT NULL,                          -- full detail of what to do; read before working
-    results     TEXT,                                   -- result log (what was done, output paths); replaced by update, appended by log
-    status      TEXT NOT NULL DEFAULT 'in_progress'
-                CHECK (status IN ('in_progress', 'done', 'cancelled')),
-    priority    TEXT NOT NULL DEFAULT 'P2'
-                CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),  -- stakes axis (P0 highest); orders the board within a status column and seeds a stall-escalation notice's priority
-    owner       BIGINT REFERENCES agents(id),           -- current owner agent; NULL only on the system root task (every other task always has an owner)
-    created_by  TEXT NOT NULL
-                CHECK (created_by ~ '^[0-9]+$' OR created_by IN ('system', 'user')),  -- original opener: an agent id, or 'system'/'user' for non-agent rows ('system' on the seeded root)
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the task last showed activity, and the reminder daemon's due clock (now() - updated_at); it moves on exactly the writes that restart the reminder window (Fleet task_reminder_reset_on: a change to the work, and by default a note), while a rename or a description edit leaves it (task #5311). The HTTP PATCH surface has no note channel and always moves it.
-    is_root          BOOLEAN NOT NULL DEFAULT FALSE,  -- the immortal system root task; all tasks descend from it
-    remind_interval_seconds  INTEGER DEFAULT 1800,  -- seconds until an idle task reminds its owner; default 30 min, capped at 24h. Reminders cannot be disabled: NULL only on the never-reminded root task.
-    last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
-    reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
-    escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by any write the reminder-window policy counts, so by default a note clears it too (task #5314; the user leg marks itself via its notice)
-    reminders_paused_until TIMESTAMPTZ  -- deadline until which the reminder and escalation passes skip this task; set through update() under Fleet task_reminder_pause_max_seconds (unset = this home cannot pause). A deadline at or before now() means "not paused": no separate flag (task #5311).
-);
-
--- The system root task is permanently 'in_progress': it is the tree anchor and
--- can never be completed, cancelled, or reopened (update()/PATCH reject it, and
--- this CHECK makes the state itself self-verifying against direct DB writes
--- too). Root-pinning only: regular tasks move freely among the three statuses,
--- but the root must never leave its permanent state.
-ALTER TABLE agent_tasks
-    ADD CONSTRAINT agent_tasks_root_status_in_progress
-    CHECK (NOT is_root OR status = 'in_progress');
-
-CREATE INDEX idx_agent_tasks_owner_status   ON agent_tasks (owner, status);
-CREATE INDEX idx_agent_tasks_parent         ON agent_tasks (parent_id);
-CREATE INDEX idx_agent_tasks_status_created ON agent_tasks (status, created_at);
-
--- No two in_progress tasks share a title — the app-level guards in
--- task_registry.create()/update() and the gateway PATCH give the friendly
--- error; this partial unique index is the database backstop (a concurrent
--- create/rename can slip past a pre-check). A title may repeat once the
--- earlier task leaves in_progress.
-CREATE UNIQUE INDEX agent_tasks_title_unique_in_progress ON agent_tasks (title) WHERE status = 'in_progress';
-
--- The root task: system-owned, permanently 'in_progress', parent of the cluster's
--- top-level tasks only. task_registry.create() requires an explicit parent,
--- and the root (id 1) is the one id callers pass for a top-level task.
--- Idempotent so re-bootstrapping is a no-op.
-INSERT INTO agent_tasks (title, description, results, status, created_by, is_root)
-SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'in_progress', 'system', TRUE
-WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root = TRUE);
 
 -- ─────────────── user_settings ───────────────
 -- Key-value store for frontend preferences (force-graph layout, view state).
@@ -2032,60 +1974,6 @@ CREATE INDEX agent_upload_batches_receiving_agent_idx
     ON agent_upload_batches (agent_id) WHERE receipt IS NULL;
 COMMENT ON TABLE agent_upload_batches IS
     'Historical silent native-image upload identities (nothing writes one now); receiving manifests keep reserving quota without expiry, ready receipts replay acceptance.';
-
-CREATE TABLE task_patch_receipts (
-    path TEXT NOT NULL,
-    operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 128),
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    result JSONB NOT NULL CHECK (jsonb_typeof(result) = 'object'),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (path, operation_key)
-);
-
-COMMENT ON TABLE task_patch_receipts IS
-    'Immutable task PATCH acceptance snapshots; retained independently of tasks and notifications.';
-
-CREATE TABLE task_update_receipts (
-    actor_agent_id BIGINT NOT NULL CHECK (actor_agent_id > 0),
-    task_id BIGINT NOT NULL CHECK (task_id > 0),
-    operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 128),
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (actor_agent_id, task_id, operation_key)
-);
-
-COMMENT ON TABLE task_update_receipts IS
-    'Immutable SDK task update/log commit tombstones; agent provenance scope, not authentication or notification execution receipts.';
-
-CREATE TABLE task_creation_receipts (
-    actor_agent_id BIGINT NOT NULL CHECK (actor_agent_id > 0),
-    operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 128),
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    result JSONB NOT NULL CHECK (jsonb_typeof(result) = 'object'),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (actor_agent_id, operation_key)
-);
-
-CREATE TABLE task_assignment_receipts (
-    operation_key TEXT PRIMARY KEY CHECK (char_length(operation_key) BETWEEN 1 AND 128),
-    request JSONB NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    result JSONB NOT NULL CHECK (
-        jsonb_typeof(result) = 'object'
-        AND result ?& ARRAY['task', 'agent_id', 'launch_attempt_id']
-        AND jsonb_typeof(result->'task') = 'object'
-        AND result->>'agent_id' ~ '^[1-9][0-9]*$'
-        AND result->>'launch_attempt_id' ~ '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
-    ),
-    birth_snapshot JSONB NOT NULL CHECK (
-        jsonb_typeof(birth_snapshot) = 'object'
-        AND birth_snapshot ?& ARRAY['machine', 'config_overlay', 'birth_config', 'preset_name', 'launch_attempt_id']
-        AND jsonb_typeof(birth_snapshot->'machine') = 'string'
-        AND jsonb_typeof(birth_snapshot->'birth_config') = 'object'
-    ),  -- 'preset_name' stays required by this merged CHECK; snapshots written after the preset removal (2026-10-17, task #5236) carry it as JSON null
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE task_assignment_receipts IS
-    'Immutable principal-scoped compound acceptance tombstones; no FK or automatic expiry.';
 
 CREATE TABLE agent_launch_retry_receipts (
     operation_key text PRIMARY KEY,

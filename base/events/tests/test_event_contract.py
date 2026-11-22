@@ -160,7 +160,6 @@ _DECLARED_PAYLOAD_KEYS = {
     "sdk_call": ("fn", "duration", "sample_rate", "detail"),
     "node_exit": ("count", "nodes"),
     "heartbeat_paused": ("duration_s",),
-    "task_update": ("status",),
     "passive_recall": ("body", "search_ms", "injected"),
     "hook_timing": ("hook_ms",),
     "heartbeat_nudged": ("idle_minutes",),

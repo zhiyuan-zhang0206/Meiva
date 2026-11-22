@@ -367,4 +367,5 @@ def test_delete_rules_tombstones_never_name_live_rules() -> None:
         assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
     assert {"orgId": 1, "uid": "meiva-ops-pitr-storage-growth"} in entries
     assert {"orgId": 1, "uid": "meiva-ops-agent-restart-spike"} in entries
+    assert {"orgId": 1, "uid": "meiva-ops-root-diagnostic-task-telemetry"} in entries
     assert {"orgId": 1, "uid": "meiva-ops-plugin-collector-silent"} not in entries

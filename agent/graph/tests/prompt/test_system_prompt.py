@@ -257,7 +257,7 @@ def test_field_default_is_production_p95() -> None:
     """The default covers the selected production P95 modules; `*` is opt-in."""
     factory = FIELD_INFOS["sdk_expand_in_system_prompt"].default_factory
     assert factory is not None
-    assert factory() == ["shell", "files", "agents", "tasks"]  # type: ignore[call-arg]
+    assert factory() == ["shell", "files", "agents"]  # type: ignore[call-arg]
 
 
 def test_plugin_expansions_merge_with_p95_without_duplicates() -> None:
@@ -268,8 +268,8 @@ def test_plugin_expansions_merge_with_p95_without_duplicates() -> None:
     assert effective_sdk_expand(
         defaults_list,
         disabled=(),
-        plugin_expansions=("cwd", "tasks"),
-    ) == ["cwd", "tasks", "shell", "files", "agents"]
+        plugin_expansions=("cwd", "files"),
+    ) == ["cwd", "files", "shell", "agents"]
 
 
 def test_env_comma_string_with_wildcard_parses() -> None:

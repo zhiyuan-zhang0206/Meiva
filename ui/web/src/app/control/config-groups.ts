@@ -25,7 +25,7 @@ const BACKEND_GROUP_FALLBACK: Partial<Record<string, string>> = {
   Agent: "config-exec",
   Web: "config-web",
   Gateway: "config-gateway",
-  Daemon: "config-daemon-tasks",
+  Daemon: "config-daemon-events",
   "Data plane": "config-dataplane",
   Services: "config-services",
   Observability: "config-observability",
