@@ -64,15 +64,7 @@ import { parseItemId, sortByItemId } from "./item-id";
 export { parseItemId, parseItemIdParts, sortByItemId, type ItemIdParts } from "./item-id";
 
 // meiva:link base/agents/messages/reply_intent.py
-function stripUserReplyPrefix(text: string): {
-  readonly matched: boolean;
-  readonly body: string;
-} {
-  const trimmed = text.trimStart();
-  if (!trimmed.startsWith(USER_REPLY_HEADER)) {
-    return { matched: false, body: text };
-  }
-  const rest = trimmed.slice(USER_REPLY_HEADER.length);
+function stripHeaderSeparator(rest: string): string {
   let idx = 0;
   while (idx < rest.length && (rest[idx] === " " || rest[idx] === "\t")) {
     idx += 1;
@@ -85,7 +77,19 @@ function stripUserReplyPrefix(text: string): {
   } else if (idx < rest.length && rest[idx] === "\n") {
     idx += 1;
   }
-  return { matched: true, body: rest.slice(idx) };
+  return rest.slice(idx);
+}
+
+// meiva:link base/agents/messages/reply_intent.py
+function stripUserReplyPrefix(text: string): {
+  readonly matched: boolean;
+  readonly body: string;
+} {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith(USER_REPLY_HEADER)) {
+    return { matched: false, body: text };
+  }
+  return { matched: true, body: stripHeaderSeparator(trimmed.slice(USER_REPLY_HEADER.length)) };
 }
 
 function resolveStreamingChat(
@@ -97,16 +101,19 @@ function resolveStreamingChat(
   if (mode === "sdk") return { payload: rawText, user_facing: false };
   if (mode === "naive") return { payload: rawText, user_facing: Boolean(rawText.trim()) };
   if (mode === "prefix" || explicitVisibility) {
-    const lineEnd = rawText.indexOf("\n");
-    const firstLine = lineEnd < 0 ? rawText : rawText.slice(0, lineEnd);
-    const header = firstLine.endsWith("\r") ? firstLine.slice(0, -1) : firstLine;
-    if (header === DISPLAY_TO_USER || header === HIDE_FROM_USER) {
-      const body = lineEnd < 0 ? "" : rawText.slice(lineEnd + 1);
-      return body.trim()
-        ? { payload: body, user_facing: header === DISPLAY_TO_USER }
-        : { payload: "", user_facing: false };
+    const trimmed = rawText.trimStart();
+    for (const [marker, visible] of [
+      [DISPLAY_TO_USER, true],
+      [HIDE_FROM_USER, false],
+    ] as const) {
+      if (trimmed.startsWith(marker)) {
+        const body = stripHeaderSeparator(trimmed.slice(marker.length));
+        return body.trim()
+          ? { payload: body, user_facing: visible }
+          : { payload: "", user_facing: false };
+      }
     }
-    if (lineEnd < 0 && (DISPLAY_TO_USER.startsWith(rawText) || HIDE_FROM_USER.startsWith(rawText))) {
+    if (DISPLAY_TO_USER.startsWith(trimmed) || HIDE_FROM_USER.startsWith(trimmed)) {
       return { payload: "", user_facing: false };
     }
     return { payload: rawText, user_facing: false };
