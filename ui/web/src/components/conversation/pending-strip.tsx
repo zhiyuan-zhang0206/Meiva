@@ -75,7 +75,7 @@ export function PendingStrip({
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
       className="pointer-events-auto mx-auto w-full bg-background px-4 text-xs text-muted-foreground"
     >
-      <div className="border-t border-border pt-1">
+      <div className="border-t border-border py-1">
         <div className={cn("items-center gap-1.5 font-medium", FLEX)}>
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}

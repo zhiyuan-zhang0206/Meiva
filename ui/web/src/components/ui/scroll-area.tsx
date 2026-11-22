@@ -13,6 +13,7 @@ const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home
 function ScrollArea({
   className,
   viewportClassName,
+  scrollbarClassName,
   viewportRef: externalViewportRef,
   viewportTestId,
   scrollbarActivity = "scroll",
@@ -23,6 +24,7 @@ function ScrollArea({
   // Extra classes for the inner scroll viewport (the element that actually
   // scrolls). Used e.g. by the timeline to set `overflow-anchor: none`.
   viewportClassName?: string;
+  scrollbarClassName?: string;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
   viewportTestId?: string;
   scrollbarActivity?: "scroll" | "input";
@@ -171,6 +173,7 @@ function ScrollArea({
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar
+        className={scrollbarClassName}
         trackRef={trackRef}
         thumbRef={setThumbRef}
         data-visible={isScrollActive || isDraggingScrollbar}

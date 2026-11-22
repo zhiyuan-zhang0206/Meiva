@@ -29,6 +29,7 @@ interface Args {
   wrapperRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLDivElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
+  overlaySlackRef?: RefObject<HTMLDivElement | null>;
   reserveRef: RefObject<HTMLDivElement | null>;
   thresholds: StickyThresholds;
   onChange: (anchor: ViewAnchor, cause: AnchorChangeCause) => void;
@@ -68,6 +69,7 @@ export interface ViewportAnchor {
   // meiva:note
   // Height of the reserve below the natural end.
   reserveHeight: () => number;
+  overlaySlackHeight: () => number;
   // meiva:note
   // The arrow's smooth ride to the tail is under way.
   riding: () => boolean;
@@ -82,7 +84,7 @@ export interface ViewportAnchor {
 }
 
 export function useViewportAnchor({
-  wrapperRef, viewportRef, contentRef, reserveRef, thresholds, onChange, onUnresolved, pinnedHead, onFree, onRideEnd,
+  wrapperRef, viewportRef, contentRef, overlaySlackRef, reserveRef, thresholds, onChange, onUnresolved, pinnedHead, onFree, onRideEnd,
   viewportObserverFactory,
 }: Args): { controls: ViewportAnchor; atEnd: boolean } {
   const anchorRef = useRef<ViewAnchor | null>(null);
@@ -99,6 +101,8 @@ export function useViewportAnchor({
   } | null>(null);
   const rideRef = useRef<{ frame: number; from: number; start: number; duration: number } | null>(null);
   const holdRef = useRef(false);
+  const inOverlaySlackRef = useRef(false);
+  const prevOverlaySlackRef = useRef(0);
   const [atEnd, setAtEnd] = useState(true);
   // meiva:note
   // The reader is in rows that are not mounted (a scrollbar or Home jump into a virtual spacer):
@@ -116,24 +120,27 @@ export function useViewportAnchor({
     () => viewportRef.current ?? wrapperRef.current?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null,
     [viewportRef, wrapperRef],
   );
+  const overlaySlackHeight = useCallback(() => overlaySlackRef?.current?.offsetHeight ?? 0, [overlaySlackRef]);
   const reserveHeight = useCallback(() => reserveRef.current?.offsetHeight ?? 0, [reserveRef]);
   // meiva:note
   // The scroll offset at which the content's last row meets the viewport bottom: the tail.
   const naturalEnd = useCallback((vp: HTMLElement) => {
     const content = contentRef.current;
-    if (!content) return Math.max(0, vp.scrollHeight - reserveHeight() - vp.clientHeight);
+    if (!content) return Math.max(0, vp.scrollHeight - overlaySlackHeight() - reserveHeight() - vp.clientHeight);
     return Math.max(0, vp.scrollTop + content.getBoundingClientRect().bottom - vp.getBoundingClientRect().top - vp.clientHeight);
-  }, [contentRef, reserveHeight]);
+  }, [contentRef, overlaySlackHeight, reserveHeight]);
 
   // meiva:note
-  // The arrow hides at the scrollable end and inside the bottom zone of the natural end.
+  // The arrow hides at the scrollable end, inside overlay scroll slack past the resting end, and
+  // inside the bottom zone of the natural end.
   const refreshEnd = useCallback((vp: HTMLElement) => {
     const distance = vp.scrollHeight - vp.scrollTop - vp.clientHeight;
     const natural = naturalEnd(vp) - vp.scrollTop;
-    const next = rideRef.current !== null || distance <= 1 ||
+    const pastNaturalInOverlay = natural < -0.5 && reserveHeight() === 0;
+    const next = rideRef.current !== null || distance <= 1 || pastNaturalInOverlay ||
       (natural >= -0.5 && natural <= bottomZone(vp.clientHeight, latest.current.thresholds));
     setAtEnd((previous) => (previous === next ? previous : next));
-  }, [naturalEnd]);
+  }, [naturalEnd, reserveHeight]);
 
   // meiva:note
   // The reserve is derived, never accumulated: while a header toggle holds it, it is exactly the space
@@ -153,12 +160,12 @@ export function useViewportAnchor({
       } else {
         const box = content.getBoundingClientRect();
         const offset = hit.collapsed ? Math.max(COLLAPSED_MIN_OFFSET_PX, anchor.offset) : anchor.offset;
-        need = hit.node.getBoundingClientRect().top - box.top - offset + vp.clientHeight - box.height;
+        need = hit.node.getBoundingClientRect().top - box.top - offset + vp.clientHeight - box.height - overlaySlackHeight();
       }
     }
     const next = `${Math.max(0, Math.ceil(need))}px`;
     if (reserve.style.height !== next) reserve.style.height = next;
-  }, [contentRef, reserveRef]);
+  }, [contentRef, overlaySlackHeight, reserveRef]);
 
   const write = useCallback((vp: HTMLElement, top: number) => {
     const before = vp.scrollTop;
@@ -220,7 +227,26 @@ export function useViewportAnchor({
     const last = lastWrittenRef.current;
     const clamped = last !== null && last > max + 0.5 && Math.abs(vp.scrollTop - max) < 0.5;
     const drift = last === null || clamped ? 0 : vp.scrollTop - last;
-    if (anchor.kind === "row" && Math.abs(drift) >= 0.5) {
+    const currentOverlay = overlaySlackHeight();
+    const overlayShrank = currentOverlay < prevOverlaySlackRef.current - 0.5;
+    prevOverlaySlackRef.current = currentOverlay;
+    if (inOverlaySlackRef.current && anchor.kind === "row" && !holdRef.current && overlayShrank) {
+      if (currentOverlay <= 0.5 || (clamped && vp.scrollTop <= naturalEnd(vp) + 1)) {
+        inOverlaySlackRef.current = false;
+        anchor = TAIL;
+        setAnchor(TAIL, "reader");
+        lastWrittenRef.current = vp.scrollTop;
+        directionTopRef.current = vp.scrollTop;
+      } else if (clamped) {
+        const row = readRow(vp);
+        if (row) {
+          anchor = row;
+          setAnchor(row, "reader");
+        }
+        lastWrittenRef.current = vp.scrollTop;
+        directionTopRef.current = vp.scrollTop;
+      }
+    } else if (anchor.kind === "row" && Math.abs(drift) >= 0.5) {
       anchor = { kind: "row", row: anchor.row, offset: anchor.offset - drift };
       anchorRef.current = anchor;
       lastWrittenRef.current = vp.scrollTop;
@@ -247,7 +273,7 @@ export function useViewportAnchor({
       write(vp, vp.scrollTop + offsetOf(vp, hit.node) - offset);
     }
     refreshEnd(vp);
-  }, [naturalEnd, readRow, refreshEnd, setAnchor, syncReserve, viewport, write]);
+  }, [naturalEnd, overlaySlackHeight, readRow, refreshEnd, setAnchor, syncReserve, viewport, write]);
 
   const finishRide = useCallback(() => {
     const ride = rideRef.current;
@@ -275,37 +301,45 @@ export function useViewportAnchor({
   // they stopped unless they are exactly at the end.
   const derive = useCallback((vp: HTMLElement, towardEnd: boolean) => {
     const natural = naturalEnd(vp);
-    const inReserve = reserveHeight() > 0 && vp.scrollTop > natural + 0.5;
+    const pastNatural = vp.scrollTop > natural + 0.5;
     const distance = natural - vp.scrollTop;
     // meiva:note
     // Reaching the natural end (including iOS overscroll bouncing back at distance <= 0) or moving
     // downward into the bottom zone follows the tail. Moving upward away from the end always leaves
     // the tail, even inside the wide touch bottom zone, so a small mobile scroll-up never snaps back.
+    // Past the natural end (overlay slack or toggle reserve), a row anchor holds the manually
+    // scrolled position instead of snapping back to the resting tail.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     const zone = distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
-    if (!inReserve && (distance <= 1 || (zone && towardEnd))) {
+    if (!pastNatural && (distance <= 1 || (zone && towardEnd))) {
       freeRef.current = false;
+      inOverlaySlackRef.current = false;
       setAnchor(TAIL, "reader");
       return;
     }
     const row = readRow(vp);
     if (row) {
       freeRef.current = false;
+      const inSlack = pastNatural && reserveHeight() === 0 && overlaySlackHeight() > 0;
+      inOverlaySlackRef.current = inSlack;
+      if (inSlack) prevOverlaySlackRef.current = overlaySlackHeight();
       setAnchor(row, "reader");
     } else if (!freeRef.current) {
       // meiva:note
       // A jump into rows that are not mounted: hold no place (nothing to write, no tail to follow)
       // until rows mount there and can be read.
       freeRef.current = true;
+      inOverlaySlackRef.current = false;
       anchorRef.current = null;
       latest.current.onFree?.();
     }
-  }, [naturalEnd, readRow, reserveHeight, setAnchor]);
+  }, [naturalEnd, overlaySlackHeight, readRow, reserveHeight, setAnchor]);
 
   const releaseTailAt = useCallback((vp: HTMLElement) => {
     if (anchorRef.current?.kind !== "tail") return;
     const row = readRow(vp);
     if (!row) return;
+    inOverlaySlackRef.current = false;
     lastWrittenRef.current = vp.scrollTop;
     directionTopRef.current = vp.scrollTop;
     setAnchor(row, "reader");
@@ -321,6 +355,7 @@ export function useViewportAnchor({
     cancelRide();
     if (options.hold !== undefined) holdRef.current = options.hold;
     freeRef.current = false;
+    inOverlaySlackRef.current = false;
     setAnchor(anchor, "placement");
     if (!vp) return;
     // meiva:note
@@ -534,7 +569,7 @@ export function useViewportAnchor({
     return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
   }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
-  }), [apply, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, viewport]);
+    viewport, current, place, apply, holdReserve, releaseTail, placeScrollTop, reserveHeight, overlaySlackHeight, riding, atTail, rekey, rekeySettled,
+  }), [apply, atTail, current, holdReserve, overlaySlackHeight, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, viewport]);
   return { controls, atEnd };
 }

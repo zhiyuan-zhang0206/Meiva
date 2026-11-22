@@ -19,24 +19,29 @@ duration grows with the distance without bound (user ruling 2026-11-20):
 - **Interruption.** Wheel, touch, keys or the scrollbar stop the ride where it
   is.
 
-## The pending strip
+## The composer dock and pending strip
 
-Messages waiting for the agent float over the timeline's bottom edge, just above
-the composer's rule. The strip is the timeline's footer
-(`TimelineView` `footer`). Its height is published as `--timeline-footer-h` on
-the timeline wrapper.
+The composer occupies a fixed resting-height band below the timeline. When the
+draft grows past one line (multi-line text, quotes, attachments, upload hints)
+or pending user messages appear in `PendingStrip` above the composer, the dock
+rises upward over the timeline's bottom edge without shrinking the timeline
+viewport or pushing messages upward (user ruling 2026-11-22).
 
-- **Fitting into the gap.** The strip sits in the blank space between the last
-  row and the composer: the log's 1.5rem bottom padding, plus the 1rem below the
-  last row (its group's padding and endRef's gap). One queued message fits that
-  space, so it appears and leaves without moving the conversation.
-- **Taller strips.** A taller strip extends the padding by the difference
-  (`max(1.5rem, footer - 1rem)`). The tail then follows the new end, and a
-  reader in history keeps their row.
-- **Hover chrome.** While messages wait, the last row is the working turn, which
-  carries no hover chrome in that space.
-- **Opacity.** The strip is opaque, so rows scrolled beneath it stay hidden.
-- **The arrow.** The arrow sits above the strip.
+- **No push-up.** The log's bottom padding stays fixed at `1.5rem`, so growing
+  the composer or pending strip never shifts `naturalEnd` or existing rows.
+- **Manual scroll slack.** The dock height beyond the resting band is passed as
+  `bottomOverlayHeight` (and combined with any `TimelineView` `footer` height)
+  into a dedicated slack spacer below the log and into `--timeline-footer-h`.
+  Covered messages stay still until the reader manually scrolls into that slack
+  to lift them clear above the grown dock.
+- **Collapse recovery.** When the overlay shrinks back to rest (after send or
+  delivery), a reader who had scrolled into the slack clamps cleanly back to
+  `naturalEnd` and resumes following the tail without a stale offset.
+- **Opacity and arrow.** The dock column is opaque (`bg-background`) so scrolled
+  rows stay masked underneath while desktop gutters and the right-edge
+  scrollbar remain unobstructed. The centered down arrow sits `1rem` above
+  `--timeline-footer-h` and stays hidden both at `naturalEnd` and inside the
+  overlay slack.
 
 ## The toggle reserve
 

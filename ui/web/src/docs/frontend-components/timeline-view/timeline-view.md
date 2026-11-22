@@ -59,11 +59,12 @@ gutters scroll — while the item column stays capped (`display.timeline_width_p
 default 800px) and centered inside it. The column clears the floating HeaderBar
 with 52px (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling
 2026-08-06) so a bar-height change cannot slide the first row underneath it. The
-composer stack lives in normal flow below the surface (user ruling 2026-08-06),
-separated from the last message row by the log's bottom padding (`timeline-log`,
-24px) + `pt-0.5` (26px), with the pending strip floating in that space, and from
-the bottom viewport edge by its own band's `pb-6`, and shares the same column
-cap with one `undefined`-means-full-width convention on narrow viewports.
+composer dock reserves its resting band below the surface and grows upward as an
+overlay (together with the pending strip) when drafts expand or messages queue
+(user ruling 2026-11-22), separated from the last message row at rest by the
+log's fixed bottom padding (`timeline-log`, 24px) + `pt-0.5` (26px) and from the
+bottom viewport edge by its own band's `pb-6`, sharing the same column cap with
+one `undefined`-means-full-width convention on narrow viewports.
 
 
 ## Uploaded images

@@ -34,7 +34,7 @@ export function PendingQuestions({ agentId, questions, failed, maxWidthCss }: {
       data-testid="pending-questions"
       data-question-panel={expanded && questions.length > 0 ? "open" : "closed"}
       aria-label={label}
-      className="relative z-30 mx-auto h-11 w-full"
+      className="pointer-events-auto relative z-30 mx-auto h-11 w-full bg-background"
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
     >
       <div className="absolute inset-x-4 bottom-1 rounded-xl border border-border/80 bg-background">
