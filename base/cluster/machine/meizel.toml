@@ -7,8 +7,8 @@ exports = ["boot.py", "configured.py", "tests"]
 "tests" = ["__init__.py", "configured.py"]
 
 [purity]
-"." = "strict-to-be"
-"configured.py" = { mode = "none", why = "the stateful owner of the machine identity: it reads each field from the root's ConfigBoot on first use, caches it and lets a root set or reset it, around the settings-free value module identity.py that holds the decisions" }
+"." = "ratchet"
+"configured.py" = { mode = "off", why = "the stateful owner of the machine identity: it reads each field from the root's ConfigBoot on first use, caches it and lets a root set or reset it, around the settings-free value module identity.py that holds the decisions" }
 "gateway_access.py" = "strict"
 "identity.py" = "strict"
 

@@ -8,5 +8,5 @@ exports = ["gitenv.py", "host_version.py", "host_version_plan.py"]
 "." = "strict"
 "__init__.py" = "strict"
 "gitenv.py" = "strict"
-"host_version.py" = { mode = "none", why = "the shell that derives the host version of a checkout: it runs git log for the HEAD commit, reads the checkout's pyproject.toml and falls back from the first to the second; how git's output and the pyproject text become a version, and how a derived version is shown, are decided in host_version_plan.py" }
+"host_version.py" = { mode = "off", why = "the shell that derives the host version of a checkout: it runs git log for the HEAD commit, reads the checkout's pyproject.toml and falls back from the first to the second; how git's output and the pyproject text become a version, and how a derived version is shown, are decided in host_version_plan.py" }
 "host_version_plan.py" = "strict"

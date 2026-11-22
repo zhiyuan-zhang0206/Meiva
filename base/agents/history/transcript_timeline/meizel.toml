@@ -13,4 +13,4 @@ exports = ["items.py", "project.py", "record", "sent.py"]
 "__init__.py" = "strict"
 "items.py" = "strict"
 "project.py" = "strict"
-"sent.py" = { mode = "none", why = "the one inbox query that names the inputs a record's rows were sent as; what a row shows is decided by the pure functions beside it" }
+"sent.py" = { mode = "off", why = "the one inbox query that names the inputs a record's rows were sent as; what a row shows is decided by the pure functions beside it" }

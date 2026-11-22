@@ -5,4 +5,4 @@ exports = ["retry.py", "retry_io.py"]
 
 [purity]
 "." = "strict"
-"retry_io.py" = { mode = "none", why = "the database-driver adapter behind the retry policy: it turns the exception a caller already holds into the facts `retry.transient_database_failure` reads, so what makes a failure connection availability is decided in retry.py and a caller that needs only the policy never loads psycopg" }
+"retry_io.py" = { mode = "off", why = "the database-driver adapter behind the retry policy: it turns the exception a caller already holds into the facts `retry.transient_database_failure` reads, so what makes a failure connection availability is decided in retry.py and a caller that needs only the policy never loads psycopg" }

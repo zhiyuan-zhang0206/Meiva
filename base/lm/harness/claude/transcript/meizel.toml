@@ -10,4 +10,4 @@ exports = ["window.py"]
 "." = "strict"
 "__init__.py" = "strict"
 "parse.py" = "strict"
-"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Claude session: it finds the main record file and names where its rows are inputs; the strict parse module decides what a row means" }
+"window.py" = { mode = "off", why = "the file shell of a read-time timeline of a Claude session: it finds the main record file and names where its rows are inputs; the strict parse module decides what a row means" }

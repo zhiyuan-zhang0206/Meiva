@@ -9,6 +9,6 @@ exports = ["no_script_sibling_imports.py", "path_imports.py"]
 
 [purity]
 "." = "strict"
-"no_script_sibling_imports.py" = { mode = "none", why = "the command-line entry of the PYTHONSAFEPATH sibling-import guard: it enumerates the files a run judges, reads them, states which modules sit beside each one, and prints what the rule found; scripts/rules/language/script_siblings.py decides script mode, guard order, sibling resolution and the repair" }
+"no_script_sibling_imports.py" = { mode = "off", why = "the command-line entry of the PYTHONSAFEPATH sibling-import guard: it enumerates the files a run judges, reads them, states which modules sit beside each one, and prints what the rule found; scripts/rules/language/script_siblings.py decides script mode, guard order, sibling resolution and the repair" }
 "path_imports.py" = "strict"
 "script_siblings.py" = "strict"

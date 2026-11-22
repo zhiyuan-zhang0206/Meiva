@@ -23,7 +23,7 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 [purity]
 "__init__.py" = "strict"
 "activation.py" = "strict"
-"config_registration.py" = "strict-to-be"
+"config_registration.py" = "ratchet"
 "contributions.py" = "strict"
 "extensions.py" = "strict"
 "plugin_errors.py" = "strict"

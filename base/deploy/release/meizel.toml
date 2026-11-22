@@ -9,9 +9,9 @@ exports = ["collector", "editable_install.py", "python_lock.py", "start_inputs.p
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
-"editable_install.py" = { mode = "none", why = "the reader of a checkout's editable install: it globs the virtualenv for the pointer and metadata records, reads and resolves them, probes the interpreters and the console script and resolves an interpreter's checkout root; the lines to resolve, the pointer beside a record and the pointers without one, the interpreter candidates, the console script and the layout rule are decided in editable_layout.py, and the comparison key, the allowed roots in both spellings and the legality of what it read in editable_policy.py" }
+"editable_install.py" = { mode = "off", why = "the reader of a checkout's editable install: it globs the virtualenv for the pointer and metadata records, reads and resolves them, probes the interpreters and the console script and resolves an interpreter's checkout root; the lines to resolve, the pointer beside a record and the pointers without one, the interpreter candidates, the console script and the layout rule are decided in editable_layout.py, and the comparison key, the allowed roots in both spellings and the legality of what it read in editable_policy.py" }
 "editable_layout.py" = "strict"
 "editable_policy.py" = "strict"
 "python_lock.py" = "strict"
 "start_digest.py" = "strict"
-"start_inputs.py" = { mode = "none", why = "the reader of the home's startup configuration: it finds the per-agent config files, lstats and reads each file and hands the digests to start_digest.py, which decides which files take part, their keys and how they combine into one digest" }
+"start_inputs.py" = { mode = "off", why = "the reader of the home's startup configuration: it finds the per-agent config files, lstats and reads each file and hands the digests to start_digest.py, which decides which files take part, their keys and how they combine into one digest" }

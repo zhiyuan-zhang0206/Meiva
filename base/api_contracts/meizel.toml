@@ -1,7 +1,7 @@
 exports = ["agent_contract.py", "ask.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "question.py", "op_envelope.py", "reading.py", "status.py", "user_delivery.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "ratchet"
 "ask.py" = "strict"
 "__init__.py" = "strict"
 "caller_identity.py" = "strict"

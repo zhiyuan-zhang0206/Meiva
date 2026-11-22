@@ -16,6 +16,6 @@ exports = ["window.py", "file.py"]
 "system_message.py" = "strict"
 "text.py" = "strict"
 
-"window.py" = { mode = "none", why = "the Antigravity record boundary locates the file and reports unknown shapes; its entries follow file offsets and tool adjacency" }
+"window.py" = { mode = "off", why = "the Antigravity record boundary locates the file and reports unknown shapes; its entries follow file offsets and tool adjacency" }
 
-"file.py" = { mode = "none", why = "bounded native record rows enriched from independently validated atomic timing facts" }
+"file.py" = { mode = "off", why = "bounded native record rows enriched from independently validated atomic timing facts" }

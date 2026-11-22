@@ -17,5 +17,5 @@ exports = ["drafts.py", "entries.py", "projection.py", "record_file.py"]
 "entries.py" = "strict"
 "position.py" = "strict"
 "projection.py" = "strict"
-"record_file.py" = { mode = "none", why = "the file shell shared by the read-time timelines of the CLIs' own records: it reads blocks of a record file backwards from a line boundary and counts the bytes it read; the strict position module decides where a row ends" }
+"record_file.py" = { mode = "off", why = "the file shell shared by the read-time timelines of the CLIs' own records: it reads blocks of a record file backwards from a line boundary and counts the bytes it read; the strict position module decides where a row ends" }
 "scrub.py" = "strict"
