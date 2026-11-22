@@ -405,8 +405,9 @@ class ReadTimelineSink:
         file = self._resolve()
         if file is None:
             return None, 0
-        self._seen_stat = file.watch_signature()
+        seen = file.watch_signature()
         if not self._ensure_fork_floor(file):
+            self._seen_stat = seen
             return None, file.complete_end()
         start = self._from if self._from is not None else self._turn_start(file)
         if self._fork_floor is not None and start < self._fork_floor:
@@ -418,13 +419,16 @@ class ReadTimelineSink:
         block = file.rows_after(start)
         self._from = block.end
         if not block.rows:
+            self._seen_stat = seen
             return None, block.end
         self._timing_needed = _needs_timing_refresh(self._harness, block.rows)
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
-        return self._projector.feed(
+        projected = self._projector.feed(
             entries, tail=self._parser.pending_calls, release_held=False
-        ), block.end
+        )
+        self._seen_stat = seen
+        return projected, block.end
 
     def _turn_start(self, file: RecordFile) -> int:
         window = read_window(

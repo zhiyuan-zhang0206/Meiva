@@ -20,6 +20,9 @@ from base.lm.harness.events import (
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import Reasoning
 from base.lm.harness.session.transcript.record_file import UnreadRows
+from base.log.tests.log_records import LogRecords, loguru_records
+
+__all__ = ["loguru_records"]
 
 
 async def test_a_turn_streams_text_and_completes(tmp_path: Path) -> None:
@@ -199,4 +202,43 @@ async def test_timing_refresh_requests_are_coalesced_and_throttled(tmp_path: Pat
         assert call_count <= 2, f"burst refresh requests must coalesce, got {call_count} RPCs"
         assert _measured_reasoning(transcript) == [30265]
     finally:
+        await harness.stop()
+
+
+async def test_interrupt_cancels_inflight_timing_refresh_without_warning(
+    tmp_path: Path,
+    loguru_records: LogRecords,
+) -> None:
+    home = tmp_path / "home"
+    sampled = tmp_path / "trajectory-sampled.jsonl"
+    release = tmp_path / "trajectory-release"
+    fixture = Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
+    harness = await start(
+        tmp_path,
+        turns=[{"hang": True}],
+        extra_environ={
+            "HOME": str(home),
+            "FAKE_AGY_BLOCK_TRAJECTORY_CALL": "1",
+            "FAKE_AGY_TRAJECTORY_SAMPLED": str(sampled),
+            "FAKE_AGY_TRAJECTORY_RELEASE": str(release),
+            "FAKE_AGY_TRAJECTORY_FIXTURE": str(fixture),
+        },
+    )
+    try:
+        _ = _write_native_transcript(home, "conv-fake")
+        _ = await send(harness, "work")
+        await running(harness, ["work"])
+        harness.session.request_timing_refresh()
+        await harness.wait_until(sampled.exists)
+        task = harness.session._timing_refresh_task
+        assert task is not None and not task.done()
+
+        _ = await harness.session.interrupt()
+        release.touch()
+        await harness.wait_until(task.done)
+        assert harness.session._timing_refresh_task is None
+        assert harness.session._timing_refresh_pending is False
+        assert loguru_records.events("harness_timing_collection_failed") == []
+    finally:
+        release.touch(exist_ok=True)
         await harness.stop()

@@ -120,7 +120,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._timing_refresh_interval = timing_refresh_interval
         self._timing_refresh_task: asyncio.Task[None] | None = None
         self._timing_refresh_pending = False
-        self._timing_refresh_last = 0.0
+        self._timing_refresh_last: float | None = None
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -149,8 +149,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._schedules = Schedules(max_timer_seconds=self.config.max_schedule_timer_seconds)
         self._sent_turn = None
         self._phantom = None
-        self._timing_refresh_pending = False
-        self._timing_refresh_task = None
+        self._cancel_timing_refresh()
         self._observed.clear()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
@@ -292,6 +291,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 turn_id=turn_id, cli_pid=transport.pid, cli_alive=transport.alive
             )
         self._retired = transport
+        self._cancel_timing_refresh()
         self._close_phantom(None)
         return await transport.interrupt(turn_id=ticket.turn_id, baseline=self._baseline)
 
@@ -319,8 +319,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return current
         if current is not None:
             self._transport = None
-            self._timing_refresh_pending = False
-            self._timing_refresh_task = None
+            self._cancel_timing_refresh()
             await current.close()
         self._lose_schedules()
         self._close_phantom(None)
@@ -502,6 +501,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             await transport.close()
             return
         self._transport = None
+        self._cancel_timing_refresh()
         retired = transport is self._retired
         if retired:
             self._retired = None
@@ -617,6 +617,19 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._run_timing_refresh(transport, self.generation)
         )
 
+    def _cancel_timing_refresh(self) -> None:
+        self._timing_refresh_pending = False
+        task, self._timing_refresh_task = self._timing_refresh_task, None
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            _ = task.cancel()
+
+    def _timing_refresh_wait_seconds(self) -> float:
+        if self._timing_refresh_last is None:
+            return 0.0
+        return max(
+            0.0, self._timing_refresh_interval - (self._monotonic() - self._timing_refresh_last)
+        )
+
     def _timing_refresh_active(self, transport: AgyTransport, generation: int) -> bool:
         return (
             not self._closed
@@ -631,10 +644,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             while self._timing_refresh_pending and self._timing_refresh_active(
                 transport, generation
             ):
-                wait = self._timing_refresh_interval - (
-                    self._monotonic() - self._timing_refresh_last
-                )
-                if self._timing_refresh_last > 0.0 and wait > 0.0:
+                wait = self._timing_refresh_wait_seconds()
+                if wait > 0.0:
                     await self._clock.asleep(wait)
                     if not self._timing_refresh_active(transport, generation):
                         return
@@ -645,10 +656,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    if not self._timing_refresh_active(transport, generation):
+                        return
                     logger.warning(
                         "agent {agent_id}: background timing refresh failed ({error}); "
                         "provider execution is unchanged",
-                        event="harness_timing_refresh_failed",
+                        event="harness_timing_collection_failed",
+                        phase="refresh",
                         agent_id=self.agent_id,
                         error=type(exc).__name__,
                     )
