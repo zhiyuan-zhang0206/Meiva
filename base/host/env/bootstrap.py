@@ -210,6 +210,29 @@ def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[st
     return values
 
 
+def validated_bootstrap_config(
+    payload: object, *, require_plugin_config: bool = False
+) -> dict[str, str]:
+    """Validate the bootstrap values before they can become a runner snapshot."""
+    from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
+    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
+
+    values = validated_bootstrap_payload(payload)
+    packet = values.get(PLUGIN_CLUSTER_CONFIG_ENV)
+    if packet is None and not require_plugin_config:
+        return values
+    raw = None if packet is None else object_of(json.loads, packet)
+    if not _is_object_dict(raw):
+        raise TypeError("bootstrap plugin cluster config must be a JSON object")
+    for plugin, fields in BUILTIN_CLUSTER_CONFIG_FIELDS.items():
+        projection = raw.get(plugin)
+        if not _is_object_dict(projection) or projection.keys() != fields:
+            raise ValueError(
+                f"bootstrap cluster fields for plugin {plugin!r} differ from declaration"
+            )
+    return values
+
+
 # The parent config snapshot (P0 #2100): a successful fetch writes the payload
 # to `$MEIVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
 # unit — most importantly the exec child the agent process spawns per turn —
@@ -366,13 +389,11 @@ def fetch_bootstrap_config(
     def _fetch_once() -> dict[str, str]:
         resp = dial_get(url, timeout=tuning.timeout_s, headers=headers)
         resp.raise_for_status()
-        return validated_bootstrap_payload(object_of(resp.json))
+        return validated_bootstrap_config(object_of(resp.json))
 
     return retry(policy)(_fetch_once)
 
 
-# meiva:note
-# The unit's config snapshot path, under `home`.
 def snapshot_path(home: Path) -> Path:
     return home / "run" / _SNAPSHOT_NAME
 
@@ -382,8 +403,8 @@ def snapshot_path(home: Path) -> Path:
 #
 # Guards: the snapshot must have been written for the SAME gateway URL (a
 # re-enrolled runner must not reuse another gateway's values), carry the
-# current version, and hold a flat ``{str: str}`` map. Absent / unreadable /
-# malformed reads as None — the caller falls through to the fetch.
+# current version, and pass the same payload validation as a live response.
+# An unusable snapshot falls through to the fetch.
 def read_config_snapshot(
     base_url: str, *, home: Path, now: float
 ) -> tuple[dict[str, str], float] | None:
@@ -402,8 +423,8 @@ def read_config_snapshot(
     if not isinstance(written_at, (int, float)):
         return None
     try:
-        values = validated_bootstrap_payload(raw.get("values"))
-    except TypeError:
+        values = validated_bootstrap_config(raw.get("values"))
+    except (TypeError, ValueError):
         return None
     return values, max(0.0, now - float(written_at))
 

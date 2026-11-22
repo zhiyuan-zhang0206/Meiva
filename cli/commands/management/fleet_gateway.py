@@ -14,6 +14,8 @@ from pydantic import JsonValue
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
+from base.host.boundary.untyped import object_of
+from base.host.env.bootstrap import validated_bootstrap_config
 from base.host.net.http_dial import get
 from cli.boundary.json_body import JsonShapeError, response_list
 
@@ -25,11 +27,17 @@ def _field(row: JsonValue, key: str) -> JsonValue:
 
 
 def main(argv: list[str]) -> int:
-    if argv != ["roster"]:
-        print(f"usage: fleet_gateway.py roster (got {argv!r})", file=sys.stderr)
+    if argv not in (["roster"], ["bootstrap"]):
+        print(f"usage: fleet_gateway.py roster|bootstrap (got {argv!r})", file=sys.stderr)
         return 2
     access = gateway_access_from_boot(ConfigBoot())
     base, headers = gateway_api_base(access.gateway_url), gateway_auth_headers(access)
+    if argv == ["bootstrap"]:
+        response = get(f"{base}/api/bootstrap", headers=headers, timeout=10)
+        response.raise_for_status()
+        validated_bootstrap_config(object_of(response.json), require_plugin_config=True)
+        return 0
+
     rows = get(f"{base}/api/cluster/roster?fresh=true", headers=headers, timeout=90)
     rows.raise_for_status()
     keep = (

@@ -663,17 +663,13 @@ repos:
         name: "types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen/codegen-types.sh)"
         entry: ./scripts/codegen/check-types-fresh.sh
         language: system
-        # base/agents/tasks/priority.py + base/agents/tasks/status.py carry the shared enums the
-        # wire schemas reference, and ops/rpc_schemas/terminate.py defines the terminate
-        # hint models — all three feed the generated spec, so they trigger the
-        # freshness check like the other schema sources.
         # Include defining modules behind schema re-exports. The CI closure
         # test follows route annotations/imports so moves cannot escape here.
         # A package's own tests/ directory is never a schema source: the directory
         # sources below exclude it (`(?!(?:.*/)?tests/)`).
         # base/lm/registry.py owns ReferenceTps in the model catalog schema.
         # base/agents/model/birth_config.py owns DefaultModelSource in the default-model schema.
-        files: ^(scripts/codegen/(typescript-types\.mjs|codegen-types\.sh|check-types-fresh\.sh|dump_openapi\.py)$|base/host/env/agent_slices\.py$|base/host/db_authority/unit\.py$|base/agents/upload_delivery/models\.py$|gateway/(?!(?:.*/)?tests/).*\.py$|base/packages/plugins/surface/stats_types\.py$|base/lm/registry\.py$|base/agents/(model/birth_config|contract)\.py$|base/agents/to_user/.*\.py$|base/api_contracts/(?!(?:.*/)?tests/).*\.py$|base/agents/tasks/(priority|status|model)\.py$|base/agents/history/timeline\.py$|base/agents/observation/snapshot\.py$|base/host/resource/reading\.py$|ops/rpc_schemas/(?!(?:.*/)?tests/).*\.py$|ui/web/src/lib/contracts/types-generated\.ts$|ui/web/openapi\.json$|base/agents/observation/roster\.py$|base/agents/observation/evidence\.py$|base/agents/history/timeline_item\.py$|base/agents/history/(context_response|context_breakdown)\.py$|services/derived/insights/run_timeline/schemas\.py$|ops/alerts\.py$|ops/cluster_status/(?:__init__|report)\.py$|base/agents/sdk/(telemetry|tally)\.py$|base/daemon/schedules/completion_notices\.py$|services/desktop/permissions_helper/onboarding\.py$|base/agents/messages/(image_dimensions|inbound|inbound_images|quote)\.py$)
+        files: ^(scripts/codegen/(typescript-types\.mjs|codegen-types\.sh|check-types-fresh\.sh|dump_openapi\.py)$|base/host/env/agent_slices\.py$|base/host/db_authority/unit\.py$|base/agents/upload_delivery/models\.py$|gateway/(?!(?:.*/)?tests/).*\.py$|base/packages/plugins/surface/stats_types\.py$|base/lm/registry\.py$|base/agents/(model/birth_config|contract)\.py$|base/agents/to_user/.*\.py$|base/api_contracts/(?!(?:.*/)?tests/).*\.py$|base/agents/history/timeline\.py$|base/agents/observation/snapshot\.py$|base/host/resource/reading\.py$|ops/rpc_schemas/(?!(?:.*/)?tests/).*\.py$|ui/web/src/lib/contracts/types-generated\.ts$|ui/web/openapi\.json$|base/agents/observation/roster\.py$|base/agents/observation/evidence\.py$|base/agents/history/timeline_item\.py$|base/agents/history/(context_response|context_breakdown)\.py$|services/derived/insights/run_timeline/schemas\.py$|ops/alerts\.py$|ops/cluster_status/(?:__init__|report)\.py$|base/agents/sdk/(telemetry|tally)\.py$|base/daemon/schedules/completion_notices\.py$|services/desktop/permissions_helper/onboarding\.py$|base/agents/messages/(image_dimensions|inbound|inbound_images|quote)\.py$)
         pass_filenames: false
       - id: constants-codegen-fresh
         name: "constants-generated.ts in sync with its backend owners (drift: run ./scripts/codegen/dump_frontend_constants.py)"
@@ -710,7 +706,7 @@ repos:
         entry: .venv/bin/python scripts/codegen/gen_config_lite_table.py --check
         language: system
         # base/config/tests/ is not a config source, so it does not trigger the check.
-        files: ^(base/config/(?!(?:.*/)?tests/).*\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
+        files: ^(base/config/(?!(?:.*/)?tests/).*\.py$|meiva_builtins/plugins/[^/]+/(plugin|default_config)\.py$|scripts/codegen/gen_config_lite_table\.py$|base/host/env/config_lite_table\.json$)
         pass_filenames: false
 
       # The `executionEnvironments` entries that keep a tests/ directory out of its covering

@@ -47,6 +47,7 @@ class _Index:
     per_agent_fields: frozenset[str]
     sensitive_fields: frozenset[str]
     required_fields: frozenset[str]
+    builtin_cluster_config_fields: Mapping[str, frozenset[str]]
 
 
 # meiva:note
@@ -92,6 +93,7 @@ def _read_index() -> tuple[
     frozenset[str],
     frozenset[str],
     frozenset[str],
+    Mapping[str, frozenset[str]],
 ]:
     """Parse once; only immutable index values survive the local JSON payload."""
     data = pkgutil.get_data(__package__ or "base.host.env", "config_lite_table.json")
@@ -103,6 +105,9 @@ def _read_index() -> tuple[
     lite = raw.get("lite_fields")
     if not is_object_dict(lite):
         raise TypeError("config_lite_table.json: lite_fields must be an object")
+    cluster_fields = raw.get("builtin_cluster_config_fields")
+    if not is_object_dict(cluster_fields):
+        raise TypeError("config_lite_table.json: builtin_cluster_config_fields must be an object")
     return (
         MappingProxyType({name: _lite_row(name, row) for name, row in lite.items()}),
         MappingProxyType(_str_map(raw, "field_domains")),
@@ -112,6 +117,7 @@ def _read_index() -> tuple[
         _str_set(raw, "per_agent_fields"),
         _str_set(raw, "sensitive_fields"),
         _str_set(raw, "required_fields"),
+        MappingProxyType({plugin: _str_set(cluster_fields, plugin) for plugin in cluster_fields}),
     )
 
 
@@ -128,3 +134,5 @@ PER_AGENT_FIELDS: frozenset[str] = _INDEX.per_agent_fields
 SENSITIVE_FIELDS: frozenset[str] = _INDEX.sensitive_fields
 # Fields with no default and no factory — the W1 required check in _lite.prepare().
 REQUIRED_FIELDS: frozenset[str] = _INDEX.required_fields
+
+BUILTIN_CLUSTER_CONFIG_FIELDS = _INDEX.builtin_cluster_config_fields

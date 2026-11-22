@@ -43,17 +43,16 @@ restored by task #3689). All sections are **expanded by default**
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
    (the events-maintenance service's 60s `agent_registry` gauge + its deriv rate, task #2010).
-5. **`meiva_fleet`** — the task-completion-rate panel.
-6. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
+5. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
    skips plus the search latency and the notes injected per pass.
-7. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
+6. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
-8. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
+7. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
    Top-20 cost drill-downs by model and agent. Every panel reads usage-time
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
-9. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
+8. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
    job's Prometheus gauges (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
@@ -220,7 +219,7 @@ of mass-editing targets.
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
-5. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
+4. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
    registries (task #3697 S3) and `meiva lgtm render` previews the result —
    the panel lands under the row named after the plugin (every
    metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).

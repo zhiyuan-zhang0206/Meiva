@@ -1823,5 +1823,17 @@
   "required_fields": [
     "db_url",
     "redis_url"
-  ]
+  ],
+  "builtin_cluster_config_fields": {
+    "lm_typesafe": [
+      "local_endpoint",
+      "local_models"
+    ],
+    "meiva_fleet": [
+      "reduce_context_switch"
+    ],
+    "meiva_usage": [
+      "collectors"
+    ]
+  }
 }

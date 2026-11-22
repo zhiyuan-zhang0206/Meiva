@@ -184,6 +184,16 @@ class Sim:
             values.append(["laptop", *self.s["laptop"]["row"]])
         return json.dumps([dict(zip(keys, row, strict=True)) for row in values])
 
+    def _gateway_program(self, alias: str, command: str, emit: list[str]) -> int:
+        if " - bootstrap" in command:
+            if rc := self._failure("bootstrap", alias):
+                emit.append("gateway bootstrap failed")
+                return rc
+            return 0
+        assert " - roster" in command, command
+        emit.append(self._roster_json())
+        return 0
+
     def handle(self, alias: str, command: str, stdin: str, emit: list[str]) -> int:
         self.s["commands"].append([alias, command])
         host = self.s["hosts"][alias]
@@ -199,10 +209,8 @@ class Sim:
         if "ConfiguredMachineIdentity(ConfigBoot()).name()" in command:
             emit.append(self.s["names"][alias])
             return 0
-        if " - roster" in command:
-            assert stdin == programs["gateway"], "the roster program is not the shipped source"
-            emit.append(self._roster_json())
-            return 0
+        if stdin == programs["gateway"]:
+            return self._gateway_program(alias, command, emit)
         if stdin == programs["silence"]:
             return self._silence(alias, command, emit)
         if "agent_host.pid" in command:
