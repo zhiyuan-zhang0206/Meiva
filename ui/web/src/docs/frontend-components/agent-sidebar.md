@@ -35,8 +35,9 @@ below:
   such as provider balances and subscription quota windows).
 - **Windowed `Usage` section** (below the rule, headed by `Usage` and its own
   `WindowSelect` offering `5m` / `1h` / `6h` / `24h` / `3d` / `7d` / `30d`): a
-  2-column core grid (`Tokens`, `Cache hit`, `Cost (API)`, `Cost (subscription)`)
-  followed by a 3-column metered API row (`OpenAI API`, `Anthropic API`, `Google API`).
+  2-column grid (at most two cards per row) covering `Tokens`, `Cache hit`,
+  `Cost (API)`, `Cost (subscription)`, `OpenAI API`, `Anthropic API`, and
+  `Google API`.
   Unresolved Grafana alerts live solely on the footer bell badge (hidden at zero)
   and `/insights#alerts`, and internal telemetry diagnostics stay off the popover
   (user ruling 2026-11-22).
