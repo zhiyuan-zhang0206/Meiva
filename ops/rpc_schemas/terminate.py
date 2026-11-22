@@ -31,9 +31,11 @@ from ops.rpc_schemas.content import UserContent
 # `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
 # includes this source in the lifecycle marker shown to the agent.
 #
-# `message`, when present, is queued as chat immediately before the terminate
-# inbound. Lifecycle acceptance claims only the terminate row, so the chat
-# remains pending for the next resurrection without another LLM turn.
+# `message`, when present, is queued as pending chat immediately before the
+# terminate inbound (visible on resurrection without running another turn),
+# carried on the termination marker/audit record, and forwarded in the
+# `agent_terminated` system note sent to the agent's nearest living ancestor
+# (skipped only when the caller itself is that exact nearest living ancestor).
 class TerminateAgentRequest(BaseModel):
     force: bool = Field(default=False)
     kill_all_shell_sessions: bool = Field(default=False)

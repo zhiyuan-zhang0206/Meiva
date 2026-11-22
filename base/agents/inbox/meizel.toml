@@ -1,4 +1,4 @@
-exports = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py", "passive_lifecycle_note.py", "rows.py", "tests", "wake.py"]
+exports = ["chat_delivery.py", "compact.py", "harness_notice.py", "insert.py", "passive_lifecycle_note.py", "rows.py", "termination_notice.py", "tests", "wake.py"]
 
 [uses]
 "compact.py" = ["control_delivery.py", "insert.py", "wake.py"]

@@ -73,6 +73,7 @@ class NoteTag(StrEnum):
     SDK_EXPAND = "sdk_expand"
     WORKSPACE_HYGIENE = "workspace_hygiene"
     PERSONAL_DREAM = "personal_dream"
+    AGENT_TERMINATED = "agent_terminated"
 
 
 class MeivaUsage(TypedDict, total=False):

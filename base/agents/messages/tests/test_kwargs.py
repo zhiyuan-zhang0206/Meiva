@@ -51,6 +51,7 @@ def test_note_tag_value_set() -> None:
         "sdk_expand",
         "workspace_hygiene",
         "personal_dream",
+        "agent_terminated",
     }
 
 

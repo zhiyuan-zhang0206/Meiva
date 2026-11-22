@@ -306,11 +306,16 @@ def _restart_at_turn_end(message: str, route: restart_plans.RestartRoute) -> str
     return restart_plans.deferred_restart_receipt(route)
 
 
-def terminate() -> NoReturn:
+def terminate(message: str | None = None) -> NoReturn:
     """Stop yourself and end the current execution; your conversation is preserved.
+
+    When `message` is provided, it is recorded on your own termination marker and
+    audit trail, and delivered to your nearest living ancestor (if any) as an
+    `agent_terminated` system note so your parent learns your final outcome.
 
     A new message, including one from background work, can wake you again. Stop
     background work that should no longer wake you before calling this."""
+    message = coerce_str(message, "message", allow_none=True)
     from meiva.sdk_surface import agent_identity
 
     ctx = process_context.ambient_context()
@@ -319,7 +324,7 @@ def terminate() -> NoReturn:
         agent_identity.assert_self_action("terminate")
     target_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur:
-        _run(cur, (plans.terminate_statement(target_id),))
+        _run(cur, (plans.terminate_statement(target_id, message),))
     _publish_self_inbound_wake()
     if is_attached:
         raise SystemExit(0)

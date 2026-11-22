@@ -14,9 +14,20 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
 
 - `spawn` — start a brand-new agent.
 - `fork_from` — copy another agent's conversation state into a new one.
-- `terminate` — end it (default: finish current turn first; `force=True` requests
-  interruption when a clean stop cannot progress; `enqueued` confirms
-  acceptance, not exit or completion of owned work).
+- `terminate` — end an agent (`meiva.self.terminate(message=...)` for yourself,
+  `meiva.agents.terminate(id, message=..., force=...)` for another agent, or
+  `meiva agents terminate <id> --message ...`). Default finishes the current
+  turn first; `force=True` requests interruption when a clean stop cannot
+  progress (`enqueued` confirms acceptance, not exit or completion of owned
+  work). When an agent transitions to `terminated` (self-termination, peer
+  termination, human/CLI termination, or `corpse_reaper` crash reap), Meiva
+  records the optional `message` on the terminated agent itself (without
+  waking it) and automatically delivers an `agent_terminated` system note
+  carrying `#id`, `label`, initiator, and `message` to its **nearest living
+  birth ancestor** (skipping dead ancestors). Anti-echo: if the caller itself
+  is that exact nearest living ancestor (for example a parent directly calling
+  `meiva.agents.terminate(child)`), the ancestor notification is skipped so the
+  parent is not woken by its own action.
 - `restart` — finish current turn, then restart as a fresh process under the
   same `agent_id` (mandatory `message` explaining the restart reason; optional
   `config_overlay` to change model, effort, or switch harness).

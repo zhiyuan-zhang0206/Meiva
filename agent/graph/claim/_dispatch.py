@@ -39,6 +39,10 @@ from base.agents.messages.lifecycle_text import (
     restart_accepted_text,
 )
 from base.agents.messages.reply_intent import delivery_disabled_entries
+from base.agents.messages.termination_notice import (
+    terminate_accepted_text,
+    termination_message_of,
+)
 from base.api_contracts.agent_contract import Harness
 from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
 from base.events.live.projection import CompactionMode, CompactionStatus
@@ -379,9 +383,10 @@ async def _handle_terminate(
     dispatch_batch). Vetoed terminates never reach here.
     """
     now = ctx.require_clock().now()
+    message = termination_message_of(item.content, item.payload)
     st.new_msgs.append(
         system_note_message(
-            content=f"Termination was accepted from {by_who(item.source)}",
+            content=terminate_accepted_text(item.source, message),
             tag=NoteTag.LIFECYCLE_TERMINATE,
             picked_up_at=now,
             created_at=now,

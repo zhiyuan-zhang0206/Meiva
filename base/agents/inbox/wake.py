@@ -9,7 +9,7 @@ from base.db.protocols import DatabaseLike
 from base.events.live.bus import EventBus
 from base.log import logger
 
-__all__ = ["publish_inbound_wake"]
+__all__ = ["publish_inbound_wake", "publish_inbound_wake_async"]
 
 
 # meiva:note
@@ -44,3 +44,13 @@ def publish_inbound_wake(db: DatabaseLike, bus: EventBus, agent_id: int, payload
             exc=exc,
         )
         return False
+
+
+async def publish_inbound_wake_async(bus: EventBus, agent_id: int, payload: str) -> bool:
+    channel = inbound_channel(agent_id, bus.channel)
+    published = await bus.publish_best_effort(
+        payload,
+        channel=channel,
+        context="inbound_wake",
+    )
+    return published is not None
