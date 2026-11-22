@@ -126,13 +126,20 @@ export interface TurnSummary {
   readonly agentMessages: number;
   readonly systemNotes: number;
   // meiva:note
-  // Wall-clock boundaries (epoch ms) of this work block: start of its first event
-  // item and end of its last settled event item, or null when missing. Active
-  // "Working for X" counts `now - startedAtMs`; settled "Worked for X" counts
-  // `endedAtMs - startedAtMs` (user ruling 2026-11-21).
+  // Active-segment timing summary (epoch ms / durations in ms) for this work block:
+  // splits the block's event items into active segments at inter-turn idle boundaries
+  // (hidden agent_chat close, post-output inbound wakes, and queued inbound restarts)
+  // so idle gaps between turns inside one work block are excluded (user ruling 2026-11-22).
+  // - `settledActiveMs`: sum of durations of all segments containing agent output, or null
+  //   if none exist or any active segment lacks timestamps.
+  // - `priorActiveMs`: sum of durations of completed active segments before the trailing
+  //   live segment (0 when none; null if any completed active segment lacks timestamps).
+  // - `liveSegmentStartMs`: start timestamp of the open trailing segment, or null when
+  //   the trailing segment already closed with a hidden agent_chat or lacks a start timestamp.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-  readonly startedAtMs: number | null;
-  readonly endedAtMs: number | null;
+  readonly settledActiveMs: number | null;
+  readonly priorActiveMs: number | null;
+  readonly liveSegmentStartMs: number | null;
   readonly sdkCalls: readonly SdkCall[];
 }
 
@@ -218,6 +225,161 @@ function itemEndMs(it: BackendTimelineItem): number | null {
   return created;
 }
 
+interface ActiveSegment {
+  readonly items: BackendTimelineItem[];
+  hasAgentOutput: boolean;
+  closingChatStep: string | null;
+}
+
+interface ComputedSegment {
+  readonly hasAgentOutput: boolean;
+  readonly closingChatStep: string | null;
+  readonly startMs: number | null;
+  readonly durationMs: number | null;
+}
+
+function stepPrefix(itemId: string): string | null {
+  const dot = itemId.lastIndexOf(".");
+  return dot > 0 ? itemId.slice(0, dot) : null;
+}
+
+function isAgentOutputItem(it: BackendTimelineItem): boolean {
+  return (
+    it.kind === "agent_reasoning" ||
+    it.kind === "agent_code" ||
+    it.kind === "code_output" ||
+    it.kind === "attach" ||
+    it.kind === "agent_chat"
+  );
+}
+
+function isInboundWakeItem(it: BackendTimelineItem): boolean {
+  return (
+    it.kind === "inbound_chat" ||
+    it.kind === "inbound_compact_request" ||
+    it.kind === "inbound_compact_summary" ||
+    (it.kind === "system_marker" && it.source === "heartbeat")
+  );
+}
+
+function isQueuedWakeRestart(it: BackendTimelineItem): boolean {
+  return it.kind === "inbound_chat" || (it.kind === "system_marker" && it.source === "heartbeat");
+}
+
+function shouldStartNewSegment(seg: ActiveSegment, it: BackendTimelineItem): boolean {
+  if (seg.closingChatStep !== null) {
+    const prefix = stepPrefix(it.item_id);
+    if (prefix !== null && prefix === seg.closingChatStep) {
+      if (it.kind !== "agent_chat") {
+        seg.closingChatStep = null;
+      }
+      return false;
+    }
+    return true;
+  }
+  if (seg.hasAgentOutput && isInboundWakeItem(it)) return true;
+  if (!seg.hasAgentOutput && isQueuedWakeRestart(it)) return true;
+  return false;
+}
+
+function splitActiveSegments(eventItems: readonly BackendTimelineItem[]): ActiveSegment[] {
+  const segments: ActiveSegment[] = [];
+  for (const it of eventItems) {
+    let seg = segments.length > 0 ? segments[segments.length - 1] : null;
+    if (seg !== null && shouldStartNewSegment(seg, it)) {
+      seg = null;
+    }
+    if (seg === null) {
+      seg = { items: [], hasAgentOutput: false, closingChatStep: null };
+      segments.push(seg);
+    }
+    seg.items.push(it);
+    if (it.kind === "agent_chat") {
+      seg.hasAgentOutput = true;
+      seg.closingChatStep = stepPrefix(it.item_id) ?? "__single__";
+    } else if (isAgentOutputItem(it)) {
+      seg.hasAgentOutput = true;
+      seg.closingChatStep = null;
+    }
+  }
+  return segments;
+}
+
+function computeSegment(seg: ActiveSegment): ComputedSegment {
+  let startMs: number | null = null;
+  if (seg.items.length > 0) {
+    const firstStart = itemStartMs(seg.items[0]);
+    if (firstStart !== null) {
+      startMs = firstStart;
+      for (let i = 1; i < seg.items.length; i++) {
+        const s = itemStartMs(seg.items[i]);
+        if (s !== null && s < startMs) startMs = s;
+      }
+    }
+  }
+
+  const settledItems = seg.items.filter((it) => !it.llmWaiting);
+  let endMs: number | null = null;
+  if (settledItems.length > 0) {
+    const lastEnd = itemEndMs(settledItems[settledItems.length - 1]);
+    if (lastEnd !== null) {
+      endMs = lastEnd;
+      for (let i = 0; i < settledItems.length - 1; i++) {
+        const e = itemEndMs(settledItems[i]);
+        if (e !== null && e > endMs) endMs = e;
+      }
+    }
+  }
+
+  const durationMs = startMs !== null && endMs !== null ? Math.max(endMs - startMs, 0) : null;
+  return {
+    hasAgentOutput: seg.hasAgentOutput,
+    closingChatStep: seg.closingChatStep,
+    startMs,
+    durationMs,
+  };
+}
+
+function sumActiveSegments(
+  segments: readonly ComputedSegment[],
+): { readonly totalMs: number | null; readonly activeCount: number } {
+  let total = 0;
+  let activeCount = 0;
+  for (const seg of segments) {
+    if (!seg.hasAgentOutput) continue;
+    activeCount += 1;
+    if (seg.durationMs === null) return { totalMs: null, activeCount };
+    total += seg.durationMs;
+  }
+  return { totalMs: total, activeCount };
+}
+
+function summarizeActiveTiming(items: readonly BackendTimelineItem[]): {
+  readonly settledActiveMs: number | null;
+  readonly priorActiveMs: number | null;
+  readonly liveSegmentStartMs: number | null;
+} {
+  const eventItems = items.filter((it) => !isStandingContextItem(it));
+  const segments = splitActiveSegments(eventItems).map(computeSegment);
+  const all = sumActiveSegments(segments);
+  const settledActiveMs = all.activeCount > 0 ? all.totalMs : null;
+
+  const lastSeg = segments.length > 0 ? segments[segments.length - 1] : null;
+  if (lastSeg !== null && lastSeg.closingChatStep === null) {
+    const prior = sumActiveSegments(segments.slice(0, -1));
+    return {
+      settledActiveMs,
+      priorActiveMs: prior.totalMs,
+      liveSegmentStartMs: lastSeg.startMs,
+    };
+  }
+  return {
+    settledActiveMs,
+    priorActiveMs: all.totalMs,
+    liveSegmentStartMs: null,
+  };
+}
+
 export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummary {
   let thinking = 0;
   let code = 0;
@@ -264,32 +426,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   const sdkCalls = orderSdkCalls(
     [...sdkCounts.entries()].map(([method, count]) => ({ method, count })),
   );
-  const eventItems = items.filter((it) => !isStandingContextItem(it));
-  const settledEventItems = eventItems.filter((it) => !it.llmWaiting);
-
-  let startedAtMs: number | null = null;
-  if (eventItems.length > 0) {
-    const firstStart = itemStartMs(eventItems[0]);
-    if (firstStart !== null) {
-      startedAtMs = firstStart;
-      for (let i = 1; i < eventItems.length; i++) {
-        const s = itemStartMs(eventItems[i]);
-        if (s !== null && s < startedAtMs) startedAtMs = s;
-      }
-    }
-  }
-
-  let endedAtMs: number | null = null;
-  if (settledEventItems.length > 0) {
-    const lastEnd = itemEndMs(settledEventItems[settledEventItems.length - 1]);
-    if (lastEnd !== null) {
-      endedAtMs = lastEnd;
-      for (let i = 0; i < settledEventItems.length - 1; i++) {
-        const e = itemEndMs(settledEventItems[i]);
-        if (e !== null && e > endedAtMs) endedAtMs = e;
-      }
-    }
-  }
+  const { settledActiveMs, priorActiveMs, liveSegmentStartMs } = summarizeActiveTiming(items);
 
   return {
     total: items.length,
@@ -302,8 +439,9 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     memories,
     agentMessages,
     systemNotes,
-    startedAtMs,
-    endedAtMs,
+    settledActiveMs,
+    priorActiveMs,
+    liveSegmentStartMs,
     sdkCalls,
   };
 }

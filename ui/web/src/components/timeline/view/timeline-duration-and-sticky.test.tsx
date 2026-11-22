@@ -173,6 +173,55 @@ describe("detail-block duration display", () => {
     expect(container.querySelector('[data-live-activity-window="true"]')).toBeNull();
     expect(runToggle().textContent).toContain("Worked for 6m");
   });
+  it("sums active work segments across inter-turn idle gaps in both Working and Worked headers", () => {
+    const MIN = 60_000;
+    const now = Date.now();
+    const base = now - 73 * MIN;
+    const liveItems = [
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
+      makeItem({
+        item_id: "2.0",
+        kind: "agent_code",
+        payload: "x = 1",
+        created_at: new Date(base).toISOString(),
+      }),
+      makeItem({
+        item_id: "3.0",
+        kind: "code_output",
+        payload: "ok",
+        exec_ms: 10 * MIN,
+        created_at: new Date(base + 10 * MIN).toISOString(),
+      }),
+      makeItem({
+        item_id: "4.0",
+        kind: "inbound_chat",
+        source: "agent:228",
+        payload: "next",
+        created_at: new Date(base + 70 * MIN).toISOString(),
+      }),
+      makeItem({
+        item_id: "5.0",
+        kind: "agent_code",
+        payload: "y = 2",
+        created_at: new Date(base + 71 * MIN).toISOString(),
+      }),
+    ];
+    const { rerender } = render(<TimelineView turnActive items={liveItems} />);
+    expect(runToggle().textContent).toContain("Working for 13m");
+
+    const settledItems = [
+      ...liveItems,
+      makeItem({
+        item_id: "6.0",
+        kind: "code_output",
+        payload: "done",
+        exec_ms: 9 * MIN,
+        created_at: new Date(base + 80 * MIN).toISOString(),
+      }),
+    ];
+    rerender(<TimelineView items={settledItems} />);
+    expect(runToggle().textContent).toContain("Worked for 20m");
+  });
   it("live timer adds the streaming block's elapsed to the committed total", () => {
     setUserSettings({ "display.expand_working_block": true });
     const now = Date.now();

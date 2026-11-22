@@ -33,22 +33,46 @@ right-aligned below the expanded body on copyable secondary messages — see
 
 The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, using the timeline as its scrollport). Before the first work item arrives, an active qualified source shows an unboxed inline `PendingLiveActivityWindow` (`Working…` header row without a disclosure chevron) when the timeline is empty or ends on a human prompt. Its suppression during source and reader loading is owned by [the loading ring](loading-ring.md).
 
-The work-block timer measures the block's wall-clock span rather than summing
-per-turn active durations (user ruling 2026-11-21):
+The work-block timer sums the active segments inside the block while excluding
+inter-turn idle gaps (user ruling 2026-11-22; derived purely on the frontend
+from timeline items, with no backend sidecars):
 
-- **Working** = `now` − the start of the first event item in this work block.
-  If earlier turns finished without a user-visible reply and a new turn starts
-  in the same work block, the live timer continues from the first item's start
-  across the intervening time.
-- **Worked** = the end of the last settled event item in the block − the start
-  of its first event item.
+- **Active segment splitting** (`runs.summarizeTurn`): after stripping standing
+  context items (`system_prompt` and `system_marker` with `show_timestamp:
+  false`), the remaining event items split into contiguous segments whenever:
+  1. A segment ended on a hidden `agent_chat` (`user_facing: false`) and the
+     next item belongs to a different step prefix (same-step tool calls such as
+     `h100.0` hidden text + `h100.1` `agent_code` stay in the same segment and
+     clear the closing boundary so subsequent `code_output` is not split).
+  2. A segment already contains agent output (`agent_reasoning` including
+     `llmWaiting`, `agent_code`, `code_output`, `attach`, `agent_chat`) and a
+     new inbound wake arrives (`inbound_chat`, `inbound_compact_request`,
+     `inbound_compact_summary`, or `system_marker` with `source ===
+     "heartbeat"`).
+  3. A segment has no agent output yet and another `inbound_chat` or heartbeat
+     marker arrives (consecutive queued wakes without agent output close the
+     empty segment at `0ms` so queue waiting time is never counted, while
+     `inbound_compact_request` → `inbound_compact_summary` remains one segment).
+- **Worked** = sum of `max(segEnd - segStart, 0)` across all segments that
+  contain agent output (`settledActiveMs`). Empty inbound-only segments
+  contribute `0` and never taint the block if their own timestamps are absent.
+  For example, 10m of work, 1h idle, then 10m of work displays `Worked for 20m`
+  rather than `80m`.
+- **Working** = `priorActiveMs + max(now - liveAnchor, 0)`, where
+  `priorActiveMs` sums completed active segments prior to the trailing open
+  segment and `liveAnchor` is the trailing open segment's start timestamp
+  (`liveSegmentStartMs`). When the trailing segment already closed on a hidden
+  `agent_chat` (for example, a hidden heartbeat has just woken before its first
+  item lands), that closed segment rolls into `priorActiveMs` and `liveAnchor`
+  falls back to `lastEventAt` (or holds `Working for <priorActiveMs>` if
+  `lastEventAt` is `0` and `priorActiveMs > 0`), never absorbing the idle gap.
 
 Item boundaries come from the timestamps and durations timeline items already
 carry (`created_at` plus `reasoning_ms` / `code_elapsed_ms` / `exec_ms`, where
 committed items with a duration stamp `created_at` at completion so start is
 `created_at - duration`, and live SSE items carry `*StartedAt`). Standing
 context items (`system_prompt` and `system_marker` with `show_timestamp: false`)
-are excluded so re-attached head notes never shift a block's start. Before the
+are excluded so re-attached head notes never shift a segment's start. Before the
 first item of a live work block arrives, `PendingLiveActivityWindow` anchors on
 the triggering human prompt's `created_at` (or `liveAnchorAt` on an empty
 timeline). Because the calculation depends only on the timeline items themselves,
@@ -58,9 +82,10 @@ bridges without per-turn timing sidecars or turn-ID deduplication.
 The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
 "Worked for Xs". Timestamped spans below one second display as "1s" ("Working
 for 1s" / "Worked for 1s", user ruling 2026-11-21); detail chips retain
-sub-second precision. When a block's start or end timestamp is truly missing,
-the header shows plain "Worked" ("Working…" while active, or `liveAnchorAt`
-fallback when live) with no duration and no per-block warning icon.
+sub-second precision. When any active segment's start or end timestamp is truly
+missing, the header shows plain "Worked" ("Working…" while active, or
+`lastEventAt` fallback when `priorActiveMs` is known and live) with no duration
+and no per-block warning icon.
 
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing

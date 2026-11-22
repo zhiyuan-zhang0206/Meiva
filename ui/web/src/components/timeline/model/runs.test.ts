@@ -58,8 +58,9 @@ describe("classifyItem", () => {
     expect(classifyItem(waiting)).toBe("secondary");
     const summary = summarizeTurn([waiting]);
     expect(summary.thinking).toBe(0);
-    expect(summary.startedAtMs).toBe(1000);
-    expect(summary.endedAtMs).toBeNull();
+    expect(summary.settledActiveMs).toBeNull();
+    expect(summary.priorActiveMs).toBe(0);
+    expect(summary.liveSegmentStartMs).toBe(1000);
   });
 
   it("agent_chat and human inbound are primary; non-user-facing agent_chat is secondary", () => {
@@ -166,8 +167,8 @@ describe("summarizeTurn / formatTurnSummary", () => {
   });
 });
 
-describe("summarizeTurn — wall-clock block span", () => {
-  it("computes start from the first item's start (subtracting committed duration) and end from the last item's end", () => {
+describe("summarizeTurn — active-segment timing", () => {
+  it("computes duration from the segment's first item start (subtracting committed duration) to its last item end without splitting multi-step waits", () => {
     const t0 = Date.parse("2026-11-21T10:00:00.000Z");
     const run = [
       item("agent_reasoning", null, "1.0", {
@@ -179,13 +180,18 @@ describe("summarizeTurn — wall-clock block span", () => {
         code_elapsed_ms: 3_000,
       }),
       item("code_output", null, "2.0", {
-        created_at: new Date(t0 + 15_000).toISOString(),
-        exec_ms: 4_000,
+        created_at: new Date(t0 + 45_000).toISOString(),
+        exec_ms: 34_000,
+      }),
+      item("agent_reasoning", null, "3.0", {
+        created_at: new Date(t0 + 55_000).toISOString(),
+        reasoning_ms: 5_000,
       }),
     ];
     const s = summarizeTurn(run);
-    expect(s.startedAtMs).toBe(t0);
-    expect(s.endedAtMs).toBe(t0 + 15_000);
+    expect(s.settledActiveMs).toBe(55_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(t0);
   });
 
   it("measures a single committed reasoning/code/output item via created_at - duration to created_at", () => {
@@ -193,20 +199,21 @@ describe("summarizeTurn — wall-clock block span", () => {
     const reasoning = summarizeTurn([
       item("agent_reasoning", null, "a", { created_at: new Date(end).toISOString(), reasoning_ms: 6_000 }),
     ]);
-    expect(reasoning.startedAtMs).toBe(end - 6_000);
-    expect(reasoning.endedAtMs).toBe(end);
+    expect(reasoning.settledActiveMs).toBe(6_000);
+    expect(reasoning.priorActiveMs).toBe(0);
+    expect(reasoning.liveSegmentStartMs).toBe(end - 6_000);
 
     const code = summarizeTurn([
       item("agent_code", null, "b", { created_at: new Date(end).toISOString(), code_elapsed_ms: 5_000 }),
     ]);
-    expect(code.startedAtMs).toBe(end - 5_000);
-    expect(code.endedAtMs).toBe(end);
+    expect(code.settledActiveMs).toBe(5_000);
+    expect(code.liveSegmentStartMs).toBe(end - 5_000);
 
     const output = summarizeTurn([
       item("code_output", null, "c", { created_at: new Date(end).toISOString(), exec_ms: 4_000 }),
     ]);
-    expect(output.startedAtMs).toBe(end - 4_000);
-    expect(output.endedAtMs).toBe(end);
+    expect(output.settledActiveMs).toBe(4_000);
+    expect(output.liveSegmentStartMs).toBe(end - 4_000);
   });
 
   it("handles frontend-frozen reasoningElapsedMs / codeElapsedMs (created_at at start) and execElapsedMs (created_at at end)", () => {
@@ -217,8 +224,8 @@ describe("summarizeTurn — wall-clock block span", () => {
         reasoningElapsedMs: 3_000,
       }),
     ]);
-    expect(frozenReasoning.startedAtMs).toBe(start);
-    expect(frozenReasoning.endedAtMs).toBe(start + 3_000);
+    expect(frozenReasoning.settledActiveMs).toBe(3_000);
+    expect(frozenReasoning.liveSegmentStartMs).toBe(start);
 
     const frozenCode = summarizeTurn([
       item("agent_code", null, "b", {
@@ -226,8 +233,8 @@ describe("summarizeTurn — wall-clock block span", () => {
         codeElapsedMs: 2_000,
       }),
     ]);
-    expect(frozenCode.startedAtMs).toBe(start);
-    expect(frozenCode.endedAtMs).toBe(start + 2_000);
+    expect(frozenCode.settledActiveMs).toBe(2_000);
+    expect(frozenCode.liveSegmentStartMs).toBe(start);
 
     const frozenExec = summarizeTurn([
       item("code_output", null, "c", {
@@ -235,26 +242,99 @@ describe("summarizeTurn — wall-clock block span", () => {
         execElapsedMs: 7_000,
       }),
     ]);
-    expect(frozenExec.startedAtMs).toBe(start);
-    expect(frozenExec.endedAtMs).toBe(start + 7_000);
+    expect(frozenExec.settledActiveMs).toBe(7_000);
+    expect(frozenExec.liveSegmentStartMs).toBe(start);
   });
 
-  it("spans across multiple hidden turns and intervening idle time within one work block", () => {
-    const t0 = Date.parse("2026-11-21T10:00:00.000Z");
+  it("sums 10m work + 1h idle + peer inbound_chat + 10m work to 20m (excluding inter-turn idle)", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
     const run = [
       item("agent_code", "Bash", "h10.0", { created_at: new Date(t0).toISOString() }),
-      item("code_output", null, "h20.0", { created_at: new Date(t0 + 10_000).toISOString(), exec_ms: 10_000 }),
-      item("agent_chat", null, "h30.0", { user_facing: false, created_at: new Date(t0 + 15_000).toISOString() }),
-      item("inbound_chat", "agent:228", "h40.0", { created_at: new Date(t0 + 315_000).toISOString() }),
-      item("agent_code", "Bash", "h50.0", { created_at: new Date(t0 + 320_000).toISOString() }),
-      item("code_output", null, "h60.0", { created_at: new Date(t0 + 335_000).toISOString(), exec_ms: 15_000 }),
+      item("code_output", null, "h20.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), exec_ms: 10 * MIN }),
+      item("inbound_chat", "agent:228", "h30.0", { created_at: new Date(t0 + 70 * MIN).toISOString() }),
+      item("agent_code", "Bash", "h40.0", { created_at: new Date(t0 + 71 * MIN).toISOString() }),
+      item("code_output", null, "h50.0", { created_at: new Date(t0 + 80 * MIN).toISOString(), exec_ms: 9 * MIN }),
     ];
     const s = summarizeTurn(run);
-    expect(s.startedAtMs).toBe(t0);
-    expect(s.endedAtMs).toBe(t0 + 335_000);
+    expect(s.settledActiveMs).toBe(20 * MIN);
+    expect(s.priorActiveMs).toBe(10 * MIN);
+    expect(s.liveSegmentStartMs).toBe(t0 + 70 * MIN);
   });
 
-  it("excludes standing context items (system_prompt and show_timestamp=false system_marker) from the block span", () => {
+  it("splits across hidden agent_chat close -> 1h idle -> hidden heartbeat resume without a visible inbound item", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const closedOnly = [
+      item("agent_reasoning", null, "h10.0", { created_at: new Date(t0 + 5 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+      item("agent_code", "Bash", "h20.0", { created_at: new Date(t0 + 6 * MIN).toISOString() }),
+      item("code_output", null, "h30.0", { created_at: new Date(t0 + 9 * MIN).toISOString(), exec_ms: 3 * MIN }),
+      item("agent_chat", null, "h40.0", { user_facing: false, created_at: new Date(t0 + 10 * MIN).toISOString() }),
+    ];
+    const sClosed = summarizeTurn(closedOnly);
+    expect(sClosed.settledActiveMs).toBe(10 * MIN);
+    expect(sClosed.priorActiveMs).toBe(10 * MIN);
+    expect(sClosed.liveSegmentStartMs).toBeNull();
+
+    const resumed = [
+      ...closedOnly,
+      item("agent_reasoning", null, "h50.0", { created_at: new Date(t0 + 75 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+      item("code_output", null, "h60.0", { created_at: new Date(t0 + 80 * MIN).toISOString(), exec_ms: 5 * MIN }),
+    ];
+    const sResumed = summarizeTurn(resumed);
+    expect(sResumed.settledActiveMs).toBe(20 * MIN);
+    expect(sResumed.priorActiveMs).toBe(10 * MIN);
+    expect(sResumed.liveSegmentStartMs).toBe(t0 + 70 * MIN);
+  });
+
+  it("does not split same-step hidden agent_chat + agent_code from its long-running code_output", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const run = [
+      item("agent_chat", null, "h100.0", { user_facing: false, created_at: new Date(t0).toISOString() }),
+      item("agent_code", "Bash", "h100.1", { created_at: new Date(t0 + 1_000).toISOString() }),
+      item("code_output", null, "h120.0", {
+        created_at: new Date(t0 + 8 * MIN + 1_000).toISOString(),
+        exec_ms: 8 * MIN,
+      }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.settledActiveMs).toBe(8 * MIN + 1_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(t0);
+  });
+
+  it("excludes queue idle time between consecutive inbound_chat wakes with no agent output and ignores missing timestamps on empty inbound segments", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const run = [
+      item("inbound_chat", "agent:10", "1.0", { created_at: null }),
+      item("inbound_chat", "agent:11", "2.0", { created_at: new Date(t0).toISOString() }),
+      item("inbound_chat", "agent:12", "3.0", { created_at: new Date(t0 + 5 * MIN).toISOString() }),
+      item("inbound_chat", "agent:13", "4.0", { created_at: new Date(t0 + 65 * MIN).toISOString() }),
+      item("agent_code", "Bash", "5.0", { created_at: new Date(t0 + 65 * MIN + 5_000).toISOString() }),
+      item("code_output", null, "6.0", { created_at: new Date(t0 + 65 * MIN + 20_000).toISOString(), exec_ms: 15_000 }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.settledActiveMs).toBe(20_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(t0 + 65 * MIN);
+  });
+
+  it("keeps inbound_compact_request and inbound_compact_summary in the same segment", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const run = [
+      item("inbound_compact_request", null, "1.0", { created_at: new Date(t0).toISOString() }),
+      item("inbound_compact_summary", null, "2.0", { created_at: new Date(t0 + 4_000).toISOString() }),
+      item("agent_reasoning", null, "3.0", { created_at: new Date(t0 + 10_000).toISOString(), reasoning_ms: 6_000 }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.settledActiveMs).toBe(10_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(t0);
+  });
+
+  it("excludes standing context items (system_prompt and show_timestamp=false system_marker) from active segments", () => {
     const oldSpawn = Date.parse("2026-11-18T00:00:00.000Z");
     const workStart = Date.parse("2026-11-21T10:00:00.000Z");
     const s = summarizeTurn([
@@ -268,32 +348,43 @@ describe("summarizeTurn — wall-clock block span", () => {
         reasoning_ms: 4_000,
       }),
     ]);
-    expect(s.startedAtMs).toBe(workStart);
-    expect(s.endedAtMs).toBe(workStart + 4_000);
+    expect(s.settledActiveMs).toBe(4_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(workStart);
   });
 
-  it("returns null start or end when the first or last event item lacks a timestamp", () => {
+  it("returns null settledActiveMs when any active segment lacks start or end timestamps, and null priorActiveMs when a prior active segment lacks timestamps", () => {
     const t = "2026-11-21T10:00:00.000Z";
     const missingBoth = summarizeTurn([
       item("agent_code", null, "a", { created_at: null }),
       item("code_output", null, "b", { created_at: null }),
     ]);
-    expect(missingBoth.startedAtMs).toBeNull();
-    expect(missingBoth.endedAtMs).toBeNull();
+    expect(missingBoth.settledActiveMs).toBeNull();
+    expect(missingBoth.priorActiveMs).toBe(0);
+    expect(missingBoth.liveSegmentStartMs).toBeNull();
 
     const missingStart = summarizeTurn([
       item("agent_code", null, "a", { created_at: null }),
       item("code_output", null, "b", { created_at: t }),
     ]);
-    expect(missingStart.startedAtMs).toBeNull();
-    expect(missingStart.endedAtMs).toBe(Date.parse(t));
+    expect(missingStart.settledActiveMs).toBeNull();
+    expect(missingStart.liveSegmentStartMs).toBeNull();
 
     const missingEnd = summarizeTurn([
       item("agent_code", null, "a", { created_at: t }),
       item("code_output", null, "b", { created_at: null }),
     ]);
-    expect(missingEnd.startedAtMs).toBe(Date.parse(t));
-    expect(missingEnd.endedAtMs).toBeNull();
+    expect(missingEnd.settledActiveMs).toBeNull();
+    expect(missingEnd.liveSegmentStartMs).toBe(Date.parse(t));
+
+    const missingPrior = summarizeTurn([
+      item("agent_code", null, "1.0", { created_at: null }),
+      item("inbound_chat", "agent:2", "2.0", { created_at: t }),
+      item("agent_code", null, "3.0", { created_at: "2026-11-21T10:00:05.000Z" }),
+    ]);
+    expect(missingPrior.settledActiveMs).toBeNull();
+    expect(missingPrior.priorActiveMs).toBeNull();
+    expect(missingPrior.liveSegmentStartMs).toBe(Date.parse(t));
   });
 
   it("takes the latest end across out-of-order parallel tool completions", () => {
@@ -303,13 +394,14 @@ describe("summarizeTurn — wall-clock block span", () => {
       item("code_output", null, "2.0", { created_at: new Date(t0 + 15_000).toISOString(), exec_ms: 15_000 }),
       item("code_output", null, "3.0", { created_at: new Date(t0 + 5_000).toISOString(), exec_ms: 5_000 }),
     ]);
-    expect(s.startedAtMs).toBe(t0);
-    expect(s.endedAtMs).toBe(t0 + 15_000);
+    expect(s.settledActiveMs).toBe(15_000);
+    expect(s.liveSegmentStartMs).toBe(t0);
   });
 
   it("a system-note-only turn summarizes as '1 system note' (never blank)", () => {
     const one = summarizeTurn([item("system_marker", "sdk_hint")]);
     expect(one.systemNotes).toBe(1);
+    expect(one.settledActiveMs).toBeNull();
     expect(formatTurnSummary(one)).toBe("1 system note");
     const several = summarizeTurn([
       item("system_marker", "lifecycle_restart"),
@@ -398,10 +490,11 @@ describe("summarizeTurn — external harness items", () => {
       }),
     ]);
     expect(s.code).toBe(1);
-    expect(s.startedAtMs).toBe(Date.parse(ts));
+    expect(s.liveSegmentStartMs).toBe(Date.parse(ts));
+    expect(s.priorActiveMs).toBe(0);
   });
 
-  it("computes wall-clock span across settled external harness items", () => {
+  it("computes active duration across settled external harness items", () => {
     const s = summarizeTurn([
       item("agent_reasoning", null, "1.0", {
         created_at: "2026-10-25T01:02:03.000Z",
@@ -416,7 +509,8 @@ describe("summarizeTurn — external harness items", () => {
         exec_ms: 500,
       }),
     ]);
-    expect(s.startedAtMs).toBe(Date.parse("2026-10-25T01:02:00.500Z"));
-    expect(s.endedAtMs).toBe(Date.parse("2026-10-25T01:02:06.000Z"));
+    expect(s.settledActiveMs).toBe(5_500);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(Date.parse("2026-10-25T01:02:00.500Z"));
   });
 });
