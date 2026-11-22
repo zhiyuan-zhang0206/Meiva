@@ -97,3 +97,24 @@ def test_root_health_tick_payload_and_metric_disposition() -> None:
 
     assert payload_keys("root_health_tick") == ("home_id", "last_tick_timestamp_seconds")
     assert METRIC_DISPOSITION[("root_health_tick", "last_tick_timestamp_seconds")] == "gauge"
+
+
+def test_state_alert_gauges_payload_and_metric_dispositions() -> None:
+    from base.events.contract import payload_keys
+    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
+
+    assert payload_keys("trace_recording") == ("disabled",)
+    assert METRIC_DISPOSITION[("trace_recording", "disabled")] == "gauge"
+    assert payload_keys("root_diagnostic_state") == ("diagnostic", "ok")
+    assert METRIC_DISPOSITION[("root_diagnostic_state", "ok")] == "gauge"
+    assert payload_keys("backup_dump_status") == ("last_run_ok",)
+    assert METRIC_DISPOSITION[("backup_dump_status", "last_run_ok")] == "gauge"
+    assert payload_keys("recovery_drill_status") == ("drill", "last_run_ok")
+    assert METRIC_DISPOSITION[("recovery_drill_status", "last_run_ok")] == "gauge"
+    assert payload_keys("schedule_manager_state") == (
+        "stalled",
+        "process_lost",
+        "convergence_abandoned",
+    )
+    for field in ("stalled", "process_lost", "convergence_abandoned"):
+        assert METRIC_DISPOSITION[("schedule_manager_state", field)] == "gauge", field

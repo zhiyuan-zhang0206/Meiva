@@ -27,6 +27,11 @@ from services.backup.scheduler.recovery_drill import (
     load_local_dump_restore_success,
     record_local_dump_restore_success,
 )
+from services.backup.scheduler.run_status import (
+    record_last_run_status,
+    resolve_dump_last_run_ok,
+    resolve_restore_drill_last_run_ok,
+)
 from services.backup.scheduler.settings import SchedulerSettings
 from services.backup.scheduler.tests.operation_support import STUB_WORKER
 from services.backup.scheduler.worker import WorkerLaunch, run_job
@@ -242,13 +247,16 @@ async def test_a_failed_backup_is_reported_and_not_retried_before_the_next_backu
     assert state.running is False
     assert state.last_error is not None and "operation exited 3" in state.last_error
     assert state.last_success is None
-    [event] = emitted_events
+    [event, status_event] = emitted_events
     assert (event.category, event.event_name, event.level) == (
         "telemetry",
         "backup_dump_failed",
         "error",
     )
     assert event.attributes["detail"] == state.last_error
+    assert (status_event.category, status_event.event_name) == ("telemetry", "backup_dump_status")
+    assert status_event.attributes == {"last_run_ok": 0}
+    assert resolve_dump_last_run_ok(tree) is False
 
 
 async def test_a_backup_with_todays_dump_launches_nothing_and_sleeps_until_the_next_hour(
@@ -320,7 +328,7 @@ async def test_a_local_restore_drill_failure_is_reported_without_publishing_succ
 
     assert _ran(log) == ["fail"]
     assert load_local_dump_restore_success(tree.restore_marker) is None
-    [event] = emitted_events
+    [event, status_event] = emitted_events
     assert (event.category, event.event_name, event.level) == (
         "telemetry",
         "recovery_drill_failed",
@@ -328,6 +336,12 @@ async def test_a_local_restore_drill_failure_is_reported_without_publishing_succ
     )
     assert event.attributes["drill"] == "logical_dump"
     assert "operation exited 3" in str(event.attributes["detail"])
+    assert (status_event.category, status_event.event_name) == (
+        "telemetry",
+        "recovery_drill_status",
+    )
+    assert status_event.attributes == {"drill": "logical_dump", "last_run_ok": 0}
+    assert resolve_restore_drill_last_run_ok(tree) is False
 
 
 async def test_an_invalid_local_restore_marker_reports_failure_without_running_restore(
@@ -342,7 +356,7 @@ async def test_an_invalid_local_restore_marker_reports_failure_without_running_r
     )
 
     assert _ran(log) == []
-    [event] = emitted_events
+    [event, status_event] = emitted_events
     assert (event.category, event.event_name, event.level) == (
         "telemetry",
         "recovery_drill_failed",
@@ -352,6 +366,118 @@ async def test_an_invalid_local_restore_marker_reports_failure_without_running_r
         "drill": "logical_dump",
         "detail": "logical restore drill success marker is invalid",
     }
+    assert (status_event.category, status_event.event_name) == (
+        "telemetry",
+        "recovery_drill_status",
+    )
+    assert status_event.attributes == {"drill": "logical_dump", "last_run_ok": 0}
+    assert resolve_restore_drill_last_run_ok(tree) is False
+
+
+def test_persisted_backup_and_drill_status_survives_restart_and_clears_on_newer_success(
+    tmp_path: Path,
+) -> None:
+    tree = BackupTree(tmp_path / "home")
+    assert resolve_dump_last_run_ok(tree) is True
+    assert resolve_restore_drill_last_run_ok(tree) is True
+
+    failed_at = datetime(2026, 9, 26, 3, 0, tzinfo=UTC)
+    record_last_run_status(tree.dump_status_marker, ok=False, now=failed_at)
+    record_last_run_status(tree.restore_status_marker, ok=False, now=failed_at)
+    assert resolve_dump_last_run_ok(tree) is False
+    assert resolve_restore_drill_last_run_ok(tree) is False
+
+    tree.managed.mkdir(parents=True)
+    (tree.managed / "stubdb-20260926T040000Z.dump.enc").write_bytes(b"ok")
+    record_local_dump_restore_success(datetime(2026, 9, 26, 4, 0, tzinfo=UTC), tree.restore_marker)
+    assert resolve_dump_last_run_ok(tree) is True
+    assert resolve_restore_drill_last_run_ok(tree) is True
+
+
+def test_corrupt_or_unreadable_status_markers_fail_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    tree = BackupTree(tmp_path / "home")
+    tree.root.mkdir(parents=True)
+    tree.dump_status_marker.write_text("{corrupt", encoding="utf-8")
+    tree.restore_status_marker.mkdir()
+    caplog.set_level("WARNING", logger="services.backup.scheduler.run_status")
+
+    assert resolve_dump_last_run_ok(tree) is False
+    assert resolve_restore_drill_last_run_ok(tree) is False
+    assert "failed reading dump run status marker" in caplog.text
+    assert "failed reading restore drill status marker" in caplog.text
+
+
+async def test_unwritable_status_marker_still_emits_failure_events_without_crashing(
+    tmp_path: Path, emitted_events: EmittedEvents, caplog: pytest.LogCaptureFixture
+) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    tree.dump_status_marker.mkdir(parents=True)
+    state = daemon.BackupState(started_at=0.0)
+    caplog.set_level("WARNING", logger="services.backup.scheduler.daemon")
+
+    sleep_s = await daemon.backup_round(
+        state, settings=_settings(), tree=tree, launch=_launch("fail", log)
+    )
+
+    assert 0 < sleep_s <= 24 * 3600
+    assert [(e.event_name, e.attributes.get("last_run_ok")) for e in emitted_events] == [
+        ("backup_dump_failed", None),
+        ("backup_dump_status", 0),
+    ]
+    assert "failed persisting run status marker" in caplog.text
+
+
+async def test_backup_loop_waits_until_next_backup_hour_while_refreshing_gauges(
+    tmp_path: Path, emitted_events: EmittedEvents
+) -> None:
+    tree = BackupTree(tmp_path / "home")
+    record_last_run_status(
+        tree.dump_status_marker, ok=False, now=datetime(2026, 9, 26, 3, 0, tzinfo=UTC)
+    )
+    now_s = 0.0
+    sleeps: list[float] = []
+    round_times: list[float] = []
+
+    class _StopLoop(BaseException):
+        pass
+
+    async def fake_round(
+        _state: daemon.BackupState,
+        *,
+        settings: SchedulerSettings,
+        tree: BackupTree,
+        launch: WorkerLaunch,
+    ) -> float:
+        del settings, tree, launch
+        round_times.append(now_s)
+        if len(round_times) >= 2:
+            raise _StopLoop
+        return 1000.0
+
+    async def fake_sleep(seconds: float) -> None:
+        nonlocal now_s
+        sleeps.append(seconds)
+        now_s += seconds
+
+    with pytest.raises(_StopLoop):
+        await daemon.backup_loop(
+            daemon.BackupState(started_at=0.0),
+            settings=_settings(),
+            tree=tree,
+            launch=_launch("succeed", tmp_path / "workers.log"),
+            monotonic=lambda: now_s,
+            sleep=fake_sleep,
+            round_fn=fake_round,
+        )
+
+    assert round_times == [0.0, 1000.0]
+    assert sleeps == [300.0, 300.0, 300.0, 100.0]
+    dump_statuses = [
+        e.attributes["last_run_ok"] for e in emitted_events if e.event_name == "backup_dump_status"
+    ]
+    assert dump_statuses == [0, 0, 0, 0]
 
 
 async def test_a_busy_restore_kind_defers_the_drill_without_a_failure_event(

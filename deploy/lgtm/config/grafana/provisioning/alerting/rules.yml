@@ -1528,8 +1528,8 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                time() - max by (cluster, machine, process, queue)
-                (meiva_event_log_drop_last_dropped_at_ratio{cluster=".meiva"})
+                time() - max by (machine, process, queue)
+                (meiva_event_log_drop_last_dropped_at_ratio)
               instant: true
               range: false
             relativeTimeRange:
@@ -2109,11 +2109,11 @@ groups:
                   query:
                     params: [C]
 
-      # ── R22: scheduled recovery proof failure (any occurrence in 1h) ──
+      # ── R22: scheduled recovery proof failure (Prometheus state gauge) ──
       # One failed isolated restore means the recovery path cannot presently
-      # be trusted. The event is emitted by the weekly logical-dump
-      # scheduler; group by the named drill so one broken path does not hide
-      # another.
+      # be trusted. The backup scheduler persists the latest outcome on disk and
+      # publishes `meiva_recovery_drill_status_last_run_ok_ratio` (1=ok, 0=failed)
+      # per drill so recovery resolves on the next evaluation instead of lingering.
       - uid: meiva-ops-recovery-drill-failed
         title: "Scheduled recovery drill failed"
         condition: D
@@ -2128,30 +2128,30 @@ groups:
           metric: recovery_drill_failure
           team: meiva-ops
         annotations:
-          summary: "Recovery drill {{ $labels.attributes_drill }} failed ({{ $values.C }} failure events in 1h)"
+          summary: "Recovery drill {{ $labels.drill }} failed (last_run_ok={{ $values.C }})"
           description: >-
-            The scheduled {{ $labels.attributes_drill }} recovery proof failed
-            at least once in the last hour. The failed proof does not mark a
-            successful drill and does not change the backup schedule. Inspect
-            the matching recovery_drill_failed event, repair the isolated
-            restore path, then confirm a later scheduled proof succeeds.
+            The latest scheduled {{ $labels.drill }} recovery proof failed
+            (meiva_recovery_drill_status_last_run_ok_ratio < 1). The failed proof
+            does not mark a successful drill and does not change the backup
+            schedule. Inspect the matching recovery_drill_failed event, repair
+            the isolated restore path, and confirm a later proof succeeds (which
+            sets the gauge back to 1 and auto-resolves this alert).
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum by (attributes_drill) (count_over_time({service_name="unknown_service", event_name="recovery_drill_failed"}
-                | json | cluster=".meiva" | category="telemetry" | level="error" [1h]))
+                min by (drill) (meiva_recovery_drill_status_last_run_ok_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 3600
+              from: 300
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -2176,17 +2176,18 @@ groups:
               expression: C
               conditions:
                 - evaluator:
-                    type: gt
-                    params: [0]
+                    type: lt
+                    params: [1]
                   operator:
                     type: and
                   query:
                     params: [C]
 
-      # ── scheduled logical dump failed (any occurrence in 24h) ──
-      # The scheduler attempts the daily dump once per cluster day and does not
-      # retry a failure, so each event is a day without a new dump. The 24h
-      # window keeps the alert firing until the next scheduled attempt.
+      # ── scheduled logical dump failed (Prometheus state gauge) ──
+      # The scheduler persists the latest dump outcome on disk across restarts and
+      # publishes `meiva_backup_dump_status_last_run_ok_ratio` (1=ok, 0=failed).
+      # Fires while the latest run failed and resolves automatically once a newer
+      # scheduled or manual dump succeeds.
       - uid: meiva-ops-backup-dump-failed
         title: "Scheduled logical dump failed"
         condition: D
@@ -2201,29 +2202,29 @@ groups:
           metric: backup_dump_failure
           team: meiva-ops
         annotations:
-          summary: "Scheduled logical dump failed ({{ $values.C }} failure events in 24h)"
+          summary: "Scheduled logical dump failed (last_run_ok={{ $values.C }})"
           description: >-
-            The daily logical dump failed at least once in the last 24 hours and
-            is not attempted again before the next backup hour. Inspect the
-            matching backup_dump_failed event, repair the cause, and confirm the
-            next scheduled dump succeeds.
+            The latest daily logical dump failed
+            (meiva_backup_dump_status_last_run_ok_ratio < 1) and no newer dump
+            has succeeded yet. Inspect the matching backup_dump_failed event,
+            repair the cause, and confirm a dump succeeds (which sets the gauge
+            back to 1 and auto-resolves this alert).
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="backup_dump_failed"}
-                | json | cluster=".meiva" | category="telemetry" | level="error" [24h]))
+                min(meiva_backup_dump_status_last_run_ok_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 86400
+              from: 300
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -2248,8 +2249,8 @@ groups:
               expression: C
               conditions:
                 - evaluator:
-                    type: gt
-                    params: [0]
+                    type: lt
+                    params: [1]
                   operator:
                     type: and
                   query:
@@ -3654,11 +3655,11 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_service) (count_over_time({service_name="unknown_service",
-                event_name="service_start_unready"} | json | cluster=".meiva" | category="telemetry" [30m]))
+                event_name="service_start_unready"} | json | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 1800
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -3705,7 +3706,7 @@ groups:
           metric: boot_retries_exhausted
           team: meiva-ops
         annotations:
-          summary: "The boot-time meiva start failed through its whole attempt budget on {{ $values.C }} occasion(s) in 1h"
+          summary: "The boot-time meiva start failed through its whole attempt budget on {{ $values.C }} occasion(s) in 15m"
           description: >-
             The OS boot job (`meiva start --boot`, launchd on macOS, the systemd unit on Linux) failed
             every attempt of its budget and is no longer retried, so this host's services may be down.
@@ -3724,11 +3725,11 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="boot_retries_exhausted"} | json
-                | cluster=".meiva" | category="telemetry" [1h]))
+                | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 3600
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -3775,7 +3776,7 @@ groups:
           metric: schedule_verify_failed
           team: meiva-ops
         annotations:
-          summary: "In-store schedule scripts fail dry-import, a name read or call-signature binding ({{ $values.C }} failed sweep(s) in 1h)"
+          summary: "In-store schedule scripts fail dry-import, a name read or call-signature binding ({{ $values.C }} failed sweep(s) in 15m)"
           description: >-
             `meiva schedules verify` found DB-embedded schedule scripts that no longer import, read only
             names they bind, or bind their calls against the checkout (a module move, a rename leftover
@@ -3795,11 +3796,11 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="schedule_verify_failed"} | json
-                | cluster=".meiva" | category="telemetry" [1h]))
+                | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 3600
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -3831,9 +3832,9 @@ groups:
                   query:
                     params: [C]
 
-      # ── meiva-ops-schedule-process-lost: the manager detects a lost session within five seconds and, until this rule, said so only in a log line ──
+      # ── meiva-ops-schedule-process-lost: live Prometheus state gauge from schedule_manager ──
       - uid: meiva-ops-schedule-process-lost
-        title: "Schedule lost its session"
+        title: "Schedule lost its run process"
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
@@ -3846,30 +3847,29 @@ groups:
           metric: schedule_process_lost
           team: meiva-ops
         annotations:
-          summary: "schedule {{ $labels.attributes_schedule_id }} lost its session"
+          summary: "{{ $labels.machine }}: {{ $values.C }} schedule(s) lost their run process"
           description: >-
-            The schedule manager's session scan found the schedule's session gone and recorded it as an error
-            (schedule_process_lost, emitted once per loss). This is the detection stage and the first alert of
-            an outage; nobody has acted yet. If nothing restarts the schedule, schedule_stalled reports the same
-            outage two hours later -- that one is the escalation, not a duplicate. A lost session is never
-            relaunched automatically, so triage with `meiva schedules list` and the schedule's session log.
+            The schedule manager reports {{ $values.C }} enabled schedule(s) on {{ $labels.machine }}
+            whose single-round process ended without an outcome or lost its leader
+            (meiva_schedule_manager_state_process_lost_ratio > 0). Triage with `meiva schedules list`
+            and the schedule's latest.log; the gauge returns to 0 and auto-resolves as soon as the
+            schedule runs cleanly, is disabled, or is cancelled.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
-                event_name="schedule_process_lost"} | json | cluster=".meiva" | category="telemetry" [24h]))
+                max by (machine) (meiva_schedule_manager_state_process_lost_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 86400
+              from: 300
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -3999,7 +3999,7 @@ groups:
           metric: llm_turn_aborted
           team: meiva-ops
         annotations:
-          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: turn aborted after retries ({{ $values.C }} in 30m)"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: turn aborted after retries ({{ $values.C }} in 15m)"
           description: >-
             A turn failed every retry and was aborted (llm_turn_aborted). The `llm_provider_error`
             rules only match rate limits and billing rejections, so a permanent rejection
@@ -4017,11 +4017,11 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id) (count_over_time({event_name="llm_turn_aborted"}
-                | json | cluster=".meiva" | category="telemetry" | attributes_cause != "planned_restart" [30m]))
+                | json | cluster=".meiva" | category="telemetry" | attributes_cause != "planned_restart" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 1800
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4088,11 +4088,11 @@ groups:
               editorMode: code
               expr: >-
                 sum by (attributes_model) (count_over_time({event_name="llm_usage_metering_failed"}
-                | json | cluster=".meiva" | category="telemetry" [1h]))
+                | json | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 3600
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4142,7 +4142,7 @@ groups:
           metric: exec_node_timeout
           team: meiva-ops
         annotations:
-          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an execute_code call hit the node timeout ({{ $values.C }} in 30m)"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an execute_code call hit the node timeout ({{ $values.C }} in 15m)"
           description: >-
             A node-level timeout fired (exec_node_timeout): the call was killed after its wall-clock
             budget. A single one is ordinary for a long loop; repetitions on one machine mean the
@@ -4159,11 +4159,11 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id) (count_over_time({event_name="exec_node_timeout"}
-                | json | cluster=".meiva" | category="telemetry" [30m]))
+                | json | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 1800
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4213,7 +4213,7 @@ groups:
           metric: exec_subprocess_killed
           team: meiva-ops
         annotations:
-          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an exec child survived the grace period and was SIGKILLed ({{ $values.C }} in 1h)"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an exec child survived the grace period and was SIGKILLed ({{ $values.C }} in 15m)"
           description: >-
             A child process outlived the signal grace period and was SIGKILLed
             (exec_subprocess_killed): it may have left partial output behind. `attributes_pid` and
@@ -4231,11 +4231,11 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id) (count_over_time({event_name="exec_subprocess_killed"}
-                | json | cluster=".meiva" | category="telemetry" [1h]))
+                | json | cluster=".meiva" | category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 3600
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4267,6 +4267,78 @@ groups:
                   query:
                     params: [C]
 
+      # ── meiva-ops-root-diagnostic-browser-reach: replaces MEIVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
+      # Evaluated in the 1m fast group so 3 samples at 300s cadence inside a 15m window always have
+      # multiple evaluation ticks while all 3 samples are simultaneously in range.
+      - uid: meiva-ops-root-diagnostic-browser-reach
+        title: "Root browser-reach diagnostic failing"
+        condition: D
+        for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-root-diagnostic-browser-reach
+          metric: root_diagnostic_browser_reach
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }}: Root browser-reach diagnostic failing on 3+ consecutive probes ({{ $values.C }} in 15m)"
+          description: >-
+            The browser canary (CDP page fetch of the gateway URL) failed while the host baseline succeeded,
+            or its prerequisite was unavailable, on at least three samples in fifteen minutes. The sample
+            cadence is browser_reach_probe_interval_s (default 300s), so three samples span ~10 minutes
+            within the 15m window. Inspect the root_diagnostic event detail (canary vs host-path result).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                cluster=".meiva" | category="telemetry" | attributes_diagnostic="browser-reach" |
+                attributes_verdict=~"down|unavailable|port-taken" [15m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
   - orgId: 1
     name: meiva-ops-slow
     folder: Meiva
@@ -4286,9 +4358,9 @@ groups:
       # episode instead of one per event. error severity: silently-off
       # observability is the incident class this alert exists to end.
       - uid: meiva-ops-inbound-consumed-unknown
-        title: "claimed inbound consumed without execution evidence (24h)"
+        title: "claimed inbound consumed without execution evidence (15m)"
         condition: D
-        for: 10m
+        for: 5m
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: &slow-missing-evals 2
         noDataState: OK
@@ -4299,14 +4371,14 @@ groups:
           metric: inbound_consumed_unknown
           team: meiva-ops
         annotations:
-          summary: "{{ $values.C }} claimed inbound(s) consumed without running in 24h across {{ $values.N }} agent(s) (threshold 2)"
+          summary: "{{ $values.C }} claimed inbound(s) consumed without running in 15m across {{ $values.N }} agent(s) (threshold 2)"
           description: >-
             A host crash or aborted turn left claimed inbound rows that the next
             cold admission consumed without executing: the message is gone and
             will not be redelivered. Each occurrence is one `inbound_consumed_unknown`
             event carrying the inbound id, kind, age and a content preview (the
             row's payload carries consumed_without_execution). One is an
-            acceptable crash cost; more than a couple a day means hosts are
+            acceptable crash cost; more than two in 15 minutes means hosts are
             dying often enough to deserve a look before users report silence.
             The threshold stays fleet-wide (one host crash drops several agents'
             inbounds at once); {{ $values.N }} is how many distinct agents lost one.
@@ -4322,11 +4394,11 @@ groups:
               editorMode: code
               expr: >-
                 sum(count_over_time({service_name="unknown_service", event_name="inbound_consumed_unknown"} | json | cluster=".meiva" |
-                category="telemetry" [24h]))
+                category="telemetry" [15m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 86400
+              from: 900
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -4350,11 +4422,11 @@ groups:
               editorMode: code
               expr: >-
                 count(sum by (agent_id) (count_over_time({service_name="unknown_service", event_name="inbound_consumed_unknown", agent_id=~".+"} | json | cluster=".meiva" |
-                category="telemetry" [24h]))) or vector(0)
+                category="telemetry" [15m]))) or vector(0)
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 86400
+              from: 900
               to: 0
           - refId: N
             datasourceUid: __expr__
@@ -4400,38 +4472,31 @@ groups:
           metric: trace_degraded
           team: meiva-ops
         annotations:
-          summary: "Trace recording auto-disabled — data disk over watermark ({{ $values.C }} degradation events in 24h)"
+          summary: "{{ $labels.machine }}: Trace recording auto-disabled — data disk over watermark"
           description: >-
-            Events with attributes.action=recording_disabled_disk_watermark
-            (event_name=trace, category=telemetry) reached {{ $values.C }} in
-            the last 24 hours. Each event = one agent start that skipped span
-            recording because its data disk is over MEIVA_TRACE_DISK_WATERMARK
-            (default 0.9): the mirror can never fill the disk, but spans are
-            not recorded — an observability blind spot (2026-08-07..10: 207
-            events over 3 days, unnoticed). Triage: `df -h` on the affected
-            machine (the event carries usage_fraction/free_gb), free space,
-            then confirm the events stop. Resolves automatically 24h after the
-            last degradation event. If the export path fails, new events stop
-            landing and this rule goes quiet with them — that outage class is
-            covered by R6 (event stream stalled) + the health-probe chain.
+            Trace recording on {{ $labels.machine }} is currently auto-disabled
+            (meiva_trace_recording_disabled_ratio > 0) because the traces data
+            disk exceeds MEIVA_TRACE_DISK_WATERMARK (default 0.9). meiva-root
+            probes the traces filesystem at startup and on every health round;
+            free disk space on {{ $labels.machine }} and this alert will
+            auto-resolve on the next evaluation once usage drops below the
+            watermark.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum(count_over_time({service_name="unknown_service", event_name="trace"} | json | cluster=".meiva" |
-                category="telemetry" |
-                attributes_action="recording_disabled_disk_watermark" [24h]))
+                max by (machine) (meiva_trace_recording_disabled_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 1440
+              from: 600
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -5112,78 +5177,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── meiva-ops-root-diagnostic-browser-reach: replaces MEIVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
-      - uid: meiva-ops-root-diagnostic-browser-reach
-        title: "Root browser-reach diagnostic failing"
-        condition: D
-        for: 0m
-        keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
-        noDataState: OK
-        execErrState: OK
-        labels:
-          severity: warning
-          ruleUID: meiva-ops-root-diagnostic-browser-reach
-          metric: root_diagnostic_browser_reach
-          team: meiva-ops
-        annotations:
-          summary: "{{ $labels.machine }}: Root browser-reach diagnostic failing on 3+ consecutive probes ({{ $values.C }} in 16m)"
-          description: >-
-            The browser canary (CDP page fetch of the gateway URL) failed while the host baseline succeeded,
-            or its prerequisite was unavailable, on at least three samples in sixteen minutes. The sample
-            cadence is browser_reach_probe_interval_s (default 300s), so three samples ~ 10-15 minutes; the
-            16m window assumes the default, widen it with that setting. Inspect the root_diagnostic event
-            detail (canary vs host-path result).
-        data:
-          - refId: A
-            datasourceUid: loki
-            queryType: ""
-            model:
-              refId: A
-              datasource:
-                type: loki
-                uid: loki
-              editorMode: code
-              expr: >-
-                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
-                cluster=".meiva" | category="telemetry" | attributes_diagnostic="browser-reach" |
-                attributes_verdict=~"down|unavailable|port-taken" [16m]))
-              instant: true
-              queryType: instant
-            relativeTimeRange:
-              from: 960
-              to: 0
-          - refId: C
-            datasourceUid: __expr__
-            queryType: ""
-            model:
-              refId: C
-              datasource:
-                type: __expr__
-                uid: __expr__
-              type: reduce
-              expression: A
-              reducer: mean
-          - refId: D
-            datasourceUid: __expr__
-            queryType: ""
-            model:
-              refId: D
-              datasource:
-                type: __expr__
-                uid: __expr__
-              type: threshold
-              expression: C
-              conditions:
-                - evaluator:
-                    type: gt
-                    params: [2]
-                  operator:
-                    type: and
-                  query:
-                    params: [C]
-
-      # ── meiva-ops-root-diagnostic-task-telemetry: the reminder/escalation record compared with the digests the daemon actually delivered; nothing read the two events, so their loss (10-03 → 10-25) was silent ──
+      # ── meiva-ops-root-diagnostic-task-telemetry: latest-round Prometheus state gauge (0=down, 1=alive) ──
       - uid: meiva-ops-root-diagnostic-task-telemetry
         title: "Root task-telemetry diagnostic failing"
         condition: D
@@ -5198,35 +5192,30 @@ groups:
           metric: root_diagnostic_task_telemetry
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine }}: Root task-telemetry diagnostic DOWN on 2+ hourly samples ({{ $values.C }} in 6h)"
+          summary: "{{ $labels.machine }}: Root task-telemetry diagnostic failing (ok={{ $values.C }})"
           description: >-
-            The task-maintenance daemon delivered reminder notices within its 24-hour window while
-            telemetry_events holds none of the task_reminder_digest / task_reminder_rerouted /
-            task_escalation rows those deliveries emit, on at least two hourly samples in six hours.
-            Reminders and escalations are the only external evidence a stalled task leaves, so while the
-            record is dark a stuck backlog and a quiet fleet look alike (2026-10-03 to 10-25: over 100
-            digests a day kept flowing, no row was stored, and both stall assessments ran blind). Triage
-            the storage filter first — an event without persist=True reaches Loki and the JSONL mirror
-            only — then the task_maintenance daemon's log. The root_diagnostic detail carries the
-            delivery and row counts.
+            The latest definitive task-telemetry diagnostic round on {{ $labels.machine }}
+            observed reminder notices delivered within 24h while telemetry_events held no
+            task_reminder_digest / task_reminder_rerouted / task_escalation rows
+            (meiva_root_diagnostic_state_ok_ratio < 1). Triage the storage filter first
+            (persist=True), then the task_maintenance daemon's log. Resolves automatically
+            on the next evaluation once a healthy diagnostic sample reports ok=1.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
-                cluster=".meiva" | category="telemetry" | attributes_diagnostic="task-telemetry" |
-                attributes_verdict="down" [6h]))
+                min by (machine) (meiva_root_diagnostic_state_ok_ratio{diagnostic="task-telemetry"})
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 21600
+              from: 600
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -5251,14 +5240,14 @@ groups:
               expression: C
               conditions:
                 - evaluator:
-                    type: gt
+                    type: lt
                     params: [1]
                   operator:
                     type: and
                   query:
                     params: [C]
 
-      # ── meiva-ops-schedule-stalled: replaces the schedule manager's stall detection ending in a log WARNING only (no rule read the event) ──
+      # ── meiva-ops-schedule-stalled: live Prometheus state gauge from schedule_manager ──
       - uid: meiva-ops-schedule-stalled
         title: "Schedule has had nothing running it for 2h"
         condition: D
@@ -5273,30 +5262,29 @@ groups:
           metric: schedule_stalled
           team: meiva-ops
         annotations:
-          summary: "schedule {{ $labels.attributes_schedule_id }} has had nothing running it for 2h+"
+          summary: "{{ $labels.machine }}: {{ $values.C }} schedule(s) stalled for 2h+"
           description: >-
-            The schedule manager found an enabled, non-completed schedule with nothing running it for more than
-            two hours (schedule_stalled, emitted once per outage). `attributes_evidence` says which shape: no
-            session at all, or a session that is still a shell whose runner process is gone. Triage with
-            `meiva schedules list` and the schedule's session log; a breaker-tripped error schedule is included
-            on purpose, its silence is the failure. Resolves 24 hours after the event.
+            The schedule manager reports {{ $values.C }} enabled schedule(s) on {{ $labels.machine }}
+            overdue or stuck without progress for more than two hours
+            (meiva_schedule_manager_state_stalled_ratio > 0). Triage with `meiva schedules list`
+            and the schedule's latest.log; the gauge returns to 0 and auto-resolves as soon as the
+            schedule progresses, is disabled, completed, or cancelled.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
-                event_name="schedule_stalled"} | json | cluster=".meiva" | category="telemetry" [24h]))
+                max by (machine) (meiva_schedule_manager_state_stalled_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 86400
+              from: 600
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -5328,11 +5316,11 @@ groups:
                   query:
                     params: [C]
 
-      # ── meiva-ops-schedule-convergence-abandoned: the schedule manager stopped retrying a surviving or unreadable session (bounded convergence) ──
+      # ── meiva-ops-schedule-convergence-abandoned: live Prometheus state gauge from schedule_manager ──
       - uid: meiva-ops-schedule-convergence-abandoned
-        title: "Schedule manager gave up converging a schedule"
+        title: "Schedule manager cannot prove run custody"
         condition: D
-        for: 0m
+        for: 5m
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: *slow-missing-evals
         noDataState: OK
@@ -5343,30 +5331,29 @@ groups:
           metric: schedule_convergence_abandoned
           team: meiva-ops
         annotations:
-          summary: "schedule {{ $labels.attributes_schedule_id }}: the manager stopped retrying its session"
+          summary: "{{ $labels.machine }}: {{ $values.C }} schedule run(s) have unprovable process custody"
           description: >-
-            The schedule manager retried a reap that the session survived (or a live session whose launch
-            provenance it could not read) for ten minutes and then stopped (schedule_convergence_abandoned,
-            emitted once per give-up). The schedule is recorded as an error and its process is left alone.
-            Inspect the process with `meiva schedules list` and the host, stop it by hand if needed, then
-            restart the schedule explicitly. Resolves 24 hours after the event.
+            The schedule manager reports {{ $values.C }} open schedule run(s) on {{ $labels.machine }}
+            whose custody record or process group could not be observed or reaped
+            (meiva_schedule_manager_state_convergence_abandoned_ratio > 0). Inspect the process with
+            `meiva schedules list` and the host; the gauge returns to 0 and auto-resolves as soon as
+            custody clears or the run is settled/cancelled.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: prometheus
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: prometheus
+                uid: prometheus
               editorMode: code
               expr: >-
-                sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
-                event_name="schedule_convergence_abandoned"} | json | cluster=".meiva" | category="telemetry" [24h]))
+                max by (machine) (meiva_schedule_manager_state_convergence_abandoned_ratio)
               instant: true
-              queryType: instant
+              range: false
             relativeTimeRange:
-              from: 86400
+              from: 600
               to: 0
           - refId: C
             datasourceUid: __expr__

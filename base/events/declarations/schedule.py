@@ -100,6 +100,14 @@ class ScheduleVerifyFailed(TypedDict):
     detail: str
 
 
+# meiva:note
+# Current per-machine counts of schedules in stalled, process-lost, or custody-blocked state.
+class ScheduleManagerState(TypedDict):
+    stalled: int
+    process_lost: int
+    convergence_abandoned: int
+
+
 EVENTS: dict[str, EventSpec] = {
     "schedule_recovery_gated": telemetry_event(
         "schedule_recovery_gated",
@@ -151,5 +159,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleVerifyFailed,
         tier="anomaly",
         site="cli/commands/management/schedules_verify.py:_report_verify telemetry.emit",
+    ),
+    "schedule_manager_state": telemetry_event(
+        "schedule_manager_state",
+        "current per-machine counts of stalled, process-lost, and custody-blocked schedules",
+        payload=ScheduleManagerState,
+        tier="noise",
+        site="services/wake/schedule_manager/declarative.py:DeclarativeScheduleEngine._emit_schedule_state",
     ),
 }

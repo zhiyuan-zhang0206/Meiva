@@ -3,6 +3,7 @@
 
 [uses]
 "test_diagnostic_budget.py" = ["slices.py"]
+"test_diagnostic_state_gauges.py" = ["slices.py"]
 "test_diagnostic_wiring.py" = ["slices.py"]
 "test_drill_heartbeat.py" = ["slices.py"]
 "test_diagnostic_work_ownership.py" = ["slices.py"]

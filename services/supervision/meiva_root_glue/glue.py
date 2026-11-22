@@ -484,6 +484,8 @@ def build_wiring(
             machine=machine,
             clock=clock,
             home=home,
+            trace_enabled=config.view.observability.trace_enabled,
+            trace_disk_watermark=config.view.observability.trace_disk_watermark,
         ),
         startup_graces=startup_graces,
     )
@@ -519,6 +521,8 @@ def assemble(
             clock=rounds.clock,
             home=rounds.home,
             tasks=context.participant_tasks,
+            trace_enabled=rounds.trace_enabled,
+            trace_disk_watermark=rounds.trace_disk_watermark,
         )
         context.supervisor.attach_health(health_rounds)
         return [health_rounds]

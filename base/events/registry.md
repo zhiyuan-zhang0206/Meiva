@@ -329,6 +329,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them); host-level, no agent_id: one batch mixes every agent's events | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
 | `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
+| `trace_recording` | current trace disk-watermark state per machine (disabled=1 while data disk exceeds trace_disk_watermark, 0 when healthy or recovered) | noise | disabled | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |
 | `converge_sealed_input_changed` | a render wrote a file a live root has sealed as a unit input, so that unit can no longer be spawned until a new generation or an explicit re-admission (task #6403) | anomaly | writer, units, paths, liveness | — | events | — |
@@ -347,10 +348,13 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events | — |
 | `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events | — |
 | `root_diagnostic` | root diagnostic sampled a failing verdict (every sample while it persists, WARNING), reached no verdict -- ran out of its observation deadline or could not inspect at all (inconclusive / unavailable, INFO) -- or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
+| `root_diagnostic_state` | latest definitive root diagnostic outcome gauge (ok=1 alive, ok=0 down) | noise | diagnostic, ok | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
 | `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events | — |
+| `backup_dump_status` | latest scheduled logical dump outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | last_run_ok | — | events | — |
 | `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
+| `recovery_drill_status` | latest scheduled recovery drill outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | drill, last_run_ok | — | events | — |
 | `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
 | `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |
 | `service_start_unready` | a non-critical service missed its readiness window at meiva start | anomaly | service | — | events | — |
@@ -363,6 +367,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `schedule_stalled` | enabled non-completed schedule has had nothing running it for more than two hours — no session, or a session whose runner process is gone | anomaly | schedule_id, status, silent_seconds, session_missing_seconds, evidence, runner_detail, beat_written_at | — | events | — |
 | `schedule_convergence_abandoned` | the schedule manager stopped retrying a schedule whose session survives its reap or whose live session's launch provenance is unreadable, and recorded the schedule as an error; an explicit new revision lifts the stop | anomaly | schedule_id, reason, blocked_seconds | — | events | — |
 | `schedule_verify_failed` | meiva schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
+| `schedule_manager_state` | current per-machine counts of stalled, process-lost, and custody-blocked schedules | noise | stalled, process_lost, convergence_abandoned | — | events | — |
 
 ## 4. Log (bare logs, category=log)
 
