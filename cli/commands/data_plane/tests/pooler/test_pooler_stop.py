@@ -16,7 +16,7 @@ import os
 import signal
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import psutil
@@ -24,6 +24,7 @@ import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Deadline
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.host.system.tests.fake_commands import real_commands_host
@@ -195,6 +196,17 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (5,)
 
 
+class _SteppingTimers(ManualTimers):
+    def __init__(self, readings: Sequence[float]) -> None:
+        super().__init__(start=readings[0])
+        self._readings = iter(readings)
+        self._last = readings[0]
+
+    def monotonic(self) -> float:
+        self._last = next(self._readings, self._last)
+        return self._last
+
+
 # meiva:note
 # A restart whose stop budget is spent before the stop reaches the pooler (a busy host spends it on
 # the lock and the listener scans, as CI runs 42885952133 and 42946600241 did with 0.5 s) fails the
@@ -217,6 +229,53 @@ def test_a_restart_whose_stop_budget_is_spent_fails_cleanly_and_leaves_the_poole
         assert running.identity.live()
         assert not (running.directory / "stop-intent.json").exists()
         assert port_preflight.require_listener(running.identity, running.port)
+
+
+# meiva:note
+# When the stop budget is still positive on entry (acquiring the lock and scanning listeners) and
+# expires before signalling, the timeout must happen before `stop-intent.json` is written. Writing
+# the intent and then timing out before SIGINT wedges every subsequent safe stop behind a phantom
+# intent for a pooler that was never signalled (CI random-order run 44969084445).
+def test_a_stop_budget_spent_during_listener_scan_leaves_no_intent_and_allows_retry(
+    unit_home: Path,
+) -> None:
+    with running_pooler(unit_home) as running:
+        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        expiring = _SteppingTimers((0.0, 2.0))
+
+        with pytest.raises(TimeoutError, match="stop deadline expired; custody retained"):
+            custodian.stop(deadline=Deadline(at=1.0, timers=expiring))
+
+        assert running.identity.live()
+        assert not (running.directory / "stop-intent.json").exists()
+        custodian.require_accepting()
+        assert custodian.stop(deadline=Deadline(at=time.monotonic() + 5, timers=SYSTEM_TIMERS))
+        assert not running.identity.live()
+
+
+def test_a_restart_whose_stop_budget_expires_during_listener_scan_can_still_be_stopped(
+    unit_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    command_machine: MachineIdentityReader,
+) -> None:
+    with running_pooler(unit_home) as running:
+        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        spec = pooler_spec(
+            command_machine, listen_port=running.port, socket_dir=unit_home, stop_wait_s=0.5
+        )
+        # meiva:note
+        # `Deadline.after` reads 0.0 (at=0.5), `_request_stop` reads 0.0 on entry (budget=0.5),
+        # and the post-scan check reads 1.0 so the budget expires after `_listeners()`.
+        expiring = _SteppingTimers((0.0, 0.0, 1.0))
+
+        assert pooler.ensure_pgbouncer(spec, host=real_commands_host(), timers=expiring) == 1
+
+        assert "could not stop the running pooler" in capsys.readouterr().err
+        assert running.identity.live()
+        assert not (running.directory / "stop-intent.json").exists()
+        assert port_preflight.require_listener(running.identity, running.port)
+        assert custodian.stop(deadline=Deadline(at=time.monotonic() + 5, timers=SYSTEM_TIMERS))
+        assert not running.identity.live()
 
 
 # meiva:note
