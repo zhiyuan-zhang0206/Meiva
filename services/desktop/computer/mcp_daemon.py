@@ -96,6 +96,7 @@ from services.desktop.remote import ClusterToolCaller, RemoteTransportRouter
 
 from . import session
 from .config import (
+    NO_LOCAL_DESKTOP_ERR,
     ComputerUseConfig,
     DaemonSettingsLike,
     beat_interval_s,
@@ -385,10 +386,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         if target.kind != "local":
             return self._router.ssh_helper_for(target.name, agent_id)
         if self._helper is None:
-            raise PermissionsHelperError(
-                "no local desktop available on this host; pass host='meiva://<machine>' "
-                "or host='ssh://<alias>' (run `meiva computer list` to view available targets)"
-            )
+            raise PermissionsHelperError(NO_LOCAL_DESKTOP_ERR)
         return self._helper
 
     async def _call_tool(
@@ -403,9 +401,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
                 agent_id,
                 tool,
                 args,
-                "error",
-                str(exc),
-                None,
+                ("error", str(exc), None),
                 target_host=str(raw_host or "local"),
             )
         tool_args = {k: v for k, v in args.items() if k != "host"}
@@ -418,16 +414,24 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             return await self._acquire_control(agent_id, tool_args, req_id, target, state)
         if tool == "release_control":
             return await self._release_control(agent_id, tool_args, req_id, target, state)
-        gen_before = state.screen.generation
-        if agent_id is not None and not await state.screen.acquire(
-            agent_id, priority=priority(tool_args)
-        ):
-            err = f"screen busy on {target.canonical_uri}: held by agent {state.screen.holder or '?'} — wait for release_control or the lease to expire, then retry"
-            return {"id": req_id, "ok": False, "error": err}
-        if agent_id is not None and state.screen.generation != gen_before:
-            state.arm_reminder(agent_id)
+        if target.kind == "local" and self._helper is None:
+            return self._audit_reply(
+                req_id,
+                agent_id,
+                tool,
+                tool_args,
+                ("error", NO_LOCAL_DESKTOP_ERR, None),
+                target_host=target.canonical_uri,
+            )
+        newly_acquired, busy_err = await state.acquire_implicit(
+            agent_id, priority_name=priority(tool_args), target_uri=target.canonical_uri
+        )
+        if busy_err is not None:
+            return {"id": req_id, "ok": False, "error": busy_err}
         async with state.action_lock:
-            return await self._execute_locked(target, state, tool, tool_args, agent_id, req_id)
+            return await self._execute_locked(
+                target, state, tool, tool_args, agent_id, req_id, newly_acquired=newly_acquired
+            )
 
     def _audit_reply(
         self,
@@ -435,15 +439,14 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         agent_id: int | None,
         tool: str,
         args: dict[str, object],
-        outcome: str,
-        error: str | None,
-        body: dict[str, object] | None,
+        verdict: tuple[str, str | None, dict[str, object] | None],
         *,
         target_host: str,
         helper: DesktopHelper | None = None,
         app_name: str | None = None,
         resp_error: str | None = None,
     ) -> Response:
+        outcome, error, body = verdict
         session.emit_computer_action(
             self._db,
             agent_id,
@@ -468,9 +471,10 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         tool_args: dict[str, object],
         agent_id: int | None,
         req_id: int,
+        *,
+        newly_acquired: bool = False,
     ) -> Response:
-        stamp = snapshot_stamp(self._clock.now())
-        is_ssh = target.kind == "ssh"
+        stamp, is_ssh = snapshot_stamp(self._clock.now()), target.kind == "ssh"
         run_sync = lambda: state.run_target_tool(  # noqa: E731
             lambda: self._helper_for_target(target, agent_id),
             tool,
@@ -486,8 +490,11 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         )
         if aborted:
             state.cancel_reminder()
-            await state.screen.release(None)
+            _ = await state.screen.release(None)
             state.mouse_holder = None
+        elif newly_acquired and agent_id is not None and (helper is None or (is_ssh and error)):
+            state.cancel_reminder()
+            _ = await state.screen.release(agent_id)
         elif agent_id is not None and helper is not None:
             session.note_task_session(
                 self._task_sessions,
@@ -506,9 +513,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             agent_id,
             tool,
             tool_args,
-            "error" if error is not None else "ok",
-            error,
-            result,
+            ("error" if error is not None else "ok", error, result),
             target_host=target.canonical_uri,
             helper=None if is_ssh else helper,
             app_name=app_name,
@@ -536,7 +541,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         except Exception as exc:
             outcome, error = "error", f"{type(exc).__name__}: {exc}"
         return self._audit_reply(
-            req_id, agent_id, tool, tool_args, outcome, error, result, target_host=target_uri
+            req_id, agent_id, tool, tool_args, (outcome, error, result), target_host=target_uri
         )
 
     async def _acquire_control(
@@ -550,7 +555,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         def _remote_acq(ttl: int) -> dict[str, object]:
             return self._router.acquire_remote_ssh(target.name, agent_id, ttl_seconds=ttl)
 
-        outcome, error, body = await session.acquire_target_control(
+        verdict = await session.acquire_target_control(
             state,
             agent_id=agent_id,
             args=args,
@@ -562,14 +567,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             now_fn=self._clock.now,
         )
         return self._audit_reply(
-            req_id,
-            agent_id,
-            "acquire_control",
-            args,
-            outcome,
-            error,
-            body,
-            target_host=target.canonical_uri,
+            req_id, agent_id, "acquire_control", args, verdict, target_host=target.canonical_uri
         )
 
     async def _release_control(
@@ -598,9 +596,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             agent_id,
             "release_control",
             args,
-            outcome,
-            error,
-            body,
+            (outcome, error, body),
             target_host=target.canonical_uri,
             helper=helper,
             resp_error=resp_err,

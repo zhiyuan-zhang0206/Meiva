@@ -142,6 +142,7 @@ class RemoteWinBridgeHelper:
         lease_seconds: int = _DEFAULT_REMOTE_LEASE_SECONDS,
         timers: Timers | None = None,
         allow_meiva_handoff: bool = True,
+        handoff_prefix: str = _MEIVA_HOLDER_PREFIX,
         client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -153,6 +154,7 @@ class RemoteWinBridgeHelper:
         )
         self._timers = timers
         self._allow_meiva_handoff = allow_meiva_handoff
+        self._handoff_prefix = handoff_prefix
         self._client = client
         self._req_ids = itertools.count(1)
         self._lease_acquired = False
@@ -162,6 +164,14 @@ class RemoteWinBridgeHelper:
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    @property
+    def holder(self) -> str:
+        return self._holder
+
+    @property
+    def handoff_prefix(self) -> str:
+        return self._handoff_prefix
 
     def set_holder(self, holder: str) -> None:
         if holder != self._holder:
@@ -266,7 +276,7 @@ class RemoteWinBridgeHelper:
             if (
                 current_holder is None
                 or current_holder == self._holder
-                or not current_holder.startswith(_MEIVA_HOLDER_PREFIX)
+                or not current_holder.startswith(self._handoff_prefix)
             ):
                 raise
             payload, _, _ = self._call_mcp("lease_manage", {**req, "force": True})

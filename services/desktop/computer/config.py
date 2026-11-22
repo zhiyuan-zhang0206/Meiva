@@ -64,6 +64,10 @@ DEFAULT_LEASE_S = 600.0
 MIN_LEASE_SECONDS = 30
 MAX_LEASE_SECONDS = 3600
 LEASE_REMINDER_LEAD_SECONDS = 180.0
+NO_LOCAL_DESKTOP_ERR = (
+    "no local desktop available on this host; pass host='meiva://<machine>' "
+    "or host='ssh://<alias>' (run `meiva computer list` to view available targets)"
+)
 
 
 def clamp_lease_ttl_seconds(raw: object, *, default_s: float) -> int | None:

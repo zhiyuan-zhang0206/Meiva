@@ -53,6 +53,7 @@ from .config import (
 )
 from .config import (
     LEASE_REMINDER_LEAD_SECONDS,
+    NO_LOCAL_DESKTOP_ERR,
     ComputerUseConfig,
     clamp_lease_ttl_seconds,
     finalize_release_result,
@@ -366,6 +367,23 @@ class TargetSessionState:
         self.reminder_agent_id = agent_id
         self.reminder_gen = self.screen.generation
 
+    async def acquire_implicit(
+        self, agent_id: int | None, *, priority_name: str, target_uri: str
+    ) -> tuple[bool, str | None]:
+        if agent_id is None:
+            return False, None
+        gen_before = self.screen.generation
+        if not await self.screen.acquire(agent_id, priority=priority_name):
+            busy = (
+                f"screen busy on {target_uri}: held by agent {self.screen.holder or '?'} — "
+                "wait for release_control or the lease to expire, then retry"
+            )
+            return False, busy
+        newly_acquired = self.screen.generation != gen_before
+        if newly_acquired:
+            self.arm_reminder(agent_id)
+        return newly_acquired, None
+
     def take_due_reminder(self, *, now_mono: float) -> tuple[int, float] | None:
         due, aid, gen = self.reminder_due_at, self.reminder_agent_id, self.reminder_gen
         if due is None or aid is None or now_mono < due:
@@ -567,7 +585,13 @@ class TargetSessionRegistry:
         self, stop: asyncio.Event, *, db: Database, now_fn: Callable[[], datetime]
     ) -> None:
         while not stop.is_set():
-            soonest = await self.flush_due_reminders(db=db, now_fn=now_fn)
+            try:
+                soonest = await self.flush_due_reminders(db=db, now_fn=now_fn)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[computer-mcp] lease reminder loop iteration failed"
+                )
+                soonest = None
             wait_s = 1.0 if soonest is None else min(soonest, 1.0)
             try:
                 await self._timers.asleep(wait_s)
@@ -594,13 +618,7 @@ async def acquire_target_control(
     except ComputerUseError as exc:
         return "error", str(exc), None
     if target_kind == "local" and not local_available:
-        return (
-            "error",
-            "no local desktop available on this host (headless or permissions helper disabled); "
-            "pass host='meiva://<machine>' or host='ssh://<alias>' "
-            "(run `meiva computer list` to view available targets)",
-            None,
-        )
+        return "error", NO_LOCAL_DESKTOP_ERR, None
     was_holder = state.screen.holder == agent_id
     if not await state.screen.acquire(agent_id, priority=priority(args), ttl_s=float(ttl_seconds)):
         busy = (
@@ -612,8 +630,14 @@ async def acquire_target_control(
         if target_kind == "ssh" and acquire_remote is not None:
             try:
                 _ = await asyncio.to_thread(acquire_remote, ttl_seconds)
+            except UserAbortError as exc:
+                state.cancel_reminder()
+                _ = await state.screen.release(None)
+                state.mouse_holder = None
+                return "error", f"{type(exc).__name__}: {exc}", None
             except Exception as exc:
                 if not was_holder:
+                    state.cancel_reminder()
                     _ = await state.screen.release(agent_id)
                 return "error", f"{type(exc).__name__}: {exc}", None
         state.arm_reminder(agent_id)

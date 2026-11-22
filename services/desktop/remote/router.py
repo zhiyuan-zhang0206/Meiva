@@ -120,7 +120,8 @@ class RemoteTransportRouter[HelperT]:
                 f"Unknown SSH desktop host 'ssh://{alias}'. "
                 "Run `meiva computer list` to view registered targets."
             )
-        holder = f"meiva-agent-{agent_id or 0}"
+        prefix = f"meiva-{self._local_machine}-agent-" if self._local_machine else "meiva-agent-"
+        holder = f"{prefix}{agent_id or 0}"
         if self._remote_helper_factory is not None:
             return self._remote_helper_factory(cfg, agent_id)
         base_url = self._resolve_tunnel_endpoint(cfg)
@@ -133,6 +134,7 @@ class RemoteTransportRouter[HelperT]:
             base_url,
             bearer_token=token,
             holder=holder,
+            handoff_prefix=prefix,
             lease_seconds=self._remote_lease_seconds,
             timers=self._clock,
         )

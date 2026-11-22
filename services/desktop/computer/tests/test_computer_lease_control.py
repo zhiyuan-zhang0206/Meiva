@@ -11,6 +11,7 @@ from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock, ClockConfig
 from base.db import Database, create_agent
 from base.host.boundary.json_values import is_object_dict
+from base.host.permissions_helper.client import PermissionsHelperError
 from base.host.permissions_helper.wire import ClickResult
 from services.desktop.computer import mcp_daemon, session
 from services.desktop.computer.tests.slices import (
@@ -18,7 +19,12 @@ from services.desktop.computer.tests.slices import (
     computer_use_config,
     text_block,
 )
-from services.desktop.remote import CornerFailsafeError, RemoteWinBridgeHelper
+from services.desktop.remote import (
+    CORNER_FAILSAFE_CODE,
+    CornerFailsafeError,
+    RemoteTransportRouter,
+    RemoteWinBridgeHelper,
+)
 
 
 class _SteppableTimers:
@@ -286,3 +292,176 @@ async def test_early_release_and_corner_abort_cancel_pending_reminders(
     finally:
         daemon.close()
         daemon_abort.close()
+
+
+def test_router_namespaces_holder_by_machine_and_blocks_cross_machine_handoff(
+    database: Database, tmp_path: Path
+) -> None:
+    _ = (tmp_path / "remote_hosts.toml").write_text(
+        '[hosts.zzyasus]\nos = "windows"\nlocal_port = 18792\n', encoding="utf-8"
+    )
+    router: RemoteTransportRouter[RemoteWinBridgeHelper] = RemoteTransportRouter(
+        db=database,
+        clock=_clock_for(_SteppableTimers(wall_start=datetime(2026, 11, 22, 12, 0, 0, tzinfo=UTC))),
+        home=tmp_path,
+        local_machine="ubuntu",
+    )
+    helper_obj = router.ssh_helper_for("zzyasus", 7)
+    assert isinstance(helper_obj, RemoteWinBridgeHelper)
+    assert helper_obj.holder == "meiva-ubuntu-agent-7"
+    assert helper_obj.handoff_prefix == "meiva-ubuntu-agent-"
+
+    remote_holder: dict[str, str] = {"holder": "meiva-macmini-agent-9"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        args = dict(body["params"]["arguments"])
+        act = args.get("action")
+        if act == "status":
+            payload: dict[str, object] = {"ok": True, "lease": {"holder": remote_holder["holder"]}}
+        elif act == "acquire" and not args.get("force"):
+            payload = {"ok": False, "code": "DESKTOP_LEASE_HELD", "message": "held by other host"}
+        else:
+            remote_holder["holder"] = str(args.get("holder"))
+            payload = {"ok": True, "acquired": True}
+        rpc = {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(payload)}],
+                "isError": False,
+            },
+        }
+        return httpx.Response(200, json=rpc)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    ubuntu_helper = RemoteWinBridgeHelper(
+        "http://127.0.0.1:18792",
+        holder="meiva-ubuntu-agent-7",
+        handoff_prefix="meiva-ubuntu-agent-",
+        client=client,
+    )
+    try:
+        ubuntu_helper.acquire_remote_lease(ttl_seconds=600)
+        raise AssertionError("expected DESKTOP_LEASE_HELD for another cluster host")
+    except PermissionsHelperError as exc:
+        assert "DESKTOP_LEASE_HELD" in str(exc)
+    assert remote_holder["holder"] == "meiva-macmini-agent-9"
+
+    remote_holder["holder"] = "meiva-ubuntu-agent-3"
+    _ = ubuntu_helper.acquire_remote_lease(ttl_seconds=600)
+    assert remote_holder["holder"] == "meiva-ubuntu-agent-7"
+
+
+async def test_acquire_control_renewal_releases_local_lease_on_corner_failsafe(
+    database: Database, tmp_path: Path
+) -> None:
+    agent_id = _create_real_agent(database)
+    _ = (tmp_path / "remote_hosts.toml").write_text(
+        '[hosts.zzyasus]\nos = "windows"\nlocal_port = 18792\n', encoding="utf-8"
+    )
+    timers = _SteppableTimers(wall_start=datetime(2026, 11, 22, 12, 0, 0, tzinfo=UTC))
+    abort_next = {"flag": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        payload: dict[str, object] = (
+            {"ok": False, "code": CORNER_FAILSAFE_CODE, "message": "cursor in corner"}
+            if abort_next["flag"]
+            else {"ok": True, "acquired": True}
+        )
+        rpc = {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(payload)}],
+                "isError": False,
+            },
+        }
+        return httpx.Response(200, json=rpc)
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    daemon = mcp_daemon.ComputerMcpDaemon(
+        computer_use_config(computer_use_lease_s=600.0),
+        database,
+        str(tmp_path / "renew-abort.sock"),
+        helper=None,
+        clock=_clock_for(timers),
+        home=tmp_path,
+        local_machine="ubuntu",
+        remote_helper_factory=lambda _cfg, aid: RemoteWinBridgeHelper(
+            "http://127.0.0.1:18792",
+            holder=f"meiva-ubuntu-agent-{aid or 0}",
+            handoff_prefix="meiva-ubuntu-agent-",
+            timers=timers,
+            client=http_client,
+        ),
+    )
+    try:
+        _ = await _call_ok(daemon, 1, "acquire_control", {"host": "ssh://zzyasus"}, agent_id)
+        st = daemon._state_for("ssh://zzyasus")
+        assert st.screen.holder == agent_id
+        assert st.reminder_due_at is not None
+
+        abort_next["flag"] = True
+        renew = await daemon._dispatch(
+            {
+                "id": 2,
+                "method": "call_tool",
+                "tool": "acquire_control",
+                "args": {"host": "ssh://zzyasus", "ttl_seconds": 1200},
+                "agent_id": agent_id,
+            }
+        )
+        assert renew["ok"] is False
+        assert CORNER_FAILSAFE_CODE in str(renew.get("error", ""))
+        assert st.screen.holder is None
+        assert st.reminder_due_at is None
+    finally:
+        daemon.close()
+
+
+async def test_headless_local_and_unreachable_ssh_leave_no_ghost_lease_or_reminder(
+    database: Database, tmp_path: Path
+) -> None:
+    agent_id = _create_real_agent(database)
+    _ = (tmp_path / "remote_hosts.toml").write_text(
+        '[hosts.zzyasus]\nos = "windows"\nlocal_port = 18792\n', encoding="utf-8"
+    )
+    timers = _SteppableTimers(wall_start=datetime(2026, 11, 22, 12, 0, 0, tzinfo=UTC))
+
+    def broken_factory(_cfg: object, _aid: int | None) -> RemoteWinBridgeHelper:
+        raise PermissionsHelperError("ssh tunnel unreachable")
+
+    daemon = mcp_daemon.ComputerMcpDaemon(
+        computer_use_config(computer_use_lease_s=600.0),
+        database,
+        str(tmp_path / "ghost.sock"),
+        helper=None,
+        clock=_clock_for(timers),
+        home=tmp_path,
+        local_machine="ubuntu",
+        remote_helper_factory=broken_factory,
+    )
+    try:
+        local_err = await daemon._dispatch(
+            {"id": 1, "method": "call_tool", "tool": "snapshot", "args": {}, "agent_id": agent_id}
+        )
+        assert local_err["ok"] is False
+        assert daemon._state_for("local").screen.holder is None
+        assert daemon._state_for("local").reminder_due_at is None
+
+        ssh_err = await daemon._dispatch(
+            {
+                "id": 2,
+                "method": "call_tool",
+                "tool": "snapshot",
+                "args": {"host": "ssh://zzyasus"},
+                "agent_id": agent_id,
+            }
+        )
+        assert ssh_err["ok"] is False
+        assert daemon._state_for("ssh://zzyasus").screen.holder is None
+        assert daemon._state_for("ssh://zzyasus").reminder_due_at is None
+    finally:
+        daemon.close()
