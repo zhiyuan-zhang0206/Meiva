@@ -18,6 +18,7 @@ from base.agents.messages.lifecycle_text import (
     restart_resume_note,
     restart_transition_note,
 )
+from base.agents.messages.termination_notice import AncestorTerminationNotice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 LifecycleKind = Literal["restart", "terminate"]
@@ -44,6 +45,7 @@ class AppliedLifecycle:
     agent_id: int
     shell_cutoff: int | None
     switch: HarnessSwitch | None = None
+    ancestor_notification: AncestorTerminationNotice | None = None
 
 
 # meiva:note
@@ -51,6 +53,7 @@ class AppliedLifecycle:
 class ReapedCorpse(NamedTuple):
     agent_id: int
     shell_cutoff: int
+    ancestor_notification: AncestorTerminationNotice | None = None
 
 
 # meiva:note

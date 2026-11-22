@@ -89,6 +89,22 @@ def test_terminate_queues_its_inbound_row_and_wakes_the_agents_own_channel(
     assert woken is not None and woken["data"] == "0"
 
 
+def test_terminate_with_message_stores_message_on_self_inbound(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
+
+    with pytest.raises(AgentTermination):
+        meiva.self.terminate("  work completed cleanly  ")
+
+    assert _inbound(db_conn, agent_id, "terminate") == [("self", "work completed cleanly", None)]
+
+
 def test_restart_without_an_overlay_queues_a_bare_restart_row(
     redis_url: str,
     db_conn: psycopg.Connection[Any],

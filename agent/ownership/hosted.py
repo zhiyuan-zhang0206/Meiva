@@ -36,12 +36,17 @@ from agent.ownership.lifecycle_plan import (
     shell_cutoff,
     turn_close,
 )
+from base.agents.inbox.termination_notice import (
+    AncestorTerminationNotice,
+    notify_nearest_living_ancestor_async,
+)
 from base.agents.incarnation.restart_transition import (
     RestartTransition,
     restart_transition_of,
 )
 from base.agents.messages.lifecycle_text import fast_acknowledgement_note
-from base.db.protocols import AsyncPool, DatabaseLike
+from base.agents.messages.termination_notice import termination_message_of
+from base.db.protocols import AsyncConnectionLike, AsyncPool, DatabaseLike
 from base.db.rows import IdRow
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
@@ -86,6 +91,7 @@ class _LifecycleCommand:
     kind: str
     source: str
     content: str
+    termination_message: str | None
     transition: RestartTransition | None
     fast_ack_note: str | None
 
@@ -98,6 +104,7 @@ class _LifecycleCommand:
                     kind,
                     source,
                     content,
+                    termination_message_of(content, payload),
                     restart_transition_of(payload),
                     fast_acknowledgement_note(payload),
                 )
@@ -129,6 +136,114 @@ class _LifecycleCommand:
 #     change hint, browser pages and every older shell), so the lifecycle lock is
 #     never held across it and the host reports cleanup failures without rolling
 #     back the durable death. A periodic reaper closes any race leftovers.
+async def _apply_terminate_command(
+    conn: AsyncConnectionLike,
+    incarnation: RuntimeIncarnation,
+    command: _LifecycleCommand,
+    session_index: int,
+) -> tuple[int, AncestorTerminationNotice | None, Event | None]:
+    await conn.execute(
+        "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
+        "AND status IN ('pending','claimed')",
+        (incarnation.agent_id,),
+    )
+    cutoff = shell_cutoff(session_index)
+    if command.source in ("self", f"agent:{incarnation.agent_id}"):
+        await conn.execute(
+            "UPDATE agents_meta SET status='terminated',termination_source='user',"
+            "last_turn_fatal_reason=NULL WHERE id=%s",
+            (incarnation.agent_id,),
+        )
+    else:
+        await conn.execute(
+            "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
+            (incarnation.agent_id,),
+        )
+    terminate_event: Event | None = None
+    if command.source == "self":
+        terminate_payload: dict[str, object] = {"inbound_id": command.id}
+        if command.termination_message is not None:
+            terminate_payload["message"] = command.termination_message
+        terminate_event = await record_audit_async(
+            conn,
+            prepare_event_log(
+                event_type="terminate",
+                agent_id=incarnation.agent_id,
+                source="self",
+                payload=terminate_payload,
+            ),
+        )
+    ancestor_notification = await notify_nearest_living_ancestor_async(
+        conn,
+        terminated_agent_id=incarnation.agent_id,
+        source=command.source,
+        message=command.termination_message,
+    )
+    return cutoff, ancestor_notification, terminate_event
+
+
+async def _apply_restart_command(
+    conn: AsyncConnectionLike,
+    incarnation: RuntimeIncarnation,
+    command: _LifecycleCommand,
+    *,
+    resume_turn: bool,
+    stored_harness: str,
+) -> HarnessSwitch | None:
+    plan = restart_apply(
+        incarnation.agent_id,
+        source=command.source,
+        message=command.content or None,
+        resume_turn=resume_turn,
+        transition=command.transition,
+        stored_harness=stored_harness,
+    )
+    if command.transition is None and plan.note is not None and command.fast_ack_note is not None:
+        plan = replace(
+            plan,
+            note=replace(
+                plan.note,
+                content=f"{plan.note.content}\n\n{command.fast_ack_note}",
+            ),
+        )
+    for sql, params in plan.statements:
+        await conn.execute(sql, params)
+    await conn.execute(
+        "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
+        "runtime_owner=NULL WHERE id=%s",
+        (incarnation.agent_id,),
+    )
+    # meiva:note
+    # The release marker is the maintenance drain's proof that this restart
+    # executed, as opposed to being closed as failed or superseded.
+    await conn.execute(
+        "UPDATE inbound_messages SET status='done',"
+        "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
+        "WHERE id=%s",
+        (command.id,),
+    )
+    note = plan.note
+    if note is not None:
+        await conn.execute(
+            "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+            "VALUES(%s,%s,'system_note',%s,jsonb_build_object('note_tag',%s::text))",
+            (
+                incarnation.agent_id,
+                note.content,
+                note.source,
+                note.note_tag,
+            ),
+        )
+    if plan.switches_harness and command.transition is not None:
+        return HarnessSwitch(
+            stored_harness,
+            command.transition.target_harness,
+            command.source,
+            command.content,
+        )
+    return None
+
+
 async def apply_hosted_lifecycle(
     pool: AsyncPool,
     incarnation: RuntimeIncarnation,
@@ -137,6 +252,8 @@ async def apply_hosted_lifecycle(
 ) -> AppliedLifecycle | None:
     cutoff: int | None = None
     switch: HarnessSwitch | None = None
+    ancestor_notification: AncestorTerminationNotice | None = None
+    terminate_event: Event | None = None
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
             "SELECT session_index, harness FROM agents_meta WHERE id=%s "
@@ -162,84 +279,27 @@ async def apply_hosted_lifecycle(
         kind = lifecycle_kind(command.kind)
         match kind:
             case "restart":
-                plan = restart_apply(
-                    incarnation.agent_id,
-                    source=command.source,
-                    message=command.content or None,
+                switch = await _apply_restart_command(
+                    conn,
+                    incarnation,
+                    command,
                     resume_turn=resume_turn,
-                    transition=command.transition,
                     stored_harness=stored_harness,
                 )
-                if (
-                    command.transition is None
-                    and plan.note is not None
-                    and command.fast_ack_note is not None
-                ):
-                    plan = replace(
-                        plan,
-                        note=replace(
-                            plan.note,
-                            content=f"{plan.note.content}\n\n{command.fast_ack_note}",
-                        ),
-                    )
-                for sql, params in plan.statements:
-                    await conn.execute(sql, params)
-                await conn.execute(
-                    "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
-                    "runtime_owner=NULL WHERE id=%s",
-                    (incarnation.agent_id,),
-                )
-                # meiva:note
-                # The release marker is the maintenance drain's proof that this restart
-                # executed, as opposed to being closed as failed or superseded.
-                await conn.execute(
-                    "UPDATE inbound_messages SET status='done',"
-                    "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
-                    "WHERE id=%s",
-                    (command.id,),
-                )
-                note = plan.note
-                if note is not None:
-                    await conn.execute(
-                        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
-                        "VALUES(%s,%s,'system_note',%s,jsonb_build_object('note_tag',%s::text))",
-                        (
-                            incarnation.agent_id,
-                            note.content,
-                            note.source,
-                            note.note_tag,
-                        ),
-                    )
-                if plan.switches_harness and command.transition is not None:
-                    switch = HarnessSwitch(
-                        stored_harness,
-                        command.transition.target_harness,
-                        command.source,
-                        command.content,
-                    )
             case "terminate":
-                await conn.execute(
-                    "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
-                    "AND status IN ('pending','claimed')",
-                    (incarnation.agent_id,),
+                cutoff, ancestor_notification, terminate_event = await _apply_terminate_command(
+                    conn, incarnation, command, session_index
                 )
-                cutoff = shell_cutoff(session_index)
-                if command.source in ("self", f"agent:{incarnation.agent_id}"):
-                    await conn.execute(
-                        "UPDATE agents_meta SET status='terminated',termination_source='user',"
-                        "last_turn_fatal_reason=NULL WHERE id=%s",
-                        (incarnation.agent_id,),
-                    )
-                else:
-                    await conn.execute(
-                        "UPDATE agents_meta SET status='terminated',termination_source='user' "
-                        "WHERE id=%s",
-                        (incarnation.agent_id,),
-                    )
             case _:
                 assert_never(kind)
+    if terminate_event is not None:
+        emit_prepared(terminate_event)
     return AppliedLifecycle(
-        kind=kind, agent_id=incarnation.agent_id, shell_cutoff=cutoff, switch=switch
+        kind=kind,
+        agent_id=incarnation.agent_id,
+        shell_cutoff=cutoff,
+        switch=switch,
+        ancestor_notification=ancestor_notification,
     )
 
 

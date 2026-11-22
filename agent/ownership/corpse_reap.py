@@ -9,6 +9,8 @@ from loguru import logger
 
 from agent.ownership.audit_payloads import reaped_payload
 from agent.ownership.lifecycle_plan import ReapedCorpse as ReapedCorpse
+from base.agents.inbox.termination_notice import notify_nearest_living_ancestor_async
+from base.agents.messages.termination_notice import CRASH_HARVEST_SOURCE
 from base.db.protocols import AsyncPool
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.telemetry import Event, emit_prepared
@@ -16,20 +18,22 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 # meiva:note
-# The two columns the reap UPDATE returns: the corpse's id and the exclusive
-# persistent-shell cutoff captured by the status transition. Matched by type rather
-# than trusted, so a row of another shape fails here instead of stamping a termination
-# against an unchecked id.
+# The three columns the reap UPDATE returns: the corpse's id, the exclusive
+# persistent-shell cutoff captured by the status transition, and the sanitized fatal
+# turn summary (if recorded) to forward in the ancestor termination notice.
 @dataclass(frozen=True)
 class _ReapedRow:
     agent_id: int
     shell_cutoff: int
+    fatal_reason: str | None
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> _ReapedRow:
         match row:
-            case (int() as agent_id, int() as shell_cutoff):
-                return cls(agent_id, shell_cutoff)
+            case (int() as agent_id, int() as shell_cutoff, object() as fatal_reason) if (
+                fatal_reason is None or isinstance(fatal_reason, str)
+            ):
+                return cls(agent_id, shell_cutoff, fatal_reason)
             case _:
                 raise TypeError("a reaped agents_meta row has columns of unexpected types")
 
@@ -64,7 +68,7 @@ async def reap_crash_corpses(
                 "WHERE machine = %s AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
-                "RETURNING id, session_index",
+                "RETURNING id, session_index, last_turn_fatal_reason",
                 (machine, CORPSE_REAP_GRACE_S),
             )
         ).fetchall()
@@ -79,10 +83,17 @@ async def reap_crash_corpses(
                 payload=reaped_payload(),
             )
             recorded.append(await record_audit_async(conn, event))
+            ancestor_notice = await notify_nearest_living_ancestor_async(
+                conn,
+                terminated_agent_id=corpse.agent_id,
+                source=CRASH_HARVEST_SOURCE,
+                message=corpse.fatal_reason,
+            )
             reaped.append(
                 ReapedCorpse(
                     corpse.agent_id,
                     corpse.shell_cutoff,
+                    ancestor_notice,
                 )
             )
     for event in recorded:
