@@ -203,12 +203,52 @@ def bill_prompt(
 MAX_AMBIGUOUS_PLANNER_ROWS = 10
 
 
+@dataclass(frozen=True, slots=True)
+class _StopText:
+    chunks: tuple[str, ...] = ()
+    seen: frozenset[int] = frozenset()
+
+    def corroborates(self, span: Sequence[PlannerRow], scope: Sequence[PlannerRow]) -> bool:
+        terminal = span[-1]
+        if not self.chunks or not terminal.final or terminal.index in self.seen:
+            return False
+        selected = {step.index for step in span}
+        positions = {0}
+        for step, text in _planner_text(scope):
+            if step.index > terminal.index:
+                break
+            if step.index in self.seen:
+                continue
+            matched = {
+                end
+                for start in positions
+                if (end := _chunk_prefix_end(self.chunks, start, text)) is not None
+            }
+            positions = matched if step.index in selected else positions | matched
+            if not positions:
+                return False
+        return any(not any(chunk.strip() for chunk in self.chunks[end:]) for end in positions)
+
+
+def _chunk_prefix_end(chunks: tuple[str, ...], start: int, expected: str) -> int | None:
+    value = ""
+    for index in range(start, len(chunks)):
+        value += chunks[index]
+        text = value.strip()
+        if text == expected:
+            return index + 1
+        if not expected.startswith(text):
+            break
+    return None
+
+
 def _witnesses(
     known: tuple[PlannerRow, ...],
     possible: tuple[PlannerRow, ...],
     reports: Sequence[PromptUsage],
     keys: Sequence[str],
-    stop_text: str,
+    scope: Sequence[PlannerRow],
+    stop_text: _StopText,
 ) -> Iterator[tuple[PlannerRow, ...]]:
     if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
@@ -220,19 +260,14 @@ def _witnesses(
         if (
             sole_carried_terminal
             and span[-1].carries_notice
-            and not _matches_stop_text(span[-1], stop_text)
+            and not stop_text.corroborates(span, scope)
         ):
             continue
         yield span
 
 
-def _matches_stop_text(step: PlannerRow, stop_text: str) -> bool:
-    value = step.row.get("content")
-    return bool(stop_text) and isinstance(value, str) and value.strip() == stop_text
-
-
 def _unique_receipt_span(
-    witnesses: Iterator[tuple[PlannerRow, ...]], stop_text: str
+    witnesses: Iterator[tuple[PlannerRow, ...]], scope: Sequence[PlannerRow], stop_text: _StopText
 ) -> tuple[PlannerRow, ...] | None:
     first = next(witnesses, None)
     if first is None:
@@ -243,7 +278,7 @@ def _unique_receipt_span(
     tied = (first, second, *witnesses)
     if not all(span[-1].carries_notice for span in tied):
         return None
-    matched = [span for span in tied if _matches_stop_text(span[-1], stop_text)]
+    matched = [span for span in tied if stop_text.corroborates(span, scope)]
     return matched[0] if len(matched) == 1 else None
 
 
@@ -312,7 +347,7 @@ class PromptTurn:
     _verified_text: tuple[str, ...] = ()
     _verified_usage_partial: bool = False
     _projection_degraded: bool = False
-    _stop_text: str = ""
+    _stop_text: _StopText = _StopText()
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
         yield from self._flush_thoughts()
@@ -346,15 +381,18 @@ class PromptTurn:
         self._verified_text = ()
         self._verified_usage_partial = False
         self._projection_degraded = False
-        self._stop_text = ""
+        self._stop_text = _StopText()
 
     def record_stop(self, reason: str, projection: OutputProjection) -> None:
         self.stop_reason = reason
-        self._stop_text = "".join(
-            content_text(frame.get("content"))
-            for frame in projection.pending
-            if frame.get("sessionUpdate") == "agent_message_chunk"
-        ).strip()
+        self._stop_text = _StopText(
+            chunks=tuple(
+                content_text(frame.get("content"))
+                for frame in projection.pending
+                if frame.get("sessionUpdate") == "agent_message_chunk"
+            ),
+            seen=frozenset(index for index, field, _ in projection.seen if field == "content"),
+        )
 
     def require_projection(self, *, required: bool) -> OutputProjection | None:
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
@@ -403,8 +441,9 @@ class PromptTurn:
             and (not reports or (projection.fences_replay and not possible))
         ):
             return known, tuple(step for step in possible if step.index > known[-1].index)
-        witnesses = _witnesses(known, possible, reports, self.keys, self._stop_text)
-        span = _unique_receipt_span(witnesses, self._stop_text)
+        scope = tuple(sorted((*known, *possible), key=lambda step: step.index))
+        witnesses = _witnesses(known, possible, reports, self.keys, scope, self._stop_text)
+        span = _unique_receipt_span(witnesses, scope, self._stop_text)
         if span is None:
             return None
         chosen = {step.index for step in span}

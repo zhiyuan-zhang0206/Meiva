@@ -327,6 +327,8 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
         ("unresolved-attribution", "", True, 6, 6, "before-marker-with-tool"),
         ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
         ("unresolved-attribution", "", True, 6, 6, "usage-collision"),
+        ("unresolved-attribution", "", True, 6, 6, "usage-collision-early"),
+        ("unresolved-attribution", "", True, 6, 6, "foreground-preamble"),
     ],
 )
 async def test_resumed_multi_step_command_completion(
@@ -373,6 +375,8 @@ async def _assert_reused_prompt(
         "after-marker": "late-native",
         "tool-after-marker": "tool-then-foreground",
         "usage-collision": "usage-collision",
+        "usage-collision-early": "usage-collision-early",
+        "foreground-preamble": "foreground-preamble",
     }.get(native_timing, "next")
     await harness.session.deliver([HarnessInput.of("second", followup)])
     second = await harness.wait_for(
@@ -382,15 +386,17 @@ async def _assert_reused_prompt(
             and event.turn_id != first_turn_id
         )
     )
-    if native_timing == "usage-collision":
+    if native_timing.startswith("usage-collision"):
         await harness.wait_for_marker("collision-receipt-read")
         harness.release("release-foreground")
     again = await harness.wait_for(
         lambda event: isinstance(event, TurnCompleted) and event.turn_id == second.turn_id
     )
-    assert again.text == "OK" and not again.usage_uncertain and harness.session.cli_pid == pid
-    assert _assistant_texts(harness, second.turn_id) == ["OK"]
-    if native_timing != "none":
+    expected = ["Working", "OK"] if native_timing == "foreground-preamble" else ["OK"]
+    assert again.text == "\n".join(expected)
+    assert not again.usage_uncertain and harness.session.cli_pid == pid
+    assert _assistant_texts(harness, second.turn_id) == expected
+    if native_timing not in {"none", "foreground-preamble"}:
         if native_timing == "tool-after-marker":
             harness.release("release-native")
         await _assert_native_reply(harness, with_tool="tool" in native_timing)

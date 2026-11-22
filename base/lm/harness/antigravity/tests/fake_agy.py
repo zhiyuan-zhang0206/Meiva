@@ -306,20 +306,46 @@ def cancel_prompt(transcript: Path, request: int) -> None:
     result(request, "cancelled", usage=False)
 
 
-def late_foreground_with_usage_collision(transcript: Path, request: int) -> None:
+def late_foreground_with_usage_collision(transcript: Path, request: int, *, early: bool) -> None:
     record_native_tool(transcript)
     record(transcript, planner_row("LATE NATIVE REPLY"))
+    if early:
+        message("LATE NATIVE REPLY")
     message("O")
     message("K")
     result(request)
     frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
 
     def write_foreground() -> None:
-        message("LATE NATIVE REPLY")
+        if not early:
+            message("LATE NATIVE REPLY")
         record(transcript, planner_row("OK"))
         update("usage_update", used=2, size=10)
 
     after_release(Path("release-foreground"), write_foreground)
+
+
+def foreground_with_preamble(transcript: Path, request: int) -> None:
+    record(
+        transcript,
+        {
+            **planner_row("Working"),
+            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "echo foreground"}}],
+        },
+    )
+    message("Working")
+    record(transcript, planner_row("OK"))
+    message("O")
+    message("K")
+    frame(
+        {
+            "id": request,
+            "result": {
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 20, "cachedReadTokens": 60, "outputTokens": 6},
+            },
+        }
+    )
 
 
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
@@ -341,8 +367,11 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         send_late_native(transcript)
     if command == "tool-then-foreground":
         record_native_tool(transcript)
-    if command == "usage-collision":
-        late_foreground_with_usage_collision(transcript, request)
+    if command == "foreground-preamble":
+        foreground_with_preamble(transcript, request)
+        return
+    if command.startswith("usage-collision"):
+        late_foreground_with_usage_collision(transcript, request, early=command.endswith("-early"))
         return
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
