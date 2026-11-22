@@ -96,17 +96,22 @@ class OwnedPooler:
             if listeners is None:
                 return
             requested = self._stop_requested()
+            if requested:
+                return
+            # meiva:note
+            # Check the remaining budget before recording `stop-intent.json`: timing out after the
+            # write and before SIGINT would leave a phantom intent that prevents every subsequent
+            # safe stop from signalling a pooler that was never told to stop.
+            if deadline.left() is None:
+                raise TimeoutError("PgBouncer stop deadline expired; custody retained")
             # meiva:note
             # Record before signalling, including when a previous native caller already closed
             # the listeners. Ambiguous delivery never authorizes a retry.
-            if not requested:
-                write_private_bytes(
-                    self.config.with_name("stop-intent.json"),
-                    render_intent(_birth(self.identity)).encode(),
-                )
-            if listeners and not requested:
-                if deadline.left() is None:
-                    raise TimeoutError("PgBouncer stop deadline expired; custody retained")
+            write_private_bytes(
+                self.config.with_name("stop-intent.json"),
+                render_intent(_birth(self.identity)).encode(),
+            )
+            if listeners:
                 self.identity.send_signal(signal.SIGINT)
 
     def _wait(self, deadline: Deadline) -> bool:
