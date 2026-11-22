@@ -69,7 +69,11 @@ bound the session reader's work. An earlier text block cannot close a turn
 while its planner span contradicts complete ACP usage receipts. Closing a
 verified foreground records the transcript boundary and the accounted span.
 A late timer reply requires a separate task notice after that boundary or
-planner evidence excluded from the verified foreground span.
+planner evidence excluded from the verified foreground span. A confirmed
+cancellation also allows an already registered timer to deliver a separate
+terminal planner row added after the cancellation boundary. A planner row
+already present at cancellation cannot acquire timer ownership by reaching
+DONE afterward.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
@@ -100,7 +104,10 @@ cover several planner steps. A single prompt's usage is authoritative. For a
 steered turn, the adapter checks ordered receipt spans against planner rows
 bounded by its input markers and final streamed answer. A disjoint set of
 receipts must cover the owned rows in sequence. A cumulative final receipt
-must cover the span, and each earlier receipt must match a proper prefix.
+must cover the span, and each available earlier receipt must match a proper
+prefix. If a superseded request omitted usage, the terminal cumulative receipt
+can still verify a unique span with planner evidence for each foreground
+input. Disjoint billing requires every request receipt.
 Planner rows attributed to a detached task are excluded. With incomplete
 evidence, the completion carries available counters and a usage uncertainty
 flag. The graph logs `harness_usage_uncertain` and skips the exact cost row.

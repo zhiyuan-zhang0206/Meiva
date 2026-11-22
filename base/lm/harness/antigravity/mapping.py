@@ -114,12 +114,17 @@ Evidence = tuple[int, str, int]
 class ForegroundBoundary:
     next_row: int
     accounted: bool
+    cancelled: bool
 
     def excludes(self, step: PlannerRow, notice: BackgroundNotice) -> bool:
         tokens = step.row.get("input_tokens")
-        return notice.index >= self.next_row or (
-            self.accounted and step.index >= self.next_row and type(tokens) is int and tokens > 0
-        )
+        if notice.index >= self.next_row:
+            return True
+        if step.index < self.next_row:
+            return False
+        if self.cancelled:
+            return step.final
+        return self.accounted and type(tokens) is int and tokens > 0
 
 
 @dataclass(slots=True)
@@ -146,8 +151,10 @@ class OutputProjection:
         self.confirmed.update(selected)
         self.excluded.update(step.index for step in candidates if step.index not in selected)
 
-    def close_foreground(self, keys: Sequence[str], row_count: int, *, accounted: bool) -> None:
-        boundary = ForegroundBoundary(row_count - self.offset, accounted)
+    def close_foreground(
+        self, keys: Sequence[str], row_count: int, *, accounted: bool, cancelled: bool = False
+    ) -> None:
+        boundary = ForegroundBoundary(row_count - self.offset, accounted, cancelled)
         self._boundaries.update(dict.fromkeys(keys, boundary))
 
     def _route(self, step: PlannerRow) -> str | BackgroundNotice | None:

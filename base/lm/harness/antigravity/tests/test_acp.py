@@ -17,7 +17,7 @@ from base.lm.harness.antigravity.foreground import (
 )
 from base.lm.harness.antigravity.mapping import OutputProjection
 from base.lm.harness.antigravity.session import ActiveTurn
-from base.lm.harness.antigravity.tests.support import start
+from base.lm.harness.antigravity.tests.support import Harness, start
 from base.lm.harness.antigravity.timing_store import timing_path
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
 from base.lm.harness.events import (
@@ -89,8 +89,16 @@ async def test_superseded_result_leaves_same_turn_and_tool_running(tmp_path: Pat
         await harness.stop()
 
 
-async def test_cancel_keeps_process_and_next_turn_works(tmp_path: Path) -> None:
-    harness = await start(tmp_path)
+async def _release_timer(harness: Harness) -> ToolResult:
+    harness.release("release-tool")
+    return await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+
+
+@pytest.mark.parametrize("extra_args", [(), ("--test-early-hub",)])
+async def test_cancel_keeps_process_and_next_turn_works(
+    tmp_path: Path, extra_args: tuple[str, ...]
+) -> None:
+    harness = await start(tmp_path, extra_args=extra_args)
     try:
         await harness.session.deliver([HarnessInput.of("timer", "background")])
         timer_turn = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
@@ -99,6 +107,8 @@ async def test_cancel_keeps_process_and_next_turn_works(tmp_path: Path) -> None:
         tool = await harness.wait_for(
             lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
         )
+        if extra_args:
+            await _release_timer(harness)
         report = await harness.session.interrupt(turn_id=tool.turn_id)
         assert report.cli_alive and report.cli_pid == pid and report.settled
         cancel = [frame for frame in harness.frames() if frame.get("method") == "session/cancel"]
@@ -107,13 +117,11 @@ async def test_cancel_keeps_process_and_next_turn_works(tmp_path: Path) -> None:
         ]
         await harness.wait_for(lambda e: isinstance(e, InterruptConfirmed))
         assert harness.session.background_work().items
-        harness.release("release-tool")
-        timer = await harness.wait_for(
-            lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer"
-        )
+        timer = await _release_timer(harness)
         assert timer.turn_id == timer_turn.turn_id and not timer.is_error
         harness.release()
-        await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        assert background.text == "BACKGROUND"
         await harness.session.deliver([HarnessInput.of("next", "after-cancel")])
         done = await harness.wait_for(
             lambda e: (
@@ -682,3 +690,79 @@ def test_repeated_text_consumes_earliest_row_for_the_same_owner() -> None:
         assert projected.input_key == "one" and projected.frame == _chunk("SAME")
         assert projection.seen == {(row, "content", 0) for row in range(1, index + 1)}
         assert not projection.pending
+
+
+@pytest.mark.parametrize("first_planner_visible", [True, False])
+def test_terminal_cumulative_steer_usage_without_early_receipt(
+    first_planner_visible: bool,
+) -> None:
+    turn = PromptTurn(ActiveTurn(turn_id="turn", key="one", blocks=()), 0)
+    turn.register_request(5, "one")
+    turn.register_request(6, "two")
+    turn.stop_reason = "end_turn"
+    assert PromptUsage.from_result({"stopReason": "end_turn"}.get("usage")) is None
+    receipt = PromptUsage.from_result(
+        {
+            "inputTokens": 6576,
+            "outputTokens": 4268,
+            "cachedReadTokens": 19166,
+            "cachedWriteTokens": 0,
+            "thoughtTokens": 343,
+            "totalTokens": 30010,
+        }
+    )
+    assert receipt is not None
+    turn.reports[6] = receipt
+    first = {**_planner("BEGIN_ALPHA", 2277), "cache_read_tokens": 8500, "output_tokens": 4100}
+    final = {
+        **_planner("DONE_ALPHA and STEER_BRAVO", 4299),
+        "cache_read_tokens": 10666,
+        "output_tokens": 168,
+    }
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker("one")},
+        *([first] if first_planner_visible else []),
+        {"type": "USER_INPUT", "content": input_marker("two")},
+        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        final,
+        _planner("BACKGROUND", 99),
+    ]
+    projection = OutputProjection(0, keys=["one", "two"])
+    projection.pending.extend(
+        _chunk(text) for text in ("BEGIN_ALPHA", "DONE_ALPHA and STEER_BRAVO", "BACKGROUND")
+    )
+    if not first_planner_visible:
+        turn.reports[6] = PromptUsage(4299, 168, 10666, 0, 0)
+        turn.prove_projection(projection, rows)
+        assert not turn.projection_ready(projection, rows)
+        assert list(projection.project(rows)) == []
+        return
+    turn.prove_projection(projection, rows)
+    assert turn.projection_ready(projection, rows)
+    events = list(projection.project(rows))
+    assert [(event.input_key, event.reply) for event in events] == [
+        ("one", ""),
+        ("two", ""),
+        (None, "BACKGROUND"),
+    ]
+    done = turn.complete(rows, "end_turn", "conv", 0.0, 1)
+    assert done.text == "BEGIN_ALPHA\nDONE_ALPHA and STEER_BRAVO"
+    assert done.usage == Usage(25_742, 4_611, 0, 19_166)
+    assert done.num_turns == 2 and not done.usage_uncertain
+
+
+def test_cancel_boundary_keeps_an_existing_planner_out_of_the_timer_reply() -> None:
+    projection = OutputProjection(0, keys=["one"])
+    interrupted = _planner("LATE FOREGROUND", 10)
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker("one")},
+        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        {**interrupted, "status": "RUNNING"},
+    ]
+    projection.close_foreground(["one"], len(rows), accounted=False, cancelled=True)
+    rows[2] = interrupted
+    rows.append(_planner("BACKGROUND", 99))
+    projection.pending.extend((_chunk("LATE FOREGROUND"), _chunk("BACKGROUND")))
+    [reply] = list(projection.project(rows))
+    assert reply.reply == "BACKGROUND" and reply.timer_notice("conv") is not None
+    assert list(projection.pending) == [_chunk("LATE FOREGROUND")]

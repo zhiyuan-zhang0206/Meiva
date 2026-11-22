@@ -643,9 +643,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         elif self._projection is None:
             self._projection = OutputProjection(len(rows))
         else:
-            self._projection.close_foreground(
-                turn.keys, len(rows), accounted=turn.verified_steps is not None
-            )
+            turn.close_projection(self._projection, len(rows))
         self._complete(ticket)
         turn.finished.set()
 
