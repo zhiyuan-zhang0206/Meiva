@@ -140,11 +140,23 @@ def validate_input[InputModel: BaseModel](
     model: type[InputModel], args: dict[str, object]
 ) -> InputModel:
     """Validate action parameters while preserving the daemon's coordination envelope."""
-    action = {key: value for key, value in args.items() if key not in {"task_id", "priority"}}
+    action = {
+        key: value for key, value in args.items() if key not in {"task_id", "priority", "host"}
+    }
     try:
         return model.model_validate(action)
     except ValidationError as exc:
         raise ComputerUseError(str(exc)) from exc
+
+
+HOST_PARAM_SCHEMA: dict[str, object] = {
+    "type": "string",
+    "description": (
+        "Optional target desktop URI ('local', 'meiva://<machine>', 'ssh://<alias>', or "
+        "unambiguous registered short name). Omit for this machine; run `meiva computer list` "
+        "to see registered targets."
+    ),
+}
 
 
 def tool_schema(model: type[BaseModel]) -> dict[str, object]:
@@ -155,6 +167,7 @@ def tool_schema(model: type[BaseModel]) -> dict[str, object]:
         raise TypeError("a tool input model declares its properties")
     properties.update(
         {
+            "host": dict(HOST_PARAM_SCHEMA),
             "task_id": {"type": "integer"},
             "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
         }

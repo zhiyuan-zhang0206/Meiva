@@ -48,6 +48,7 @@ from base.host.boundary.fields import (
 )
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
+from base.host.remote_hosts import has_remote_hosts
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
 from base.log.sinks import add_sink
@@ -222,8 +223,13 @@ async def connect_server(
     server: str, config: DaemonConfig, oauth_locks: dict[str, asyncio.Lock]
 ) -> tuple[DirectSession, AsyncExitStack]:
     spec = load_mcp_config(home=config.home)[server]
+    remote_desktop_available = spec.get("shared") == "computer_use" and (
+        has_remote_hosts(home=config.home) or computer_mcp_socket(config.home).exists()
+    )
     unmet = unmet_requirement(
-        validate_requirements(spec), display_available=config.display_available
+        validate_requirements(spec),
+        display_available=config.display_available,
+        remote_desktop_available=remote_desktop_available,
     )
     if unmet is not None:
         raise MCPError(unmet)

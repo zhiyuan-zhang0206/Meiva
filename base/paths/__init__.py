@@ -345,6 +345,10 @@ def computer_mcp_socket(home: Path) -> Path:
     return run_dir(home) / "computer-mcp.sock"
 
 
+def remote_hosts_path(home: Path) -> Path:
+    return home / "remote_hosts.toml"
+
+
 def insights_socket(home: Path) -> Path:
     """Unix socket the insights service answers on (`<home>/run/insights.sock`).
 

@@ -74,6 +74,8 @@ def get_computer_trace(
                     "error": attrs.get("error"),
                 }
             )
+            if attrs.get("target_host") is not None:
+                entry["target_host"] = attrs.get("target_host")
             actions.append(entry)
         elif row["event_name"] == "computer_session_start":
             start = entry | {

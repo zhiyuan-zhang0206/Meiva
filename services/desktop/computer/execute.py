@@ -11,6 +11,7 @@ from . import ocr as ocr_mod
 from .ax_ids import AxSession
 from .errors import ComputerUseError
 from .input import (
+    HOST_PARAM_SCHEMA,
     ClickInput,
     ClipboardWriteInput,
     DragInput,
@@ -34,7 +35,7 @@ from .screen import (
     capture_region,
     capture_screen,
     current_scale,
-    png_size,
+    image_size,
     snapshot_path,
     to_logical,
 )
@@ -90,6 +91,28 @@ def mcp_result(result: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _capture_window_snapshot(
+    helper: DesktopHelper, raw_target: object, agent_id: int, *, stamp: str, home: Path
+) -> tuple[Path, CaptureFrame, int, int]:
+    target = WindowTarget.parse(raw_target)
+    path = snapshot_path(agent_id, stamp=stamp, home=home)
+    captured = helper.screencapture_window(target.pid, target.window_id, str(path))
+    actual_path = Path(captured["path"]) if Path(captured["path"]).is_file() else path
+    pw, ph = image_size(actual_path)
+    if (pw, ph) != (captured["width"], captured["height"]):
+        raise ComputerUseError("window image dimensions do not match the helper response")
+    frame = CaptureFrame.parse(
+        {
+            "coordinate_space": CoordinateSpace.WINDOW_PIXELS.value,
+            "origin": captured["origin"],
+            "scale": captured["scale"],
+            "pixels": {"width": pw, "height": ph},
+            "target": {"pid": target.pid, "window_id": target.window_id},
+        }
+    )
+    return actual_path, frame, pw, ph
+
+
 def _snapshot_tool(
     helper: DesktopHelper,
     args: dict[str, object],
@@ -112,20 +135,8 @@ def _snapshot_tool(
             frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, region.x, region.y, scale, pw, ph)
             source = "region"
         else:
-            target = WindowTarget.parse(args["target"])
-            path = snapshot_path(agent_id, stamp=stamp, home=home)
-            captured = helper.screencapture_window(target.pid, target.window_id, str(path))
-            pw, ph = png_size(path)
-            if (pw, ph) != (captured["width"], captured["height"]):
-                raise ComputerUseError("window image dimensions do not match the helper response")
-            frame = CaptureFrame.parse(
-                {
-                    "coordinate_space": CoordinateSpace.WINDOW_PIXELS.value,
-                    "origin": captured["origin"],
-                    "scale": captured["scale"],
-                    "pixels": {"width": pw, "height": ph},
-                    "target": {"pid": target.pid, "window_id": target.window_id},
-                }
+            path, frame, pw, ph = _capture_window_snapshot(
+                helper, args["target"], agent_id, stamp=stamp, home=home
             )
             source = "window"
         result: dict[str, object] = {
@@ -322,7 +333,7 @@ def _application_tool(
 
 
 def _clipboard_read_tool(helper: DesktopHelper, args: dict[str, object]) -> dict[str, object]:
-    if args.keys() - {"task_id", "priority"}:
+    if args.keys() - {"task_id", "priority", "host"}:
         raise ComputerUseError("clipboard_read takes no arguments")
     return dict(helper.clipboard_read())
 
@@ -430,6 +441,31 @@ def execute_tool(
 # MCP tool declarations (list_tools shape: name / description / input_schema).
 TOOLS: list[dict[str, object]] = [
     {
+        "name": "acquire_control",
+        "description": (
+            "Explicitly acquire or renew the screen-ownership lease on local or a remote host "
+            "with ttl_seconds (default 600s, range 30..3600s). Calling acquire_control while you "
+            "already hold the screen refreshes both local and remote leases from now with the new "
+            "ttl_seconds. Regular tools still implicitly acquire the default 600s lease when idle; "
+            "use acquire_control to pre-reserve a longer window or renew when <=180s remain."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "host": HOST_PARAM_SCHEMA,
+                "ttl_seconds": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 3600,
+                    "default": 600,
+                    "description": "Lease duration in seconds (30..3600, default 600).",
+                },
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+        },
+    },
+    {
         "name": "release_control",
         "description": (
             "Release the screen so the next FIFO waiter can act — call it when a "
@@ -441,6 +477,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },
@@ -466,6 +503,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "region": {
                     "type": "object",
                     "properties": {
@@ -508,6 +546,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "text": {"type": "string"},
                 "match": {"type": "string", "enum": ["contains", "exact"], "default": "contains"},
                 "snapshot_fresh": {"type": "boolean", "default": True},
@@ -584,6 +623,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "text": {"type": "string"},
                 "match": {"type": "string", "enum": ["contains", "exact"], "default": "contains"},
                 "index": {"type": "integer", "default": 0},
@@ -599,6 +639,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "text": {"type": "string"},
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
@@ -645,6 +686,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },
@@ -665,19 +707,22 @@ TOOLS: list[dict[str, object]] = [
     {
         "name": "cursor_position",
         "description": "Read the actual pointer position in physical screen pixels using the current scale.",
-        "input_schema": {"type": "object", "properties": {}},
+        "input_schema": {"type": "object", "properties": {"host": HOST_PARAM_SCHEMA}},
     },
     {
         "name": "list_apps",
         "description": "List running application PID, display name and bundle ID; nullable metadata stays null.",
-        "input_schema": {"type": "object", "properties": {}},
+        "input_schema": {"type": "object", "properties": {"host": HOST_PARAM_SCHEMA}},
     },
     {
         "name": "list_windows",
         "description": "List window IDs, owning PIDs and logical geometry, including off-screen windows. Optional exact app name/bundle ID must be unique. Requires Screen Recording.",
         "input_schema": {
             "type": "object",
-            "properties": {"app": {"type": "string", "minLength": 1}},
+            "properties": {
+                "host": HOST_PARAM_SCHEMA,
+                "app": {"type": "string", "minLength": 1},
+            },
         },
     },
     {
@@ -686,6 +731,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "target": AppTarget.schema(),
             },
             "required": ["target"],
@@ -699,6 +745,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "owner": {"type": "string"},
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
@@ -711,6 +758,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },
@@ -722,6 +770,7 @@ TOOLS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "task_id": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
             },

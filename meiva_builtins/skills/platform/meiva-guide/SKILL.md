@@ -54,6 +54,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Understand skills/plugins or manage installed packages | [packages](packages/SKILL.md) |
 | Find skills, plugins, or MCP providers; compare, install, and verify a capability | [packages.install](packages/install/SKILL.md) |
 | Add, inspect, or remove MCP servers | [mcp](mcp/SKILL.md) |
+| Drive a local or remote desktop via `computer_use` (`meiva computer list` + `host=`) | [mcp](mcp/SKILL.md#cross-machine-computer-use) |
 | Understand Meiva plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
 | Inspect, message, create, or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |

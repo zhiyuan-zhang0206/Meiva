@@ -245,6 +245,8 @@ check-typed-exception = true
 # The fake SDK must expose the SDK's own constructor name, which is a class name
 # used as a method.
 "base/lm/harness/claude/tests/fake_sdk.py" = ["N802"]
+# Windows UIAutomation COM control protocol methods follow Microsoft's PascalCase ABI.
+"services/desktop/win_helper/win32_uia.py" = ["N802"]
 # schedules/* are version-controlled deployment templates (runnable scripts
 # referenced by the ops docs), not runtime source: exempt them from source-level
 # rules (typing, ambiguous unicode, security heuristics) so they stay readable.
@@ -1071,6 +1073,9 @@ root = "services/desktop/permissions_helper/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/desktop/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/win_helper/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"

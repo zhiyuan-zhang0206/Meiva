@@ -68,25 +68,35 @@ from pydantic import TypeAdapter
 from base.clock import SYSTEM_TIMERS, Clock, Timers
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import GatewayAccess
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.boundary.fields import optional_float_field, optional_int_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.exit_codes import hard_exit
 from base.host.permissions_helper.client import PermissionsHelperError
+from base.host.remote_hosts import (
+    RemoteHostConfig,
+    RemoteHostConfigError,
+    ResolvedTarget,
+    TargetResolutionError,
+)
+from base.host.system.hostport import Host
+from base.host.system.probes import permissions_helper_incapability
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import computer_mcp_socket, meiva_home
 from base.sessions.helperproc import helper_client
-from base.telemetry import audit_events, build_pipeline
+from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from services.desktop.remote import ClusterToolCaller, RemoteTransportRouter
 
-from .audit_coords import audit_coords
-from .ax_ids import AxSession
+from . import session
 from .config import (
+    NO_LOCAL_DESKTOP_ERR,
     ComputerUseConfig,
     DaemonSettingsLike,
     beat_interval_s,
@@ -94,26 +104,14 @@ from .config import (
     from_daemon_settings,
     loop_is_silent,
 )
-from .execute import TOOLS, DesktopHelper, execute_tool, mcp_result, priority
-from .ocr import OcrCache
+from .execute import TOOLS, DesktopHelper, mcp_result, priority
 from .protocol import Response, WireRequest
-from .screen import measured_tool_scale, snapshot_stamp
-from .session import ScreenSession
+from .screen import snapshot_stamp
 from .task_sessions import TaskSessionTracker
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
 LINE_LIMIT = 64 * 1024 * 1024
-
-
-def _hide_badge(helper: DesktopHelper) -> None:
-    """End the capture badge when the screen is handed over. The helper shows it, per input, on
-    the window the input lands on, and ends it on its own; this only makes it prompt. It is
-    display-only, so a failure is logged and never fails the release."""
-    try:
-        helper.indicator_stop()
-    except (PermissionsHelperError, OSError) as e:
-        logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
 
 
 def computer_use_config(daemon_settings: DaemonSettingsLike | None = None) -> ComputerUseConfig:
@@ -272,20 +270,11 @@ async def bounded_cleanup(
 
 
 # meiva:note
-# The number `record[key]`; a tool result or argument that lacks it is malformed.
-def _float_field(record: dict[str, object], key: str) -> float:
-    value = optional_float_field(record, key)
-    if value is None:
-        raise TypeError(f"{key} is not a number")
-    return value
-
-
-# meiva:note
 # One request line as the daemon reads it; see `WireRequest`.
 _WIRE_REQUEST = TypeAdapter(WireRequest)
 
 
-class ComputerMcpDaemon:
+class ComputerMcpDaemon(session.LocalTargetMixin):
     """Unix-socket server for the computer-mcp line protocol."""
 
     def __init__(
@@ -294,47 +283,44 @@ class ComputerMcpDaemon:
         db: Database,
         sock: str,
         *,
-        helper: DesktopHelper,
+        helper: DesktopHelper | None,
         clock: Clock,
         home: Path,
+        local_machine: str | None = None,
+        gateway_access: GatewayAccess | None = None,
+        user_home: Path | None = None,
+        remote_helper_factory: Callable[[RemoteHostConfig, int | None], DesktopHelper]
+        | None = None,
+        cluster_tool_caller: ClusterToolCaller | None = None,
     ) -> None:
-        self._db = db
-        self._helper = helper
-        self._clock = clock
-        self._home = home
-        self._sock = sock
-        # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
-        # Scroll without x/y reads the actual native cursor.
-        self._pointer: tuple[float, float] | None = None
-        # Last measured physical->logical scale (snapshot PNG vs logical size).
-        # None until the first snapshot; click/scroll use it via _current_scale.
-        self._scale: float | None = None
-        # Last OCR text boxes ({items: [...]}) — refreshed by every OCR the
-        # daemon runs (snapshot include_ocr, find_text, click_text) so a later
-        # find_text with snapshot_fresh=false searches the screen the caller
-        # last saw instead of capturing again.
-        self._ocr_cache: OcrCache = {"items": []}
-        # Stable accessibility element ids (ax_tree / ax_act), one app at a time.
-        self._ax_session = AxSession()
-        # The agent whose mouse_down is outstanding (the helper holds at most one button).
-        # Stale after the helper lets go by itself, which is harmless: releasing is idempotent.
-        self._mouse_holder: int | None = None
-        # One lock around execute: a single desktop op at a time machine-wide,
-        # and a snapshot's multi-step capture never interleaves with another
-        # agent's click (same serial choice as browser-mcp).
-        self._action_lock = asyncio.Lock()
-        # Phase 2 session coordination: who owns the screen + FIFO waiters.
-        self._screen = ScreenSession(
-            clock,
+        self._db, self._helper, self._clock, self._home, self._sock = db, helper, clock, home, sock
+        self._router: RemoteTransportRouter[DesktopHelper] = RemoteTransportRouter(
+            db=db,
+            clock=clock,
+            home=home,
+            local_machine=local_machine,
+            gateway_access=gateway_access,
+            user_home=user_home,
             lease_s=config.computer_use_lease_s,
-            queue_timeout_s=config.computer_use_queue_timeout_s,
+            remote_helper_factory=remote_helper_factory,
+            cluster_tool_caller=cluster_tool_caller,
         )
+        self._targets = session.TargetSessionRegistry(config, timers=clock)
         # Phase 2 audit envelope: task_id -> computer_session_start/end.
         self._task_sessions = TaskSessionTracker(idle_s=config.computer_use_session_idle_s)
         # Active client handler tasks, so shutdown can close them instead of
-        # hanging in server.wait_closed() behind a client that never disconnects
-        # (the pre-fix orphan: SIGTERM left the process alive holding the socket).
+        # hanging in server.wait_closed() behind a client that never disconnects.
         self._clients: set[asyncio.Task[None]] = set()
+
+    def _state_for(self, target_uri: str) -> session.TargetSessionState:
+        return self._targets.state_for(target_uri)
+
+    def close(self) -> None:
+        self._targets.cancel_all_reminders()
+        self._router.close()
+
+    async def run_reminder_loop(self, stop: asyncio.Event) -> None:
+        await self._targets.run_reminder_loop(stop, db=self._db, now_fn=self._clock.now)
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -369,14 +355,24 @@ class ComputerMcpDaemon:
         method = req.get("method")
         if method == "ping":
             return {"id": req_id, "ok": True, "result": "pong"}
+        if method == "status":
+            return {
+                "id": req_id,
+                "ok": True,
+                "result": {
+                    "local_available": self._helper is not None,
+                    "holder": self._targets.state_for("local").screen.holder,
+                    "holders": self._targets.holders_snapshot(),
+                },
+            }
         if method == "list_tools":
             return {"id": req_id, "ok": True, "result": TOOLS}
         if method != "call_tool":
             return {"id": req_id, "ok": False, "error": f"unknown method {method!r}"}
         tool = req.get("tool") or ""
-        raw_args: object = req.get("args") or {}
+        raw_obj: object = req.get("args") or dict[str, object]()
         agent_id = req.get("agent_id")
-        if not isinstance(tool, str) or not is_object_dict(raw_args):
+        if not isinstance(tool, str) or not is_object_dict(raw_obj):
             return {
                 "id": req_id,
                 "ok": False,
@@ -384,233 +380,227 @@ class ComputerMcpDaemon:
             }
         if agent_id is not None and (not isinstance(agent_id, int) or isinstance(agent_id, bool)):
             return {"id": req_id, "ok": False, "error": "agent_id must be an integer"}
-        return await self._call_tool(tool, raw_args, agent_id, req_id)
+        return await self._call_tool(tool, raw_obj, agent_id, req_id)
 
-    def _track_tool_effects(
-        self, tool: str, args: dict[str, object], result: dict[str, object]
-    ) -> None:
-        """Remember the scale and pointer the tool's result established, for later conversions."""
-        ocr_scale = self._ocr_cache.get("scale")
-        self._scale = measured_tool_scale(
-            tool, args, result, self._scale, ocr_scale, self._ax_session.visual_scale
-        )
-        if tool == "click_text":
-            self._pointer = (_float_field(result, "x"), _float_field(result, "y"))
-        if "frame" in args:
-            return
-        if tool in {"click", "move"} or (
-            tool in {"scroll", "mouse_down", "mouse_up"} and "x" in args and "y" in args
-        ):
-            self._pointer = (_float_field(args, "x"), _float_field(args, "y"))
-        elif tool == "drag":
-            self._pointer = (_float_field(args, "end_x"), _float_field(args, "end_y"))
-
-    async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, object]) -> None:
-        """A live caller renews the lease (success or failure — it is still acting on the
-        screen) and its task session notes the action."""
-        await self._screen.touch(agent_id)
-        # meiva:note
-        # A task_id that is not a whole number: the computer_action row still carries it as-is and the
-        # envelope just does not form; the action is what matters here.
-        if args.get("task_id") is None:
-            return
-        tid = optional_int_field(args, "task_id")
-        if tid is None:
-            logger.warning(
-                "[computer-mcp] task_id {!r} is not a whole number; no task session forms",
-                args["task_id"],
-            )
-            return
-        try:
-            for event_type, session_agent_id, payload in self._task_sessions.note(
-                tid, agent_id, tool, now=self._clock.now().timestamp()
-            ):
-                self._emit_session_event(event_type, session_agent_id, payload)
-        except Exception as e:  # auxiliary path, see below
-            # The session envelope is auxiliary to the action
-            # itself: never fail the action, but never stay
-            # silent either — a contract mismatch (unregistered
-            # event name, FK hiccup) must be audible.
-            logger.warning(f"[computer-mcp] task-session event failed: {e}")
+    def _helper_for_target(self, target: ResolvedTarget, agent_id: int | None) -> DesktopHelper:
+        if target.kind != "local":
+            return self._router.ssh_helper_for(target.name, agent_id)
+        if self._helper is None:
+            raise PermissionsHelperError(NO_LOCAL_DESKTOP_ERR)
+        return self._helper
 
     async def _call_tool(
         self, tool: str, args: dict[str, object], agent_id: int | None, req_id: int
     ) -> Response:
-        if tool == "release_control":
-            return await self._release_control(agent_id, args, req_id)
-        if agent_id is not None and not await self._screen.acquire(
-            agent_id, priority=priority(args)
-        ):
-            # Someone else holds the screen and did not let go in time. Fail
-            # with a readable busy error instead of interleaving actions.
-            return {
-                "id": req_id,
-                "ok": False,
-                "error": f"screen busy: held by agent {self._screen.holder or '?'} — "
-                "wait for release_control or the lease to expire, then retry",
-            }
-        async with self._action_lock:
-            outcome = "ok"
-            error: str | None = None
-            if agent_id is not None and self._mouse_holder not in (None, agent_id):
-                # The screen changed hands (a lease expired or was kicked) with a button still
-                # down: it must not carry over into this agent's actions.
-                self._release_held_mouse(f"screen passed to agent {agent_id}")
-            try:
-                result = execute_tool(
-                    self._helper,
-                    tool,
-                    args,
-                    agent_id or 0,
-                    pointer=self._pointer,
-                    scale=self._scale,
-                    ocr_cache=self._ocr_cache,
-                    ax_session=self._ax_session,
-                    stamp=snapshot_stamp(self._clock.now()),
-                    home=self._home,
-                )
-                self._track_tool_effects(tool, args, result)
-                self._track_mouse_hold(tool, agent_id, result)
-            except (PermissionsHelperError, KeyError, TypeError, ValueError, OSError) as e:
-                outcome, error = "error", f"{type(e).__name__}: {e}"
-                result = None
-            except Exception as e:  # unknown failure: audit + surface, stay alive
-                outcome, error = "error", f"{type(e).__name__}: {e}"
-                result = None
-            if agent_id is not None:
-                await self._renew_and_note(agent_id, tool, args)
-            self._emit_action(agent_id, tool, args, outcome, error, result=result)
-            if error is not None:
-                return {"id": req_id, "ok": False, "error": error}
-            assert result is not None  # noqa: S101 — no error ⇒ execution succeeded
-            return {"id": req_id, "ok": True, "result": mcp_result(result)}
-
-    async def _release_control(
-        self, agent_id: int | None, args: dict[str, object], req_id: int
-    ) -> Response:
-        """release_control tool: the holder hands the screen to the next FIFO
-        waiter. `force` (CLI-only, not in the MCP schema) releases regardless of
-        who holds it — the operator's last resort for a wedged session."""
-        async with self._action_lock:
-            released = await self._screen.release(None if args.get("force") else agent_id)
-            outcome = "ok" if released is not None else "error"
-            error = None if released is not None else "not the screen holder"
-            if args.get("force") and released is not None:
-                # Operator kick: no agent identity, so no audit row — log it.
-                logger.info(f"[computer-mcp] operator forced release of agent {released}")
-            # A button this agent still holds comes up with the screen, and also when its
-            # release_control is refused because the screen had already moved on.
-            mouse: dict[str, object] = {}
-            if self._mouse_holder is not None and (
-                released is not None or self._mouse_holder == agent_id
-            ):
-                mouse = self._release_held_mouse("release_control")
-                if "mouse_release_error" in mouse:
-                    outcome, error = "error", f"mouse not released: {mouse['mouse_release_error']}"
-            self._emit_action(agent_id, "release_control", args, outcome, error)
-            if released is not None:
-                _hide_badge(self._helper)
-            if released is None:
-                note = (
-                    " (the mouse button you held was released)"
-                    if mouse.get("mouse_released")
-                    else ""
-                )
-                return {"id": req_id, "ok": False, "error": "not the screen holder" + note}
-            return {
-                "id": req_id,
-                "ok": True,
-                "result": mcp_result(
-                    {"released": released, "holder": self._screen.holder, **mouse}
-                ),
-            }
-
-    def _track_mouse_hold(self, tool: str, agent_id: int | None, result: dict[str, object]) -> None:
-        """Remember who has a button down, from the helper's own answers."""
-        if result.get("auto_released"):
-            self._mouse_holder = None  # the helper let go by itself; nothing is held now
-        if tool == "mouse_down" and agent_id is not None:
-            self._mouse_holder = agent_id
-        elif tool == "mouse_up":
-            self._mouse_holder = None
-
-    def _release_held_mouse(self, why: str) -> dict[str, object]:
-        """Ask the helper to let go of any button, loudly: a stuck button hurts the user.
-
-        Failure keeps the holder recorded so the next call tries again, and is returned to
-        the caller as `mouse_release_error`; the helper's own idle bound is the backstop."""
-        holder = self._mouse_holder
+        raw_host = args.get("host")
         try:
-            released = self._helper.mouse_release_all()["released"]
-        except (PermissionsHelperError, OSError) as e:
-            logger.error(
-                f"[computer-mcp] could not release the mouse button held for agent {holder} ({why}): {e}"
+            target = self._router.resolve(raw_host)
+        except (TargetResolutionError, RemoteHostConfigError) as exc:
+            return self._audit_reply(
+                req_id,
+                agent_id,
+                tool,
+                args,
+                ("error", str(exc), None),
+                target_host=str(raw_host or "local"),
             )
-            return {"mouse_release_error": str(e)}
-        self._mouse_holder = None
-        if released:
-            logger.warning(
-                f"[computer-mcp] released the mouse button held for agent {holder} ({why}): {released}"
+        tool_args = {k: v for k, v in args.items() if k != "host"}
+        if target.kind == "meiva":
+            return await self._call_cluster_tool(
+                target.name, target.canonical_uri, tool, tool_args, agent_id, req_id
             )
-        return {"mouse_released": released}
+        state = self._targets.state_for(target.canonical_uri)
+        if tool == "acquire_control":
+            return await self._acquire_control(agent_id, tool_args, req_id, target, state)
+        if tool == "release_control":
+            return await self._release_control(agent_id, tool_args, req_id, target, state)
+        if target.kind == "local" and self._helper is None:
+            return self._audit_reply(
+                req_id,
+                agent_id,
+                tool,
+                tool_args,
+                ("error", NO_LOCAL_DESKTOP_ERR, None),
+                target_host=target.canonical_uri,
+            )
+        newly_acquired, busy_err = await state.acquire_implicit(
+            agent_id, priority_name=priority(tool_args), target_uri=target.canonical_uri
+        )
+        if busy_err is not None:
+            return {"id": req_id, "ok": False, "error": busy_err}
+        async with state.action_lock:
+            return await self._execute_locked(
+                target, state, tool, tool_args, agent_id, req_id, newly_acquired=newly_acquired
+            )
 
-    def _emit_action(
+    def _audit_reply(
         self,
+        req_id: int,
         agent_id: int | None,
         tool: str,
         args: dict[str, object],
-        outcome: str,
-        error: str | None,
-        result: dict[str, object] | None = None,
-    ) -> None:
-        """One computer_action audit event per call — facts for later review."""
-        coords = audit_coords(tool, args, result)
-        if agent_id is None:
-            # No identity, no audit row: events.agent_id references agents(id).
-            return
-        app = None
-        # Enrichment only: an unreachable helper is already reported by the
-        # tool call itself.
-        with suppress(PermissionsHelperError, OSError):
-            app = self._helper.frontmost_app()["app"] or None
-        event = audit_events.prepare_event_log(
-            event_type="computer_action",
-            agent_id=agent_id,
-            source=f"agent:{agent_id}",
-            payload={
-                "action": tool,
-                "app": app,
-                "outcome": outcome,
-                "error": error,
-                "coords": coords,
-                "path": result.get("path") if tool == "snapshot" and result else None,
-                "task_id": args.get("task_id"),
-            },
+        verdict: tuple[str, str | None, dict[str, object] | None],
+        *,
+        target_host: str,
+        helper: DesktopHelper | None = None,
+        app_name: str | None = None,
+        resp_error: str | None = None,
+    ) -> Response:
+        outcome, error, body = verdict
+        session.emit_computer_action(
+            self._db,
+            agent_id,
+            tool,
+            args,
+            outcome,
+            error,
+            result=body,
+            helper=helper,
+            app_name=app_name,
+            target_host=target_host,
         )
-        from base import telemetry
-        from base.telemetry.audit_events import record_audit
+        if body is None:
+            return {"id": req_id, "ok": False, "error": resp_error or error or f"{tool} failed"}
+        return {"id": req_id, "ok": True, "result": mcp_result(body)}
 
-        with self._db.write_transaction() as conn:
-            tagged = record_audit(conn, event)
-        telemetry.emit_prepared(tagged)
-
-    def _emit_session_event(
-        self, event_type: str, agent_id: int, payload: dict[str, object]
-    ) -> None:
-        """One computer_session_start/end audit row (no app lookup — the
-        envelope describes the task, not a screen state)."""
-        event = audit_events.prepare_event_log(
-            event_type=event_type,
-            agent_id=agent_id,
-            source=f"agent:{agent_id}",
-            payload=payload,
+    async def _execute_locked(
+        self,
+        target: ResolvedTarget,
+        state: session.TargetSessionState,
+        tool: str,
+        tool_args: dict[str, object],
+        agent_id: int | None,
+        req_id: int,
+        *,
+        newly_acquired: bool = False,
+    ) -> Response:
+        stamp, is_ssh = snapshot_stamp(self._clock.now()), target.kind == "ssh"
+        run_sync = lambda: state.run_target_tool(  # noqa: E731
+            lambda: self._helper_for_target(target, agent_id),
+            tool,
+            tool_args,
+            agent_id,
+            stamp=stamp,
+            home=self._home,
+            helper_errors=(PermissionsHelperError, TargetResolutionError, RemoteHostConfigError),
+            capture_app=is_ssh,
         )
-        from base import telemetry
-        from base.telemetry.audit_events import record_audit
+        result, error, aborted, app_name, helper = (
+            await asyncio.to_thread(run_sync) if is_ssh else run_sync()
+        )
+        if aborted:
+            state.cancel_reminder()
+            _ = await state.screen.release(None)
+            state.mouse_holder = None
+        elif newly_acquired and agent_id is not None and (helper is None or (is_ssh and error)):
+            state.cancel_reminder()
+            _ = await state.screen.release(agent_id)
+        elif agent_id is not None and helper is not None:
+            session.note_task_session(
+                self._task_sessions,
+                self._db,
+                agent_id,
+                tool,
+                tool_args,
+                now_ts=self._clock.now().timestamp(),
+            )
+        if error is None and result is not None:
+            state.attach_in_band_lease_reminder(
+                result, agent_id, target_uri=target.canonical_uri, now=self._clock.now()
+            )
+        return self._audit_reply(
+            req_id,
+            agent_id,
+            tool,
+            tool_args,
+            ("error" if error is not None else "ok", error, result),
+            target_host=target.canonical_uri,
+            helper=None if is_ssh else helper,
+            app_name=app_name,
+        )
 
-        with self._db.write_transaction() as conn:
-            tagged = record_audit(conn, event)
-        telemetry.emit_prepared(tagged)
+    async def _call_cluster_tool(
+        self,
+        machine: str,
+        target_uri: str,
+        tool: str,
+        tool_args: dict[str, object],
+        agent_id: int | None,
+        req_id: int,
+    ) -> Response:
+        outcome, error, result = "ok", None, None
+        try:
+            result = await asyncio.to_thread(
+                self._router.call_cluster_peer,
+                machine,
+                tool=tool,
+                args=tool_args,
+                agent_id=agent_id,
+                stamp=snapshot_stamp(self._clock.now()),
+            )
+        except Exception as exc:
+            outcome, error = "error", f"{type(exc).__name__}: {exc}"
+        return self._audit_reply(
+            req_id, agent_id, tool, tool_args, (outcome, error, result), target_host=target_uri
+        )
+
+    async def _acquire_control(
+        self,
+        agent_id: int | None,
+        args: dict[str, object],
+        req_id: int,
+        target: ResolvedTarget,
+        state: session.TargetSessionState,
+    ) -> Response:
+        def _remote_acq(ttl: int) -> dict[str, object]:
+            return self._router.acquire_remote_ssh(target.name, agent_id, ttl_seconds=ttl)
+
+        verdict = await session.acquire_target_control(
+            state,
+            agent_id=agent_id,
+            args=args,
+            target_kind=target.kind,
+            target_uri=target.canonical_uri,
+            local_available=self._helper is not None,
+            acquire_remote=_remote_acq if target.kind == "ssh" else None,
+            default_lease_s=self._targets.default_lease_s,
+            now_fn=self._clock.now,
+        )
+        return self._audit_reply(
+            req_id, agent_id, "acquire_control", args, verdict, target_host=target.canonical_uri
+        )
+
+    async def _release_control(
+        self,
+        agent_id: int | None,
+        args: dict[str, object],
+        req_id: int,
+        target: ResolvedTarget,
+        state: session.TargetSessionState,
+    ) -> Response:
+        def _remote_rel() -> tuple[bool, str | None]:
+            return self._router.release_remote_ssh(target.name, force=bool(args.get("force")))
+
+        helper = self._helper if target.kind == "local" else None
+        outcome, error, body, resp_err = await session.release_target_control(
+            state,
+            agent_id=agent_id,
+            args=args,
+            target_kind=target.kind,
+            target_uri=target.canonical_uri,
+            helper=helper,
+            release_remote=_remote_rel if target.kind == "ssh" else None,
+        )
+        return self._audit_reply(
+            req_id,
+            agent_id,
+            "release_control",
+            args,
+            (outcome, error, body),
+            target_host=target.canonical_uri,
+            helper=helper,
+            resp_error=resp_err,
+        )
 
 
 async def socket_in_use(path: Path) -> bool:
@@ -666,45 +656,52 @@ async def run(
     sock: str,
     *,
     database: Callable[[], Database],
-    helper: DesktopHelper,
+    helper: DesktopHelper | None,
     clock: Clock,
     home: Path,
+    local_machine: str | None = None,
+    gateway_access: GatewayAccess | None = None,
+    user_home: Path | None = None,
 ) -> None:
     config = computer_use_config()
-    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper, clock=clock, home=home)
+    daemon = ComputerMcpDaemon(
+        config,
+        database(),
+        sock,
+        helper=helper,
+        clock=clock,
+        home=home,
+        local_machine=local_machine,
+        gateway_access=gateway_access,
+        user_home=user_home,
+    )
     path = Path(daemon._sock)
     path.parent.mkdir(parents=True, exist_ok=True)
     if await socket_in_use(path):
         logger.error(
-            "[computer-mcp] socket {} is already served by a live daemon — "
-            "refusing to start a second instance",
-            path,
+            "[computer-mcp] socket {} already served by a live daemon; refusing to start", path
         )
         raise SystemExit(1)
     with suppress(OSError):
         path.unlink()
-    # The group owns every client handler; the shutdown path cancels them before it closes.
     async with asyncio.TaskGroup() as clients:
         server = await asyncio.start_unix_server(
-            lambda r, w: tracked_client(daemon, clients, r, w),
-            path=str(path),
-            limit=LINE_LIMIT,
+            lambda r, w: tracked_client(daemon, clients, r, w), path=str(path), limit=LINE_LIMIT
         )
         logger.info(f"[computer-mcp] listening on {path}")
         watchdog = guard_loop_liveness(
             asyncio.get_running_loop(), config.computer_use_loop_stall_s, timers=clock
         )
         stop = asyncio.Event()
-
-        def _stop() -> None:
-            stop.set()
-
+        reminder_task = clients.create_task(daemon.run_reminder_loop(stop))
         for sig in (signal.SIGTERM, signal.SIGINT):
             with suppress(NotImplementedError):
-                asyncio.get_running_loop().add_signal_handler(sig, _stop)
+                asyncio.get_running_loop().add_signal_handler(sig, stop.set)
         try:
             await stop.wait()
         finally:
+            stop.set()
+            _ = reminder_task.cancel()
             watchdog.stop()
             server.close()
             try:
@@ -716,6 +713,7 @@ async def run(
             await bounded_cleanup(
                 server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
             )
+            daemon.close()
             with suppress(OSError):
                 path.unlink()
             logger.info("[computer-mcp] shutting down")
@@ -731,8 +729,9 @@ class DaemonEntry:
 
 def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot, *, home: Path) -> DaemonEntry:
     machine = ConfiguredMachineIdentity(machine_config)
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="computer-mcp", end_process=hard_exit)
+    gate = ProcessDbGate(
+        version=CodeVersion(image).get, process="computer-mcp", end_process=hard_exit
+    )
     return DaemonEntry(
         image=image,
         machine=machine,
@@ -742,24 +741,18 @@ def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot, *, home: Path
 
 
 def main() -> None:
-    image = LoadedCommit.capture()
-    machine_config = ConfigBoot()
+    image, machine_config = LoadedCommit.capture(), ConfigBoot()
     machine_config.boot()
     home = meiva_home()
     process_home = home.resolve()
     entry = prepare_entry(image, machine_config, home=process_home)
-
-    def database() -> Database:
-        return Database.from_settings(
-            gate=entry.gate,
-            direct_url=entry.direct_url,
-        )
-
+    database = lambda: Database.from_settings(gate=entry.gate, direct_url=entry.direct_url)  # noqa: E731
+    clock = Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS)
     pipeline = build_pipeline(
         database=database,
         machine=entry.machine,
         home=process_home,
-        now=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS).now,
+        now=clock.now,
         otlp_enabled=lambda: machine_config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: machine_config.view.observability.telemetry_otlp_endpoint,
         rng=random.SystemRandom(),
@@ -771,13 +764,23 @@ def main() -> None:
         image=entry.image,
         home=process_home,
     )
+    host = Host.system(environ=machine_config.process_environment())
+    local_helper: DesktopHelper | None = (
+        helper_client(home=process_home)
+        if machine_config.view.services.permissions_helper_enabled
+        and permissions_helper_incapability(host=host) is None
+        else None
+    )
     asyncio.run(
         run(
             str(computer_mcp_socket(home)),
             database=database,
-            helper=helper_client(home=process_home),
-            clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
+            helper=local_helper,
+            clock=clock,
             home=process_home,
+            local_machine=entry.machine.name(),
+            gateway_access=gateway_access_from_boot(machine_config),
+            user_home=Path.home(),
         )
     )
 

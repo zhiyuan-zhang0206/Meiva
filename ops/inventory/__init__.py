@@ -67,7 +67,7 @@ def inventory_read_op(
     overlay = mcp_enabled.read_enabled(home=home)
     mcp_servers: dict[str, InventoryReadItem] = {}
     for name, spec in merged.items():
-        ok, reason = server_capability(spec, host=host)
+        ok, reason = server_capability(spec, host=host, home=home)
         mcp_servers[name] = InventoryReadItem(
             enabled=overlay.get(name, True),
             can_enable=ok,
@@ -106,7 +106,7 @@ def inventory_write_op(
     require_agent_runner(local_machine.role())
     merged = load_mcp_config(include_disabled=True, home=home)
     capabilities = {
-        name: Verdict(*server_capability(merged[name], host=host))
+        name: Verdict(*server_capability(merged[name], host=host, home=home))
         for name in servers_to_probe(mcp_servers, frozenset(merged))
     }
     verdicts = plan_toggles(

@@ -58,3 +58,57 @@ def beat_interval_s(beat_s: float, stall_s: float) -> float:
 # Whether the loop has gone more than `stall_s` seconds without a beat.
 def loop_is_silent(*, now: float, last_beat: float, stall_s: float) -> bool:
     return now - last_beat > stall_s
+
+
+DEFAULT_LEASE_S = 600.0
+MIN_LEASE_SECONDS = 30
+MAX_LEASE_SECONDS = 3600
+LEASE_REMINDER_LEAD_SECONDS = 180.0
+NO_LOCAL_DESKTOP_ERR = (
+    "no local desktop available on this host; pass host='meiva://<machine>' "
+    "or host='ssh://<alias>' (run `meiva computer list` to view available targets)"
+)
+
+
+def clamp_lease_ttl_seconds(raw: object, *, default_s: float) -> int | None:
+    if raw is None:
+        return max(MIN_LEASE_SECONDS, min(MAX_LEASE_SECONDS, round(default_s)))
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
+        return None
+    return max(MIN_LEASE_SECONDS, min(MAX_LEASE_SECONDS, round(raw)))
+
+
+def finalize_release_result(
+    local: tuple[int | None, dict[str, object], str, str | None],
+    *,
+    force: bool,
+    remote: tuple[bool, str | None],
+    holder: int | None,
+    target_uri: str,
+) -> tuple[str, str | None, dict[str, object] | None, str | None]:
+    released, mouse, outcome, error = local
+    remote_released, remote_error = remote
+    if released is not None:
+        body: dict[str, object] = {
+            "released": released,
+            "holder": holder,
+            "host": target_uri,
+            **mouse,
+        }
+        if remote_released:
+            body["remote_released"] = True
+        return outcome, error, body, None
+    if force and remote_released:
+        body = {
+            "released": None,
+            "remote_released": True,
+            "holder": holder,
+            "host": target_uri,
+            **mouse,
+        }
+        return "ok", None, body, None
+    if force and remote_error is not None:
+        err = f"remote release failed: {remote_error}"
+        return "error", err, None, err
+    note = " (the mouse button you held was released)" if mouse.get("mouse_released") else ""
+    return outcome, error, None, "not the screen holder" + note

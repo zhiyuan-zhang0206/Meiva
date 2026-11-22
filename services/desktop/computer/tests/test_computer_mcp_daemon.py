@@ -217,6 +217,7 @@ async def test_list_tools_and_ping(*, database_gate: ProcessDbGate) -> None:
     assert isinstance(tools, list)
     names = {t["name"] for t in tools}
     assert names == {
+        "acquire_control",
         "release_control",
         "snapshot",
         "find_text",

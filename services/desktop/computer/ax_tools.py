@@ -25,6 +25,7 @@ from . import ax_gap
 from .ax_gap import Frame
 from .ax_ids import AxSession
 from .errors import ComputerUseError
+from .input import HOST_PARAM_SCHEMA
 from .screen import DesktopHelper, current_scale
 from .targets import AppTarget, app_selector
 
@@ -535,6 +536,7 @@ TOOL_DECLARATIONS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "app": {"type": "string"},
                 "target": AppTarget.schema(),
                 "mode": {"type": "string", "enum": list(_MODES), "default": "interactive"},

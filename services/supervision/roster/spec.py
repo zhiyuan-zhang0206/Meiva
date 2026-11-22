@@ -39,6 +39,7 @@ from typing import assert_never
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.host.net.url_secret import names_foreign_host
+from base.host.remote_hosts import has_remote_hosts
 from base.host.system.hostport import Host
 from base.host.system.probes import (
     browser_incapability,
@@ -95,11 +96,15 @@ def _gate_fact(
             )
         case "computer-mcp":
             helper_enabled = settings.permissions_helper_enabled
+            has_remote = has_remote_hosts(home=home) or names_foreign_host(
+                settings.db_url, settings.redis_url
+            )
             return ComputerFact(
                 helper_enabled=helper_enabled,
                 incapability=(
                     permissions_helper_incapability(host=host) if helper_enabled else None
                 ),
+                has_remote_targets=has_remote,
             )
         case "station":
             from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles

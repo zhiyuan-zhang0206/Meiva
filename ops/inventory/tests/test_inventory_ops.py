@@ -321,3 +321,29 @@ def test_cluster_policy_refuses_a_mixed_local_write_atomically(
     assert result.plugin_results["meiva_code"].ok is False
     assert not enable_config.local_config_path(home=runner_home).exists()
     assert mcp_enabled.read_enabled(home=runner_home) == {}
+
+
+def test_inventory_ops_allow_computer_use_on_headless_host_with_remote_hosts(
+    runner_home: Path, machine_identity: MachineIdentityReader
+) -> None:
+    (runner_home / "remote_hosts.toml").write_text(
+        '[hosts.zzyasus]\nos = "windows"\nlocal_port = 18792\n', encoding="utf-8"
+    )
+    host = fake_host(platform=LINUX_X86, environ={})
+    home = meiva_home()
+
+    inventory = inventory_read_op(local_machine=machine_identity, host=host, home=home)
+    assert inventory.mcp_servers["computer_use"].can_enable is True
+    assert inventory.mcp_servers["computer_use"].reason is None
+    assert inventory.mcp_servers["chrome"].can_enable is False
+
+    enable = inventory_write_op(
+        plugins={},
+        mcp_servers={"computer_use": True},
+        local_machine=machine_identity,
+        host=host,
+        home=home,
+    )
+    assert enable.applied is True
+    assert enable.mcp_results["computer_use"] == FieldWriteResult(ok=True, reason=None)
+    assert mcp_enabled.read_enabled(home=home) == {"computer_use": True}

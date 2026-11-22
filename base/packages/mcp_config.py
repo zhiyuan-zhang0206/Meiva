@@ -7,10 +7,11 @@ from typing import TypedDict, TypeGuard
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
+from base.host.remote_hosts import has_remote_hosts
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
-from base.paths import mcps_dir, repo_root
+from base.paths import computer_mcp_socket, mcps_dir, repo_root
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -73,20 +74,55 @@ def validate_requirements(spec: dict[str, object]) -> dict[str, bool]:
     return validated
 
 
+def _remote_desktop_satisfies_display(
+    spec: dict[str, object],
+    *,
+    home: Path | None,
+    remote_desktop_available: bool,
+) -> bool:
+    if spec.get("shared") != "computer_use":
+        return False
+    if remote_desktop_available:
+        return True
+    if home is None:
+        return False
+    return has_remote_hosts(home=home) or computer_mcp_socket(home).exists()
+
+
 # meiva:link meiva/mcps/docs/mcps.md
-def assert_requirements(spec: dict[str, object], *, host: Host) -> None:
+def assert_requirements(
+    spec: dict[str, object],
+    *,
+    host: Host,
+    home: Path | None = None,
+    remote_desktop_available: bool = False,
+) -> None:
     requires = validate_requirements(spec)
     for key, want in requires.items():
         if key == "display" and want and not display_available(host=host):
+            if _remote_desktop_satisfies_display(
+                spec, home=home, remote_desktop_available=remote_desktop_available
+            ):
+                continue
             raise MCPError(
                 "MCP server requires a display, but this host has none (headless server)"
             )
 
 
 # meiva:link meiva/mcps/docs/mcps.md
-def server_capability(spec: dict[str, object], *, host: Host) -> tuple[bool, str | None]:
+def server_capability(
+    spec: dict[str, object],
+    *,
+    host: Host,
+    home: Path | None = None,
+    remote_desktop_available: bool = False,
+) -> tuple[bool, str | None]:
     requires = validate_requirements(spec)
     if requires.get("display") and not display_available(host=host):
+        if _remote_desktop_satisfies_display(
+            spec, home=home, remote_desktop_available=remote_desktop_available
+        ):
+            return (True, None)
         return (False, "requires a display, but this host has none")
     return (True, None)
 

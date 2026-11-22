@@ -1,17 +1,18 @@
 exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.py", "protocol.py", "tests"]
 
 [uses]
-"ax_act.py" = ["ax_ids.py", "ax_tools.py", "errors.py", "screen.py"]
+"ax_act.py" = ["ax_ids.py", "ax_tools.py", "errors.py", "input.py", "screen.py"]
 "ax_gap.py" = ["ocr", "screen.py"]
 "ax_ids.py" = ["errors.py"]
-"ax_tools.py" = ["ax_gap.py", "ax_ids.py", "errors.py", "screen.py", "targets.py"]
+"ax_tools.py" = ["ax_gap.py", "ax_ids.py", "errors.py", "input.py", "screen.py", "targets.py"]
 "execute.py" = ["ax_act.py", "ax_ids.py", "ax_tools.py", "errors.py", "input.py", "ocr", "ocr_text.py", "screen.py", "targets.py"]
 "input.py" = ["errors.py", "targets.py"]
-"mcp_daemon.py" = ["audit_coords.py", "ax_ids.py", "config.py", "execute.py", "ocr", "protocol.py", "screen.py", "session.py", "task_sessions.py"]
+"mcp_daemon.py" = ["config.py", "execute.py", "protocol.py", "screen.py", "session.py", "task_sessions.py"]
 "ocr_text.py" = ["errors.py", "ocr", "screen.py"]
 "screen.py" = ["errors.py", "targets.py"]
+"session.py" = ["audit_coords.py", "ax_ids.py", "config.py", "errors.py", "execute.py", "ocr", "screen.py", "task_sessions.py"]
 "targets.py" = ["errors.py"]
-"tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
+"tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "execute.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -23,5 +24,5 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "task_sessions.py" = "strict"
 
 [roots]
-"mcp_daemon.py" = { kinds = ["clock", "db", "home", "random", "settings"], why = "process entry point of the computer-use MCP daemon: reads the settings, the home it runs under and opens the database from them; builds the process clock from SYSTEM_TIMERS; builds the random generator its event pipeline mints the process's `service.instance.id` from" }
+"mcp_daemon.py" = { kinds = ["clock", "db", "home", "platform", "random", "settings"], why = "process entry point of the computer-use MCP daemon: reads the settings, the home it runs under, the invoking user home (for remote_hosts.toml token paths), the platform capability for local permissions-helper availability, and opens the database from them; builds the process clock from SYSTEM_TIMERS; builds the random generator its event pipeline mints the process's `service.instance.id` from" }
 "mcp_wrapper.py" = { kinds = ["environ", "home", "settings"], why = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed; the stdio wrapper process entry reads the home whose daemon socket it dials; Service or operator process entry boots configuration before composing its resources" }
