@@ -1,29 +1,38 @@
-# Alert Classes — the unresolved warning/error read
+# Diagnostics — the release-aware anomaly/error read
 
 Parent: [Ops Surfaces](ops-surfaces.md).
 
-The sidebar's Warnings / Errors card displays the dashboard's unresolved event totals,
-separately from formal Grafana alerts. The diagnostic API groups one class per
-`(level, event_name, source, process)` of the window, with its event count, first and
-last occurrence, the `dismissal_id` of the active `event_dismissals` row that cancels it
-(None = no dismissal) and `resolved_by`: `"dismissed"` for that row, `"quiet"` when the
-class recorded nothing for `GatewayConfig.alert_class_quiet_seconds` (default one hour),
-None while it is unresolved. Only unresolved classes are listed unless
-`include_resolved=true` (see [quiet auto-resolution](../../../docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md)). The dismissal match is
-`resolution.matching_dismissal` — the daemon's: the emission category is ignored, an
-exact `process` row or a wildcard row (`process = ''`, task #4329 B5) cancels the class,
-and the exact row wins when both match. A reopened or per-agent row cancels nothing. The
-dashboard's `alert_classes_active` / `alert_classes_dismissed` count the unresolved and
-resolved classes, and its `warnings` / `errors` sum only unresolved ones (`warnings_resolved` /
-`errors_resolved` carry the rest; critical folds into errors). The list is most-frequent-first,
-capped at 200 rows (`total_classes` / `total_events` cover the returned set).
-`/samples?level&event_name&source&process&hours` returns the newest five events of one
-class (`attributes.msg` as `message`, plus the full attributes). Dismiss and reopen use `POST /api/event-resolutions[/{id}/reopen]`
-calls, scoped per class. Both reads run under an 8-second statement timeout
+Diagnostics (`GET /api/stats/diagnostics` and `/api/stats/diagnostics/samples`) are a
+windowed, release-aware telemetry summary kept strictly separate from formal Grafana Live
+Alerts (`alerts` table). Formal alerts own the red badge and Insights/Control alert views;
+diagnostics never drive alert badges and require no manual dismissal state.
+
+## Admission and archiving
+
+- **Strict admission**: groups one diagnostic class per `(level, event_name, source, process)`
+  over `telemetry_events` rows that are either `level IN ('error', 'critical')` (excluding
+  non-`log` events declared `tier="noise"`) or `level = 'warning'` for events explicitly
+  declared `tier="anomaly"` in `base/events/declarations/`. Unregistered warnings, bare
+  `event_name='log'` warnings, and `tier="noise"` warnings are excluded.
+- **Release-aware archiving (`deployed_sha`)**: every emitted telemetry row carries the
+  process's `deployed_sha`. Comparing against the gateway's current `process_image.sha`,
+  a class with no occurrences on the current release auto-archives (`archived_by="deployed_sha"`).
+  A class that also occurred on an older release and recurs on the current release stays
+  active with `regressed=true`.
+- **Quiet fallback**: within the current release (or when `current_sha` is empty), a class
+  with no occurrence for `GatewayConfig.diagnostic_quiet_seconds` (default one hour)
+  auto-archives (`archived_by="quiet"`).
+
+Only active classes are listed unless `include_archived=true`. The dashboard's
+`diagnostics` object reports `active_classes`, `archived_classes`, `active_events`,
+`archived_events`, `errors` (error + critical events in active classes), `warnings`
+(warning events in active classes), and `deployed_sha`. The list is
+most-frequent-first, capped at 200 rows. `/samples?level&event_name&source&process&hours`
+returns the newest five events of one class (`attributes.msg` as `message`, plus
+`deployed_sha` and full attributes). Both reads run under an 8-second statement timeout
 (a timeout is a retriable 503).
 
 ## Key dependencies
 
-- `gateway/cluster/monitor/alert_classes.py` — the read that groups the window's rows
-- [Ops Surfaces (cluster admin + stats dashboard)](ops-surfaces.md) — the dashboard aggregate whose `warnings` / `errors` these classes decide
-- [quiet auto-resolution](../../../docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md) — why a quiet class reads as resolved
+- `gateway/cluster/monitor/diagnostics.py` — the read that admits, groups, and archives the window's diagnostic rows
+- [Ops Surfaces (cluster admin + stats dashboard)](ops-surfaces.md) — the dashboard aggregate whose `alerts` and `diagnostics` fields separate formal alerts from diagnostics

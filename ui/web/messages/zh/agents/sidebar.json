@@ -28,7 +28,10 @@
   "openaiCost": "OpenAI API",
   "anthropicCost": "Anthropic API",
   "googleCost": "Google API",
-  "warningsErrors": "警告 / 错误",
+  "liveAlerts": "告警",
+  "liveAlertsAllClear": "当前无活跃 Grafana 告警",
+  "liveAlertsDetail": "{unresolved} 条未解决（{critical} 严重，{error} 错误，{warning} 警告）",
+  "diagnostics": "诊断",
   "switchFlat": "切换为平铺列表",
   "switchTree": "切换为树状视图",
   "tree": "树状",
@@ -58,7 +61,7 @@
   "anthropicCostTitleDetail": "过去 {win} 的 Anthropic API 按量计费花费（不含订阅渠道）：${amount}",
   "googleCostTitle": "过去 {win} 的 Google API 按量计费花费（不含订阅渠道）",
   "googleCostTitleDetail": "过去 {win} 的 Google API 按量计费花费（不含订阅渠道）：${amount}",
-  "warningsTitle": "过去 {win} 的 Warning / Error 事件数量",
+  "diagnosticsTitle": "过去 {win} 活跃的错误 / 异常诊断类",
   "noMatch": "没有匹配“{query}”的 agent",
   "searchAgent": "搜索 agent",
   "archive": "Agent 历史",
@@ -79,7 +82,8 @@
   "themeDark": "暗色",
   "display": "显示",
   "emptyAgents": "还没有 agent。",
-  "warningsErrorsUnresolved": "警告 / 错误（未解决）",
-  "warningsTitleUnresolved": "过去 {win} 仍在发生的 Warning / Error 事件；已经不再发生的那一类视为已解决、不计入（已解决 {resolved} 条）",
-  "warningsAllClear": "当前没有仍在发生的警告或错误"
+  "diagnosticsTitleDetail": "当前版本 {sha} 活跃 {classes} 类（{events} 条），已归档 {archived} 类",
+  "diagnosticsTitleDetailNoSha": "活跃 {classes} 类（{events} 条），已归档 {archived} 类",
+  "diagnosticsAllClear": "当前版本无活跃诊断问题",
+  "diagnosticsAllClearArchived": "当前版本无活跃诊断问题（已归档 {archived} 类）"
 }

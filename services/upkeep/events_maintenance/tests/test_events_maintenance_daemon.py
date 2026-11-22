@@ -45,9 +45,6 @@ from services.upkeep.events_maintenance.tests.service_probe import (
     wait_serving,
 )
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
-from services.upkeep.events_maintenance.tests.test_events_maintenance_resolution import (
-    record_maintenance_event,
-)
 
 # meiva:note
 # 13:00 in America/Los_Angeles: outside the vacuum window, so a pass never dials a direct connection.
@@ -199,13 +196,13 @@ def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
 def test_loop_components_report_fresh_loops_as_ok() -> None:
     liveness = LivenessGroup(clock=system_clock())
     liveness.register("dispatch", timeout_s=15.0)
-    liveness.register("resolution", timeout_s=20.0)
+    liveness.register("escalation", timeout_s=20.0)
 
     assert daemon.loop_components(
-        liveness, {"dispatch": 15.0, "resolution": 20.0}, now=time.time()
+        liveness, {"dispatch": 15.0, "escalation": 20.0}, now=time.time()
     ) == [
         {"name": "dispatch", "status": "ok", "progress": "idle"},
-        {"name": "resolution", "status": "ok", "progress": "idle"},
+        {"name": "escalation", "status": "ok", "progress": "idle"},
     ]
 
 
@@ -247,16 +244,13 @@ def test_loop_components_carry_the_age_of_the_last_success() -> None:
 def test_deadline_settings_defaults_and_env_aliases() -> None:
     defaults = DaemonSettings()
     assert defaults.events_maintenance_pass_deadline_s == 1500.0
-    assert defaults.events_maintenance_resolution_deadline_s == 600.0
 
     configured = DaemonSettings.model_validate(
         {
             "MEIVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S": "15.5",
-            "MEIVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S": "35.5",
         }
     )
     assert configured.events_maintenance_pass_deadline_s == 15.5
-    assert configured.events_maintenance_resolution_deadline_s == 35.5
 
 
 def _boot(**fields: Any) -> ConfigBoot:
@@ -303,7 +297,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
         await asyncio.gather(service, return_exceptions=True)
 
     assert status == 200
-    expected = ["dispatch", "resolution", "registry_gauge", "escalation"]
+    expected = ["dispatch", "registry_gauge", "escalation"]
     assert component_names(body) == expected + (["alert_reconciliation"] if credential else [])
     await assert_released(pool_probe, tmp_path / "run" / "events_maintenance.pid", port)
 
@@ -315,7 +309,6 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
     ("crashing", "table"),
     [
         ("dispatch", "agent_model_tokens_total_through"),
-        ("resolution", "event_dismissals"),
     ],
 )
 async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
@@ -325,7 +318,6 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     crashing: str,
     table: str,
 ) -> None:
-    record_maintenance_event(db_conn, level="info", event_name="heartbeat", minutes_ago=0.1)
     database = pool_probe.database()
     boot = _boot()
     port = _port(boot, tmp_path)

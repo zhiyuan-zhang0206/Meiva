@@ -651,6 +651,7 @@ class Event:
     source: str
     target_agent_id: int | None
     attributes: dict[str, object] = field(default_factory=dict[str, object])
+    deployed_sha: str = ""
 
 
 # meiva:note

@@ -256,6 +256,7 @@ def add_event_sink(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     home: Path,
+    deployed_sha: str | None = None,
 ) -> int:
     """Eagerly open the unified event pipeline + register the loguru adapter.
     Pipeline open failure raises during init_* (it no longer touches the DB);
@@ -282,6 +283,7 @@ def add_event_sink(
         pipeline=producer(),
         machine_reader=machine_reader,
         home=home,
+        deployed_sha=deployed_sha,
     )
     global _event_sink_id  # noqa: PLW0603 — process-level singleton
     core: object = getattr(logger, "_core", None)
@@ -374,6 +376,7 @@ def init_gateway_process(
             producer=producer,
             machine_reader=machine_reader,
             home=home,
+            deployed_sha=image.sha,
         ),
         announce=announce,
         home=home,

@@ -319,11 +319,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events | — |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events | — |
 | `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | events | — |
-| `warning_resolved` | class-level warning dismissal marker | anomaly | resolved_by, category, level, event_name, source, process, agent_id, dismissed_by, note | — | events | — |
-| `error_resolved` | class-level error/critical dismissal marker | anomaly | resolved_by, category, level, event_name, source, process, agent_id, dismissed_by, note | — | events | — |
-| `warning_reopened` | class-level warning dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, process, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | events | — |
-| `error_reopened` | class-level error/critical dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, process, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | events | — |
-| `resolution_status` | absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, dismissed_warnings, dismissed_errors, window | — | events | — |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
 | `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |

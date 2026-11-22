@@ -311,47 +311,6 @@ def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
     assert resource.attributes["cluster"] == ".meiva-preview"
 
 
-def test_resolution_status_uses_latest_value_gauges(otlp_backend: OtlpFixture) -> None:
-
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [
-            otlp_test_event(
-                event_name="resolution_status",
-                attributes={
-                    "unresolved_warnings": 9,
-                    "unresolved_errors": 4,
-                    "dismissed_warnings": 5,
-                    "dismissed_errors": 2,
-                    "window": "6h",
-                },
-            ),
-            otlp_test_event(
-                event_name="resolution_status",
-                attributes={
-                    "unresolved_warnings": 2,
-                    "unresolved_errors": 1,
-                    "dismissed_warnings": 7,
-                    "dismissed_errors": 3,
-                    "window": "6h",
-                },
-            ),
-        ]
-    )
-    backend.flush()
-
-    metrics = collected_metrics(metric_reader)
-    warning = metrics["meiva_resolution_status_unresolved_warnings"]
-    error = metrics["meiva_resolution_status_unresolved_errors"]
-    dismissed_warning = metrics["meiva_resolution_status_dismissed_warnings"]
-    dismissed_error = metrics["meiva_resolution_status_dismissed_errors"]
-    assert warning.data.data_points[0].value == 2.0
-    assert error.data.data_points[0].value == 1.0
-    assert dismissed_warning.data.data_points[0].value == 7.0
-    assert dismissed_error.data.data_points[0].value == 3.0
-    assert _attrs_of(warning.data.data_points[0])["window"] == "6h"
-
-
 def test_root_health_tick_uses_latest_timestamp_gauge(otlp_backend: OtlpFixture) -> None:
     backend, _, metric_reader = otlp_backend
     backend.export_batch(

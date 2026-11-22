@@ -106,7 +106,6 @@ from services.upkeep.events_maintenance.blob_vacuum import (
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.health_components import LoopFacts
 from services.upkeep.events_maintenance.passes import events_maintenance_log
-from services.upkeep.events_maintenance.resolution import AutoDismissCadence, run_resolution_slice
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
@@ -126,11 +125,6 @@ def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> Events
     return EventsMaintenanceConfig(
         events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
-        events_maintenance_resolution_deadline_s=config.view.daemon.events_maintenance_resolution_deadline_s,
-        events_resolution_burst_threshold=config.view.daemon.events_resolution_burst_threshold,
-        events_resolution_interval_seconds=config.view.daemon.events_resolution_interval_seconds,
-        events_auto_dismiss_enabled=config.view.daemon.events_auto_dismiss_enabled,
-        events_auto_dismiss_days=config.view.daemon.events_auto_dismiss_days,
         events_escalation_mode=config.view.daemon.events_escalation_mode,
         events_escalation_interval_seconds=config.view.daemon.events_escalation_interval_seconds,
         events_escalation_min_age_seconds=config.view.daemon.events_escalation_min_age_seconds,
@@ -233,24 +227,6 @@ def _clock(config: EventsMaintenanceConfig) -> Clock:
         ),
         timers=SYSTEM_TIMERS,
     )
-
-
-def _run_resolution(
-    pool: ConnectionPool,
-    progress: LoopProgress,
-    config: EventsMaintenanceConfig,
-    cadence: AutoDismissCadence,
-) -> None:
-    """Run the resolution slice while discarding its test-facing summary."""
-
-    run_resolution_slice(
-        pool,
-        config,
-        cadence=cadence,
-        now=_clock(config).now(),
-    )
-    progress.beat()
-    progress.mark_success()
 
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
@@ -357,35 +333,6 @@ async def dispatch_loop(
     )
 
 
-async def resolution_loop(
-    pool: ConnectionPool,
-    progress: LoopProgress,
-    config: EventsMaintenanceConfig,
-    *,
-    tasks: asyncio.TaskGroup,
-) -> None:
-    """Refresh immutable-event class-resolution gauges on their own cadence.
-
-    The six-hour class count and safety-valve write are independent of the hourly
-    rollup pass. As with the rollup loop, a transient backend outage waits one full
-    configured interval; schema drift exits for watchdog recovery.
-    """
-
-    cadence = AutoDismissCadence()
-    interval = config.events_resolution_interval_seconds
-    events_maintenance_log.info(
-        "[events-maintenance] resolution loop started, interval=%ds",
-        interval,
-    )
-    await passes.pass_loop(
-        progress,
-        label="resolution",
-        interval_s=interval,
-        work=lambda: _run_resolution(pool, progress, config, cadence),
-        tasks=tasks,
-    )
-
-
 # meiva:note
 # `pass_loop` runs blocking work that reports success by returning; the pass's own count is a
 # fact for the caller, not for the loop, so it is logged rather than returned.
@@ -467,7 +414,6 @@ async def run(
     # carries no such loop (and no tracker to read as idle).
     loops = loop_roster.roster(
         dispatch_deadline_s=config.events_maintenance_pass_deadline_s,
-        resolution_deadline_s=config.events_maintenance_resolution_deadline_s,
         reconcile_alerts=alert_reconciler.grafana_reconciliation_configured(config),
     )
     liveness = LivenessGroup(clock=clock)
@@ -495,7 +441,6 @@ async def run(
         # the blocking executor thread.
         async with asyncio.TaskGroup() as group:
             group.create_task(dispatch_loop(pool, progress["dispatch"], config, db, tasks=group))
-            group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
             group.create_task(escalation_loop(pool, progress["escalation"], config, tasks=group))
             if "alert_reconciliation" in progress:

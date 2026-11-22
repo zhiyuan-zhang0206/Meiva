@@ -49,10 +49,13 @@ class _SerializableEvent(Protocol):
     @property
     def attributes(self) -> Mapping[str, object]: ...
 
+    @property
+    def deployed_sha(self) -> str: ...
+
 
 def event_payload(event: _SerializableEvent) -> dict[str, object]:
     """Return the persistent shape without its derived surrogate id."""
-    return {
+    payload: dict[str, object] = {
         "ts": event.ts.isoformat(),
         "trace_id": event.trace_id,
         "span_id": event.span_id,
@@ -67,6 +70,9 @@ def event_payload(event: _SerializableEvent) -> dict[str, object]:
         "target_agent_id": event.target_agent_id,
         "attributes": event.attributes,
     }
+    if event.deployed_sha:
+        payload["deployed_sha"] = event.deployed_sha
+    return payload
 
 
 def event_line(event: _SerializableEvent) -> str:

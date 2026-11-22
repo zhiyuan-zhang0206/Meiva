@@ -204,7 +204,6 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 _PER_TEST_TRUNCATE_TABLES = (
     "inbound_messages",
     "agents_meta",
-    "event_dismissals",
     "agent_model_tokens_total",
     "agent_model_tokens_total_through",
     "agent_metric_file_cursors",

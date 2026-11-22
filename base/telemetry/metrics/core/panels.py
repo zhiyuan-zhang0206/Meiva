@@ -224,47 +224,6 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="core_unresolved_warning",
-            title="Unresolved Warning",
-            event_name="resolution_status",
-            category="telemetry",
-            unit="short",
-            panel="stat",
-            query="meiva_resolution_status_unresolved_warnings_ratio",
-            query_type="promql",
-            target_names=["unresolved_warning"],
-            field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
-            width=8,
-            height=4,
-            panel_id=4,
-            section="core",
-            order=3,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="core_unresolved_error",
-            title="Unresolved Error",
-            event_name="resolution_status",
-            category="telemetry",
-            unit="short",
-            panel="stat",
-            query="meiva_resolution_status_unresolved_errors_ratio",
-            query_type="promql",
-            target_names=["unresolved_error"],
-            options={"noValue": "0"},
-            field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
-            width=8,
-            height=4,
-            panel_id=5,
-            section="core",
-            order=4,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
             name="core_live_agents",
             title="Live agents",
             event_name="lifecycle",

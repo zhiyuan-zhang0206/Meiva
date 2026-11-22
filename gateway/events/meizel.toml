@@ -1,10 +1,9 @@
-exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "notification_outbox.py", "resolutions.py", "router.py", "schemas.py", "sse.py", "sse_frames.py", "system.py", "telemetry_rows.py"]
+exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "notification_outbox.py", "router.py", "schemas.py", "sse.py", "sse_frames.py", "system.py", "telemetry_rows.py"]
 
 [uses]
 "agent_events.py" = ["events_plan.py", "schemas.py", "sse.py", "sse_frames.py", "telemetry_rows.py"]
 "merged.py" = ["sse.py", "sse_frames.py"]
 "metrics.py" = ["schemas.py"]
-"resolutions.py" = ["schemas.py"]
 "router.py" = ["events_plan.py", "schemas.py", "telemetry_rows.py"]
 "sse.py" = ["sse_frames.py"]
 "system.py" = ["merged.py", "sse.py", "sse_frames.py"]

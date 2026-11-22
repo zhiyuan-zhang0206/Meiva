@@ -154,10 +154,13 @@ def bind_identity(
     home: Path,
     now: Callable[[], datetime],
     agent_id: int | None = None,
+    deployed_sha: str | None = None,
 ) -> None:
     process_state["process"] = process
     process_state["agent_id"] = agent_id
     process_state["home"] = home
+    if deployed_sha:
+        process_state["deployed_sha"] = deployed_sha
     # meiva:note
     # The process clock, beside every other fact this binding establishes. `emit()` stamps an
     # event whose producer passed no `ts` with it, so a process that binds an identity binds the
@@ -195,6 +198,7 @@ def init_telemetry(
     pipeline: EventPipeline,
     home: Path,
     machine_reader: Callable[[], str] | None = None,
+    deployed_sha: str | None = None,
 ) -> None:
     """Bind process identity and bring up the event pipeline. Idempotent.
 
@@ -212,7 +216,13 @@ def init_telemetry(
         # original failure before admitting the next concrete entry resource.
         bound.stop(timeout=0)
         process_state["pipeline"] = pipeline
-    bind_identity(process=process, home=home, now=pipeline.now, agent_id=agent_id)
+    bind_identity(
+        process=process,
+        home=home,
+        now=pipeline.now,
+        agent_id=agent_id,
+        deployed_sha=deployed_sha,
+    )
     if machine_reader is not None:
         process_state["machine"] = resolve_machine(machine_reader, home=home)
     if process_state["pipeline"] is None:
@@ -391,6 +401,7 @@ def prepare_event(
         source=source,
         target_agent_id=target_agent_id,
         attributes=dict(attributes or {}),
+        deployed_sha=process_state["deployed_sha"],
     )
 
 

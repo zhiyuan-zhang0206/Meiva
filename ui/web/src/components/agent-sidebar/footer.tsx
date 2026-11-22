@@ -95,7 +95,7 @@ export function StatusCards({
   const windowedTitle = windowMismatch ? t("statusPanelUpdatingFor", { win }) : null;
   const windowedCards: (
     | { kind?: undefined; label: string; value: string; title?: string }
-    | { kind: "warnings"; title?: string }
+    | { kind: "diagnostics"; title?: string }
   )[] = [
     {
       label: t("tokens"),
@@ -155,8 +155,8 @@ export function StatusCards({
           : t("costSubscriptionTitle", { win })),
     },
     {
-      kind: "warnings",
-      title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
+      kind: "diagnostics",
+      title: windowedTitle ?? errMsg ?? t("diagnosticsTitle", { win }),
     },
     ...[
       {
@@ -229,7 +229,7 @@ export function StatusCards({
           ) : null}
         </div>
       </div>
-      <div className="px-3 py-2">
+      <div className="space-y-1 px-3 py-2">
         <div
           title={errMsg ?? t("liveAgentsTitle")}
           className={cn("items-center justify-between rounded bg-sidebar-accent/40 px-2.5 py-1.5", FLEX)}
@@ -243,6 +243,13 @@ export function StatusCards({
             <span className={valueClass}>{stats ? String(stats.live_count) : placeholder}</span>
           )}
         </div>
+        <LiveAlertsRow
+          stats={stats}
+          errMsg={errMsg}
+          firstLoad={firstLoad}
+          placeholder={placeholder}
+          valueClass={valueClass}
+        />
         {pluginCards.length > 0 ? (
           <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
             {pluginCards.map((card) => (
@@ -280,16 +287,15 @@ export function StatusCards({
         </div>
         <div className="grid grid-cols-2 gap-1 px-3 pb-2.5">
           {windowedCards.map((card) =>
-            card.kind === "warnings" ? (
-              <WarningErrorCard
-                key="warnings"
+            card.kind === "diagnostics" ? (
+              <DiagnosticsCard
+                key="diagnostics"
                 stats={windowMismatch ? undefined : stats}
                 placeholder={windowedPlaceholder}
                 placeholderClass={placeholderClass}
                 valueClass={valueClass}
                 firstLoad={firstLoad}
                 title={card.title}
-                windowLabel={win}
               />
             ) : (
               <div
@@ -489,23 +495,77 @@ function SidebarNavButton({
 }
 
 // meiva:note
-// Windowed Warning / Error event totals, presented like the other status cards.
-// Formal Grafana alerts have their own header badge and history.
-// meiva:link ui/web/src/docs/frontend-components/alert-classes.md
+// Point-in-time unresolved Grafana alerts from `/api/stats/dashboard`, backed by the same `alerts`
+// table predicate as the header badge and `/insights#alerts`. Links directly to the alerts list.
+function LiveAlertsRow({
+  stats,
+  errMsg,
+  firstLoad,
+  placeholder,
+  valueClass,
+}: {
+  stats: StatsDashboard | undefined;
+  errMsg: string | null;
+  firstLoad: boolean;
+  placeholder: string;
+  valueClass: string;
+}) {
+  const t = useTranslations("sidebar");
+  const alerts = stats?.alerts;
+  const unresolved = alerts?.unresolved ?? 0;
+  const title =
+    errMsg ??
+    (alerts === undefined
+      ? t("liveAlertsAllClear")
+      : unresolved === 0
+        ? t("liveAlertsAllClear")
+        : t("liveAlertsDetail", {
+            unresolved,
+            critical: alerts.critical,
+            error: alerts.error,
+            warning: alerts.warning,
+          }));
+  return (
+    <Link
+      href="/insights#alerts"
+      data-testid="status-live-alerts"
+      title={title}
+      className={cn(
+        "items-center justify-between rounded bg-sidebar-accent/40 px-2.5 py-1.5 transition-colors hover:bg-sidebar-accent/70",
+        FLEX,
+      )}
+    >
+      <span className="text-[10px] tracking-wide text-muted-foreground">{t("liveAlerts")}</span>
+      {firstLoad ? (
+        <Spinner className="size-3" />
+      ) : alerts === undefined ? (
+        <span className={valueClass}>{placeholder}</span>
+      ) : (
+        <span
+          className={cn(
+            valueClass,
+            unresolved > 0 ? "font-semibold text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {String(unresolved)}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 // meiva:note
-// The pair counts only classes that still need attention: the server resolves a class that
-// stopped happening, so a pulse that ended hours ago cannot keep this badge red (user ruling
-// 2026-11-08). What it does count stays visible, and the tooltip names the resolved events, so a
-// pair that fell from "3000 / 64" to "0 / 0" is accountable rather than mysterious.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
-function WarningErrorCard({
+// Windowed Sentry-style error diagnostics for the current release, separate from live Grafana
+// alerts. Classes from prior releases or silent past `diagnostic_quiet_seconds` auto-archive and
+// never feed alert badges; no manual dismiss action exists.
+// meiva:link ui/web/src/docs/frontend-components/alert-classes.md
+function DiagnosticsCard({
   stats,
   placeholder,
   placeholderClass,
   valueClass,
   firstLoad,
   title,
-  windowLabel,
 }: {
   stats: StatsDashboard | undefined;
   placeholder: string;
@@ -513,35 +573,44 @@ function WarningErrorCard({
   valueClass: string;
   firstLoad: boolean;
   title: string | undefined;
-  windowLabel: string;
 }) {
   const t = useTranslations("sidebar");
-  const warnings = stats?.warnings;
-  const errors = stats?.errors;
-  const unresolved = warnings === 0 && errors === 0;
-  const resolved = (stats?.warnings_resolved ?? 0) + (stats?.errors_resolved ?? 0);
+  const diag = stats?.diagnostics;
+  const allClear = diag?.active_classes === 0;
+  const shortSha = diag?.deployed_sha ? diag.deployed_sha.slice(0, 7) : null;
   const shownTitle =
-    stats === undefined
+    diag === undefined
       ? title
-      : resolved > 0
-        ? t("warningsTitleUnresolved", {
-            win: windowLabel,
-            resolved: resolved.toLocaleString("en-US"),
-          })
-        : t("warningsTitle", { win: windowLabel });
+      : allClear
+        ? diag.archived_classes > 0
+          ? t("diagnosticsAllClearArchived", { archived: diag.archived_classes })
+          : t("diagnosticsAllClear")
+        : shortSha
+          ? t("diagnosticsTitleDetail", {
+              classes: diag.active_classes,
+              events: diag.active_events.toLocaleString("en-US"),
+              sha: shortSha,
+              archived: diag.archived_classes,
+            })
+          : t("diagnosticsTitleDetailNoSha", {
+              classes: diag.active_classes,
+              events: diag.active_events.toLocaleString("en-US"),
+              archived: diag.archived_classes,
+            });
   return (
     <div
-      title={unresolved ? t("warningsAllClear") : shownTitle}
+      data-testid="status-diagnostics-card"
+      title={shownTitle}
       className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
     >
-      <span className="text-[10px] tracking-wide text-muted-foreground">{t("warningsErrors")}</span>
+      <span className="text-[10px] tracking-wide text-muted-foreground">{t("diagnostics")}</span>
       {firstLoad ? (
         <Spinner className="size-3" />
-      ) : stats === undefined ? (
+      ) : diag === undefined ? (
         <span className={placeholderClass}>{placeholder}</span>
       ) : (
-        <span className={cn(valueClass, unresolved && "text-muted-foreground")}>
-          {`${stats.warnings} / ${stats.errors}`}
+        <span className={cn(valueClass, allClear && "text-muted-foreground")}>
+          {allClear ? "0" : `${diag.active_classes} (${diag.active_events})`}
         </span>
       )}
     </div>

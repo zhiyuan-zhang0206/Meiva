@@ -241,17 +241,13 @@ class GatewayConfig:
     # retriable 503.
     stats_statement_timeout_ms: int = 8000
     # meiva:note
-    # Rows of the alert-class list, and newest events shown for one class.
-    alert_classes_limit: int = 200
-    alert_samples_limit: int = 5
+    # Rows of the diagnostics class list, and newest events shown for one class.
+    diagnostics_limit: int = 200
+    diagnostic_samples_limit: int = 5
     # meiva:note
-    # How long a warning/error class must record nothing before it stops counting as
-    # unresolved (task #6540, user ruling 2026-11-08). A pulse that ended is not an
-    # operator's problem now: the numbers the Status popover shows answer "what is
-    # happening", not "what happened in the last N hours". One hour keeps a class that
-    # fires once an hour visible while dropping a rollout burst that ended with the
-    # restart.
-    alert_class_quiet_seconds: float = 3600.0
+    # Quiet-window fallback inside the current release: a diagnostic class that stops recurring
+    # for this duration auto-archives without waiting for the next deploy.
+    diagnostic_quiet_seconds: float = 3600.0
     # meiva:note
     # First-contact per-host budget for a remote inventory_read in the aggregate fan-out, so
     # one offline host doesn't stall the whole matrix on the default deadline.

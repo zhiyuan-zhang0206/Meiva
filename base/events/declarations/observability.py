@@ -29,53 +29,6 @@ class LokiWritePathProbeThrottled(TypedDict):
     reason: str
 
 
-class ResolvedMarker(TypedDict, total=False):
-    """`warning_resolved` / `error_resolved` payload: an immutable Loki event
-    class and the `event_dismissals` row that carries its resolution state."""
-
-    resolved_by: NotRequired[int]
-    category: NotRequired[str]
-    level: NotRequired[str]
-    event_name: NotRequired[str]
-    source: NotRequired[str]
-    process: NotRequired[str]
-    agent_id: NotRequired[int | None]
-    dismissed_by: NotRequired[int]
-    note: NotRequired[str]
-
-
-class EventClassReopened(TypedDict):
-    """`warning_reopened` / `error_reopened` immutable class-state marker."""
-
-    category: str
-    level: str
-    event_name: str
-    source: str
-    process: str
-    agent_id: int | None
-    dismissed_by: int
-    note: str
-    reopened_by: str
-    triggered_by_count: int | None
-
-
-class ResolutionStatus(TypedDict):
-    """`resolution_status` payload — absolute class-resolution gauges.
-
-    ``unresolved_*`` are the events of actively-dismissed classes subtracted
-    from the fixed window's per-class counts (the net); ``dismissed_*`` are
-    the subtracted counts themselves, so the visible Grafana trio
-    (total = Warning/Error tiles, dismissed, unresolved) sums by construction
-    (task #1935).
-    """
-
-    unresolved_warnings: int
-    unresolved_errors: int
-    dismissed_warnings: int
-    dismissed_errors: int
-    window: str
-
-
 class CheckpointTableSizes(TypedDict):
     """`checkpoint_table_sizes` payload — physical sizes + live row counts.
 
@@ -231,64 +184,6 @@ EVENTS: dict[str, EventSpec] = {
         "OTLP backend brought up after a disabled episode (periodic retry)",
         payload=OtlpBackendRecovered,
         site="base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event",
-    ),
-    # Immutable Loki lines cannot be updated with a `resolved_by` attribute.
-    # These markers record class-state transitions while `event_dismissals`
-    # remains the active-resolution source of truth (task #1468).
-    "warning_resolved": telemetry_event(
-        "warning_resolved",
-        "class-level warning dismissal marker",
-        payload=ResolvedMarker,
-        tier="anomaly",
-        site=(
-            "Class-resolution markers select their name from the event level at "
-            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
-            "markers and resolution_status, while the gateway emits resolved ones."
-        ),
-    ),
-    "error_resolved": telemetry_event(
-        "error_resolved",
-        "class-level error/critical dismissal marker",
-        payload=ResolvedMarker,
-        tier="anomaly",
-        site=(
-            "Class-resolution markers select their name from the event level at "
-            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
-            "markers and resolution_status, while the gateway emits resolved ones."
-        ),
-    ),
-    "warning_reopened": telemetry_event(
-        "warning_reopened",
-        "class-level warning dismissal reopened manually or by the burst safety valve",
-        payload=EventClassReopened,
-        tier="anomaly",
-        site=(
-            "Class-resolution markers select their name from the event level at "
-            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
-            "markers and resolution_status, while the gateway emits resolved ones."
-        ),
-    ),
-    "error_reopened": telemetry_event(
-        "error_reopened",
-        "class-level error/critical dismissal reopened manually or by the burst safety valve",
-        payload=EventClassReopened,
-        tier="anomaly",
-        site=(
-            "Class-resolution markers select their name from the event level at "
-            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
-            "markers and resolution_status, while the gateway emits resolved ones."
-        ),
-    ),
-    "resolution_status": telemetry_event(
-        "resolution_status",
-        "absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window",
-        payload=ResolutionStatus,
-        tier="noise",
-        site=(
-            "Class-resolution markers select their name from the event level at "
-            "runtime; services/upkeep/events_maintenance/resolution.py emits the reopen "
-            "markers and resolution_status, while the gateway emits resolved ones."
-        ),
     ),
     "checkpoint_table_sizes": telemetry_event(
         "checkpoint_table_sizes",

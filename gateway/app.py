@@ -64,7 +64,7 @@ from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
 from gateway.cluster.harness_probe import HarnessProbeCache, ensure_machine_harnesses
-from gateway.cluster.monitor import alert_classes as alert_classes_router
+from gateway.cluster.monitor import diagnostics as diagnostics_router
 from gateway.cluster.monitor import ops_monitor as ops_monitor_router
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
@@ -75,7 +75,6 @@ from gateway.events import computer_traces as computer_traces_router
 from gateway.events import merged as merged_stream_router
 from gateway.events import metrics as metrics_router
 from gateway.events import notification_outbox
-from gateway.events import resolutions as event_resolutions_router
 from gateway.events import router as events_router
 from gateway.events import system as system_router
 from gateway.extensions import inventory as inventory_router
@@ -277,6 +276,7 @@ async def lifespan(
             process="gateway",
             pipeline=process.event_pipeline(),
             machine_reader=process.machine.name,
+            deployed_sha=process.image.sha,
         )
         async with startup_releases() as releases:
             state.config_authority = ConfigAuthority(
@@ -551,11 +551,10 @@ def create_app(
         events_router.router,
         merged_stream_router.router,
         insights_router.router,
-        event_resolutions_router.router,
         ops_monitor_router.router,
         alerts_router.router,
         status_router.router,
-        alert_classes_router.router,
+        diagnostics_router.router,
         memory_router.router,
         fleet_graph_router.router,
         frontend_telemetry_router.router,

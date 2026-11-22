@@ -135,7 +135,7 @@ describe("read endpoints reach their gateway route", () => {
     ["getCommands scopes to an agent", "/api/commands?agent_id=7", (a) => a.getCommands(7)],
     ["getStatsDashboard", "/api/stats/dashboard?hours=24", (a) => a.getStatsDashboard(24)],
     ["getStatsDashboard passes a non-default window", "/api/stats/dashboard?hours=168", (a) => a.getStatsDashboard(168)],
-    ["getAlertClasses", "/api/stats/alert-classes?hours=6", (a) => a.getAlertClasses(6)],
+    ["getDiagnostics", "/api/stats/diagnostics?hours=6", (a) => a.getDiagnostics(6)],
     ["getConfig", "/api/config", (a) => a.getConfig()],
     ["getConfig for a machine", "/api/config?machine=runner-1", (a) => a.getConfig("runner-1")],
     ["getResolvedConfig for a model", "/api/config/resolved?model=claude-opus-5", (a) => a.getResolvedConfig("claude-opus-5")],
@@ -168,15 +168,15 @@ describe("read endpoints reach their gateway route", () => {
     expect(rows.agents.map((row) => row.status)).toEqual(["running", "idling", "terminated"]);
   });
 
-  it("getAlertClassSamples addresses one class by its full identity and unwraps the samples", async () => {
+  it("getDiagnosticSamples addresses one class by its full identity and unwraps the samples", async () => {
     answer = () => ({ kind: "json", body: { samples: [{ id: 1 }] } });
-    const samples = await api().getAlertClassSamples(
+    const samples = await api().getDiagnosticSamples(
       { level: "error", event_name: "turn failed", source: "runner", process: "" },
       24,
     );
     expect(samples).toEqual([{ id: 1 }]);
     const url = new URL(requests()[0].path, "http://gateway");
-    expect(url.pathname).toBe("/api/stats/alert-classes/samples");
+    expect(url.pathname).toBe("/api/stats/diagnostics/samples");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       level: "error",
       event_name: "turn failed",
@@ -264,22 +264,6 @@ describe("write endpoints", () => {
       ["POST", "/api/agents/5/compact", ""],
     ]);
     expect(keyOf(requests()[0])).toBeUndefined();
-  });
-
-  it("dismissAlertClass POSTs the class identity and reopenAlertClass POSTs the dismissal id", async () => {
-    const identity = {
-      category: "log",
-      level: "warning",
-      event_name: "disk_pressure",
-      source: "svc",
-      process: "gateway",
-    } as const;
-    await api().dismissAlertClass(identity);
-    expect([requests()[0].method, requests()[0].path]).toEqual(["POST", "/api/event-resolutions"]);
-    expect(json(requests()[0])).toEqual(identity);
-
-    await api().reopenAlertClass(12);
-    expect([requests()[1].method, requests()[1].path]).toEqual(["POST", "/api/event-resolutions/12/reopen"]);
   });
 
   it("putConfig PUTs JSON body to /api/config and parses the result", async () => {

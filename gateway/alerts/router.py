@@ -37,7 +37,14 @@ from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
-from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
+from ops.alerts import (
+    ALERTS_CHANNEL,
+    NON_WATCHDOG_ALERT_SQL,
+    AlertRow,
+    AlertSeverity,
+    AlertStatus,
+    publish_alert_rows,
+)
 
 router = APIRouter()
 
@@ -209,7 +216,7 @@ def list_alerts(
     # and badges.
     where: list[LiteralString] = [
         "(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)",
-        "(labels->>'metric' IS DISTINCT FROM 'alert_pipeline_watchdog' AND COALESCE(labels->>'ruleUID', '') != 'meiva-ops-alert-pipeline-watchdog' AND alertname != 'Alert pipeline watchdog (synthetic heartbeat)')",
+        NON_WATCHDOG_ALERT_SQL,
     ]
     if status is not None:
         where.append("status = %s")
@@ -229,7 +236,7 @@ def list_alerts(
         else:
             base: list[LiteralString] = [
                 "status = 'unresolved'",
-                "(labels->>'metric' IS DISTINCT FROM 'alert_pipeline_watchdog' AND COALESCE(labels->>'ruleUID', '') != 'meiva-ops-alert-pipeline-watchdog' AND alertname != 'Alert pipeline watchdog (synthetic heartbeat)')",
+                NON_WATCHDOG_ALERT_SQL,
             ]
             base_params: list[object] = []
             if severity is not None:

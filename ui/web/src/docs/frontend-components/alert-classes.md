@@ -1,20 +1,19 @@
-# Warning and Error Counts
+# Alerts and Diagnostics in the Status Popover
 
-The Warnings / Errors card in the Status popover (`agent-sidebar/footer.tsx`) displays
-`warnings / errors` from `GET /api/stats/dashboard` over the selected
-window. These are event totals; `errors` includes critical events. The card is a
-compact cell like the other status cards, with no nested class/sample list.
-Changing the window uses the same loading and mismatch placeholders as its peers.
+The Status popover (`agent-sidebar/footer.tsx`) keeps formal Grafana Live Alerts and
+windowed telemetry Diagnostics strictly separate:
 
-Both totals count only classes that are still happening: a warning or error class that
-recorded nothing for the gateway's `alert_class_quiet_seconds` reads as resolved, so the card
-stops showing it. At zero the card drops its alert tone and says no warning or error is still
-happening, and its tooltip names how many were resolved (`warnings_resolved` /
-`errors_resolved` in the same payload), so a number falling to zero stays explainable.
+- **Live Alerts (top section, not windowed)**: displays `alerts` (`unresolved`, `critical`,
+  `error`, `warning`) from `GET /api/stats/dashboard`, which reads the same unresolved non-watchdog
+  `alerts` table rows as `/api/alerts`, the header badge, and Insights Alerts. Clicking
+  navigates to `/insights#alerts`.
+- **Diagnostics (Usage section, windowed)**: displays `diagnostics` (`active_classes`, `archived_classes`,
+  `active_events`, `archived_events`, `errors`, `warnings`, `deployed_sha`) over the selected window. `errors` folds `critical` events;
+  `warnings` includes only explicitly declared `tier="anomaly"` events. Classes from
+  earlier releases (`deployed_sha`) or quiet for `diagnostic_quiet_seconds` auto-archive
+  without manual dismissal. Diagnostics never drive alert badges.
 
-The event-class diagnostics and dismissal APIs remain available to operators;
-they neither replace these totals nor become formal alert data.
-The backend contract: [Alert Classes](../../../../../gateway/cluster/docs/alert-classes-api.md).
+The backend contract: [Diagnostics](../../../../../gateway/cluster/docs/alert-classes-api.md).
 
 Formal Grafana alerts have their own header badge and Insights history. Their
 SSE stream invalidates TanStack Query snapshots, so the server owns ordering,

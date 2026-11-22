@@ -202,129 +202,6 @@
   },
   {
    "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "orange",
-      "mode": "fixed"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 0,
-    "y": 5
-   },
-   "id": 4,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "meiva_resolution_status_unresolved_warnings_ratio",
-     "instant": true,
-     "legendFormat": "unresolved_warning",
-     "range": false,
-     "refId": "A"
-    }
-   ],
-   "title": "Unresolved Warning",
-   "type": "stat"
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "red",
-      "mode": "fixed"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 8,
-    "y": 5
-   },
-   "id": 5,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "noValue": "0",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "meiva_resolution_status_unresolved_errors_ratio",
-     "instant": true,
-     "legendFormat": "unresolved_error",
-     "range": false,
-     "refId": "A"
-    }
-   ],
-   "title": "Unresolved Error",
-   "type": "stat"
-  },
-  {
-   "datasource": {
     "type": "postgres",
     "uid": "ops"
    },
@@ -349,7 +226,7 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 16,
+    "x": 0,
     "y": 5
    },
    "id": 6,
@@ -414,8 +291,8 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 0,
-    "y": 9
+    "x": 8,
+    "y": 5
    },
    "id": 7,
    "options": {
@@ -518,8 +395,8 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 8,
-    "y": 9
+    "x": 16,
+    "y": 5
    },
    "id": 8,
    "options": {
@@ -611,7 +488,7 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 16,
+    "x": 0,
     "y": 9
    },
    "id": 44,
@@ -704,8 +581,8 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 0,
-    "y": 13
+    "x": 8,
+    "y": 9
    },
    "id": 45,
    "options": {
@@ -800,8 +677,8 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 8,
-    "y": 13
+    "x": 16,
+    "y": 9
    },
    "id": 46,
    "options": {
@@ -894,7 +771,7 @@
    "gridPos": {
     "h": 4,
     "w": 8,
-    "x": 16,
+    "x": 0,
     "y": 13
    },
    "id": 47,
@@ -926,129 +803,6 @@
     }
    ],
    "title": "Avg turn duration (window)",
-   "type": "stat"
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "orange",
-      "mode": "fixed"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 0,
-    "y": 17
-   },
-   "id": 48,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "meiva_resolution_status_dismissed_warnings_ratio",
-     "instant": true,
-     "legendFormat": "dismissed_warning",
-     "range": false,
-     "refId": "A"
-    }
-   ],
-   "title": "Dismissed Warning",
-   "type": "stat"
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "fixedColor": "red",
-      "mode": "fixed"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 8,
-    "y": 17
-   },
-   "id": 49,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "noValue": "0",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "meiva_resolution_status_dismissed_errors_ratio",
-     "instant": true,
-     "legendFormat": "dismissed_error",
-     "range": false,
-     "refId": "A"
-    }
-   ],
-   "title": "Dismissed Error",
    "type": "stat"
   },
   {
@@ -1090,8 +844,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 0,
-    "y": 21
+    "x": 8,
+    "y": 13
    },
    "id": 17,
    "options": {
@@ -1171,8 +925,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
-    "y": 21
+    "x": 0,
+    "y": 20
    },
    "id": 33,
    "options": {
@@ -1241,8 +995,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 0,
-    "y": 28
+    "x": 12,
+    "y": 20
    },
    "id": 18,
    "options": {
@@ -1344,8 +1098,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
-    "y": 28
+    "x": 0,
+    "y": 27
    },
    "id": 11,
    "options": {
@@ -1463,8 +1217,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 0,
-    "y": 35
+    "x": 12,
+    "y": 27
    },
    "id": 12,
    "options": {
@@ -1566,8 +1320,8 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
-    "y": 35
+    "x": 0,
+    "y": 34
    },
    "id": 23,
    "options": {
@@ -1612,7 +1366,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 42
+    "y": 41
    },
    "id": 2201,
    "options": {
@@ -1626,7 +1380,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"audit_machine_unknown|checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|error_resolved|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|task_reminder_undelivered|warning_resolved\")))",
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"audit_machine_unknown|checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|task_reminder_undelivered\")))",
      "legendFormat": "events",
      "queryType": "range",
      "refId": "A"
@@ -1670,7 +1424,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 49
+    "y": 48
    },
    "id": 2202,
    "options": {
@@ -1710,7 +1464,7 @@
     "h": 10,
     "w": 24,
     "x": 0,
-    "y": 56
+    "y": 55
    },
    "id": 2203,
    "options": {
@@ -1739,7 +1493,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 69
+    "y": 68
    },
    "id": 2002,
    "panels": [],
@@ -1785,7 +1539,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 70
+    "y": 69
    },
    "id": 10,
    "options": {
@@ -1851,7 +1605,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 70
+    "y": 69
    },
    "id": 13,
    "options": {
@@ -1939,7 +1693,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 77
+    "y": 76
    },
    "id": 14,
    "options": {
@@ -2027,7 +1781,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 77
+    "y": 76
    },
    "id": 15,
    "options": {
@@ -2116,7 +1870,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 84
+    "y": 83
    },
    "id": 16,
    "options": {
@@ -2189,7 +1943,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 84
+    "y": 83
    },
    "id": 40,
    "options": {
@@ -2292,7 +2046,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 91
+    "y": 90
    },
    "id": 22,
    "options": {
@@ -2373,7 +2127,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 91
+    "y": 90
    },
    "id": 30,
    "options": {
@@ -2442,7 +2196,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 98
+    "y": 97
    },
    "id": 2003,
    "panels": [],
@@ -2484,7 +2238,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 99
+    "y": 98
    },
    "id": 19,
    "options": {
@@ -2587,7 +2341,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 99
+    "y": 98
    },
    "id": 20,
    "options": {
@@ -2668,7 +2422,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 106
+    "y": 105
    },
    "id": 24,
    "options": {
@@ -2748,7 +2502,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 106
+    "y": 105
    },
    "id": 21,
    "options": {
