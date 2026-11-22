@@ -336,6 +336,18 @@ function splitActiveSegments(eventItems: readonly BackendTimelineItem[]): Active
   return segments;
 }
 
+function hasMeasuredDuration(items: readonly BackendTimelineItem[]): boolean {
+  return items.some(
+    (it) =>
+      (it.reasoning_ms != null && Number.isFinite(it.reasoning_ms)) ||
+      (it.reasoningElapsedMs != null && Number.isFinite(it.reasoningElapsedMs)) ||
+      (it.code_elapsed_ms != null && Number.isFinite(it.code_elapsed_ms)) ||
+      (it.codeElapsedMs != null && Number.isFinite(it.codeElapsedMs)) ||
+      (it.exec_ms != null && Number.isFinite(it.exec_ms)) ||
+      (it.execElapsedMs != null && Number.isFinite(it.execElapsedMs)),
+  );
+}
+
 function computeSegment(seg: ActiveSegment): ComputedSegment {
   let startMs: number | null = null;
   if (seg.items.length > 0) {
@@ -362,7 +374,14 @@ function computeSegment(seg: ActiveSegment): ComputedSegment {
     }
   }
 
-  const durationMs = startMs !== null && endMs !== null ? Math.max(endMs - startMs, 0) : null;
+  let durationMs: number | null = null;
+  if (startMs !== null && endMs !== null) {
+    if (endMs > startMs) {
+      durationMs = endMs - startMs;
+    } else if (hasMeasuredDuration(settledItems)) {
+      durationMs = 0;
+    }
+  }
   return {
     hasAgentOutput: seg.hasAgentOutput,
     closed: seg.closed,

@@ -403,16 +403,43 @@ describe("summarizeTurn — active-segment timing", () => {
     expect(s.liveSegmentStartMs).toBe(t0 + 90 * MIN);
   });
 
-  it("clamps inverted segment timestamps (endMs < startMs) to 0ms and ignores non-positive *StartedAt anchors", () => {
+  it("clamps measured inverted timestamps to 0ms, returns null for unmeasured 0ms single-point segments, and ignores non-positive *StartedAt anchors", () => {
     const t0 = Date.parse("2026-11-22T10:00:00.000Z");
-    const inverted = summarizeTurn([
+    const measuredInverted = summarizeTurn([
+      item("agent_reasoning", null, "1.0", {
+        created_at: new Date(t0).toISOString(),
+        reasoningStartedAt: t0 + 10_000,
+        reasoning_ms: 0,
+      }),
+    ]);
+    expect(measuredInverted.settledActiveMs).toBe(0);
+    expect(measuredInverted.liveSegmentStartMs).toBe(t0 + 10_000);
+
+    const unmeasuredInverted = summarizeTurn([
       item("agent_reasoning", null, "1.0", {
         created_at: new Date(t0).toISOString(),
         reasoningStartedAt: t0 + 10_000,
       }),
     ]);
-    expect(inverted.settledActiveMs).toBe(0);
-    expect(inverted.liveSegmentStartMs).toBe(t0 + 10_000);
+    expect(unmeasuredInverted.settledActiveMs).toBeNull();
+    expect(unmeasuredInverted.liveSegmentStartMs).toBe(t0 + 10_000);
+
+    const sameSecondUnmeasured = summarizeTurn([
+      item("agent_reasoning", null, "1.0", { created_at: "2026-11-22T04:08:02.000Z" }),
+      item("agent_chat", null, "1.1", { user_facing: false, created_at: "2026-11-22T04:08:02.000Z" }),
+    ]);
+    expect(sameSecondUnmeasured.settledActiveMs).toBeNull();
+
+    const sameSecondMeasuredZero = summarizeTurn([
+      item("agent_reasoning", null, "1.0", { created_at: "2026-11-22T04:08:02.000Z", reasoning_ms: 0 }),
+    ]);
+    expect(sameSecondMeasuredZero.settledActiveMs).toBe(0);
+
+    const subSecondPositiveSpan = summarizeTurn([
+      item("agent_reasoning", null, "1.0", { created_at: "2026-11-22T04:08:02.000Z" }),
+      item("agent_chat", null, "1.1", { user_facing: false, created_at: "2026-11-22T04:08:02.400Z" }),
+    ]);
+    expect(subSecondPositiveSpan.settledActiveMs).toBe(400);
 
     const zeroAnchor = summarizeTurn([
       item("agent_reasoning", null, "1.0", {

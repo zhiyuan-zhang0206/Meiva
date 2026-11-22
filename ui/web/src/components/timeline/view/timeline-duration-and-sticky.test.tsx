@@ -126,7 +126,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
   });
-  it("completed work turn with sub-1s wall-clock span shows Worked for 1s while detail chip keeps plain Thinking", () => {
+  it("completed work turn with unmeasured 0ms single-point timestamp shows plain Worked while detail chip keeps plain Thinking", () => {
     render(
       <TimelineView
         items={[
@@ -142,11 +142,38 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toBe("Worked for 1s");
+    expect(header.textContent).toBe("Worked");
     expect(screen.queryByRole("img")).toBeNull();
     fireEvent.click(header);
     expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
     expect(screen.getByTestId("card-toggle").textContent).not.toContain("Thinking for");
+  });
+  it("shows plain Worked for same-second unmeasured agent_reasoning + hidden agent_chat (#8097) and Worked for 1s when reasoning_ms is measured", () => {
+    const ts = "2026-11-22T04:08:02.000Z";
+    const { rerender } = render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
+          makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thought", created_at: ts }),
+          makeItem({ item_id: "2.1", kind: "agent_chat", user_facing: false, payload: "internal", created_at: ts }),
+          makeItem({ item_id: "3.0", kind: "agent_chat", payload: "done" }),
+        ]}
+      />,
+    );
+    expect(runToggle().textContent).toBe("Worked");
+    expect(screen.queryByRole("img")).toBeNull();
+
+    rerender(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
+          makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thought", created_at: ts, reasoning_ms: 400 }),
+          makeItem({ item_id: "2.1", kind: "agent_chat", user_facing: false, payload: "internal", created_at: ts }),
+          makeItem({ item_id: "3.0", kind: "agent_chat", payload: "done" }),
+        ]}
+      />,
+    );
+    expect(runToggle().textContent).toBe("Worked for 1s");
   });
   it("live and settled headers share the work block's wall-clock span from its first item", () => {
     const now = Date.now();

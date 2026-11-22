@@ -98,10 +98,18 @@ or turn-ID deduplication.
 The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
 "Worked for Xs". Timestamped spans below one second display as "1s" ("Working
 for 1s" / "Worked for 1s", user ruling 2026-11-21); detail chips retain
-sub-second precision. When any active segment's start or end timestamp is truly
-missing, the header shows plain "Worked" ("Working…" while active, or
-`lastEventAt` / `timelineStore.liveAnchorAt` fallback when `priorActiveMs` is
-known and live) with no duration and no per-block warning icon.
+sub-second precision. An active segment whose settled items have no measured
+duration field (`reasoning_ms`, `reasoningElapsedMs`, `code_elapsed_ms`,
+`codeElapsedMs`, `exec_ms`, `execElapsedMs`) and zero or non-positive wall-clock
+span (`endMs <= startMs`, such as a single unmeasured reasoning item or
+same-second items) reports `durationMs = null` so the header shows plain
+"Worked" instead of fabricating "Worked for 1s" (whereas a genuine positive
+sub-second span `endMs > startMs` or an explicit `0ms` measurement still
+displays "Worked for 1s"). When any active segment's start or end timestamp is
+truly missing, the header likewise shows plain "Worked" ("Working…" while
+active, or `lastEventAt` / `timelineStore.liveAnchorAt` fallback when
+`priorActiveMs` is known and live) with no duration and no per-block warning
+icon.
 
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
