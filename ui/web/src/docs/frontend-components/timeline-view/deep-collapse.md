@@ -40,32 +40,47 @@ from timeline items, with no backend sidecars):
 - **Active segment splitting** (`runs.summarizeTurn`): after stripping standing
   context items (`system_prompt` and `system_marker` with `show_timestamp:
   false`), the remaining event items split into contiguous segments whenever:
-  1. A segment ended on a hidden `agent_chat` (`user_facing: false`) and the
-     next item belongs to a different step prefix (same-step tool calls such as
+  1. A segment closed on a hidden `agent_chat` (`user_facing: false`) and the
+     next item is not a same-step agent output (same-step tool calls such as
      `h100.0` hidden text + `h100.1` `agent_code` stay in the same segment and
-     clear the closing boundary so subsequent `code_output` is not split).
+     reopen it so subsequent `code_output` is not split), or closed permanently
+     on a turn-closing lifecycle marker (`lifecycle_terminate`,
+     `lifecycle_interrupt`).
   2. A segment already contains agent output (`agent_reasoning` including
      `llmWaiting`, `agent_code`, `code_output`, `attach`, `agent_chat`) and a
      new inbound wake arrives (`inbound_chat`, `inbound_compact_request`,
-     `inbound_compact_summary`, or `system_marker` with `source ===
-     "heartbeat"`).
-  3. A segment has no agent output yet and another `inbound_chat` or heartbeat
-     marker arrives (consecutive queued wakes without agent output close the
-     empty segment at `0ms` so queue waiting time is never counted, while
-     `inbound_compact_request` → `inbound_compact_summary` remains one segment).
+     `inbound_compact_summary`, or a wake `system_marker`: `heartbeat`,
+     `lifecycle_restart`, `lifecycle_resurrect`, `lifecycle_fork`).
+  3. A segment has no agent output yet and another `inbound_chat` or wake
+     `system_marker` arrives (consecutive queued wakes without agent output
+     close the empty segment at `0ms` so queue waiting time is never counted,
+     while `inbound_compact_request` → `inbound_compact_summary` remains one
+     segment).
+  4. Any non-wake `system_marker` (`show_timestamp: true`, e.g., `task`,
+     `new_skills`, `compact_failed`, `turn_lost`, or ephemeral `error:` /
+     `status:`) appearing while idle, after a closed segment, or before agent
+     output lands as its own closed `0ms` segment (`hasAgentOutput: false,
+     closed: true`) so it never absorbs a subsequent hidden wake's agent output;
+     `lifecycle_terminate` / `lifecycle_interrupt` after agent output caps and
+     hard-closes that segment.
 - **Worked** = sum of `max(segEnd - segStart, 0)` across all segments that
-  contain agent output (`settledActiveMs`). Empty inbound-only segments
-  contribute `0` and never taint the block if their own timestamps are absent.
-  For example, 10m of work, 1h idle, then 10m of work displays `Worked for 20m`
-  rather than `80m`.
+  contain agent output (`settledActiveMs`). Empty inbound-only or marker-only
+  segments contribute `0` and never taint the block if their own timestamps are
+  absent. For example, 10m of work, 1h idle, then 10m of work displays
+  `Worked for 20m` rather than `80m`.
 - **Working** = `priorActiveMs + max(now - liveAnchor, 0)`, where
   `priorActiveMs` sums completed active segments prior to the trailing open
   segment and `liveAnchor` is the trailing open segment's start timestamp
-  (`liveSegmentStartMs`). When the trailing segment already closed on a hidden
-  `agent_chat` (for example, a hidden heartbeat has just woken before its first
-  item lands), that closed segment rolls into `priorActiveMs` and `liveAnchor`
-  falls back to `lastEventAt` (or holds `Working for <priorActiveMs>` if
-  `lastEventAt` is `0` and `priorActiveMs > 0`), never absorbing the idle gap.
+  (`liveSegmentStartMs`). When the trailing segment is already closed (for
+  example, after a hidden `agent_chat`, `lifecycle_terminate`, or trailing
+  non-wake marker while a hidden heartbeat has just woken before its first item
+  lands), completed active segments roll into `priorActiveMs` and `liveAnchor`
+  falls back to the `lastEventAt` prop (fed from `timelineStore.liveAnchorAt`,
+  which is maintained only while `turnActive` is `true` and reset to `0` on
+  `settleTurn`, terminal SSE events, and connection close so a later wake in the
+  same tab never inherits a stale pre-idle anchor). When `lastEventAt` is `0`
+  and `priorActiveMs > 0`, the header holds `Working for <priorActiveMs>`
+  without absorbing idle time or dropping back to `Working…`.
 
 Item boundaries come from the timestamps and durations timeline items already
 carry (`created_at` plus `reasoning_ms` / `code_elapsed_ms` / `exec_ms`, where
@@ -74,18 +89,19 @@ committed items with a duration stamp `created_at` at completion so start is
 context items (`system_prompt` and `system_marker` with `show_timestamp: false`)
 are excluded so re-attached head notes never shift a segment's start. Before the
 first item of a live work block arrives, `PendingLiveActivityWindow` anchors on
-the triggering human prompt's `created_at` (or `liveAnchorAt` on an empty
-timeline). Because the calculation depends only on the timeline items themselves,
-live and settled readings agree across reloads, reconnects and rebuilt harness
-bridges without per-turn timing sidecars or turn-ID deduplication.
+the triggering human prompt's `created_at` (or `timelineStore.liveAnchorAt`,
+passed as `lastEventAt`, on an empty timeline). Because the calculation depends
+only on the timeline items themselves, live and settled readings agree across
+reloads, reconnects and rebuilt harness bridges without per-turn timing sidecars
+or turn-ID deduplication.
 
 The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
 "Worked for Xs". Timestamped spans below one second display as "1s" ("Working
 for 1s" / "Worked for 1s", user ruling 2026-11-21); detail chips retain
 sub-second precision. When any active segment's start or end timestamp is truly
 missing, the header shows plain "Worked" ("Working…" while active, or
-`lastEventAt` fallback when `priorActiveMs` is known and live) with no duration
-and no per-block warning icon.
+`lastEventAt` / `timelineStore.liveAnchorAt` fallback when `priorActiveMs` is
+known and live) with no duration and no per-block warning icon.
 
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing

@@ -304,6 +304,127 @@ describe("summarizeTurn — active-segment timing", () => {
     expect(s.liveSegmentStartMs).toBe(t0);
   });
 
+  it("keeps same-step hidden agent_chat + agent_code joined across compact-prefixed historical item_ids (s1.prev.5.0 + s1.prev.5.1)", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const run = [
+      item("agent_chat", null, "s1.prev.5.0", { user_facing: false, created_at: new Date(t0).toISOString() }),
+      item("agent_code", "Bash", "s1.prev.5.1", { created_at: new Date(t0 + 2_000).toISOString() }),
+      item("code_output", null, "s1.prev.6.0", {
+        created_at: new Date(t0 + 5 * MIN + 2_000).toISOString(),
+        exec_ms: 5 * MIN,
+      }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.settledActiveMs).toBe(5 * MIN + 2_000);
+    expect(s.priorActiveMs).toBe(0);
+    expect(s.liveSegmentStartMs).toBe(t0);
+  });
+
+  it("isolates timestamped non-wake system_markers after a closed segment so a later hidden wake never absorbs idle time", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const closedPlusMarkers = [
+      item("agent_reasoning", null, "h10.0", { created_at: new Date(t0 + 5 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+      item("agent_code", "Bash", "h20.0", { created_at: new Date(t0 + 6 * MIN).toISOString() }),
+      item("code_output", null, "h30.0", { created_at: new Date(t0 + 9 * MIN).toISOString(), exec_ms: 3 * MIN }),
+      item("agent_chat", null, "h40.0", { user_facing: false, created_at: new Date(t0 + 10 * MIN).toISOString() }),
+      item("system_marker", "task", "h41.0", { created_at: new Date(t0 + 10 * MIN + 1_000).toISOString(), show_timestamp: true }),
+      item("system_marker", "compact_failed", "h42.0", { created_at: new Date(t0 + 10 * MIN + 2_000).toISOString(), show_timestamp: true }),
+      item("system_marker", null, "_marker.err", { payload: "error:boom", created_at: new Date(t0 + 10 * MIN + 3_000).toISOString(), show_timestamp: true }),
+    ];
+    const sIdle = summarizeTurn(closedPlusMarkers);
+    expect(sIdle.settledActiveMs).toBe(10 * MIN);
+    expect(sIdle.priorActiveMs).toBe(10 * MIN);
+    expect(sIdle.liveSegmentStartMs).toBeNull();
+
+    const resumed = [
+      ...closedPlusMarkers,
+      item("agent_reasoning", null, "h50.0", { created_at: new Date(t0 + 75 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+    ];
+    const sResumed = summarizeTurn(resumed);
+    expect(sResumed.settledActiveMs).toBe(15 * MIN);
+    expect(sResumed.priorActiveMs).toBe(10 * MIN);
+    expect(sResumed.liveSegmentStartMs).toBe(t0 + 70 * MIN);
+  });
+
+  it("hard-closes segments on lifecycle_terminate / lifecycle_interrupt and splits on lifecycle_restart / lifecycle_resurrect / lifecycle_fork", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const terminated = [
+      item("agent_code", "Bash", "1.0", { created_at: new Date(t0).toISOString() }),
+      item("code_output", null, "2.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), exec_ms: 10 * MIN }),
+      item("system_marker", "lifecycle_terminate", "3.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), show_timestamp: true }),
+    ];
+    const sTerm = summarizeTurn(terminated);
+    expect(sTerm.settledActiveMs).toBe(10 * MIN);
+    expect(sTerm.priorActiveMs).toBe(10 * MIN);
+    expect(sTerm.liveSegmentStartMs).toBeNull();
+
+    const resurrected = [
+      ...terminated,
+      item("system_marker", "lifecycle_resurrect", "4.0", { created_at: new Date(t0 + 130 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_code", "Bash", "5.0", { created_at: new Date(t0 + 131 * MIN).toISOString() }),
+      item("code_output", null, "6.0", { created_at: new Date(t0 + 135 * MIN).toISOString(), exec_ms: 4 * MIN }),
+    ];
+    expect(summarizeTurn(resurrected).settledActiveMs).toBe(15 * MIN);
+
+    const directRestart = [
+      item("agent_code", "Bash", "1.0", { created_at: new Date(t0).toISOString() }),
+      item("code_output", null, "2.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), exec_ms: 10 * MIN }),
+      item("system_marker", "lifecycle_restart", "3.0", { created_at: new Date(t0 + 130 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "4.0", { created_at: new Date(t0 + 135 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+      item("system_marker", "lifecycle_fork", "5.0", { created_at: new Date(t0 + 195 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "6.0", { created_at: new Date(t0 + 198 * MIN).toISOString(), reasoning_ms: 3 * MIN }),
+    ];
+    expect(summarizeTurn(directRestart).settledActiveMs).toBe(18 * MIN);
+
+    const interruptedThenHiddenWake = [
+      item("agent_code", "Bash", "1.0", { created_at: new Date(t0).toISOString() }),
+      item("system_marker", "lifecycle_interrupt", "2.0", { created_at: new Date(t0 + 4 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "3.0", { created_at: new Date(t0 + 67 * MIN).toISOString(), reasoning_ms: 3 * MIN }),
+    ];
+    expect(summarizeTurn(interruptedThenHiddenWake).settledActiveMs).toBe(7 * MIN);
+  });
+
+  it("splits and deduplicates queued heartbeat system_markers without counting inter-heartbeat idle time", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const run = [
+      item("system_marker", "heartbeat", "1.0", { created_at: new Date(t0).toISOString(), show_timestamp: true }),
+      item("system_marker", "heartbeat", "2.0", { created_at: new Date(t0 + 30 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "3.0", { created_at: new Date(t0 + 30 * MIN + 10_000).toISOString(), reasoning_ms: 10_000 }),
+      item("system_marker", "heartbeat", "4.0", { created_at: new Date(t0 + 90 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "5.0", { created_at: new Date(t0 + 90 * MIN + 15_000).toISOString(), reasoning_ms: 15_000 }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.settledActiveMs).toBe(25_000);
+    expect(s.priorActiveMs).toBe(10_000);
+    expect(s.liveSegmentStartMs).toBe(t0 + 90 * MIN);
+  });
+
+  it("clamps inverted segment timestamps (endMs < startMs) to 0ms and ignores non-positive *StartedAt anchors", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const inverted = summarizeTurn([
+      item("agent_reasoning", null, "1.0", {
+        created_at: new Date(t0).toISOString(),
+        reasoningStartedAt: t0 + 10_000,
+      }),
+    ]);
+    expect(inverted.settledActiveMs).toBe(0);
+    expect(inverted.liveSegmentStartMs).toBe(t0 + 10_000);
+
+    const zeroAnchor = summarizeTurn([
+      item("agent_reasoning", null, "1.0", {
+        created_at: new Date(t0 + 4_000).toISOString(),
+        reasoning_ms: 4_000,
+        reasoningStartedAt: 0,
+      }),
+    ]);
+    expect(zeroAnchor.settledActiveMs).toBe(4_000);
+    expect(zeroAnchor.liveSegmentStartMs).toBe(t0);
+  });
+
   it("excludes queue idle time between consecutive inbound_chat wakes with no agent output and ignores missing timestamps on empty inbound segments", () => {
     const t0 = Date.parse("2026-11-22T10:00:00.000Z");
     const MIN = 60_000;

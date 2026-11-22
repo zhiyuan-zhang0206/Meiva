@@ -135,7 +135,8 @@ export interface TurnSummary {
   // - `priorActiveMs`: sum of durations of completed active segments before the trailing
   //   live segment (0 when none; null if any completed active segment lacks timestamps).
   // - `liveSegmentStartMs`: start timestamp of the open trailing segment, or null when
-  //   the trailing segment already closed with a hidden agent_chat or lacks a start timestamp.
+  //   the trailing segment is already closed (hidden agent_chat, lifecycle_terminate /
+  //   lifecycle_interrupt, or trailing non-wake marker) or lacks a start timestamp.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly settledActiveMs: number | null;
   readonly priorActiveMs: number | null;
@@ -165,7 +166,7 @@ function isStandingContextItem(it: BackendTimelineItem): boolean {
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 function itemStartMs(it: BackendTimelineItem): number | null {
   if (it.kind === "agent_reasoning") {
-    if (it.reasoningStartedAt != null && Number.isFinite(it.reasoningStartedAt)) {
+    if (it.reasoningStartedAt != null && Number.isFinite(it.reasoningStartedAt) && it.reasoningStartedAt > 0) {
       return it.reasoningStartedAt;
     }
     const created = parseTimestampMs(it.created_at);
@@ -176,7 +177,7 @@ function itemStartMs(it: BackendTimelineItem): number | null {
     return created;
   }
   if (it.kind === "agent_code") {
-    if (it.codeStartedAt != null && Number.isFinite(it.codeStartedAt)) {
+    if (it.codeStartedAt != null && Number.isFinite(it.codeStartedAt) && it.codeStartedAt > 0) {
       return it.codeStartedAt;
     }
     const created = parseTimestampMs(it.created_at);
@@ -187,7 +188,7 @@ function itemStartMs(it: BackendTimelineItem): number | null {
     return created;
   }
   if (it.kind === "code_output") {
-    if (it.execStartedAt != null && Number.isFinite(it.execStartedAt)) {
+    if (it.execStartedAt != null && Number.isFinite(it.execStartedAt) && it.execStartedAt > 0) {
       return it.execStartedAt;
     }
     const created = parseTimestampMs(it.created_at);
@@ -228,15 +229,28 @@ function itemEndMs(it: BackendTimelineItem): number | null {
 interface ActiveSegment {
   readonly items: BackendTimelineItem[];
   hasAgentOutput: boolean;
+  closed: boolean;
   closingChatStep: string | null;
 }
 
 interface ComputedSegment {
   readonly hasAgentOutput: boolean;
-  readonly closingChatStep: string | null;
+  readonly closed: boolean;
   readonly startMs: number | null;
   readonly durationMs: number | null;
 }
+
+const WAKE_MARKER_SOURCES: ReadonlySet<string> = new Set([
+  "heartbeat",
+  "lifecycle_restart",
+  "lifecycle_resurrect",
+  "lifecycle_fork",
+]);
+
+const CLOSING_MARKER_SOURCES: ReadonlySet<string> = new Set([
+  "lifecycle_terminate",
+  "lifecycle_interrupt",
+]);
 
 function stepPrefix(itemId: string): string | null {
   const dot = itemId.lastIndexOf(".");
@@ -253,30 +267,42 @@ function isAgentOutputItem(it: BackendTimelineItem): boolean {
   );
 }
 
+function isWakeMarker(it: BackendTimelineItem): boolean {
+  return it.kind === "system_marker" && it.source !== null && WAKE_MARKER_SOURCES.has(it.source);
+}
+
+function isTurnClosingMarker(it: BackendTimelineItem): boolean {
+  return it.kind === "system_marker" && it.source !== null && CLOSING_MARKER_SOURCES.has(it.source);
+}
+
+function isNonWakeMarker(it: BackendTimelineItem): boolean {
+  return it.kind === "system_marker" && !isWakeMarker(it);
+}
+
 function isInboundWakeItem(it: BackendTimelineItem): boolean {
   return (
     it.kind === "inbound_chat" ||
     it.kind === "inbound_compact_request" ||
     it.kind === "inbound_compact_summary" ||
-    (it.kind === "system_marker" && it.source === "heartbeat")
+    isWakeMarker(it)
   );
 }
 
 function isQueuedWakeRestart(it: BackendTimelineItem): boolean {
-  return it.kind === "inbound_chat" || (it.kind === "system_marker" && it.source === "heartbeat");
+  return it.kind === "inbound_chat" || isWakeMarker(it);
+}
+
+function isSameClosingChatStep(seg: ActiveSegment, it: BackendTimelineItem): boolean {
+  if (seg.closingChatStep === null || !isAgentOutputItem(it)) return false;
+  const prefix = stepPrefix(it.item_id);
+  return prefix !== null && prefix === seg.closingChatStep;
 }
 
 function shouldStartNewSegment(seg: ActiveSegment, it: BackendTimelineItem): boolean {
-  if (seg.closingChatStep !== null) {
-    const prefix = stepPrefix(it.item_id);
-    if (prefix !== null && prefix === seg.closingChatStep) {
-      if (it.kind !== "agent_chat") {
-        seg.closingChatStep = null;
-      }
-      return false;
-    }
-    return true;
+  if (seg.closed) {
+    return !isSameClosingChatStep(seg, it);
   }
+  if (isNonWakeMarker(it) && !seg.hasAgentOutput) return true;
   if (seg.hasAgentOutput && isInboundWakeItem(it)) return true;
   if (!seg.hasAgentOutput && isQueuedWakeRestart(it)) return true;
   return false;
@@ -290,15 +316,20 @@ function splitActiveSegments(eventItems: readonly BackendTimelineItem[]): Active
       seg = null;
     }
     if (seg === null) {
-      seg = { items: [], hasAgentOutput: false, closingChatStep: null };
+      seg = { items: [], hasAgentOutput: false, closed: false, closingChatStep: null };
       segments.push(seg);
     }
     seg.items.push(it);
     if (it.kind === "agent_chat") {
       seg.hasAgentOutput = true;
-      seg.closingChatStep = stepPrefix(it.item_id) ?? "__single__";
+      seg.closed = true;
+      seg.closingChatStep = stepPrefix(it.item_id) ?? "";
     } else if (isAgentOutputItem(it)) {
       seg.hasAgentOutput = true;
+      seg.closed = false;
+      seg.closingChatStep = null;
+    } else if (isTurnClosingMarker(it) || (isNonWakeMarker(it) && !seg.hasAgentOutput)) {
+      seg.closed = true;
       seg.closingChatStep = null;
     }
   }
@@ -334,7 +365,7 @@ function computeSegment(seg: ActiveSegment): ComputedSegment {
   const durationMs = startMs !== null && endMs !== null ? Math.max(endMs - startMs, 0) : null;
   return {
     hasAgentOutput: seg.hasAgentOutput,
-    closingChatStep: seg.closingChatStep,
+    closed: seg.closed,
     startMs,
     durationMs,
   };
@@ -365,7 +396,7 @@ function summarizeActiveTiming(items: readonly BackendTimelineItem[]): {
   const settledActiveMs = all.activeCount > 0 ? all.totalMs : null;
 
   const lastSeg = segments.length > 0 ? segments[segments.length - 1] : null;
-  if (lastSeg !== null && lastSeg.closingChatStep === null) {
+  if (lastSeg !== null && !lastSeg.closed) {
     const prior = sumActiveSegments(segments.slice(0, -1));
     return {
       settledActiveMs,

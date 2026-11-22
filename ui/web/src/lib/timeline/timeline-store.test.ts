@@ -317,6 +317,66 @@ describe("liveAnchorAt (the running turn's live clock anchor)", () => {
     });
     expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
   });
+
+  it("clears liveAnchorAt on settleTurn, turn-ending SSE events, and connection close, and stays 0 on idle snapshots", () => {
+    const store = useTimelineStore.getState();
+    act(() => {
+      store.processSseEvent({ role: "reasoning_start", agent_id: 42, item_id: "5.0" }, 1_700_000_000_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_000_000_000);
+
+    act(() => {
+      store.settleTurn(1_700_000_600_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    act(() => {
+      store.processSseEvent(
+        { role: "timeline_snapshot", agent_id: 42, msg_count: 1, items: [item({})] },
+        1_700_000_601_000,
+      );
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    act(() => {
+      store.processSseEvent({ role: "chat_start", agent_id: 42, item_id: "6.0" }, 1_700_004_200_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_004_200_000);
+
+    act(() => {
+      store.processSseEvent({ role: "llm_done", agent_id: 42 }, 1_700_004_210_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    act(() => {
+      store.processSseEvent({ role: "code_start", agent_id: 42, item_id: "7.0" }, 1_700_004_300_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_004_300_000);
+
+    act(() => {
+      store.processSseEvent({ role: "cancelled", agent_id: 42 }, 1_700_004_310_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    act(() => {
+      store.processSseEvent({ role: "code_start", agent_id: 42, item_id: "8.0" }, 1_700_004_400_000);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_004_400_000);
+
+    act(() => {
+      store.processConnectionEvent({ type: "closed" });
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    act(() => {
+      store.processSseEvent({ role: "compact_done", agent_id: 42 }, 1_700_004_500_000);
+      store.processSseEvent(
+        { role: "timeline_snapshot", agent_id: 42, msg_count: 1, items: [item({ item_id: "1.0" })] },
+        1_700_004_501_000,
+      );
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+  });
 });
 
 describe("processSseEvent role dispatch (table-driven)", () => {

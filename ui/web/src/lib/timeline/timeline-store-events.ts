@@ -38,8 +38,9 @@ export interface TimelineState {
   streamingCode: boolean;
   turnActive: boolean;
   // meiva:note
-  // Page-clock time of the thread's last received event (0 = none yet). Used only as a live
-  // fallback when a running work block has no timestamped items yet.
+  // Page-clock time of the active turn's last received event (0 when idle or none yet).
+  // Maintained only while `turnActive` is true and reset to 0 on settle/turn-end/close so a
+  // later hidden wake in the same tab never inherits a stale pre-idle anchor.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
   connectionState: ConnectionState;
@@ -340,7 +341,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         const epoch = state.compactEpoch + 1;
         return {
           items: snapItems,
-          liveAnchorAt: nowMs,
+          liveAnchorAt: state.turnActive ? nowMs : 0,
           compactEpoch: epoch,
           compactBuffer: captureCompactTransition(state.items, state.compactBuffer, ev.agent_id, epoch, false),
           streamingIds: new Set(),
@@ -390,8 +391,9 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         ev.role === "code_delta" ||
         ev.role === "exec_output_chunk" ||
         (ev.role === "chat_start" && !hadLiveWorkClock));
-    const nextLiveAnchorAt =
-      ev.role === "chat_start" && !hadLiveWorkClock && waitingBefore != null
+    const nextLiveAnchorAt = !next.turnActive
+      ? 0
+      : ev.role === "chat_start" && !hadLiveWorkClock && waitingBefore != null
         ? waitingBefore
         : preserveLiveAnchor
           ? state.liveAnchorAt

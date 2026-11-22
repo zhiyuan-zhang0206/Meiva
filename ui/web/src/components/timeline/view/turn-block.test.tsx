@@ -5,6 +5,7 @@ import { render } from "@/lib/transport/tests/wall-clock-render";
 import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
 import { summarizeTurn, type TurnSummary } from "../model/runs";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
 afterEach(cleanup);
 
@@ -171,6 +172,12 @@ describe("TurnBlock component", () => {
     rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000 })));
     expect(renders).toBe(2);
     expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 13s");
+
+    rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000, priorActiveMs: 5_000 })));
+    expect(renders).toBe(3);
+
+    rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000, priorActiveMs: 5_000, liveSegmentStartMs: SAMPLE_START + 1_000 })));
+    expect(renders).toBe(4);
   });
 
   it("ticks the live clock only while its turn is active", () => {
@@ -582,6 +589,73 @@ describe("Work block active-segment duration semantics (#7533)", () => {
       />,
     );
     expect(screen.getByText("Worked for 30s")).toBeTruthy();
+  });
+
+  it("holds Working for 10m (not 70m) in the same tab after settleTurn + trailing snapshot and 1h idle wake", () => {
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const closedTurn1 = [
+      blockItem("agent_reasoning", "h10.0", {
+        created_at: new Date(t0 + 5 * MIN).toISOString(),
+        reasoning_ms: 5 * MIN,
+      }),
+      blockItem("code_output", "h20.0", {
+        created_at: new Date(t0 + 9 * MIN).toISOString(),
+        exec_ms: 4 * MIN,
+      }),
+      blockItem("agent_chat", "h30.0", {
+        user_facing: false,
+        created_at: new Date(t0 + 10 * MIN).toISOString(),
+      }),
+    ];
+
+    const store = useTimelineStore.getState();
+    act(() => {
+      store.switchThread(42, [], false);
+      store.processSseEvent({ role: "reasoning_start", agent_id: 42, item_id: "h10.0" }, t0);
+      store.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: closedTurn1 }, t0 + 10 * MIN);
+      store.settleTurn(t0 + 10 * MIN);
+      store.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: closedTurn1 }, t0 + 10 * MIN + 500);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    vi.setSystemTime(t0 + 70 * MIN);
+    render(
+      <TurnBlock
+        id="h10.0"
+        memberIds={closedTurn1.map((it) => it.item_id)}
+        summary={summarizeTurn(closedTurn1)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        lastEventAt={useTimelineStore.getState().liveAnchorAt}
+      />,
+    );
+    expect(screen.getByText("Working for 10m")).toBeTruthy();
+  });
+
+  it("excludes idle gaps around trailing non-wake markers and lifecycle terminate/resurrect transitions", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const items = [
+      blockItem("agent_code", "1.0", { created_at: new Date(t0).toISOString() }),
+      blockItem("code_output", "2.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), exec_ms: 10 * MIN }),
+      blockItem("system_marker", "3.0", { source: "lifecycle_terminate", created_at: new Date(t0 + 10 * MIN).toISOString(), show_timestamp: true }),
+      blockItem("system_marker", "4.0", { source: "task", created_at: new Date(t0 + 10 * MIN + 1_000).toISOString(), show_timestamp: true }),
+      blockItem("system_marker", "5.0", { source: "lifecycle_resurrect", created_at: new Date(t0 + 130 * MIN).toISOString(), show_timestamp: true }),
+      blockItem("agent_reasoning", "6.0", { created_at: new Date(t0 + 135 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+    ];
+    render(
+      <TurnBlock
+        id="1.0"
+        memberIds={items.map((it) => it.item_id)}
+        summary={summarizeTurn(items)}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Worked for 15m")).toBeTruthy();
   });
 
   it("shows plain Worked with no warning icon when block timestamps are truly missing", () => {
