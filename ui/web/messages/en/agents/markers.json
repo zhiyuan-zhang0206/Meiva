@@ -5,7 +5,11 @@
   "resurrected": "Resurrected",
   "forked": "Forked",
   "memory": "Memory",
+  "task": "Task",
+  "backgroundTask": "Background task",
   "note": "Note",
+  "systemNotice": "System notice",
+  "error": "Error",
   "unrecognized": "Unrecognized system_marker",
   "unrecognizedReload": "This page is older than the server. Reload to show this note.",
   "errorPrefix": "[error] {content}"

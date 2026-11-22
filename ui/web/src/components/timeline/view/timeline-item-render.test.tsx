@@ -542,4 +542,41 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByText("Internal closing text")).toBeTruthy();
   });
+
+  it("expands only agent_chat by default inside an opened TurnBlock and collapses notes, attach, system inbound, and task markers", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_chat", user_facing: false, payload: "agent internal output" }),
+          makeItem({ item_id: "1.1", kind: "system_marker", source: "sdk_hint", payload: "hidden sdk note" }),
+          makeItem({ item_id: "1.2", kind: "system_marker", source: "memory", payload: "hidden memory" }),
+          makeItem({ item_id: "1.3", kind: "system_marker", source: "lifecycle_restart", payload: "hidden lifecycle" }),
+          makeItem({ item_id: "1.4", kind: "system_marker", source: "task", payload: "hidden task note" }),
+          makeItem({ item_id: "1.5", kind: "system_marker", source: "background_task", payload: "status:hidden bg task" }),
+          makeItem({ item_id: "1.6", kind: "system_marker", source: "scheduled_wake", payload: "status:hidden wake notice" }),
+          makeItem({ item_id: "1.7", kind: "attach", payload: "hidden attach body" }),
+          makeItem({ item_id: "1.8", kind: "inbound_chat", source: "shell:1", payload: "hidden shell inbound" }),
+          makeItem({ item_id: "1.9", kind: "inbound_chat", source: "watcher:2", payload: "hidden watcher inbound" }),
+          makeItem({ item_id: "1.10", kind: "inbound_chat", source: "schedule:3", payload: "hidden schedule inbound" }),
+          makeItem({ item_id: "1.11", kind: "inbound_chat", source: "system", payload: "hidden system inbound" }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const toggles = screen.getAllByTestId("card-toggle");
+    expect(toggles).toHaveLength(12);
+    expect(toggles[0].getAttribute("aria-expanded")).toBe("true");
+    for (const toggle of toggles.slice(1)) {
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    }
+    expect(screen.getByText("agent internal output")).toBeTruthy();
+    expect(screen.queryByText(/hidden /)).toBeNull();
+    expect(screen.getByText("Task")).toBeTruthy();
+    expect(screen.getByText("Background task")).toBeTruthy();
+    expect(screen.getByText("System notice")).toBeTruthy();
+    expect(screen.getByText("Shell")).toBeTruthy();
+    expect(screen.getByText("Watcher")).toBeTruthy();
+    expect(screen.getByText("Schedule")).toBeTruthy();
+    expect(screen.getByText("System")).toBeTruthy();
+  });
 });

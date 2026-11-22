@@ -1,6 +1,17 @@
 "use client";
 
-import { GitFork, Hand, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  GitFork,
+  Hand,
+  Info,
+  ListTodo,
+  NotebookText,
+  PowerOff,
+  RotateCw,
+  Terminal,
+  type LucideIcon,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
@@ -27,7 +38,24 @@ const LIFECYCLE_META: Record<
 };
 
 const MEMORY_META: MarkerVisual = { icon: NotebookText, title: "Memory", titleKey: "memory" };
+const TASK_META: MarkerVisual = { icon: ListTodo, title: "Task", titleKey: "task" };
+const BACKGROUND_TASK_META: MarkerVisual = {
+  icon: Terminal,
+  title: "Background task",
+  titleKey: "backgroundTask",
+};
 const NOTE_META: MarkerVisual = { icon: Info, title: "Note", titleKey: "note" };
+const SYSTEM_NOTICE_META: MarkerVisual = {
+  icon: Info,
+  title: "System notice",
+  titleKey: "systemNotice",
+};
+const ERROR_META: MarkerVisual = { icon: AlertTriangle, title: "Error", titleKey: "error" };
+const UNRECOGNIZED_META: MarkerVisual = {
+  icon: AlertTriangle,
+  title: "Unrecognized system_marker",
+  titleKey: "unrecognized",
+};
 
 export function markerVisual(cls: MarkerClass): MarkerVisual {
   switch (cls.kind) {
@@ -35,10 +63,18 @@ export function markerVisual(cls: MarkerClass): MarkerVisual {
       return LIFECYCLE_META[cls.tag];
     case "memory":
       return MEMORY_META;
+    case "task":
+      return TASK_META;
+    case "background_task":
+      return BACKGROUND_TASK_META;
     case "note":
       return NOTE_META;
-    case "ephemeral":
-      throw new Error("markerVisual called on an ephemeral marker");
+    case "system_notice":
+      return SYSTEM_NOTICE_META;
+    case "error":
+      return ERROR_META;
+    case "unrecognized":
+      return UNRECOGNIZED_META;
   }
 }
 
@@ -60,7 +96,15 @@ export function MarkerBody({ payload, markdown = false }: { payload: string; mar
 // build does not know is a tag newer than the loaded page; reloading picks it up. A null
 // source is an untagged message, which no reload fixes.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
-function UnknownMarkerChip({ source, payload }: { source: string | null; payload: string }) {
+export function UnknownMarkerChip({
+  source,
+  payload,
+  showHeading = true,
+}: {
+  source: string | null;
+  payload: string;
+  showHeading?: boolean;
+}) {
   const t = useTranslations("markers");
   console.warn("[timeline] unrecognized system_marker", { source, payload });
   return (
@@ -68,9 +112,11 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
       data-testid="marker-unrecognized"
       className="border-l-2 border-destructive/60 bg-destructive/10 text-destructive rounded-r-sm px-3 py-2"
     >
-      <div className="text-[11px] font-mono uppercase tracking-widest mb-1">
-        {t("unrecognized")}
-      </div>
+      {showHeading ? (
+        <div className="text-[11px] font-mono uppercase tracking-widest mb-1">
+          {t("unrecognized")}
+        </div>
+      ) : null}
       {source !== null ? (
         <div data-testid="marker-unrecognized-reload" className="text-[12px] mb-1">
           {t("unrecognizedReload")}
@@ -96,6 +142,12 @@ function EphemeralMarker({ label, isError = false }: { label: string; isError?: 
   );
 }
 
+export function ErrorMarkerBody({ payload }: { payload: string }) {
+  const t = useTranslations("markers");
+  const content = payload.startsWith("error:") ? payload.slice("error:".length) : payload;
+  return <EphemeralMarker label={t("errorPrefix", { content })} isError />;
+}
+
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function EphemeralSystemMarker({
   source,
@@ -104,11 +156,9 @@ export function EphemeralSystemMarker({
   source: string | null;
   payload: string;
 }) {
-  const t = useTranslations("markers");
   if (isSilentEphemeralPayload(payload)) return null;
   if (payload.startsWith("error:")) {
-    const content = payload.slice("error:".length);
-    return <EphemeralMarker label={t("errorPrefix", { content })} isError />;
+    return <ErrorMarkerBody payload={payload} />;
   }
   if (payload.startsWith("status:")) {
     return <EphemeralMarker label={payload.slice("status:".length)} />;

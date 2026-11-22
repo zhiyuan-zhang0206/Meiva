@@ -13,7 +13,7 @@ afterEach(cleanupTimelineTest);
 describe("work block expansion", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
 
-  it("contains a streamed SSE error before and after committing the timeline", () => {
+  it("contains a streamed SSE error as a collapsed card before and after committing the timeline", () => {
     const items = applySystemEvent([], { role: "error", agent_id: 405, content: "SSE failure retained" }, 1000);
     const { rerender } = render(<TimelineView turnActive items={items} />);
     expect(runToggle().getAttribute("aria-expanded")).toBe("false");
@@ -21,15 +21,24 @@ describe("work block expansion", () => {
     rerender(<TimelineView items={JSON.parse(JSON.stringify(items)) as BackendTimelineItem[]} />);
     expect(runToggle().getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(runToggle());
+    const cardToggle = screen.getByTestId("card-toggle");
+    expect(cardToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(cardToggle.textContent).toBe("Error");
+    expect(screen.queryByTestId("marker-error")).toBeNull();
+    fireEvent.click(cardToggle);
     expect(screen.getByTestId("marker-error").textContent).toContain("SSE failure retained");
   });
 
   it.each([
-    { source: "background_task", payload: 'status:Task id "conversation/task-6775" finished with result:\nCommand exited with code 0.\nLog: file:///tmp/task-6775.log' },
-    { source: null, payload: "error:isolated failure" },
-    { source: null, payload: "status:Retrying attempt 2" },
-    { source: "future_source", payload: "unexpected marker body" },
-  ])("keeps $source $payload in work through live updates, settling and reload", ({ source, payload }) => {
+    {
+      source: "background_task",
+      payload: 'status:Task id "conversation/task-6775" finished with result:\nCommand exited with code 0.\nLog: file:///tmp/task-6775.log',
+      title: "Background task",
+    },
+    { source: null, payload: "error:isolated failure", title: "Error" },
+    { source: null, payload: "status:Retrying attempt 2", title: "System notice" },
+    { source: "future_source", payload: "unexpected marker body", title: "Unrecognized system_marker" },
+  ])("keeps $source $payload collapsed in a categorized card through live updates, settling and reload", ({ source, payload, title }) => {
     const marker = makeItem({ item_id: "h18417887.0", kind: "system_marker", source, payload, user_facing: true });
     const { rerender, unmount } = render(<TimelineView turnActive items={[marker]} />);
     expect(screen.getAllByTestId("turn-toggle")).toHaveLength(1);
@@ -42,7 +51,14 @@ describe("work block expansion", () => {
     expect(screen.getByText("Visible human reply")).toBeTruthy();
     expect(screen.queryByText(/isolated failure|Retrying attempt|finished with result|unexpected marker body/)).toBeNull();
     fireEvent.click(runToggle());
+    const cardToggle = screen.getByRole("button", { name: title });
+    expect(cardToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/isolated failure|Retrying attempt|finished with result|unexpected marker body/)).toBeNull();
+    fireEvent.click(cardToggle);
     expect(screen.getByText(/isolated failure|Retrying attempt|finished with result|unexpected marker body/)).toBeTruthy();
+    if (payload.startsWith("status:")) {
+      expect(screen.queryByText(/^status:/)).toBeNull();
+    }
     unmount();
     render(<TimelineView items={JSON.parse(JSON.stringify(updated)) as BackendTimelineItem[]} />);
     expect(runToggle().getAttribute("aria-expanded")).toBe("false");

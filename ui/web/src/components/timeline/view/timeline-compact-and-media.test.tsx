@@ -300,7 +300,7 @@ describe("ItemView: inbound_chat images", () => {
       expect(image.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
   });
-  it("attach item renders data-URI images raw (no API_BASE prefix)", () => {
+  it("attach item starts collapsed inside the turn and renders data-URI images raw once expanded", () => {
     render(
       <TimelineView
         items={[
@@ -313,6 +313,8 @@ describe("ItemView: inbound_chat images", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.queryByAltText("attached image")).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
     const img = screen.getByAltText("attached image");
     expect(img.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
     expect(screen.getByText(/render.png/)).toBeTruthy();
@@ -370,6 +372,8 @@ describe("ItemView: inbound_chat images", () => {
     );
     expect(screen.queryByText("[files]")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Context/i }));
+    expect(screen.queryByTestId("chat-markdown")).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.getByTestId("chat-markdown").textContent).toBe(payload);
     expect(screen.queryByRole("link", { name: "diagram.png" })).toBeNull();
     expect(screen.getByRole("link", { name: "spec.pdf" }).getAttribute("href"))
@@ -401,6 +405,7 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
   const renderAttach = (item: ReturnType<typeof makeItem>) => {
     render(<TimelineView items={[item]} />);
     fireEvent.click(screen.getByTestId("turn-toggle"));
+    fireEvent.click(screen.getByTestId("card-toggle"));
   };
   it("interleaves label line → thumbnail → label line → thumbnail", () => {
     renderAttach(

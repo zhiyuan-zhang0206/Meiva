@@ -64,11 +64,15 @@ function renderWithQuery(ui: React.ReactElement, overrides: Record<string, unkno
 // ---------------------------------------------------------------------------
 
 describe("messageCardConfig", () => {
-  it("returns null for ephemeral system_marker (no card)", () => {
-    const cfg = messageCardConfig(
-      item("system_marker", { source: null, payload: "error:boom" }),
-    );
-    expect(cfg).toBeNull();
+  it("returns null for silent ephemeral system_marker payloads", () => {
+    for (const payload of [
+      "compact_done",
+      "cancelled",
+      "status:Cancellation requested.",
+      "compact_request:abc",
+    ]) {
+      expect(messageCardConfig(item("system_marker", { source: null, payload }))).toBeNull();
+    }
   });
 
   it("system_prompt → monochrome System prompt label, fixed default collapsed", () => {
@@ -92,12 +96,12 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("code");
   });
 
-  it("attach → paperclip card, open by default", () => {
+  it("attach → paperclip card, collapsed by default", () => {
     const cfg = messageCardConfig(item("attach"));
     expect(cfg).not.toBeNull();
     expect(cfg!.icon?.displayName).toBe("Paperclip");
     expect(cfg!.titleKey).toBe("timeline.attachedFiles");
-    expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.fixedDefault).toBe(false);
     expect(cfg!.showTimestamp).toBe(true);
   });
 
@@ -144,10 +148,26 @@ describe("messageCardConfig", () => {
     expect(cfg?.fixedDefault).toBe(false);
   });
 
-  it("inbound_chat unknown source → System", () => {
-    const cfg = messageCardConfig(item("inbound_chat", { source: "kernel" }));
-    expect(cfg!.title).toBe("System");
-    expect(cfg!.fixedDefault).toBe(true);
+  it("classifies system inbound_chat sources and keeps them collapsed by default", () => {
+    const shellCfg = messageCardConfig(item("inbound_chat", { source: "shell:3" }));
+    expect(shellCfg!.title).toBe("Shell");
+    expect(shellCfg!.titleKey).toBe("timeline.inboundShell");
+    expect(shellCfg!.fixedDefault).toBe(false);
+
+    const watcherCfg = messageCardConfig(item("inbound_chat", { source: "watcher:7" }));
+    expect(watcherCfg!.title).toBe("Watcher");
+    expect(watcherCfg!.titleKey).toBe("timeline.inboundWatcher");
+    expect(watcherCfg!.fixedDefault).toBe(false);
+
+    const scheduleCfg = messageCardConfig(item("inbound_chat", { source: "schedule:1" }));
+    expect(scheduleCfg!.title).toBe("Schedule");
+    expect(scheduleCfg!.titleKey).toBe("timeline.inboundSchedule");
+    expect(scheduleCfg!.fixedDefault).toBe(false);
+
+    const kernelCfg = messageCardConfig(item("inbound_chat", { source: "kernel" }));
+    expect(kernelCfg!.title).toBe("System");
+    expect(kernelCfg!.titleKey).toBe("timeline.system");
+    expect(kernelCfg!.fixedDefault).toBe(false);
   });
 
   it("inbound_compact → differentiated labels", () => {
@@ -166,14 +186,15 @@ describe("messageCardConfig", () => {
     expect(cfg!.fixedDefault).toBe(false);
   });
 
-  it("system_marker memory → Memory with monochrome header (no purple override)", () => {
+  it("system_marker memory → Memory with monochrome header, collapsed by default", () => {
     for (const src of ["memory", "agent_memory"]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Memory");
+      expect(cfg!.fixedDefault).toBe(false);
     }
   });
 
-  it("system_marker note → Note with monochrome header", () => {
+  it("system_marker note → Note with monochrome header, collapsed by default", () => {
     for (const src of [
       "sdk_hint",
       "memory_write_check",
@@ -184,8 +205,49 @@ describe("messageCardConfig", () => {
     ]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Note");
-      expect(cfg!.fixedDefault).toBe(true);
+      expect(cfg!.fixedDefault).toBe(false);
     }
+  });
+
+  it("classifies task, background_task, status, error, and unrecognized system_markers as collapsed cards", () => {
+    const taskCfg = messageCardConfig(item("system_marker", { source: "task", payload: "Task updated" }));
+    expect(taskCfg!.title).toBe("Task");
+    expect(taskCfg!.titleKey).toBe("markers.task");
+    expect(taskCfg!.fixedDefault).toBe(false);
+
+    for (const src of ["background_task", "task-notification"]) {
+      const bgCfg = messageCardConfig(
+        item("system_marker", { source: src, payload: "status:Task finished" }),
+      );
+      expect(bgCfg!.title).toBe("Background task");
+      expect(bgCfg!.titleKey).toBe("markers.backgroundTask");
+      expect(bgCfg!.fixedDefault).toBe(false);
+    }
+
+    for (const src of [null, "scheduled_wake", "queued_input_revived", "unknown"]) {
+      const noticeCfg = messageCardConfig(
+        item("system_marker", { source: src, payload: "status:Retrying attempt 2" }),
+      );
+      expect(noticeCfg!.title).toBe("System notice");
+      expect(noticeCfg!.titleKey).toBe("markers.systemNotice");
+      expect(noticeCfg!.fixedDefault).toBe(false);
+    }
+
+    const errCfg = messageCardConfig(
+      item("system_marker", { source: null, payload: "error:boom" }),
+    );
+    expect(errCfg!.title).toBe("Error");
+    expect(errCfg!.titleKey).toBe("markers.error");
+    expect(errCfg!.fixedDefault).toBe(false);
+    expect(errCfg!.ownQuoteBody).toBe(true);
+
+    const unrecognizedCfg = messageCardConfig(
+      item("system_marker", { source: "future_tag", payload: "raw payload" }),
+    );
+    expect(unrecognizedCfg!.title).toBe("Unrecognized system_marker");
+    expect(unrecognizedCfg!.titleKey).toBe("markers.unrecognized");
+    expect(unrecognizedCfg!.fixedDefault).toBe(false);
+    expect(unrecognizedCfg!.ownQuoteBody).toBe(true);
   });
 });
 

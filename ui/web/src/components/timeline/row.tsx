@@ -47,9 +47,9 @@ export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
 // meiva:note
 // Memoized timeline row renderer: primary human messages render as right-aligned
 // bubbles, user-facing agent_chat renders as unboxed canvas Markdown prose (both
-// sharing right-aligned CARD_FOOTER_CLS below the block), secondary items render
-// as collapsible MessageCard rows inside TurnBlocks, and config === null renders
-// bare ephemeral markers.
+// sharing right-aligned CARD_FOOTER_CLS below the block), and every rendered
+// secondary item (including all non-silent system_marker kinds) renders as a
+// collapsible MessageCard row inside TurnBlocks.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 export const TimelineRow = memo(function TimelineRow({
   item,
@@ -244,7 +244,7 @@ export const TimelineRow = memo(function TimelineRow({
             onToggle={handleToggle}
           />
           {showExpandedBody ? (
-            <div data-quote-body={!item.partial && !streaming ? "" : undefined} className="relative px-1 pt-0.5 pb-1.5">
+            <div data-quote-body={!config.ownQuoteBody && !item.partial && !streaming ? "" : undefined} className="relative px-1 pt-0.5 pb-1.5">
               <ItemView item={item} streaming={streaming} />
               {secondaryCopy ? (
                 <div

@@ -14,10 +14,11 @@
 // carries no per-kind border / background; it just emits the inner content
 // (markdown / code / envelope / marker payload).
 //
-// system_marker is the one split kind: the lifecycle / memory / note families
-// render their payload body here (their icon + title + color come from the card),
-// while the ephemeral families (compact_done / cancelled / error / unrecognized)
-// have no card and render bare through EphemeralSystemMarker.
+// system_marker renders inside a collapsible MessageCard for every non-silent
+// family: lifecycle / memory / task / note render Markdown bodies,
+// background_task / system_notice strip a leading status: prefix into
+// MarkerBody, error renders ErrorMarkerBody, and unrecognized renders
+// UnknownMarkerChip.
 
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -40,8 +41,8 @@ import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
 import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
 import { TimelineItemImageBatch } from "./model/image-loading";
-import { EphemeralSystemMarker, MarkerBody } from "./markers";
-import { classifyMarker } from "./model/marker-classify";
+import { ErrorMarkerBody, MarkerBody, UnknownMarkerChip } from "./markers";
+import { classifyMarker, isSilentMarker, stripStatusPrefix } from "./model/marker-classify";
 import { inboundKind } from "./model/runs";
 import { isLiveReasoning } from "./model/reasoning-clock";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -616,11 +617,16 @@ export const ItemView = memo(function ItemView({
       );
 
     case "system_marker": {
-      // Card marker families render their payload body here; the ephemeral
-      // families have no card and render their own bare output.
-      const cls = classifyMarker(item.source);
-      if (cls.kind === "ephemeral") {
-        return <EphemeralSystemMarker source={item.source} payload={item.payload} />;
+      if (isSilentMarker(item.source, item.payload)) return null;
+      const cls = classifyMarker(item.source, item.payload);
+      if (cls.kind === "error") {
+        return <ErrorMarkerBody payload={item.payload} />;
+      }
+      if (cls.kind === "unrecognized") {
+        return <UnknownMarkerChip source={item.source} payload={item.payload} showHeading={false} />;
+      }
+      if (cls.kind === "background_task" || cls.kind === "system_notice") {
+        return <MarkerBody payload={stripStatusPrefix(item.payload)} />;
       }
       return (
         <TimelineItemImageBatch>

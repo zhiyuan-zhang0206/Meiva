@@ -83,9 +83,9 @@ describe("TimelineView bounded work blocks during scroll", () => {
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
   });
 
-  it("keeps the expanded trailing header sticky across rapid scroll gestures", () => {
+  it("keeps the expanded trailing header non-sticky across rapid scroll gestures", () => {
     const { container, viewport, toggle } = setupExpandedBlock();
-    expect(toggle.className).toContain("sticky");
+    expect(toggle.className).not.toContain("sticky");
     // meiva:note
     // The body has no inner scrollport and no cap: it is as tall as its content
     // and the timeline around it is what scrolls (user ruling 2026-11-09).
@@ -97,7 +97,7 @@ describe("TimelineView bounded work blocks during scroll", () => {
     viewport.scrollTop = 1000;
     act(() => { fireEvent.scroll(viewport); });
 
-    expect(toggle.className).toContain("sticky");
+    expect(toggle.className).not.toContain("sticky");
     expect(container.querySelector("[data-fast-scrolling]")).toBeNull();
   });
 });
