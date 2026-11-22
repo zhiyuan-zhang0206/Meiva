@@ -219,7 +219,7 @@ of mass-editing targets.
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
-4. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
+5. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
    registries (task #3697 S3) and `meiva lgtm render` previews the result —
    the panel lands under the row named after the plugin (every
    metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).

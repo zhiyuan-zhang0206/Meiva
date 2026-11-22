@@ -21,9 +21,9 @@ def _good_sqls() -> list[str]:
     return [
         "SELECT count(*) AS calls FROM agents_meta WHERE event_name='llm_usage' "
         "AND category IN ('telemetry','log')",
-        "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'sampled' = 'true') "
-        '/ NULLIF(count(*), 0) AS "sampled %" FROM agents_meta '
-        "WHERE event_name = 'sample' AND category = 'audit' AND attributes ? 'sampled'",
+        "SELECT 100.0 * count(*) FILTER (WHERE attributes->>'ok' = 'true') "
+        '/ NULLIF(count(*), 0) AS "successful %" FROM agents_meta '
+        "WHERE event_name = 'exec' AND category = 'telemetry' AND attributes ? 'ok'",
         'SELECT agent_id, max(ratio) AS "max agent" FROM ('
         "SELECT agent_id, SUM((attributes->>'cache_read')::bigint)::numeric "
         "/ NULLIF(SUM((attributes->>'in_total')::bigint), 0) AS ratio "

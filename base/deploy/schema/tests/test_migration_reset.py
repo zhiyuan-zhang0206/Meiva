@@ -301,6 +301,16 @@ def test_current_reset_refuses_missing_history_without_mutation(
         assert applied_migration_names(conn) == before
 
 
+def _restore_task_budget_table(conn: psycopg.Connection) -> None:
+    """Restore the table and columns the frozen reset anchor alters."""
+    conn.execute(
+        "CREATE TABLE agent_tasks (id bigint PRIMARY KEY, "
+        "token_budget bigint, usd_budget double precision, "
+        "token_used bigint, usd_used double precision, "
+        "token_budget_notified_at timestamptz, usd_budget_notified_at timestamptz)"
+    )
+
+
 def test_current_reset_converges_when_the_missing_names_still_have_files(
     db_url: str,
     machine_identity: MachineIdentityReader,
@@ -327,6 +337,7 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
     with throwaway_database("reset_partial_files") as url:
         with psycopg.connect(url, autocommit=True) as c:
             c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            _restore_task_budget_table(c)
             # meiva:note
             # This historical applied set predates delivery tables; remove their folded
             # schema effects before replaying the real migration tree from that state.
@@ -376,6 +387,7 @@ def _live_reset_shape(url: str) -> set[str]:
     before = {BASELINE_NAME, *(set(PRE_RESET_SET) - file_backed)}
     with psycopg.connect(url, autocommit=True) as c:
         c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+        _restore_task_budget_table(c)
         restore_pre_split_names(c)
         c.execute(
             "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
@@ -403,9 +415,6 @@ def test_current_reset_converges_the_shape_the_deleted_files_left_behind(
     db_url: str,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    # meiva:note
-    # `_live_reset_shape` builds the live shape; the same apply the next start would run must
-    # converge instead of raising.
     from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
     from base.deploy.schema.migrations import applied_migration_names
     from base.deploy.schema.tests.migration_support import throwaway_database
@@ -424,8 +433,9 @@ def test_current_reset_converges_the_shape_the_deleted_files_left_behind(
             assert RESET_ANCHOR in applied
             assert conn.execute(
                 "SELECT to_regclass('public.upload_staged_files'),"
-                "       to_regclass('public.agent_harness_messages')"
-            ).fetchone() == ("upload_staged_files", None)
+                "       to_regclass('public.agent_harness_messages'),"
+                "       to_regclass('public.agent_tasks')"
+            ).fetchone() == ("upload_staged_files", None, None)
             after = applied_migration_names(conn)
             assert (set(PRE_RESET_SET) - file_backed) & after == set()
 
@@ -467,7 +477,7 @@ def test_reapplying_the_converged_tree_after_the_reset_is_a_no_op(
 
 
 def test_current_reset_converges_complete_history(
-    db_conn: psycopg.Connection,
+    db_url: str,
     machine_identity: MachineIdentityReader,
 ) -> None:
     from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
@@ -477,32 +487,39 @@ def test_current_reset_converges_complete_history(
         required_migration_set,
     )
     from base.deploy.schema.tests.migration_support import (
+        SCHEMA_SQL,
         schema_sql_stamped_migration_names,
         set_table_to,
+        throwaway_database,
     )
 
+    _ = db_url
     predecessor = set(PRE_RESET_SET) | (set(schema_sql_stamped_migration_names()) - {RESET_ANCHOR})
-    set_table_to(db_conn, "set", predecessor)
-    with psycopg.connect(db_url()) as conn:
-        applied = apply_pending_migrations(
-            conn,
-            machine_name=machine_identity.name,
-            migrations_dir=MIGRATIONS_DIR,
-            home=resolve_meiva_home(),
-        )
-        assert RESET_ANCHOR in applied
-        check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
-        expected = required_migration_set(migrations_dir=MIGRATIONS_DIR)
-        assert applied_migration_names(conn) == expected
-        assert (
-            apply_pending_migrations(
+    with throwaway_database("reset_complete_history") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            _restore_task_budget_table(conn)
+            set_table_to(conn, "set", predecessor)
+        with psycopg.connect(url) as conn:
+            applied = apply_pending_migrations(
                 conn,
                 machine_name=machine_identity.name,
                 migrations_dir=MIGRATIONS_DIR,
                 home=resolve_meiva_home(),
             )
-            == []
-        )
+            assert RESET_ANCHOR in applied
+            check_schema_version(conn, migrations_dir=MIGRATIONS_DIR)
+            expected = required_migration_set(migrations_dir=MIGRATIONS_DIR)
+            assert applied_migration_names(conn) == expected
+            assert (
+                apply_pending_migrations(
+                    conn,
+                    machine_name=machine_identity.name,
+                    migrations_dir=MIGRATIONS_DIR,
+                    home=resolve_meiva_home(),
+                )
+                == []
+            )
 
 
 @pytest.mark.parametrize("apply", [False, True])

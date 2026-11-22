@@ -151,7 +151,7 @@ def _is_main_guard(node: ast.stmt) -> bool:
 
 def _is_enter_call(node: ast.stmt) -> bool:
     return (
-        isinstance(node, ast.Expr)
+        isinstance(node, (ast.Expr, ast.Assign))
         and isinstance(node.value, ast.Call)
         and isinstance(node.value.func, ast.Name)
         and node.value.func.id == "enter_scratch_home"
