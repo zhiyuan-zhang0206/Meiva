@@ -115,7 +115,6 @@ def _build_halted_error(
     *,
     requeued: tuple[int, ...],
     after_output: bool = False,
-    breaker_halted: bool = True,
 ) -> HarnessTurnHaltedError:
     harness = ctx.harness.value
     if isinstance(exc, HarnessTurnStalledError):
@@ -123,21 +122,13 @@ def _build_halted_error(
             sanitize_error_text(f"{harness} harness turn stalled: {exc}")
             or f"{harness} harness turn stalled"
         )
-        if after_output and not breaker_halted:
-            msg = (
-                "harness turn stalled after delivering a reply; session retired and the agent "
-                "idles without requeuing answered inputs"
-            )
-        elif after_output:
-            msg = (
-                "harness turn stalled after partial output without a reply; session retired "
-                "and the agent halted without requeuing delivered inputs"
-            )
-        else:
-            msg = (
-                "harness turn stalled; session retired, inputs requeued and the agent halted "
-                "until a new message"
-            )
+        msg = (
+            "harness turn stalled after partial output without a reply; session retired and "
+            "the agent halted without requeuing delivered inputs"
+            if after_output
+            else "harness turn stalled; session retired, inputs requeued and the agent halted "
+            "until a new message"
+        )
         logger.warning(
             msg,
             event="harness_turn_stalled",
@@ -148,7 +139,6 @@ def _build_halted_error(
             stall_seconds=exc.stall_seconds,
             requeued_inbound_ids=list(requeued),
             requeued_count=len(requeued),
-            breaker_halted=breaker_halted,
             reason=detail,
         )
     else:
@@ -171,7 +161,6 @@ def _build_halted_error(
             model=bridge.model,
             requeued_inbound_ids=list(requeued),
             requeued_count=len(requeued),
-            breaker_halted=breaker_halted,
             reason=detail,
         )
     return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
@@ -220,16 +209,10 @@ async def _handle_harness_abort(
     if halt_reason is not None:
         # meiva:note
         # Requeuing delivered inputs and tripping the recovery breaker are separate decisions:
-        # quota exhaustion always trips the breaker so background wakes cannot hammer an
-        # exhausted account, and a stall after partial tool/delta output without any completed
-        # assistant reply trips it too. A stall after a completed AssistantText reply settles
-        # cleanly without tripping the breaker or marking a crash corpse, because an open
-        # background command or timer should not strand a responsive agent.
-        should_halt_breaker = (
-            halt_reason == HALT_REASON_QUOTA_EXHAUSTED or not projector.has_delivered_reply
-        )
-        if should_halt_breaker:
-            await run.record_halt(reason=halt_reason)
+        # after partial output (tools or text deltas) without a completed reply, already-delivered
+        # inputs cannot safely be re-executed, while the recovery breaker still halts automatic
+        # wakes for both quota exhaustion and genuine pre-reply stalls.
+        await run.record_halt(reason=halt_reason)
         return _build_halted_error(
             ctx,
             agent_id,
@@ -238,7 +221,6 @@ async def _handle_harness_abort(
             halt_reason,
             requeued=(),
             after_output=True,
-            breaker_halted=should_halt_breaker,
         )
     return None
 
@@ -281,6 +263,30 @@ async def _run_harness_turn(
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
+        if (
+            isinstance(exc, HarnessClosedError)
+            and run.settled_for_background_exit
+            and not _is_quota_exhaustion(exc)
+        ):
+            await bridge.retire(reason="session unavailable")
+            await projector.finish()
+            logger.info(
+                "harness session closed after delivering replies while waiting on background "
+                "work; session retired and agent idles cleanly ({detail})",
+                agent_id=agent_id,
+                harness=ctx.harness.value,
+                detail=sanitize_error_text(str(exc)) or type(exc).__name__,
+            )
+            _apply_wake_polarity(state, projector, extra_updates)
+            return Command[HarnessGoto](
+                update={
+                    **extra_updates,
+                    "halted": True,
+                    "harness_inputs": run.pending_inputs(),
+                    "harness_view": [],
+                },
+                goto=CLAIM,
+            )
         halted = await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
         if halted is not None:
             raise halted from exc

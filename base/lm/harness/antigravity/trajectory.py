@@ -35,6 +35,7 @@ _LIVE_STEP_STATUSES = frozenset(
         "CORTEX_STEP_STATUS_GENERATING",
     }
 )
+_PLANNER_STEP_KIND = "CORTEX_STEP_TYPE_PLANNER_RESPONSE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,24 @@ class Trajectory:
 
     def has_live_steps(self) -> bool:
         return any(step.status in _LIVE_STEP_STATUSES for step in self.steps)
+
+    def has_live_planner_steps(self) -> bool:
+        return any(
+            step.kind == _PLANNER_STEP_KIND and step.status in _LIVE_STEP_STATUSES
+            for step in self.steps
+        )
+
+    def has_live_background_steps(self) -> bool:
+        return any(
+            step.kind != _PLANNER_STEP_KIND and step.status in _LIVE_STEP_STATUSES
+            for step in self.steps
+        )
+
+    def is_idle_without_planner(self) -> bool:
+        return self.status is RunStatus.IDLE and not self.has_live_planner_steps()
+
+    def is_reactive_background_idle(self) -> bool:
+        return self.is_idle_without_planner() and self.has_live_background_steps()
 
 
 def parse_trajectory(payload: Mapping[str, object]) -> Trajectory:

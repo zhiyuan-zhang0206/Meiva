@@ -410,10 +410,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._schedules = self._schedules.on_wakeup(turn, monotonic_now=self._monotonic())
 
     def _needs_poll(self) -> bool:
-        unsettled = self._ledger.keys_in(InputPhase.SENT) + self._ledger.keys_in(
-            InputPhase.RECEIVED
-        )
-        return bool(unsettled) or self._phantom is not None
+        keys = self._ledger.keys_in(InputPhase.SENT) + self._ledger.keys_in(InputPhase.RECEIVED)
+        return bool(keys) or self._phantom is not None
 
     def _observe(self, snap: Trajectory) -> None:
         action = phantom_action(
@@ -589,10 +587,31 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         now = self._clock.now().timestamp()
         return BackgroundWork((*self._schedules.pending_at(now), *self._observed_turn_items()))
 
-    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
-        if self._closed:
+    def _live_transport(self) -> AgyTransport | None:
+        t = self._transport
+        if self._closed or not self._session_id or t is None or t is self._retired or not t.alive:
             return None
-        return self._schedules.silence_floor_monotonic(turn_ids)
+        return t
+
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
+        return None if self._closed else self._schedules.silence_floor_monotonic(turn_ids)
+
+    async def waiting_on_background(self, turn_ids: Collection[str]) -> bool:
+        t, ticket = self._live_transport(), self._active
+        if t is None or ticket is None or set(turn_ids) != {ticket.turn_id} or self._needs_poll():
+            return False
+        try:
+            snap = await t.trajectory(conversation_id=self._session_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "agent {agent_id}: background wait trajectory check failed", agent_id=self.agent_id
+            )
+            return False
+        if snap.is_reactive_background_idle():
+            return True
+        return snap.is_idle_without_planner() and self._schedules.has_active_wait(
+            ticket.turn_id, now=self._clock.now().timestamp(), monotonic_now=self._monotonic()
+        )
 
     # meiva:note
     # Single-flight, trailing-throttled background `GetCascadeTrajectory` collector for native
@@ -602,12 +621,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # piling up concurrent RPCs.
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
     def request_timing_refresh(self) -> None:
-        if self._closed or not self._session_id:
-            return
-        transport = self._transport
-        if transport is None or transport is self._retired or not transport.alive:
-            return
-        if not transport.has_timing_record(conversation_id=self._session_id):
+        transport = self._live_transport()
+        if transport is None or not transport.has_timing_record(conversation_id=self._session_id):
             return
         self._timing_refresh_pending = True
         task = self._timing_refresh_task
@@ -624,10 +639,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             _ = task.cancel()
 
     def _timing_refresh_wait_seconds(self) -> float:
-        if self._timing_refresh_last is None:
-            return 0.0
-        return max(
-            0.0, self._timing_refresh_interval - (self._monotonic() - self._timing_refresh_last)
+        last = self._timing_refresh_last
+        return (
+            0.0
+            if last is None
+            else max(0.0, self._timing_refresh_interval - (self._monotonic() - last))
         )
 
     def _timing_refresh_active(self, transport: AgyTransport, generation: int) -> bool:
@@ -777,10 +793,4 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._complete(ticket)
 
 
-__all__ = [
-    "EVENT_STREAM_END",
-    "ActiveTurn",
-    "AgySession",
-    "CancelReport",
-    "SessionClosedError",
-]
+__all__ = ["EVENT_STREAM_END", "ActiveTurn", "AgySession", "CancelReport", "SessionClosedError"]

@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import cast
 
@@ -15,6 +16,7 @@ import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_foreground import Foreground, Handed
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
@@ -29,7 +31,7 @@ from agent.graph.claim.tests.harness_support import (
 )
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
-from agent.graph.llm_errors import FatalLLMStreamError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -38,11 +40,21 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     HarnessInput,
     HarnessNotDeliveredError,
+    InputInContext,
+    ReasoningDelta,
+    ReasoningText,
     Reconciliation,
+    SessionFailed,
     TextBlock,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+    TurnOrigin,
+    TurnStarted,
 )
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -679,3 +691,99 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
     ]
     assert again.blocks[1:] == first.blocks, "the same message blocks, delivered again as one input"
     assert isinstance(again.blocks[0], TextBlock) and "restarted" in again.blocks[0].text
+
+
+def test_foreground_awaiting_reply_transitions() -> None:
+    fg = Foreground(generation=1)
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (False, False)
+    fg = fg.hand((Handed("inbound-1", 1),))
+    fg, _ = fg.on_event(TurnStarted("t1", TurnOrigin.INPUT, ("inbound-1",), 1))
+    fg, _ = fg.on_event(InputInContext("inbound-1", "t1", 1))
+    assert (fg.handed, fg.awaiting_reply, fg.can_wait_on_background) == ((), True, False)
+    fg, _ = fg.on_event(AssistantText("t1", "   "))
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
+    fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nchecking now"))
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (False, True)
+    for activity in (
+        ToolUse("t1", "c1", "read_file", {"Path": "/x"}),
+        ToolResult("t1", "c1", False, "ok"),
+        TextDelta("t1", "next"),
+        ReasoningDelta("t1", "think"),
+        ReasoningText("t1", "thought"),
+    ):
+        rearmed, _ = fg.on_event(activity)
+        assert (rearmed.awaiting_reply, rearmed.can_wait_on_background, rearmed.replied_turns) == (
+            True,
+            False,
+            frozenset(),
+        )
+    sub_tool, _ = fg.on_event(ToolUse("t1", "sub1", "read_file", {}, parent_tool_use_id="p1"))
+    assert (sub_tool.awaiting_reply, sub_tool.can_wait_on_background) == (False, True)
+    step, _ = fg.on_event(ToolUse("t1", "c2", "run_command", {}))
+    step, _ = step.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nstep done"))
+    assert (step.awaiting_reply, step.can_wait_on_background) == (False, True)
+    fg = fg.hand((Handed("inbound-2", 2),))
+    fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nlate old reply"))
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
+    fg, _ = fg.on_event(InputInContext("inbound-2", "t1", 1))
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
+
+
+async def test_concurrent_steer_during_assistant_text_persist_resets_delivery_wave(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat1 = insert_row(db_conn, agent_id, "chat", "user", "first")
+    armed, entered, release = [False], asyncio.Event(), asyncio.Event()
+
+    class _SlowPool:
+        timeout = aops_pool.timeout
+
+        @asynccontextmanager
+        async def connection(self, timeout: float | None = None) -> AsyncGenerator[object]:
+            if armed[0]:
+                armed[0] = False
+                entered.set()
+                _ = await release.wait()
+            async with aops_pool.connection(timeout=timeout) as conn:
+                yield conn
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        keys = tuple(i.key for i in inputs)
+        if len(engine.delivered) == 1:
+            return [
+                TurnStarted("t1", TurnOrigin.INPUT, keys, 1),
+                *(InputInContext(k, "t1", 1) for k in keys),
+            ]
+        return [InputInContext(k, "t1", 1) for k in keys]
+
+    engine = FakeEngine(script=script)
+    rt = runtime(
+        engine,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+        ops_pool=cast(AsyncConnectionPool, _SlowPool()),
+        hosted_resources=hosted_resources,
+    )
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat1) == "done", "first chat committed")
+        armed[0] = True
+        engine.emit(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nreply 1"))
+        _ = await entered.wait()
+        chat2 = insert_row(db_conn, agent_id, "chat", "user", "second")
+        engine.notify_inbound()
+        await engine.wait_deliveries(2)
+        release.set()
+        await wait_until(lambda: row_status(db_conn, chat2) == "done", "steered chat committed")
+        engine.emit(SessionFailed("You've hit your usage limit"))
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            _ = await task
+    assert halted.value.requeued_inbound_ids == (chat2,)
+    assert [row_status(db_conn, i) for i in (chat1, chat2)] == ["done", "pending"]

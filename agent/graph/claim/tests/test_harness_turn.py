@@ -19,21 +19,28 @@ from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.tests.claim_support import scalar, scalar_int, timeline_items
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    ProbeTimers,
     RuntimeFixture,
     config,
+    insert_row,
     read_recorded_items,
+    row_status,
     runtime,
+    turn_events,
+    wait_until,
+    with_virtual_clock,
 )
 from agent.graph.claim.tests.harness_support import (
     harness_runtime as harness_runtime,
 )
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
-from agent.graph.llm_errors import FatalLLMStreamError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
+from base.agents.recovery.breaker import HALT_REASON_TURN_STALLED
 from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
@@ -52,6 +59,7 @@ from base.lm.harness import (
     InputInContext,
     ReasoningDelta,
     ReasoningText,
+    SessionFailed,
     TextDelta,
     ToolResult,
     ToolUse,
@@ -729,3 +737,58 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
     async with aops_pool.connection() as conn:
         shown = [str(item.payload) for item in await read_recorded_items(conn, agent)]
     assert not any(_HOOK_NOTE in payload for payload in shown), "never shown as the person's"
+
+
+async def test_multi_step_turn_stalls_at_900s_after_intermediate_text_and_tool_use(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "investigate logs")
+    timers = ProbeTimers(start=100.0)
+    engine = FakeEngine(
+        script=lambda inputs: turn_events(
+            inputs,
+            AssistantText("t1", "MEIVA_HIDE_FROM_USER\nChecking logs first."),
+            ToolUse("t1", "t1#1", "run_command", {"CommandLine": "tail -n 20 app.log"}),
+            ToolResult("t1", "t1#1", False, "ok"),
+        )
+    )
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat_id) == "done", "input in context")
+        await timers.advance_and_probe(engine, 899.0)
+        assert not task.done()
+        timers.advance(1.0)
+        engine.notify_inbound()
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            await task
+    assert halted.value.reason == HALT_REASON_TURN_STALLED and "turn stalled" in engine.retired
+
+
+@pytest.mark.parametrize("with_tool", [False, True], ids=["commentary_only", "commentary_and_tool"])
+async def test_multi_step_turn_eof_after_intermediate_text_raises_fatal_abort(
+    with_tool: bool, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "run multi-step task")
+    timers = ProbeTimers(start=100.0)
+    tail = (
+        (
+            AssistantText("t1", "MEIVA_HIDE_FROM_USER\nStarting tool."),
+            ToolUse("t1", "t1#1", "run_command", {"CommandLine": "make build"}),
+        )
+        if with_tool
+        else (AssistantText("t1", "MEIVA_HIDE_FROM_USER\nStarting work."),)
+    )
+    engine = FakeEngine(script=lambda inputs: turn_events(inputs, *tail))
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat_id) == "done", "input in context")
+        await timers.advance_and_probe(engine, 10.0)
+        engine.emit(SessionFailed("cli process OOM killed"))
+        with pytest.raises(FatalLLMStreamError, match="cli process OOM killed"):
+            await task
