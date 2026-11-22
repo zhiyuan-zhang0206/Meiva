@@ -5,6 +5,7 @@ import base64
 import functools
 import json
 import socket
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from base.paths import computer_mcp_socket, logs_path
 from services.agent_runner.agent_ops import in_flight
 
 _SOCKET_TIMEOUT_S = 55.0
-_MAX_IMAGE_BYTES = 24 * 1024 * 1024
+MAX_IMAGE_BYTES = 24 * 1024 * 1024
 
 
 def _roundtrip_computer_socket(sock_path: Path, req: dict[str, object]) -> dict[str, object]:
@@ -33,7 +34,12 @@ def _roundtrip_computer_socket(sock_path: Path, req: dict[str, object]) -> dict[
     return parsed
 
 
-def _attach_snapshot_bytes(result: dict[str, object], *, home: Path) -> None:
+def attach_snapshot_bytes(
+    result: dict[str, object],
+    *,
+    home: Path,
+    read_file: Callable[[Path], bytes] = Path.read_bytes,
+) -> None:
     raw_path = result.get("path")
     if not isinstance(raw_path, str) or not raw_path:
         return
@@ -42,10 +48,12 @@ def _attach_snapshot_bytes(result: dict[str, object], *, home: Path) -> None:
         snapshots_root = (logs_path(home) / "computer" / "snapshots").resolve()
         if not candidate.is_relative_to(snapshots_root) or not candidate.is_file():
             return
-        data = candidate.read_bytes()
+        if candidate.stat().st_size > MAX_IMAGE_BYTES:
+            return
+        data = read_file(candidate)
     except OSError:
         return
-    if len(data) > _MAX_IMAGE_BYTES:
+    if len(data) > MAX_IMAGE_BYTES:
         return
     result["_remote_image_b64"] = base64.b64encode(data).decode("ascii")
     result["_remote_image_ext"] = candidate.suffix or ".png"
@@ -148,7 +156,7 @@ def _handle_call_tool_rpc(
             200, {"ok": False, "error": str(resp.get("error") or "computer-mcp error")}
         )
     semantic = _unwrap_mcp_result(resp.get("result"))
-    _attach_snapshot_bytes(semantic, home=home)
+    attach_snapshot_bytes(semantic, home=home)
     return _json_reply(200, {"ok": True, "result": semantic})
 
 

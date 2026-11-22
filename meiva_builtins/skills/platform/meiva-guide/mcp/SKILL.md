@@ -84,8 +84,11 @@ configured in `$MEIVA_HOME/remote_hosts.toml` (`ssh://<alias>`).
    `"zzyasus"`) to any `computer_use` tool call — for example
    `meiva.mcps.computer_use.snapshot(host="ssh://zzyasus")`. Bare IP addresses and unregistered
    URLs are rejected.
-3. Call `meiva.mcps.computer_use.release_control(host="<target>")` when your multi-step flow ends
-   (or `meiva computer release --host <target>` as an operator kick).
+3. Desktop leases default to `600s` (10 min, synchronized locally and on SSH targets) and remind
+   you when `<= 180s` remain. Call `meiva.mcps.computer_use.acquire_control(host="<target>", ttl_seconds=1200)`
+   to reserve or renew a longer window (30..3600s), and call
+   `meiva.mcps.computer_use.release_control(host="<target>")` when done (or
+   `meiva computer release --host <target>` as an operator kick).
 
 ## When to Fix Behavior in a Wrapper Instead
 

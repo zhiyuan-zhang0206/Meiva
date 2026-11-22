@@ -696,20 +696,24 @@ def _encode_image(img: Image.Image, *, fmt: str, quality: int) -> tuple[bytes, s
     return buf.getvalue(), "image/webp", "webp"
 
 
-def _save_shot_if_requested(
+def save_shot_if_requested(
     save_path: str, img_bytes: bytes, *, shots_dir: Path, ext: str, now: Callable[[], datetime]
 ) -> str | None:
     cleaned = save_path.strip()
     if not cleaned:
         return None
+    shots_root = shots_dir.resolve()
     if cleaned.lower() == "auto":
-        shots_dir.mkdir(parents=True, exist_ok=True)
+        shots_root.mkdir(parents=True, exist_ok=True)
         ts = now().astimezone(UTC).strftime("%Y%m%dT%H%M%S_%f")
-        dst = shots_dir / f"shot_{ts}.{ext}"
+        dst = shots_root / f"shot_{ts}.{ext}"
         _ = dst.write_bytes(img_bytes)
-        _prune_old_shots(shots_dir)
+        _prune_old_shots(shots_root)
         return str(dst)
-    dst = Path(cleaned)
+    raw = Path(cleaned)
+    dst = raw.resolve() if raw.is_absolute() else (shots_root / raw).resolve()
+    if not dst.is_relative_to(shots_root):
+        raise ValueError("save_path must be 'auto' or resolve inside the helper shots directory")
     dst.parent.mkdir(parents=True, exist_ok=True)
     _ = dst.write_bytes(img_bytes)
     return str(dst)
@@ -768,7 +772,7 @@ def capture_screenshot(
         )
     out_w, out_h = img.size
     img_bytes, mime, ext = _encode_image(img, fmt=fmt, quality=quality)
-    saved = _save_shot_if_requested(save_path, img_bytes, shots_dir=shots_dir, ext=ext, now=now)
+    saved = save_shot_if_requested(save_path, img_bytes, shots_dir=shots_dir, ext=ext, now=now)
     meta: dict[str, object] = {
         "ok": True,
         "capture_rect": [region["left"], region["top"], region["width"], region["height"]],

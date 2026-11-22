@@ -10,7 +10,7 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "mcp_daemon.py" = ["config.py", "execute.py", "protocol.py", "screen.py", "session.py", "task_sessions.py"]
 "ocr_text.py" = ["errors.py", "ocr", "screen.py"]
 "screen.py" = ["errors.py", "targets.py"]
-"session.py" = ["audit_coords.py", "ax_ids.py", "config.py", "execute.py", "ocr", "screen.py"]
+"session.py" = ["audit_coords.py", "ax_ids.py", "config.py", "errors.py", "execute.py", "ocr", "screen.py", "task_sessions.py"]
 "targets.py" = ["errors.py"]
 "tests" = ["ax_act.py", "ax_gap.py", "ax_ids.py", "ax_tools.py", "config.py", "errors.py", "execute.py", "mcp_daemon.py", "mcp_wrapper.py", "ocr", "ocr_text.py", "protocol.py", "screen.py", "session.py", "targets.py", "task_sessions.py"]
 

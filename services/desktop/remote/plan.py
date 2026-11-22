@@ -11,6 +11,8 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 
 CORNER_FAILSAFE_CODE = "SESSION_ABORTED_BY_CORNER_FAILSAFE"
+_MAX_IMAGE_BYTES = 24 * 1024 * 1024
+_MAX_IMAGE_B64_CHARS = ((_MAX_IMAGE_BYTES + 2) // 3) * 4 + 4
 
 _MACOS_KEYCODE_TO_WIN_NAME: dict[int, str] = {
     0: "a",
@@ -126,6 +128,7 @@ def ssh_tunnel_argv(ssh_host: str, *, local_port: int, remote_port: int) -> list
         "ServerAliveCountMax=3",
         "-L",
         f"127.0.0.1:{local_port}:127.0.0.1:{remote_port}",
+        "--",
         ssh_host,
     ]
 
@@ -194,6 +197,20 @@ def parse_streamable_http_body(body: bytes, content_type: str) -> dict[str, obje
     return parsed
 
 
+def _decode_image_block(block: dict[str, object]) -> tuple[bytes | None, str | None, str | None]:
+    raw_data = str(block["data"])
+    if len(raw_data) > _MAX_IMAGE_B64_CHARS:
+        return None, None, f"remote desktop helper image exceeds {_MAX_IMAGE_BYTES} byte limit"
+    try:
+        image_bytes = base64.b64decode(raw_data, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        return None, None, f"remote desktop helper returned invalid image: {exc}"
+    if len(image_bytes) > _MAX_IMAGE_BYTES:
+        return None, None, f"remote desktop helper image exceeds {_MAX_IMAGE_BYTES} byte limit"
+    mime = block.get("mime_type") or block.get("mimeType") or "image/png"
+    return image_bytes, str(mime), None
+
+
 def _collect_content_blocks(
     content: list[object],
 ) -> tuple[str, bytes | None, str | None, str | None]:
@@ -207,12 +224,9 @@ def _collect_content_blocks(
         if btype == "text" and isinstance(block.get("text"), str):
             text_chunks.append(str(block["text"]))
         elif btype == "image" and isinstance(block.get("data"), str):
-            try:
-                image_bytes = base64.b64decode(str(block["data"]), validate=True)
-            except (ValueError, binascii.Error) as exc:
-                return "", None, None, f"remote desktop helper returned invalid image: {exc}"
-            mime = block.get("mime_type") or block.get("mimeType") or "image/png"
-            image_mime = str(mime)
+            image_bytes, image_mime, img_err = _decode_image_block(block)
+            if img_err is not None:
+                return "", None, None, img_err
     return "\n".join(text_chunks).strip(), image_bytes, image_mime, None
 
 

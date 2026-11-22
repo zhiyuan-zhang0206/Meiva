@@ -258,6 +258,9 @@ def cmd_computer_release(*, home: Path, host: str | None = None) -> int:
         case _:
             result = None
     match result:
+        case {"released": None, "remote_released": True}:
+            print("released the remote screen lease")
+            return 0
         case {"released": None}:
             print("screen was free (no holder)")
             return 0

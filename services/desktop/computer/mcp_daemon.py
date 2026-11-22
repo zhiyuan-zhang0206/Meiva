@@ -74,7 +74,6 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.boundary.fields import optional_int_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.exit_codes import hard_exit
 from base.host.permissions_helper.client import PermissionsHelperError
@@ -112,16 +111,6 @@ from .task_sessions import TaskSessionTracker
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
 LINE_LIMIT = 64 * 1024 * 1024
-
-
-def _hide_badge(helper: DesktopHelper) -> None:
-    """End the capture badge when the screen is handed over. The helper shows it, per input, on
-    the window the input lands on, and ends it on its own; this only makes it prompt. It is
-    display-only, so a failure is logged and never fails the release."""
-    try:
-        helper.indicator_stop()
-    except (PermissionsHelperError, OSError) as e:
-        logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
 
 
 def computer_use_config(daemon_settings: DaemonSettingsLike | None = None) -> ComputerUseConfig:
@@ -311,6 +300,7 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             local_machine=local_machine,
             gateway_access=gateway_access,
             user_home=user_home,
+            lease_s=config.computer_use_lease_s,
             remote_helper_factory=remote_helper_factory,
             cluster_tool_caller=cluster_tool_caller,
         )
@@ -325,7 +315,11 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         return self._targets.state_for(target_uri)
 
     def close(self) -> None:
+        self._targets.cancel_all_reminders()
         self._router.close()
+
+    async def run_reminder_loop(self, stop: asyncio.Event) -> None:
+        await self._targets.run_reminder_loop(stop, db=self._db, now_fn=self._clock.now)
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -375,9 +369,9 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         if method != "call_tool":
             return {"id": req_id, "ok": False, "error": f"unknown method {method!r}"}
         tool = req.get("tool") or ""
-        raw_args: object = req.get("args") or {}
+        raw_obj: object = req.get("args") or dict[str, object]()
         agent_id = req.get("agent_id")
-        if not isinstance(tool, str) or not is_object_dict(raw_args):
+        if not isinstance(tool, str) or not is_object_dict(raw_obj):
             return {
                 "id": req_id,
                 "ok": False,
@@ -385,41 +379,17 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             }
         if agent_id is not None and (not isinstance(agent_id, int) or isinstance(agent_id, bool)):
             return {"id": req_id, "ok": False, "error": "agent_id must be an integer"}
-        return await self._call_tool(tool, raw_args, agent_id, req_id)
-
-    async def _renew_and_note(
-        self, state: session.TargetSessionState, agent_id: int, tool: str, args: dict[str, object]
-    ) -> None:
-        """A live caller renews the lease (success or failure — it is still acting on the
-        screen) and its task session notes the action."""
-        await state.screen.touch(agent_id)
-        if args.get("task_id") is None:
-            return
-        tid = optional_int_field(args, "task_id")
-        if tid is None:
-            logger.warning(
-                "[computer-mcp] task_id {!r} is not a whole number; no task session forms",
-                args["task_id"],
-            )
-            return
-        try:
-            for event_type, session_agent_id, payload in self._task_sessions.note(
-                tid, agent_id, tool, now=self._clock.now().timestamp()
-            ):
-                session.emit_audit_event(self._db, event_type, session_agent_id, payload)
-        except Exception as e:
-            logger.warning(f"[computer-mcp] task-session event failed: {e}")
+        return await self._call_tool(tool, raw_obj, agent_id, req_id)
 
     def _helper_for_target(self, target: ResolvedTarget, agent_id: int | None) -> DesktopHelper:
-        if target.kind == "local":
-            if self._helper is None:
-                raise PermissionsHelperError(
-                    "no local desktop available on this host (headless or permissions helper "
-                    "disabled); pass host='meiva://<machine>' or host='ssh://<alias>' "
-                    "(run `meiva computer list` to view available targets)"
-                )
-            return self._helper
-        return self._router.ssh_helper_for(target.name, agent_id)
+        if target.kind != "local":
+            return self._router.ssh_helper_for(target.name, agent_id)
+        if self._helper is None:
+            raise PermissionsHelperError(
+                "no local desktop available on this host; pass host='meiva://<machine>' "
+                "or host='ssh://<alias>' (run `meiva computer list` to view available targets)"
+            )
+        return self._helper
 
     async def _call_tool(
         self, tool: str, args: dict[str, object], agent_id: int | None, req_id: int
@@ -428,31 +398,67 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         try:
             target = self._router.resolve(raw_host)
         except (TargetResolutionError, RemoteHostConfigError) as exc:
-            err_msg = str(exc)
-            self._emit_action(
-                agent_id, tool, args, "error", err_msg, target_host=str(raw_host or "local")
+            return self._audit_reply(
+                req_id,
+                agent_id,
+                tool,
+                args,
+                "error",
+                str(exc),
+                None,
+                target_host=str(raw_host or "local"),
             )
-            return {"id": req_id, "ok": False, "error": err_msg}
         tool_args = {k: v for k, v in args.items() if k != "host"}
-        state = self._targets.state_for(target.canonical_uri)
-        if tool == "release_control":
-            return await self._release_control(
-                agent_id, tool_args, req_id, target=target, state=state
-            )
         if target.kind == "meiva":
             return await self._call_cluster_tool(
                 target.name, target.canonical_uri, tool, tool_args, agent_id, req_id
             )
+        state = self._targets.state_for(target.canonical_uri)
+        if tool == "acquire_control":
+            return await self._acquire_control(agent_id, tool_args, req_id, target, state)
+        if tool == "release_control":
+            return await self._release_control(agent_id, tool_args, req_id, target, state)
+        gen_before = state.screen.generation
         if agent_id is not None and not await state.screen.acquire(
             agent_id, priority=priority(tool_args)
         ):
-            busy = (
-                f"screen busy on {target.canonical_uri}: held by agent {state.screen.holder or '?'} — "
-                "wait for release_control or the lease to expire, then retry"
-            )
-            return {"id": req_id, "ok": False, "error": busy}
+            err = f"screen busy on {target.canonical_uri}: held by agent {state.screen.holder or '?'} — wait for release_control or the lease to expire, then retry"
+            return {"id": req_id, "ok": False, "error": err}
+        if agent_id is not None and state.screen.generation != gen_before:
+            state.arm_reminder(agent_id)
         async with state.action_lock:
             return await self._execute_locked(target, state, tool, tool_args, agent_id, req_id)
+
+    def _audit_reply(
+        self,
+        req_id: int,
+        agent_id: int | None,
+        tool: str,
+        args: dict[str, object],
+        outcome: str,
+        error: str | None,
+        body: dict[str, object] | None,
+        *,
+        target_host: str,
+        helper: DesktopHelper | None = None,
+        app_name: str | None = None,
+        resp_error: str | None = None,
+    ) -> Response:
+        session.emit_computer_action(
+            self._db,
+            agent_id,
+            tool,
+            args,
+            outcome,
+            error,
+            result=body,
+            helper=helper,
+            app_name=app_name,
+            target_host=target_host,
+        )
+        if body is None:
+            return {"id": req_id, "ok": False, "error": resp_error or error or f"{tool} failed"}
+        return {"id": req_id, "ok": True, "result": mcp_result(body)}
 
     async def _execute_locked(
         self,
@@ -463,43 +469,50 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
         agent_id: int | None,
         req_id: int,
     ) -> Response:
-        try:
-            helper = self._helper_for_target(target, agent_id)
-        except (PermissionsHelperError, TargetResolutionError, RemoteHostConfigError) as e:
-            err = f"{type(e).__name__}: {e}"
-            self._emit_action(
-                agent_id, tool, tool_args, "error", err, target_host=target.canonical_uri
-            )
-            return {"id": req_id, "ok": False, "error": err}
-        result, error, aborted = state.run_tool(
-            helper,
+        stamp = snapshot_stamp(self._clock.now())
+        is_ssh = target.kind == "ssh"
+        run_sync = lambda: state.run_target_tool(  # noqa: E731
+            lambda: self._helper_for_target(target, agent_id),
             tool,
             tool_args,
             agent_id,
-            stamp=snapshot_stamp(self._clock.now()),
+            stamp=stamp,
             home=self._home,
+            helper_errors=(PermissionsHelperError, TargetResolutionError, RemoteHostConfigError),
+            capture_app=is_ssh,
+        )
+        result, error, aborted, app_name, helper = (
+            await asyncio.to_thread(run_sync) if is_ssh else run_sync()
         )
         if aborted:
+            state.cancel_reminder()
             await state.screen.release(None)
             state.mouse_holder = None
-            _hide_badge(helper)
-        elif agent_id is not None:
-            await self._renew_and_note(state, agent_id, tool, tool_args)
-        outcome = "error" if error is not None else "ok"
-        self._emit_action(
+        elif agent_id is not None and helper is not None:
+            session.note_task_session(
+                self._task_sessions,
+                self._db,
+                agent_id,
+                tool,
+                tool_args,
+                now_ts=self._clock.now().timestamp(),
+            )
+        if error is None and result is not None:
+            state.attach_in_band_lease_reminder(
+                result, agent_id, target_uri=target.canonical_uri, now=self._clock.now()
+            )
+        return self._audit_reply(
+            req_id,
             agent_id,
             tool,
             tool_args,
-            outcome,
+            "error" if error is not None else "ok",
             error,
-            result=result,
-            helper=helper,
+            result,
             target_host=target.canonical_uri,
+            helper=None if is_ssh else helper,
+            app_name=app_name,
         )
-        if error is not None:
-            return {"id": req_id, "ok": False, "error": error}
-        assert result is not None  # noqa: S101
-        return {"id": req_id, "ok": True, "result": mcp_result(result)}
 
     async def _call_cluster_tool(
         self,
@@ -522,90 +535,75 @@ class ComputerMcpDaemon(session.LocalTargetMixin):
             )
         except Exception as exc:
             outcome, error = "error", f"{type(exc).__name__}: {exc}"
-        self._emit_action(
+        return self._audit_reply(
+            req_id, agent_id, tool, tool_args, outcome, error, result, target_host=target_uri
+        )
+
+    async def _acquire_control(
+        self,
+        agent_id: int | None,
+        args: dict[str, object],
+        req_id: int,
+        target: ResolvedTarget,
+        state: session.TargetSessionState,
+    ) -> Response:
+        def _remote_acq(ttl: int) -> dict[str, object]:
+            return self._router.acquire_remote_ssh(target.name, agent_id, ttl_seconds=ttl)
+
+        outcome, error, body = await session.acquire_target_control(
+            state,
+            agent_id=agent_id,
+            args=args,
+            target_kind=target.kind,
+            target_uri=target.canonical_uri,
+            local_available=self._helper is not None,
+            acquire_remote=_remote_acq if target.kind == "ssh" else None,
+            default_lease_s=self._targets.default_lease_s,
+            now_fn=self._clock.now,
+        )
+        return self._audit_reply(
+            req_id,
             agent_id,
-            tool,
-            tool_args,
+            "acquire_control",
+            args,
             outcome,
             error,
-            result=result,
-            helper=None,
-            target_host=target_uri,
+            body,
+            target_host=target.canonical_uri,
         )
-        if error is not None:
-            return {"id": req_id, "ok": False, "error": error}
-        assert result is not None  # noqa: S101
-        return {"id": req_id, "ok": True, "result": mcp_result(result)}
 
     async def _release_control(
         self,
         agent_id: int | None,
         args: dict[str, object],
         req_id: int,
-        *,
         target: ResolvedTarget,
         state: session.TargetSessionState,
     ) -> Response:
-        if target.kind == "meiva":
-            return await self._call_cluster_tool(
-                target.name, target.canonical_uri, "release_control", args, agent_id, req_id
-            )
-        async with state.action_lock:
-            force = bool(args.get("force"))
-            helper = self._helper if target.kind == "local" else None
-            released, mouse, outcome, error = await state.release_session(
-                agent_id, force=force, helper=helper, target_uri=target.canonical_uri
-            )
-            self._emit_action(
-                agent_id,
-                "release_control",
-                args,
-                outcome,
-                error,
-                helper=helper,
-                target_host=target.canonical_uri,
-            )
-            if released is not None and target.kind == "local" and helper is not None:
-                _hide_badge(helper)
-            elif target.kind == "ssh" and (released is not None or force):
-                self._router.release_remote_ssh(target.name, force=force)
-            if released is None:
-                note = (
-                    " (the mouse button you held was released)"
-                    if mouse.get("mouse_released")
-                    else ""
-                )
-                return {"id": req_id, "ok": False, "error": "not the screen holder" + note}
-            body: dict[str, object] = {
-                "released": released,
-                "holder": state.screen.holder,
-                "host": target.canonical_uri,
-                **mouse,
-            }
-            return {"id": req_id, "ok": True, "result": mcp_result(body)}
+        def _remote_rel() -> tuple[bool, str | None]:
+            return self._router.release_remote_ssh(target.name, force=bool(args.get("force")))
 
-    def _emit_action(
-        self,
-        agent_id: int | None,
-        tool: str,
-        args: dict[str, object],
-        outcome: str,
-        error: str | None,
-        result: dict[str, object] | None = None,
-        *,
-        helper: DesktopHelper | None = None,
-        target_host: str = "local",
-    ) -> None:
-        session.emit_computer_action(
-            self._db,
+        helper = self._helper if target.kind == "local" else None
+        outcome, error, body, resp_err = await session.release_target_control(
+            state,
+            agent_id=agent_id,
+            args=args,
+            target_kind=target.kind,
+            target_uri=target.canonical_uri,
+            helper=helper,
+            release_remote=_remote_rel if target.kind == "ssh" else None,
+        )
+        return self._audit_reply(
+            req_id,
             agent_id,
-            tool,
+            "release_control",
             args,
             outcome,
             error,
-            result,
+            body,
+            target_host=target.canonical_uri,
             helper=helper,
-            target_host=target_host,
+            resp_error=resp_err,
         )
 
 
@@ -699,12 +697,15 @@ async def run(
             asyncio.get_running_loop(), config.computer_use_loop_stall_s, timers=clock
         )
         stop = asyncio.Event()
+        reminder_task = clients.create_task(daemon.run_reminder_loop(stop))
         for sig in (signal.SIGTERM, signal.SIGINT):
             with suppress(NotImplementedError):
                 asyncio.get_running_loop().add_signal_handler(sig, stop.set)
         try:
             await stop.wait()
         finally:
+            stop.set()
+            _ = reminder_task.cancel()
             watchdog.stop()
             server.close()
             try:

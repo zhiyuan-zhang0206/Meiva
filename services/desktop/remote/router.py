@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from pathlib import Path
 
 from base.clock import Clock
@@ -61,8 +60,10 @@ class RemoteTransportRouter[HelperT]:
         local_machine: str | None = None,
         gateway_access: GatewayAccess | None = None,
         user_home: Path | None = None,
+        lease_s: float = 600.0,
         remote_helper_factory: Callable[[RemoteHostConfig, int | None], HelperT] | None = None,
         cluster_tool_caller: ClusterToolCaller | None = None,
+        tunnel_endpoint_resolver: Callable[[RemoteHostConfig], str] | None = None,
     ) -> None:
         self._db = db
         self._clock = clock
@@ -70,10 +71,12 @@ class RemoteTransportRouter[HelperT]:
         self._local_machine = local_machine
         self._gateway_access = gateway_access
         self._user_home = user_home if user_home is not None else home
+        self._remote_lease_seconds = max(30, min(3600, round(lease_s)))
         self._remote_helper_factory = remote_helper_factory
         self._cluster_tool_caller = cluster_tool_caller or _default_cluster_caller
         self._tunnels = SshTunnelManager(timers=clock)
-        self._ssh_helpers: dict[str, RemoteWinBridgeHelper] = {}
+        self._resolve_tunnel_endpoint = tunnel_endpoint_resolver or self._tunnels.endpoint_for
+        self._ssh_helpers: dict[str, tuple[str, str | None, RemoteWinBridgeHelper]] = {}
 
     def _cluster_machine_names(self) -> list[str]:
         try:
@@ -101,6 +104,14 @@ class RemoteTransportRouter[HelperT]:
             local_machine=self._local_machine,
         )
 
+    def _read_ssh_token(self, cfg: RemoteHostConfig) -> str | None:
+        if cfg.token_file is None:
+            return None
+        try:
+            return read_bearer_token(cfg.token_file, home=self._home, user_home=self._user_home)
+        except RemoteHostConfigError as exc:
+            raise PermissionsHelperError(str(exc)) from exc
+
     def ssh_helper_for(self, alias: str, agent_id: int | None) -> HelperT | RemoteWinBridgeHelper:
         hosts = load_remote_hosts(home=self._home)
         cfg = hosts.get(alias)
@@ -112,28 +123,57 @@ class RemoteTransportRouter[HelperT]:
         holder = f"meiva-agent-{agent_id or 0}"
         if self._remote_helper_factory is not None:
             return self._remote_helper_factory(cfg, agent_id)
+        base_url = self._resolve_tunnel_endpoint(cfg)
+        token = self._read_ssh_token(cfg)
         cached = self._ssh_helpers.get(alias)
-        if cached is not None:
-            cached.set_holder(holder)
-            return cached
-        base_url = self._tunnels.endpoint_for(cfg)
-        token: str | None = None
-        if cfg.token_file is not None:
-            try:
-                token = read_bearer_token(
-                    cfg.token_file, home=self._home, user_home=self._user_home
-                )
-            except RemoteHostConfigError as exc:
-                raise PermissionsHelperError(str(exc)) from exc
-        helper = RemoteWinBridgeHelper(base_url, bearer_token=token, holder=holder)
-        self._ssh_helpers[alias] = helper
+        if cached is not None and cached[0] == base_url and cached[1] == token:
+            cached[2].set_holder(holder)
+            return cached[2]
+        helper = RemoteWinBridgeHelper(
+            base_url,
+            bearer_token=token,
+            holder=holder,
+            lease_seconds=self._remote_lease_seconds,
+            timers=self._clock,
+        )
+        self._ssh_helpers[alias] = (base_url, token, helper)
         return helper
 
-    def release_remote_ssh(self, alias: str, *, force: bool = False) -> None:
-        helper = self._ssh_helpers.get(alias)
-        if helper is not None:
-            with suppress(PermissionsHelperError, OSError):
-                _ = helper.release_remote_lease(force=force)
+    def acquire_remote_ssh(
+        self, alias: str, agent_id: int | None, *, ttl_seconds: int
+    ) -> dict[str, object]:
+        helper = self.ssh_helper_for(alias, agent_id)
+        if isinstance(helper, RemoteWinBridgeHelper):
+            return helper.acquire_remote_lease(ttl_seconds=ttl_seconds)
+        return {"ok": True}
+
+    def release_remote_ssh(self, alias: str, *, force: bool = False) -> tuple[bool, str | None]:
+        helper: object | None = None
+        if force:
+            try:
+                helper = self.ssh_helper_for(alias, None)
+            except (
+                PermissionsHelperError,
+                TargetResolutionError,
+                RemoteHostConfigError,
+                OSError,
+            ) as exc:
+                logger.opt(exception=True).warning(
+                    "[computer-mcp] failed to connect for forced release of ssh://{}", alias
+                )
+                return False, str(exc)
+        else:
+            cached = self._ssh_helpers.get(alias)
+            helper = cached[2] if cached is not None else None
+        if not isinstance(helper, RemoteWinBridgeHelper):
+            return False, None
+        try:
+            return helper.release_remote_lease(force=force), None
+        except (PermissionsHelperError, OSError) as exc:
+            logger.opt(exception=True).warning(
+                "[computer-mcp] failed to release remote lease on ssh://{}", alias
+            )
+            return False, str(exc)
 
     def call_cluster_peer(
         self,

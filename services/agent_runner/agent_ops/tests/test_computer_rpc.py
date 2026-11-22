@@ -11,7 +11,11 @@ from PIL import Image
 
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import computer_mcp_socket
-from services.agent_runner.agent_ops.computer_rpc import computer_rpc_response
+from services.agent_runner.agent_ops.computer_rpc import (
+    MAX_IMAGE_BYTES,
+    attach_snapshot_bytes,
+    computer_rpc_response,
+)
 
 
 def _tiny_png_bytes() -> bytes:
@@ -92,3 +96,23 @@ def test_computer_rpc_status_and_snapshot_transfer(short_tmp: Path) -> None:
     result = parsed["result"]
     assert result["_remote_image_ext"] == ".png"
     assert base64.b64decode(result["_remote_image_b64"]) == png_bytes
+
+
+def test_attach_snapshot_bytes_skips_oversized_file_before_read(short_tmp: Path) -> None:
+    snap_dir = short_tmp / "logs" / "computer" / "snapshots"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    huge = snap_dir / "huge.png"
+    with huge.open("wb") as fh:
+        _ = fh.truncate(MAX_IMAGE_BYTES + 1)
+
+    read_called = False
+
+    def guarded_read(path: Path) -> bytes:
+        nonlocal read_called
+        read_called = True
+        return path.read_bytes()
+
+    payload: dict[str, object] = {"path": str(huge)}
+    attach_snapshot_bytes(payload, home=short_tmp, read_file=guarded_read)
+    assert read_called is False
+    assert "_remote_image_b64" not in payload

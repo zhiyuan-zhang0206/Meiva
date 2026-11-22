@@ -75,6 +75,24 @@ def test_a_free_screen_is_reported_as_such(
     assert capsys.readouterr().out == "screen was free (no holder)\n"
 
 
+def test_remote_release_without_local_holder_reports_success(
+    short_tmp: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = json.dumps({"released": None, "remote_released": True})
+    reply = json.dumps({"ok": True, "result": {"content": [{"text": payload}]}}).encode()
+    with daemon(short_tmp, reply) as requests:
+        assert cmd_computer_release(home=short_tmp, host="ssh://zzyasus") == 0
+    assert requests == [
+        {
+            "id": 1,
+            "method": "call_tool",
+            "tool": "release_control",
+            "args": {"force": True, "host": "ssh://zzyasus"},
+        }
+    ]
+    assert capsys.readouterr().out == "released the remote screen lease\n"
+
+
 def test_a_daemon_that_is_not_listening_is_a_one_line_refusal(
     short_tmp: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -412,9 +412,9 @@ class DaemonSettings(
 
     computer_use_lease_s: float = Field(
         title="Computer screen ownership timeout (seconds)",
-        default=30.0,
+        default=600.0,
         alias="MEIVA_COMPUTER_LEASE_S",
-        description="Computer-use screen-ownership lease: a holder that sends no action for this long loses the screen (Phase 2, task #1101).",
+        description="Default computer-use screen-ownership lease duration in seconds (default 600s; renewable via acquire_control).",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

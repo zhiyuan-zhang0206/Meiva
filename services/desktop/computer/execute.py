@@ -441,6 +441,31 @@ def execute_tool(
 # MCP tool declarations (list_tools shape: name / description / input_schema).
 TOOLS: list[dict[str, object]] = [
     {
+        "name": "acquire_control",
+        "description": (
+            "Explicitly acquire or renew the screen-ownership lease on local or a remote host "
+            "with ttl_seconds (default 600s, range 30..3600s). Calling acquire_control while you "
+            "already hold the screen refreshes both local and remote leases from now with the new "
+            "ttl_seconds. Regular tools still implicitly acquire the default 600s lease when idle; "
+            "use acquire_control to pre-reserve a longer window or renew when <=180s remain."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "host": HOST_PARAM_SCHEMA,
+                "ttl_seconds": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 3600,
+                    "default": 600,
+                    "description": "Lease duration in seconds (30..3600, default 600).",
+                },
+                "task_id": {"type": "integer"},
+                "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
+            },
+        },
+    },
+    {
         "name": "release_control",
         "description": (
             "Release the screen so the next FIFO waiter can act — call it when a "

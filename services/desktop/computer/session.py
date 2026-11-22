@@ -31,30 +31,84 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from base.agents.inbox.insert import emit_prepared_event, insert_inbound_message_in_transaction
+from base.agents.messages.kwargs import NoteTag
 from base.clock import Timers
 from base.db import Database
-from base.host.boundary.fields import optional_float_field
+from base.host.boundary.fields import optional_float_field, optional_int_field
 from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
 from base.log import logger
 from base.telemetry import audit_events
 
 from .audit_coords import audit_coords
 from .ax_ids import AxSession
-from .config import ComputerUseConfig
-from .execute import execute_tool
+from .config import (
+    DEFAULT_LEASE_S as DEFAULT_LEASE_S,
+)
+from .config import (
+    LEASE_REMINDER_LEAD_SECONDS,
+    ComputerUseConfig,
+    clamp_lease_ttl_seconds,
+    finalize_release_result,
+)
+from .errors import ComputerUseError
+from .execute import execute_tool, priority
 from .ocr import OcrCache
 from .screen import DesktopHelper, measured_tool_scale
+from .task_sessions import TaskSessionTracker
 
 # Waiter poll interval: short enough that a released screen is re-taken
 # promptly, long enough that idle waiters cost nothing.
 _POLL_S = 0.05
 
-DEFAULT_LEASE_S = 30.0
 DEFAULT_QUEUE_TIMEOUT_S = 30.0
+
+
+def parse_lease_ttl_seconds(raw: object, *, default_s: float) -> int:
+    parsed = clamp_lease_ttl_seconds(raw, default_s=default_s)
+    if parsed is None:
+        raise ComputerUseError("ttl_seconds must be a positive number of seconds")
+    return parsed
+
+
+def _iso_utc(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def send_lease_reminder_note(
+    db: Database,
+    agent_id: int,
+    *,
+    target_uri: str,
+    remaining_seconds: int,
+    expires_at_iso: str,
+) -> None:
+    content = (
+        f"Desktop lease on {target_uri} expires in {remaining_seconds}s (at {expires_at_iso}). "
+        f"Call acquire_control(host={target_uri!r}, ttl_seconds=...) to renew if you need more "
+        f"time, or release_control(host={target_uri!r}) when finished."
+    )
+    try:
+        with db.write_transaction() as conn, conn.cursor() as cur:
+            _, prepared_event = insert_inbound_message_in_transaction(
+                cur,
+                agent_id,
+                content,
+                "system",
+                kind="system_note",
+                payload={"note_tag": NoteTag.SDK_HINT.value},
+            )
+        emit_prepared_event(prepared_event)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[computer-mcp] failed to deliver lease reminder note to agent {}", agent_id
+        )
 
 
 class ScreenSession:
@@ -70,6 +124,8 @@ class ScreenSession:
         self._lease_s = lease_s
         self._queue_timeout_s = queue_timeout_s
         self._holder: int | None = None
+        self._holder_ttl_s: float = lease_s
+        self._generation: int = 0
         # meiva:note
         # The holder's lease deadline, on the timers this session was built with.
         self._lease_until: float = 0.0
@@ -81,10 +137,30 @@ class ScreenSession:
         """Current holder, for diagnostics (no lock — best effort)."""
         return self._holder
 
-    def _take(self, agent_id: int, now: float) -> None:
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    @property
+    def holder_ttl_s(self) -> float:
+        return self._holder_ttl_s
+
+    @property
+    def lease_until(self) -> float:
+        return self._lease_until
+
+    def remaining_seconds(self, agent_id: int) -> float | None:
+        if self._holder != agent_id:
+            return None
+        return max(0.0, self._lease_until - self._timers.monotonic())
+
+    def _take(self, agent_id: int, now: float, *, ttl_s: float | None = None) -> None:
         """Become the holder (caller holds the state lock)."""
+        effective_ttl = self._lease_s if ttl_s is None else ttl_s
         self._holder = agent_id
-        self._lease_until = now + self._lease_s
+        self._holder_ttl_s = effective_ttl
+        self._lease_until = now + effective_ttl
+        self._generation += 1
 
     def _step(
         self,
@@ -95,6 +171,7 @@ class ScreenSession:
         deadline: float,
         *,
         queued: bool,
+        ttl_s: float | None = None,
     ) -> tuple[bool | None, bool]:
         """One acquire attempt (caller holds the state lock): `(verdict, queued)`.
 
@@ -111,9 +188,11 @@ class ScreenSession:
                 return None, queued
             if self._waiters:
                 self._waiters.popleft()
-            self._take(agent_id, now)
+            self._take(agent_id, now, ttl_s=ttl_s)
             return True, queued
         if self._holder == agent_id:
+            if ttl_s is not None:
+                self._take(agent_id, now, ttl_s=ttl_s)
             # Already the holder — pass through without re-queueing.
             return True, queued
         if not queued:
@@ -124,7 +203,9 @@ class ScreenSession:
             return False, queued
         return None, queued
 
-    async def acquire(self, agent_id: int, priority: str = "normal") -> bool:
+    async def acquire(
+        self, agent_id: int, priority: str = "normal", *, ttl_s: float | None = None
+    ) -> bool:
         """Become the holder (or confirm we are), waiting FIFO up to the queue
         timeout. `priority="high"` jumps the queue (FIFO among highs — a P0
         task is not blocked behind a normal task's whole session). Returns
@@ -138,7 +219,13 @@ class ScreenSession:
             while True:
                 async with self._state_lock:
                     verdict, queued = self._step(
-                        agent_id, fut, priority, self._timers.monotonic(), deadline, queued=queued
+                        agent_id,
+                        fut,
+                        priority,
+                        self._timers.monotonic(),
+                        deadline,
+                        queued=queued,
+                        ttl_s=ttl_s,
                     )
                 if verdict is not None:
                     return verdict
@@ -170,11 +257,14 @@ class ScreenSession:
                 del self._waiters[i]
                 return
 
-    async def touch(self, agent_id: int) -> None:
+    async def touch(self, agent_id: int, *, ttl_s: float | None = None) -> None:
         """Renew the holder's lease (a no-op for non-holders)."""
         async with self._state_lock:
             if self._holder == agent_id:
-                self._lease_until = self._timers.monotonic() + self._lease_s
+                effective_ttl = self._holder_ttl_s if ttl_s is None else ttl_s
+                self._holder_ttl_s = effective_ttl
+                self._lease_until = self._timers.monotonic() + effective_ttl
+                self._generation += 1
 
     async def release(self, agent_id: int | None = None) -> int | None:
         """Release the screen. agent_id None = operator kick (any holder).
@@ -184,6 +274,7 @@ class ScreenSession:
                 released = self._holder
                 self._holder = None
                 self._lease_until = 0.0
+                self._generation += 1
                 return released
             return None
 
@@ -192,6 +283,13 @@ class ScreenSession:
             f"ScreenSession(holder={self._holder}, "
             f"lease_until={self._lease_until:.1f}, waiters={len(self._waiters)})"
         )
+
+
+def hide_badge(helper: DesktopHelper) -> None:
+    try:
+        helper.indicator_stop()
+    except (PermissionsHelperError, OSError) as e:
+        logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
 
 
 def _float_field(record: dict[str, object], key: str) -> float:
@@ -210,6 +308,75 @@ class TargetSessionState:
     pointer: tuple[float, float] | None = None
     scale: float | None = None
     mouse_holder: int | None = None
+    reminder_due_at: float | None = None
+    reminder_agent_id: int | None = None
+    reminder_gen: int = 0
+
+    def cancel_reminder(self) -> None:
+        self.reminder_due_at = None
+        self.reminder_agent_id = None
+        self.reminder_gen = 0
+
+    def lease_snapshot(self, agent_id: int, *, now: datetime) -> dict[str, object]:
+        rem = self.screen.remaining_seconds(agent_id)
+        remaining_s = 0.0 if rem is None else rem
+        return {
+            "ttl_seconds": round(self.screen.holder_ttl_s),
+            "lease_remaining_seconds": max(0, round(remaining_s)),
+            "lease_expires_at": _iso_utc(now + timedelta(seconds=remaining_s)),
+        }
+
+    def attach_in_band_lease_reminder(
+        self,
+        result: dict[str, object],
+        agent_id: int | None,
+        *,
+        target_uri: str,
+        now: datetime,
+    ) -> None:
+        if agent_id is None or self.screen.holder != agent_id:
+            return
+        if self.screen.holder_ttl_s <= LEASE_REMINDER_LEAD_SECONDS:
+            return
+        rem = self.screen.remaining_seconds(agent_id)
+        if rem is None or rem > LEASE_REMINDER_LEAD_SECONDS:
+            return
+        rem_int = max(0, round(rem))
+        expires_iso = _iso_utc(now + timedelta(seconds=rem))
+        result["lease_expires_at"] = expires_iso
+        result["lease_remaining_seconds"] = rem_int
+        result["lease_reminder"] = (
+            f"Desktop lease on {target_uri} expires in {rem_int}s (<=180s). "
+            f"Call acquire_control(host={target_uri!r}, ttl_seconds=...) to renew, "
+            f"or release_control(host={target_uri!r}) when done."
+        )
+
+    def arm_reminder(self, agent_id: int) -> None:
+        self.cancel_reminder()
+        if self.screen.holder != agent_id:
+            return
+        rem = self.screen.remaining_seconds(agent_id)
+        if (
+            self.screen.holder_ttl_s <= LEASE_REMINDER_LEAD_SECONDS
+            or rem is None
+            or rem <= LEASE_REMINDER_LEAD_SECONDS
+        ):
+            return
+        self.reminder_due_at = self.screen.lease_until - LEASE_REMINDER_LEAD_SECONDS
+        self.reminder_agent_id = agent_id
+        self.reminder_gen = self.screen.generation
+
+    def take_due_reminder(self, *, now_mono: float) -> tuple[int, float] | None:
+        due, aid, gen = self.reminder_due_at, self.reminder_agent_id, self.reminder_gen
+        if due is None or aid is None or now_mono < due:
+            return None
+        self.cancel_reminder()
+        if self.screen.holder != aid or self.screen.generation != gen:
+            return None
+        rem_now = self.screen.remaining_seconds(aid)
+        if rem_now is None or rem_now <= 0:
+            return None
+        return aid, rem_now
 
     def track_effects(self, tool: str, args: dict[str, object], result: dict[str, object]) -> None:
         ocr_scale = self.ocr_cache.get("scale")
@@ -284,6 +451,33 @@ class TargetSessionState:
             return None, f"{type(e).__name__}: {e}", False
         return result, None, False
 
+    def run_target_tool(
+        self,
+        get_helper: Callable[[], DesktopHelper],
+        tool: str,
+        tool_args: dict[str, object],
+        agent_id: int | None,
+        *,
+        stamp: str,
+        home: Path,
+        helper_errors: tuple[type[Exception], ...],
+        capture_app: bool,
+    ) -> tuple[dict[str, object] | None, str | None, bool, str | None, DesktopHelper | None]:
+        try:
+            helper = get_helper()
+        except helper_errors as e:
+            return None, f"{type(e).__name__}: {e}", False, None, None
+        result, error, aborted = self.run_tool(
+            helper, tool, tool_args, agent_id, stamp=stamp, home=home
+        )
+        if aborted:
+            hide_badge(helper)
+        app: str | None = None
+        if capture_app and agent_id is not None:
+            with suppress(PermissionsHelperError, OSError):
+                app = helper.frontmost_app()["app"] or None
+        return result, error, aborted, app, helper
+
     async def release_session(
         self,
         agent_id: int | None,
@@ -337,8 +531,133 @@ class TargetSessionRegistry:
             self._states[target_uri] = state
         return state
 
+    @property
+    def default_lease_s(self) -> float:
+        return self._config.computer_use_lease_s
+
     def holders_snapshot(self) -> dict[str, int | None]:
         return {uri: st.screen.holder for uri, st in self._states.items()}
+
+    def cancel_all_reminders(self) -> None:
+        for st in self._states.values():
+            st.cancel_reminder()
+
+    async def flush_due_reminders(
+        self, *, db: Database, now_fn: Callable[[], datetime]
+    ) -> float | None:
+        now_mono, soonest = self._timers.monotonic(), None
+        for uri, st in list(self._states.items()):
+            due = st.take_due_reminder(now_mono=now_mono)
+            if due is not None:
+                aid, rem = due
+                await asyncio.to_thread(
+                    send_lease_reminder_note,
+                    db,
+                    aid,
+                    target_uri=uri,
+                    remaining_seconds=max(1, round(rem)),
+                    expires_at_iso=_iso_utc(now_fn() + timedelta(seconds=rem)),
+                )
+            elif st.reminder_due_at is not None:
+                delay = max(0.0, st.reminder_due_at - now_mono)
+                soonest = delay if soonest is None else min(soonest, delay)
+        return soonest
+
+    async def run_reminder_loop(
+        self, stop: asyncio.Event, *, db: Database, now_fn: Callable[[], datetime]
+    ) -> None:
+        while not stop.is_set():
+            soonest = await self.flush_due_reminders(db=db, now_fn=now_fn)
+            wait_s = 1.0 if soonest is None else min(soonest, 1.0)
+            try:
+                await self._timers.asleep(wait_s)
+            except asyncio.CancelledError:
+                return
+
+
+async def acquire_target_control(
+    state: TargetSessionState,
+    *,
+    agent_id: int | None,
+    args: dict[str, object],
+    target_kind: str,
+    target_uri: str,
+    local_available: bool,
+    acquire_remote: Callable[[int], dict[str, object]] | None,
+    default_lease_s: float,
+    now_fn: Callable[[], datetime],
+) -> tuple[str, str | None, dict[str, object] | None]:
+    if agent_id is None:
+        return "error", "acquire_control requires an agent_id", None
+    try:
+        ttl_seconds = parse_lease_ttl_seconds(args.get("ttl_seconds"), default_s=default_lease_s)
+    except ComputerUseError as exc:
+        return "error", str(exc), None
+    if target_kind == "local" and not local_available:
+        return (
+            "error",
+            "no local desktop available on this host (headless or permissions helper disabled); "
+            "pass host='meiva://<machine>' or host='ssh://<alias>' "
+            "(run `meiva computer list` to view available targets)",
+            None,
+        )
+    was_holder = state.screen.holder == agent_id
+    if not await state.screen.acquire(agent_id, priority=priority(args), ttl_s=float(ttl_seconds)):
+        busy = (
+            f"screen busy on {target_uri}: held by agent {state.screen.holder or '?'} — "
+            "wait for release_control or the lease to expire, then retry"
+        )
+        return "error", busy, None
+    async with state.action_lock:
+        if target_kind == "ssh" and acquire_remote is not None:
+            try:
+                _ = await asyncio.to_thread(acquire_remote, ttl_seconds)
+            except Exception as exc:
+                if not was_holder:
+                    _ = await state.screen.release(agent_id)
+                return "error", f"{type(exc).__name__}: {exc}", None
+        state.arm_reminder(agent_id)
+        body: dict[str, object] = {
+            "acquired": True,
+            "holder": agent_id,
+            "host": target_uri,
+            **state.lease_snapshot(agent_id, now=now_fn()),
+        }
+        return "ok", None, body
+
+
+async def release_target_control(
+    state: TargetSessionState,
+    *,
+    agent_id: int | None,
+    args: dict[str, object],
+    target_kind: str,
+    target_uri: str,
+    helper: DesktopHelper | None,
+    release_remote: Callable[[], tuple[bool, str | None]] | None,
+) -> tuple[str, str | None, dict[str, object] | None, str | None]:
+    async with state.action_lock:
+        force = bool(args.get("force"))
+        local = await state.release_session(
+            agent_id, force=force, helper=helper, target_uri=target_uri
+        )
+        released = local[0]
+        if released is not None:
+            state.cancel_reminder()
+        remote: tuple[bool, str | None] = (False, None)
+        if released is not None and target_kind == "local" and helper is not None:
+            hide_badge(helper)
+        elif (
+            target_kind == "ssh" and release_remote is not None and (released is not None or force)
+        ):
+            remote = await asyncio.to_thread(release_remote)
+        return finalize_release_result(
+            local,
+            force=force,
+            remote=remote,
+            holder=state.screen.holder,
+            target_uri=target_uri,
+        )
 
 
 class LocalTargetMixin:
@@ -401,13 +720,14 @@ def emit_computer_action(
     result: dict[str, object] | None = None,
     *,
     helper: DesktopHelper | None = None,
+    app_name: str | None = None,
     target_host: str = "local",
 ) -> None:
     coords = audit_coords(tool, args, result)
     if agent_id is None:
         return
-    app = None
-    if helper is not None:
+    app = app_name
+    if app is None and helper is not None:
         with suppress(PermissionsHelperError, OSError):
             app = helper.frontmost_app()["app"] or None
     emit_audit_event(
@@ -425,3 +745,28 @@ def emit_computer_action(
             "target_host": target_host,
         },
     )
+
+
+def note_task_session(
+    tracker: TaskSessionTracker,
+    db: Database,
+    agent_id: int,
+    tool: str,
+    args: dict[str, object],
+    *,
+    now_ts: float,
+) -> None:
+    if args.get("task_id") is None:
+        return
+    tid = optional_int_field(args, "task_id")
+    if tid is None:
+        logger.warning(
+            "[computer-mcp] task_id {!r} is not a whole number; no task session forms",
+            args["task_id"],
+        )
+        return
+    try:
+        for event_type, session_agent_id, payload in tracker.note(tid, agent_id, tool, now=now_ts):
+            emit_audit_event(db, event_type, session_agent_id, payload)
+    except Exception as e:
+        logger.warning(f"[computer-mcp] task-session event failed: {e}")

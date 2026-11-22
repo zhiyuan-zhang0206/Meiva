@@ -17,6 +17,9 @@ from .plan import CORNER_FAILSAFE_CODE
 
 _DEFAULT_RPC_TIMEOUT_S = 60.0
 _DEFAULT_PROBE_TIMEOUT_S = 2.5
+_MAX_IMAGE_BYTES = 24 * 1024 * 1024
+_MAX_IMAGE_B64_CHARS = ((_MAX_IMAGE_BYTES + 2) // 3) * 4 + 4
+_ALLOWED_IMAGE_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 
 def probe_cluster_computer_status(
@@ -81,6 +84,16 @@ def _post_cluster_rpc(
     return parsed
 
 
+def _validated_image_ext(raw_ext: object) -> str:
+    if raw_ext is None:
+        return ".png"
+    if isinstance(raw_ext, str) and raw_ext.lower() in _ALLOWED_IMAGE_EXTS:
+        return raw_ext.lower()
+    raise PermissionsHelperError(
+        f"cluster desktop peer returned disallowed screenshot extension: {raw_ext!r}"
+    )
+
+
 def _save_remote_snapshot(
     out: dict[str, object], *, agent_id: int | None, stamp: str, home: Path
 ) -> None:
@@ -88,16 +101,28 @@ def _save_remote_snapshot(
     raw_ext = out.pop("_remote_image_ext", None)
     if not isinstance(raw_b64, str) or not raw_b64:
         return
+    if len(raw_b64) > _MAX_IMAGE_B64_CHARS:
+        raise PermissionsHelperError(
+            f"cluster desktop peer screenshot payload exceeds {_MAX_IMAGE_BYTES} byte limit"
+        )
+    ext = _validated_image_ext(raw_ext)
     try:
         img_bytes = base64.b64decode(raw_b64, validate=True)
     except (ValueError, binascii.Error) as exc:
         raise PermissionsHelperError(
             f"cluster desktop peer returned invalid screenshot bytes: {exc}"
         ) from exc
-    ext = str(raw_ext) if isinstance(raw_ext, str) and raw_ext.startswith(".") else ".png"
-    directory = logs_dir(home=home) / "computer" / "snapshots"
+    if len(img_bytes) > _MAX_IMAGE_BYTES:
+        raise PermissionsHelperError(
+            f"cluster desktop peer screenshot exceeds {_MAX_IMAGE_BYTES} byte limit"
+        )
+    directory = (logs_dir(home=home) / "computer" / "snapshots").resolve()
     directory.mkdir(parents=True, exist_ok=True)
-    local_path = directory / f"agent-{agent_id or 0}-{stamp}{ext}"
+    local_path = (directory / f"agent-{agent_id or 0}-{stamp}{ext}").resolve()
+    if not local_path.is_relative_to(directory):
+        raise PermissionsHelperError(
+            "cluster desktop peer screenshot path escapes snapshot directory"
+        )
     _ = local_path.write_bytes(img_bytes)
     out["path"] = str(local_path)
 

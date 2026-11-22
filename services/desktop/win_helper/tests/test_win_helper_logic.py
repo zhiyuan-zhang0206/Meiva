@@ -33,6 +33,7 @@ from services.desktop.win_helper.lease import DesktopLeaseManager
 from services.desktop.win_helper.overlay_render import build_dashed_border_bgra
 from services.desktop.win_helper.uia_logic import classify_tree_quality
 from services.desktop.win_helper.win32_ffi import object_of
+from services.desktop.win_helper.win32_uia import save_shot_if_requested
 
 
 def test_corner_hotzone_and_input_tag() -> None:
@@ -213,3 +214,32 @@ async def test_bearer_auth_middleware_protects_mcp_and_exposes_healthz() -> None
     assert status == 200
     assert body == b"ok"
     assert forwarded == ["/mcp"]
+
+
+def test_save_shot_if_requested_confines_paths_to_shots_dir(tmp_path: Path) -> None:
+    shots_dir = tmp_path / "shots"
+
+    def now() -> datetime:
+        return datetime(2026, 11, 22, 12, 0, 0, tzinfo=UTC)
+
+    auto_saved = save_shot_if_requested("auto", b"abc", shots_dir=shots_dir, ext="webp", now=now)
+    assert auto_saved is not None
+    assert Path(auto_saved).resolve().is_relative_to(shots_dir.resolve())
+    assert Path(auto_saved).read_bytes() == b"abc"
+
+    rel_saved = save_shot_if_requested(
+        "nested/capture.webp", b"xyz", shots_dir=shots_dir, ext="webp", now=now
+    )
+    assert rel_saved is not None
+    assert Path(rel_saved).resolve() == (shots_dir / "nested" / "capture.webp").resolve()
+    assert Path(rel_saved).read_bytes() == b"xyz"
+
+    with pytest.raises(ValueError, match="shots directory"):
+        _ = save_shot_if_requested(
+            "../escape.webp", b"bad", shots_dir=shots_dir, ext="webp", now=now
+        )
+
+    outside = tmp_path / "outside.webp"
+    with pytest.raises(ValueError, match="shots directory"):
+        _ = save_shot_if_requested(str(outside), b"bad", shots_dir=shots_dir, ext="webp", now=now)
+    assert not outside.exists()

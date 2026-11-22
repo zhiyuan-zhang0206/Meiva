@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from base.clock import Timers
 from base.host.boundary.fields import optional_float_field, optional_int_field
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
@@ -52,8 +53,11 @@ from .plan import (
 from .uia_map import win_uia_to_ax_tree
 
 _DEFAULT_TIMEOUT_S = 30.0
-_REMOTE_LEASE_SECONDS = 1800
+_MIN_REMOTE_LEASE_SECONDS = 30
+_MAX_REMOTE_LEASE_SECONDS = 3600
+_DEFAULT_REMOTE_LEASE_SECONDS = 600
 _HEALTHZ_TIMEOUT_S = 2.0
+_MEIVA_HOLDER_PREFIX = "meiva-agent-"
 
 
 def _float_pair(raw: object) -> tuple[float, float] | None:
@@ -135,21 +139,35 @@ class RemoteWinBridgeHelper:
         bearer_token: str | None = None,
         holder: str = "meiva-agent",
         timeout_s: float = _DEFAULT_TIMEOUT_S,
+        lease_seconds: int = _DEFAULT_REMOTE_LEASE_SECONDS,
+        timers: Timers | None = None,
+        allow_meiva_handoff: bool = True,
         client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._bearer_token = bearer_token
         self._holder = holder
         self._timeout_s = timeout_s
+        self._lease_seconds = max(
+            _MIN_REMOTE_LEASE_SECONDS, min(_MAX_REMOTE_LEASE_SECONDS, int(lease_seconds))
+        )
+        self._timers = timers
+        self._allow_meiva_handoff = allow_meiva_handoff
         self._client = client
         self._req_ids = itertools.count(1)
         self._lease_acquired = False
+        self._lease_expires_at = 0.0
         self._uia_id_map: dict[int, str] = {}
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
     def set_holder(self, holder: str) -> None:
         if holder != self._holder:
             self._holder = holder
             self._lease_acquired = False
+            self._lease_expires_at = 0.0
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -212,22 +230,61 @@ class RemoteWinBridgeHelper:
             raise PermissionsHelperError(extracted.error_message)
         return extracted.data, extracted.image_bytes, extracted.mime_type
 
+    def _remote_lease_holder(self) -> str | None:
+        try:
+            payload, _, _ = self._call_mcp("lease_manage", {"action": "status"})
+        except PermissionsHelperError:
+            return None
+        lease = payload.get("lease")
+        if is_object_dict(lease) and isinstance(lease.get("holder"), str):
+            return str(lease["holder"])
+        return None
+
+    def _mark_lease_active(self) -> None:
+        self._lease_acquired = True
+        if self._timers is not None:
+            self._lease_expires_at = self._timers.monotonic() + float(self._lease_seconds)
+
+    def acquire_remote_lease(self, *, ttl_seconds: int | None = None) -> dict[str, object]:
+        ttl = (
+            max(_MIN_REMOTE_LEASE_SECONDS, min(_MAX_REMOTE_LEASE_SECONDS, int(ttl_seconds)))
+            if ttl_seconds is not None
+            else self._lease_seconds
+        )
+        req: dict[str, object] = {
+            "action": "acquire",
+            "holder": self._holder,
+            "purpose": "meiva computer_use session",
+            "ttl_seconds": ttl,
+        }
+        try:
+            payload, _, _ = self._call_mcp("lease_manage", req)
+        except PermissionsHelperError as exc:
+            if not self._allow_meiva_handoff or "DESKTOP_LEASE_HELD" not in str(exc):
+                raise
+            current_holder = self._remote_lease_holder()
+            if (
+                current_holder is None
+                or current_holder == self._holder
+                or not current_holder.startswith(_MEIVA_HOLDER_PREFIX)
+            ):
+                raise
+            payload, _, _ = self._call_mcp("lease_manage", {**req, "force": True})
+        self._lease_seconds = ttl
+        self._mark_lease_active()
+        return payload
+
     def _ensure_remote_lease(self) -> None:
         if self._lease_acquired:
-            return
-        _ = self._call_mcp(
-            "lease_manage",
-            {
-                "action": "acquire",
-                "holder": self._holder,
-                "purpose": "meiva computer_use session",
-                "ttl_seconds": _REMOTE_LEASE_SECONDS,
-            },
-        )
-        self._lease_acquired = True
+            if self._timers is None or self._timers.monotonic() < self._lease_expires_at:
+                return
+            self._lease_acquired = False
+            self._lease_expires_at = 0.0
+        _ = self.acquire_remote_lease()
 
     def release_remote_lease(self, *, force: bool = False) -> bool:
         self._lease_acquired = False
+        self._lease_expires_at = 0.0
         payload, _, _ = self._call_mcp(
             "lease_manage",
             {"action": "release", "holder": self._holder, "force": force},
@@ -546,25 +603,41 @@ class RemoteWinBridgeHelper:
                     rows.append(row)
         return {"windows": rows}
 
-    def focus_app(self, target: dict[str, object]) -> FocusAppResult:
-        self._ensure_remote_lease()
+    def _resolve_window_selector(
+        self, target: dict[str, object], *, require_pid_match: bool
+    ) -> tuple[int, str, int]:
         pid = optional_int_field(target, "pid")
-        bundle = target.get("bundle_id")
-        hwnd = 0
-        title_contains = ""
         if pid is not None:
             wins = self.list_windows()["windows"]
             match = next((w for w in wins if w["pid"] == pid), None)
             if match is None:
-                raise PermissionsHelperError(f"no visible window found for pid={pid}")
-            hwnd = match["window_id"]
-        elif isinstance(bundle, str) and bundle.strip():
-            title_contains = bundle.strip()
+                if require_pid_match:
+                    raise PermissionsHelperError(f"no visible window found for pid={pid}")
+                return 0, "", pid
+            return match["window_id"], "", pid
+        bundle = target.get("bundle_id")
+        if isinstance(bundle, str) and bundle.strip():
+            needle = bundle.strip()
+            wins = self.list_windows(needle)["windows"]
+            if wins:
+                exact = next(
+                    (w for w in wins if (w["owner"] or "").lower() == needle.lower()),
+                    wins[0],
+                )
+                return exact["window_id"], "", exact["pid"]
+            return 0, needle, 0
+        return 0, "", 0
+
+    def focus_app(self, target: dict[str, object]) -> FocusAppResult:
+        self._ensure_remote_lease()
+        hwnd, title_contains, resolved_pid = self._resolve_window_selector(
+            target, require_pid_match=True
+        )
         data, _, _ = self._call_mcp(
             "focus_window",
             {"hwnd": hwnd, "title_contains": title_contains, "holder": self._holder},
         )
-        return {"focused": bool(data.get("is_foreground", True)), "pid": pid or 0}
+        return {"focused": bool(data.get("is_foreground", True)), "pid": resolved_pid}
 
     def ax_window_info(self, app: str) -> AxWindowInfo:
         wins = self.list_windows(app)["windows"]
@@ -605,14 +678,7 @@ class RemoteWinBridgeHelper:
         hwnd = 0
         title_contains = ""
         if target is not None:
-            pid = optional_int_field(target, "pid")
-            if pid is not None:
-                wins = self.list_windows()["windows"]
-                match = next((w for w in wins if w["pid"] == pid), None)
-                if match is not None:
-                    hwnd = match["window_id"]
-            elif isinstance(target.get("bundle_id"), str):
-                title_contains = str(target["bundle_id"])
+            hwnd, title_contains, _ = self._resolve_window_selector(target, require_pid_match=False)
         elif app:
             wins = self.list_windows(app)["windows"]
             if wins:

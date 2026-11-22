@@ -213,8 +213,22 @@ def parse_remote_hosts_toml(raw_toml: str) -> dict[str, RemoteHostConfig]:
     return {alias: _parse_host_entry(alias, entry) for alias, entry in hosts_section.items()}
 
 
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+
+
 def _validate_target_name(raw_name: str, *, raw_host: str) -> str:
-    if not raw_name or any(ch in raw_name for ch in ("/", ":", "@", "?", "#", " ", "\t", "\n")):
+    if (
+        not raw_name
+        or ".." in raw_name
+        or any(
+            ch in ("/", "\\", ":", "@", "?", "#")
+            or ch.isspace()
+            or ord(ch) < 0x20
+            or ord(ch) == 0x7F
+            for ch in raw_name
+        )
+    ):
         raise TargetResolutionError(
             f"Invalid computer_use host {raw_host!r}: bare URLs, ports, paths, and raw IPs are "
             "forbidden. Run `meiva computer list` to view registered targets."
@@ -274,6 +288,11 @@ def resolve_target(
 ) -> ResolvedTarget:
     if host is None:
         return ResolvedTarget(kind="local", name="local", canonical_uri="local")
+    if _has_control_chars(host):
+        raise TargetResolutionError(
+            f"Invalid computer_use host {host!r}: control characters are forbidden. "
+            "Run `meiva computer list` to view registered targets."
+        )
     cleaned = host.strip()
     if not cleaned or cleaned.lower() in {"local", "local://"}:
         return ResolvedTarget(kind="local", name="local", canonical_uri="local")

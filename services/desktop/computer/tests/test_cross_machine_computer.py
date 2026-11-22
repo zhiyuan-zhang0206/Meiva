@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -11,9 +12,12 @@ import pytest
 from PIL import Image
 
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.host.boundary.json_values import is_object_dict
+from base.host.permissions_helper.client import PermissionsHelperError
 from base.host.permissions_helper.wire import ClickResult, FrontmostApp, ScreenSize
+from base.host.remote_hosts import RemoteHostConfig
 from services.desktop.computer import execute as exec_mod
 from services.desktop.computer import mcp_daemon
 from services.desktop.computer.tests.slices import (
@@ -25,7 +29,9 @@ from services.desktop.computer.tests.slices import (
 from services.desktop.remote import (
     CORNER_FAILSAFE_CODE,
     CornerFailsafeError,
+    RemoteTransportRouter,
     RemoteWinBridgeHelper,
+    call_cluster_computer_tool,
     extract_mcp_tool_payload,
     macos_keycode_to_win_key,
     parse_streamable_http_body,
@@ -105,6 +111,7 @@ def test_remote_plan_pure_helpers() -> None:
         "ServerAliveCountMax=3",
         "-L",
         "127.0.0.1:19999:127.0.0.1:18792",
+        "--",
         "zzyasus",
     ]
 
@@ -490,3 +497,274 @@ async def test_daemon_routes_cluster_with_audit(database: Database, tmp_path: Pa
     assert cluster_calls[0][0] == "http://10.20.30.41:8765"
     assert cluster_calls[0][1] == "snapshot"
     assert "meiva://macmini" in [row["payload"].get("target_host") for row in audit_log]
+
+
+def test_remote_snapshot_rejects_traversal_ext_and_oversized_images(tmp_path: Path) -> None:
+    png_b64 = base64.b64encode(_make_png_bytes(16, 16)).decode("ascii")
+
+    def make_client(result_obj: dict[str, object]) -> httpx.Client:
+        def handler(_req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"ok": True, "result": result_obj})
+
+        return httpx.Client(transport=httpx.MockTransport(handler))
+
+    for bad_ext in ("/../../evil", ".exe", ".png/../../escape", "png"):
+        with pytest.raises(PermissionsHelperError, match="disallowed screenshot extension"):
+            _ = call_cluster_computer_tool(
+                "http://10.20.30.41:8765",
+                headers={},
+                tool="snapshot",
+                args={},
+                agent_id=7,
+                stamp="20261122-000000",
+                home=tmp_path,
+                client=make_client({"_remote_image_b64": png_b64, "_remote_image_ext": bad_ext}),
+            )
+
+    oversized_b64 = "A" * (33 * 1024 * 1024)
+    with pytest.raises(PermissionsHelperError, match="byte limit"):
+        _ = call_cluster_computer_tool(
+            "http://10.20.30.41:8765",
+            headers={},
+            tool="snapshot",
+            args={},
+            agent_id=7,
+            stamp="20261122-000000",
+            home=tmp_path,
+            client=make_client({"_remote_image_b64": oversized_b64, "_remote_image_ext": ".png"}),
+        )
+
+    rpc_oversized: dict[str, object] = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "content": [{"type": "image", "data": oversized_b64, "mime_type": "image/png"}],
+            "isError": False,
+        },
+    }
+    parsed = extract_mcp_tool_payload(rpc_oversized)
+    assert "byte limit" in (parsed.error_message or "")
+
+
+def _make_bundle_and_lease_client(
+    calls: list[tuple[str, dict[str, object]]],
+    remote_holder: dict[str, str | None],
+) -> httpx.Client:
+    def _lease_reply(args: dict[str, object]) -> dict[str, object]:
+        act = args["action"]
+        if act == "status":
+            holder = remote_holder["holder"]
+            return {"ok": True, "lease": {"holder": holder} if holder else None}
+        if act == "acquire":
+            cur = remote_holder["holder"]
+            if cur is not None and cur != args["holder"] and not args.get("force"):
+                return {"ok": False, "code": "DESKTOP_LEASE_HELD", "message": f"held by {cur}"}
+            remote_holder["holder"] = str(args["holder"])
+            return {"ok": True, "acquired": True}
+        if act == "release":
+            was_held = remote_holder["holder"] is not None
+            remote_holder["holder"] = None
+            return {"ok": True, "released": was_held}
+        return {"ok": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        tool = str(body["params"]["name"])
+        args = dict(body["params"]["arguments"])
+        calls.append((tool, args))
+        win = {
+            "hwnd": 4242,
+            "pid": 777,
+            "process": "CharacterCreator.exe",
+            "title": "Untitled Project",
+        }
+        if tool == "list_windows":
+            payload: dict[str, object] = {
+                "ok": True,
+                "windows": [{**win, "rect": [0, 0, 1920, 1080], "is_minimized": False}],
+            }
+        elif tool == "focus_window":
+            payload = {"ok": True, "is_foreground": True}
+        elif tool == "uia_tree":
+            payload = {
+                "ok": True,
+                "window": win,
+                "elements": [],
+                "truncated": False,
+                "elapsed_ms": 2,
+            }
+        elif tool == "lease_manage":
+            payload = _lease_reply(args)
+        else:
+            payload = {"ok": True}
+        rpc = {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(payload)}],
+                "isError": False,
+            },
+        }
+        return httpx.Response(200, json=rpc)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_win_bridge_bundle_id_resolution_and_lease_handoff() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    remote_holder: dict[str, str | None] = {"holder": None}
+    helper = RemoteWinBridgeHelper(
+        "http://127.0.0.1:18792",
+        holder="meiva-agent-1",
+        lease_seconds=600,
+        timers=ManualTimers(),
+        client=_make_bundle_and_lease_client(calls, remote_holder),
+    )
+
+    focused = helper.focus_app({"bundle_id": "CharacterCreator.exe"})
+    assert focused == {"focused": True, "pid": 777}
+    by_tool = dict(calls)
+    assert (by_tool["focus_window"]["hwnd"], by_tool["focus_window"]["title_contains"]) == (
+        4242,
+        "",
+    )
+    assert by_tool["lease_manage"]["ttl_seconds"] == 600
+
+    _ = helper.ax_tree(target={"bundle_id": "CharacterCreator.exe"})
+    uia_args = dict(calls[-1][1])
+    assert (uia_args["hwnd"], uia_args["title_contains"]) == (4242, "")
+
+    _ = helper.acquire_remote_lease(ttl_seconds=1200)
+    assert calls[-1] == (
+        "lease_manage",
+        {
+            "action": "acquire",
+            "holder": "meiva-agent-1",
+            "purpose": "meiva computer_use session",
+            "ttl_seconds": 1200,
+        },
+    )
+
+    helper.set_holder("meiva-agent-2")
+    _ = helper.focus_app({"bundle_id": "CharacterCreator.exe"})
+    assert remote_holder["holder"] == "meiva-agent-2"
+    lease_calls = [a for t, a in calls if t == "lease_manage"]
+    assert lease_calls[-1].get("force") is True
+
+    remote_holder["holder"] = "external-operator"
+    helper.set_holder("meiva-agent-3")
+    with pytest.raises(PermissionsHelperError, match="DESKTOP_LEASE_HELD"):
+        _ = helper.focus_app({"bundle_id": "CharacterCreator.exe"})
+
+
+async def test_router_rebuilds_on_tunnel_change_and_daemon_runs_ssh_off_loop_and_force_releases(
+    database: Database, tmp_path: Path
+) -> None:
+    _ = (tmp_path / "remote_hosts.toml").write_text(
+        '[hosts.zzyasus]\nos = "windows"\n', encoding="utf-8"
+    )
+    ports = iter(["http://127.0.0.1:21001", "http://127.0.0.1:21002"])
+
+    def fake_endpoint(_cfg: RemoteHostConfig) -> str:
+        return next(ports)
+
+    router: RemoteTransportRouter[RemoteWinBridgeHelper] = RemoteTransportRouter(
+        db=database,
+        clock=system_clock(),
+        home=tmp_path,
+        lease_s=600.0,
+        tunnel_endpoint_resolver=fake_endpoint,
+    )
+    h1 = router.ssh_helper_for("zzyasus", 1)
+    h2 = router.ssh_helper_for("zzyasus", 1)
+    assert isinstance(h1, RemoteWinBridgeHelper) and isinstance(h2, RemoteWinBridgeHelper)
+    assert h1.base_url == "http://127.0.0.1:21001"
+    assert h2.base_url == "http://127.0.0.1:21002"
+    assert h1 is not h2
+
+    main_tid = threading.get_ident()
+    worker_tids: list[int] = []
+    release_calls: list[bool] = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        worker_tids.append(threading.get_ident())
+        body = json.loads(request.content)
+        tool = str(body["params"]["name"])
+        args = dict(body["params"]["arguments"])
+        if tool == "lease_manage" and args.get("action") == "release":
+            release_calls.append(bool(args.get("force")))
+            payload: dict[str, object] = {"ok": True, "released": True}
+        elif tool == "status":
+            payload = {
+                "ok": True,
+                "screen": {
+                    "monitors": [
+                        {
+                            "index": 1,
+                            "role": "primary",
+                            "left": 0,
+                            "top": 0,
+                            "width": 320,
+                            "height": 180,
+                        }
+                    ]
+                },
+                "foreground_window": {"process": "CC4.exe", "title": "CC4"},
+                "session": {"desktop_interactive": True},
+            }
+        else:
+            payload = {"ok": True}
+        rpc = {
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(payload)}],
+                "isError": False,
+            },
+        }
+        return httpx.Response(200, json=rpc)
+
+    http_client = httpx.Client(transport=httpx.MockTransport(mock_handler))
+    daemon = mcp_daemon.ComputerMcpDaemon(
+        computer_use_config(),
+        database,
+        str(tmp_path / "c2.sock"),
+        helper=None,
+        clock=system_clock(),
+        home=tmp_path,
+        local_machine="ubuntu",
+        remote_helper_factory=lambda _cfg, aid: RemoteWinBridgeHelper(
+            "http://127.0.0.1:18792",
+            holder=f"meiva-agent-{aid or 0}",
+            client=http_client,
+        ),
+    )
+
+    rel = await daemon._dispatch(
+        {
+            "id": 10,
+            "method": "call_tool",
+            "tool": "release_control",
+            "args": {"host": "ssh://zzyasus", "force": True},
+            "agent_id": None,
+        }
+    )
+    assert rel["ok"] is True
+    assert release_calls == [True]
+    rel_res = rel["result"]
+    assert is_object_dict(rel_res)
+    rel_data = json.loads(text_block(rel_res))
+    assert rel_data["released"] is None
+    assert rel_data["remote_released"] is True
+
+    win_resp = await daemon._dispatch(
+        {
+            "id": 11,
+            "method": "call_tool",
+            "tool": "list_apps",
+            "args": {"host": "ssh://zzyasus"},
+            "agent_id": 55,
+        }
+    )
+    assert win_resp["ok"] is True
+    assert worker_tids and all(tid != main_tid for tid in worker_tids)
