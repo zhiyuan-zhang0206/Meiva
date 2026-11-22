@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
+from base.api_contracts.contracts import MACHINE_ENDPOINTS_PATH
 from base.api_contracts.status import MachineStatus
 from base.cluster import machines
 from base.db.transaction import write_transaction
@@ -147,6 +148,21 @@ async def cluster_status_snapshot(env: RosterEnv) -> ClusterStatus:
         result = await dispatch_op(env.db, env.machine.name(), "status_probe", {}, rpc=env.rpc)
         return ClusterStatus.model_validate(result)
     return await asyncio.to_thread(_local_snapshot_blocking, env)
+
+
+@router.get(
+    MACHINE_ENDPOINTS_PATH,
+    description="Read registered endpoints for unpaused runners that have not announced a stop.",
+)
+async def get_cluster_machine_endpoints(request: Request) -> dict[str, str | None]:
+    rows = await asyncio.to_thread(
+        snapshots.readroster_rows_blocking, gateway_state(request).control_db_pool
+    )
+    return {
+        row.name: row.gateway_url or None
+        for row in rows
+        if "agent-runner" in row.role and row.stopped_at is None
+    }
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])

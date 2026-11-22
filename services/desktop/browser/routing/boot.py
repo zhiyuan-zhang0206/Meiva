@@ -5,9 +5,10 @@ from __future__ import annotations
 from contextlib import suppress
 from pathlib import Path
 
-from pydantic import TypeAdapter
+import httpx
+from pydantic import TypeAdapter, ValidationError
 
-from base.api_contracts.status import MachineStatus
+from base.api_contracts.contracts import MACHINE_ENDPOINTS_PATH
 from base.clock import Timers
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
@@ -20,7 +21,7 @@ from base.paths import chrome_mcp_socket
 
 from .session import BrowserRoutes
 
-_ROSTER = TypeAdapter(list[MachineStatus])
+_PEER_ENDPOINTS = TypeAdapter(dict[str, str | None])
 
 
 def browser_routes_from_boot(
@@ -39,11 +40,21 @@ def browser_routes_from_boot(
     def peers() -> dict[str, str | None]:
         access = gateway_access_from_boot(config)
         url = gateway_api_base(access.gateway_url)
-        response = get(f"{url}/api/cluster/roster", headers=gateway_auth_headers(access))
-        response.raise_for_status()
-        return {
-            row.name: row.gateway_url or None for row in _ROSTER.validate_json(response.content)
-        }
+        try:
+            response = get(f"{url}{MACHINE_ENDPOINTS_PATH}", headers=gateway_auth_headers(access))
+            response = response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Chrome peer directory returned HTTP {exc.response.status_code}"
+            ) from None
+        except httpx.RequestError as exc:
+            raise RuntimeError(
+                f"Chrome peer directory request failed ({type(exc).__name__})"
+            ) from None
+        try:
+            return _PEER_ENDPOINTS.validate_json(response.content)
+        except ValidationError:
+            raise ValueError("Chrome peer directory returned an invalid response") from None
 
     socket = chrome_mcp_socket(home, config.view.services.browser_cdp_port)
     local_display = config.view.services.browser_enabled and display_available(host=host)

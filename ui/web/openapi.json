@@ -3555,6 +3555,36 @@
         }
       }
     },
+    "/api/cluster/machine-endpoints": {
+      "get": {
+        "summary": "Get Cluster Machine Endpoints",
+        "description": "Read registered endpoints for unpaused runners that have not announced a stop.",
+        "operationId": "get_cluster_machine_endpoints_api_cluster_machine_endpoints_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "object",
+                  "title": "Response Get Cluster Machine Endpoints Api Cluster Machine Endpoints Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/cluster/roster": {
       "get": {
         "summary": "Get Cluster Roster",

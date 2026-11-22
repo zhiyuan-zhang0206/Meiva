@@ -19,6 +19,9 @@ class RouteContract:
     note: str = ""
 
 
+MACHINE_ENDPOINTS_PATH = "/api/cluster/machine-endpoints"
+
+
 ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("PATCH", "/api/agents/{agent_id}"): RouteContract(note="label patch — CAS update"),
     ("GET", "/api/models"): RouteContract(),
@@ -88,6 +91,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/cluster/status"): RouteContract(
         note="control-plane read — cluster observability"
+    ),
+    ("GET", MACHINE_ENDPOINTS_PATH): RouteContract(
+        note="registered runner endpoints; no liveness probes"
     ),
     ("GET", "/api/cluster/roster"): RouteContract(
         note="control-plane read — cluster observability"
