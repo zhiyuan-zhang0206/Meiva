@@ -51,7 +51,7 @@ def test_a_pause_names_what_the_machine_is_hidden_from_and_no_rollout() -> None:
 
 
 def test_a_pause_reason_follows_the_verdict() -> None:
-    lines = pause_lines("runner-a", PauseReply("2026-09-27T00:00:00+00:00", "disk swap", 0, 0, 0))
+    lines = pause_lines("runner-a", PauseReply("2026-09-27T00:00:00+00:00", "disk swap", 0, 0))
 
     assert lines[0].endswith("(since 2026-09-27T00:00:00) — disk swap")
 

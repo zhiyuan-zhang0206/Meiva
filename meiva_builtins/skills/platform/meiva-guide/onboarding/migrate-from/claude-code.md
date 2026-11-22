@@ -70,7 +70,7 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
 - **Subagents become full agents.** A Claude Code subagent shares your
   project and returns to the main conversation; an Meiva agent is a peer with
   its own workspace. Give it a self-contained prompt and a defined handoff
-  (file path or task id).
+  (workspace path).
 - **Hooks have no runtime equivalent.** Anything that fired on every tool
   call must become a checked-in rule or a CI check instead.
 

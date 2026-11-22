@@ -99,8 +99,7 @@ green, and remove/prune the temporary worktree immediately afterwards.
        inspect every `missing_path` and `git_changed` item reported by
        `dream_gather.py`, plus symbol/contract existence and retired scripts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
-       machine topology): check active vs. terminated agents, live schedule triggers,
-       and task status.
+       machine topology): check active vs. terminated agents and live schedule triggers.
      - *Host environment & embedded probes*: check machine configuration and
        `<!-- fact-check: <cmd> -->` directives.
    - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent

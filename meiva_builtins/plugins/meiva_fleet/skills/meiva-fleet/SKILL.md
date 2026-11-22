@@ -1,14 +1,13 @@
 ---
 name: meiva-fleet
-description: "Coordinates Meiva Fleet tasks after collaboration is chosen. Use when assigning work, tracking delegated tasks, or reporting blockers in Fleet."
+description: "Coordinates Meiva agents through assignments, peer messages, and handoffs. Use when delegating work, reporting progress, or handling blockers."
 ---
 
 # Working in a Fleet
 
 Fleet is one optional implementation of collaboration. Use `meiva-workflow` to
 choose how to work; direct execution, peer cooperation, and script orchestration
-remain valid. Loading this skill does not require task creation or a manager
-role. The procedures below apply to chosen Fleet work. Read the
+remain valid. Read the
 [operating contract](reference/operating-contract.md) before using its labels,
 questions or delegation; it owns detailed operating obligations.
 
@@ -52,15 +51,13 @@ workspace's `memory/MEMORY.md`.
 
 The Fleet system prompt keeps message-delivery semantics resident. The
 [operating contract](reference/operating-contract.md) owns detailed coordination,
-completion, and task procedures. Use `send_message` for peer delivery,
-`meiva.ui.ask` for the user, and task updates for the durable record.
+and handoff procedures. Use `send_message` for peer delivery and
+`meiva.ui.ask` for user decisions.
 
 For each milestone, name its reporter and the agent that must act in the brief.
-Publish the result in its existing artifact or task record and send that owner
-its reference with a concise explanation of what changed and what is needed.
+Save the result in its artifact and send its path with what changed and what is needed.
 Combine related findings; other participants send only additional evidence,
-blockers, or changed results. Do not append an unchanged milestone to another
-agent's task log merely to record forwarding: that write can notify its owner.
+blockers, or changed results.
 
 When a requester needs your acceptance or timing to coordinate, communicate
 that commitment. Otherwise, act on received messages without a courtesy reply.
@@ -97,13 +94,11 @@ Authorization widens what you may do on your own; it does not remove the rails. 
 - **Don't touch prod** — no deploys, no prod data-plane writes, no rollout.
 - **Spend only what was authorized** — the budget in the approval is a ceiling, not a target.
 
-Usage reminders are independent of Fleet task records. Load `meiva-being-a-long-running-agent` for
+Load `meiva-being-a-long-running-agent` for
 its agent usage script: choose IDs, a time window, and spawn/fork birth lineage,
 then notify the peers responsible for the work when the agreed threshold is
 reached. The receiving agent decides how to converge, finish a safe unit,
-preserve results, prepare a handoff, or ask for a revised budget. Your assignment
-and reminder escalation do not meter or enforce spending. No automatic kill is
-part of a budget reminder.
+preserve results, prepare a handoff, or ask for a revised budget.
 
 ## Reaching the User vs Another Agent
 
@@ -114,7 +109,7 @@ The **user** is the only one who can authorize what no agent may decide alone �
 
 ## Reporting
 
-Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.ask` is the question channel: when a question needs a user answer, post it to the user's queue. Ordinary information and results use the configured publish/text delivery protocol. Don't promote routine progress; don't bury a decision that needs an answer.
+Your messages and artifacts record how the work progressed. `meiva.ui.ask` is the question channel: when a question needs a user answer, post it to the user's queue. Ordinary information and results use the configured publish/text delivery protocol. Don't promote routine progress; don't bury a decision that needs an answer.
 
 ### Message discipline: milestone-based, no noise
 

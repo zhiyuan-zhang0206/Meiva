@@ -64,13 +64,13 @@ def test_a_private_name_never_loads_plugins() -> None:
 def test_a_missing_name_after_a_recorded_failure_raises_it() -> None:
     failure = RuntimeError("plugin load failed earlier")
     with held_installation(Loading(failure=failure)), pytest.raises(RuntimeError) as caught:
-        boot.maybe_load_plugins_for_missing("tasks")
+        boot.maybe_load_plugins_for_missing("memory")
     assert caught.value is failure
 
 
 def test_a_missing_name_on_an_installed_process_loads_nothing() -> None:
     with held_installation(Installation.bare(sampling=fixed_sampling_owner())):
-        assert boot.maybe_load_plugins_for_missing("tasks") is False
+        assert boot.maybe_load_plugins_for_missing("memory") is False
 
 
 def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:

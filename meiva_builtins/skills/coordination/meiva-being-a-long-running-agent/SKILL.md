@@ -75,7 +75,7 @@ one-off monitors when done, and terminate when the finite task is complete.
 
 For agent usage observations and USD cost reminders, read [usage reports](references/usage.md)
 and use `scripts/agent_usage.py`. Select explicit IDs, a time window or lifetime,
-and spawn/fork birth lineage; task records are not a spending ledger. Optional
+and spawn/fork birth lineage. Optional
 polling sends a one-shot reminder to named peers and exits without termination.
 
 Treat a reminder as a decision point. Preserve useful work and recovery notes,

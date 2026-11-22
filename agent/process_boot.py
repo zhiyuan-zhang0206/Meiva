@@ -90,7 +90,7 @@ def apply_per_agent_eval_isolation(
             "eval_network_allowlist",
         )
     )
-    disabled = ["agents.get_last_message", "tasks", "mcps", "ui"]
+    disabled = ["agents.get_last_message", "mcps", "ui"]
     if "web" not in allowed_network:
         disabled.append("web")
     if "understand" not in allowed_network:

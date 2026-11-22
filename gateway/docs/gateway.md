@@ -18,7 +18,7 @@ database until the runner starts. A gateway that is stopping drains its in-fligh
 connections under a finite budget and ends its SSE streams at once.
 
 - **Agent lifecycle management**: unified handling of spawn, send_message, terminate, resurrect, restart via `/api/agents/*`
-- **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
+- **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, or memory search
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
 - **Runtime observability**: CPU/RSS/FD, loop lag/slow ticks and SSE metrics use OTLP. Lifespan joins its telemetry flushers before pool closure; emit failures stay best effort.
 - **Alert truth reconciliation**: the events-maintenance service's startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
