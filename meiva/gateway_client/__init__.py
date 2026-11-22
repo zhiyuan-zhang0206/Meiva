@@ -235,7 +235,6 @@ def send_system_note(
     content: str,
     note_tag: str,
     source: str,
-    task_id: int | None,
     resurrect: bool,
     idempotency_key: str,
 ) -> int:
@@ -245,9 +244,7 @@ def send_system_note(
     prefix), waking a live agent, reviving a terminated one when `resurrect`
     is set (same 120 s per-call timeout as send_message).
     """
-    note = plans.NoteIntent(
-        content=content, note_tag=note_tag, source=source, task_id=task_id, resurrect=resurrect
-    )
+    note = plans.NoteIntent(content=content, note_tag=note_tag, source=source, resurrect=resurrect)
     plan = plans.system_note_request(agent_id, note, idempotency_key)
     return _InboundIdAnswer.model_validate(
         _transport.json_object(_run(plan, _ctx(None)))

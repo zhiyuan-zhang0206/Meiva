@@ -115,10 +115,7 @@ describe("agentStatusKey", () => {
   });
 
   it("returns null for a status outside the vocabulary instead of asserting one", () => {
-    // meiva:note
-    // The task board reuses the canvas with task statuses, so the card sees strings that are not
-    // agent statuses; none of them may borrow an agent status's colour or label.
-    expect(agentStatusKey("in_progress")).toBeNull();
+    expect(agentStatusKey("future_status")).toBeNull();
     expect(agentStatusKey("")).toBeNull();
   });
 });

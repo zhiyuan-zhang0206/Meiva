@@ -17,8 +17,6 @@ _INVENTORY: dict[str, str] = {
     "agent/ownership/hosted.py::_apply_terminate_command": "local",
     "meiva/self/__init__.py::compact": "local",
     "meiva/skills/__init__.py::_record_skill_invoked": "local",
-    "meiva_builtins/plugins/meiva_fleet/_task_update.py::_log_task_update": "local",
-    "base/agents/tasks/creation.py::insert_task": "local",
     "gateway/agents/router.py::_patch_label_blocking": "local",
     "base/agents/birth/transaction.py::record_birth_event": "local",
     "ops/agents/wake.py::_stage_resurrect_event": "local",

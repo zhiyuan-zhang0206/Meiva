@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath, toUserPath } from "./agent-routes";
+import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, toUserPath } from "./agent-routes";
 
 describe("agent routes", () => {
   it("listAgents defaults to the SQL-bounded live roster", () => {
@@ -38,8 +38,4 @@ describe("agent routes", () => {
     expect(toUserPath(5, ["a", "b c"])).toBe("/api/agents/5/to-user?file=a&file=b+c");
   });
 
-  it("tasks take a window and a field set", () => {
-    expect(tasksPath()).toBe("/api/tasks");
-    expect(tasksPath({ window: "7d", fields: "summary" })).toBe("/api/tasks?window=7d&fields=summary");
-  });
 });

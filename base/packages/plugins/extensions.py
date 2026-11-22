@@ -15,7 +15,6 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import DecisionProviderContribution, ProviderContribution
 from base.lm.harness.handoff import HarnessContribution
 from base.packages.plugins.contributions import Contribution
-from base.packages.plugins.surface.inspector import InspectWidgetSpec
 
 NoteBuilder = Callable[..., object | None]
 
@@ -84,7 +83,6 @@ class PluginContributions:
     before_turn: tuple[GraphHook, ...] = ()
     state: tuple[type[BaseModel], ...] = ()
     metrics: tuple[MetricSpec, ...] = ()
-    inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
     providers: tuple[ProviderContribution, ...] = ()
     decision_providers: tuple[DecisionProviderContribution, ...] = ()
     sdk_namespaces: tuple[SdkNamespace, ...] = ()
@@ -106,7 +104,6 @@ class PluginContributions:
             before_turn=self.before_turn + other.before_turn,
             state=self.state + other.state,
             metrics=self.metrics + other.metrics,
-            inspect_widgets=self.inspect_widgets + other.inspect_widgets,
             providers=self.providers + other.providers,
             decision_providers=self.decision_providers + other.decision_providers,
             sdk_namespaces=self.sdk_namespaces + other.sdk_namespaces,
@@ -164,10 +161,6 @@ class PluginContributions:
 
     def _data_records(self, plugin: str) -> tuple[Contribution, ...]:
         metrics = (Contribution("metrics", spec.name, plugin, spec.title) for spec in self.metrics)
-        widgets = (
-            Contribution("inspectWidgets", spec.id, plugin, spec.kind)
-            for spec in self.inspect_widgets
-        )
         providers = (
             Contribution("providers", p.binding.prefix, plugin, p.binding.display_name)
             for p in self.providers
@@ -176,7 +169,7 @@ class PluginContributions:
             Contribution("decisionProviders", p.prefix, plugin, p.display_name)
             for p in self.decision_providers
         )
-        return (*metrics, *widgets, *providers, *decision_providers)
+        return (*metrics, *providers, *decision_providers)
 
     def _sdk_records(self, plugin: str) -> tuple[Contribution, ...]:
         namespaces = (
@@ -253,10 +246,6 @@ class ExtensionRegistry:
     def metrics(self) -> Iterator[MetricSpec]:
         for _plugin, contributions in self.plugins:
             yield from contributions.metrics
-
-    def inspect_widgets(self) -> Iterator[InspectWidgetSpec]:
-        for _plugin, contributions in self.plugins:
-            yield from contributions.inspect_widgets
 
     def harness_contributions(
         self, harness: Harness | None = None

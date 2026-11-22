@@ -35,7 +35,7 @@ block with its own `MEIVA_SYSTEM_PROMPT_*` toggle.
 2. **SDK detail** — full contracts (signatures + docstrings) for the configured
    namespaces, rendered directly after the SDK overview so the agent calls them
    without a drill-down turn. Config-selected (`MEIVA_SDK_EXPAND`), default
-   `shell,files,agents,tasks` = the stable production P95 module set.
+   `shell,files,agents` = the stable production P95 module set.
    Explicit `*` expands all public
    namespaces except the capability surfaces (`meiva.skills`, `meiva.mcps`).
    The frequency-driven subset keeps common contracts resident, leaving rare
@@ -74,7 +74,7 @@ Capabilities rather than standing as its own section.
   the configured list, the plugin expansions and the discovered namespaces, all read once by
   `live.py`): plugin registrations
   (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. meiva_code's `cwd`) first, then
-  `settings.sdk_expand_in_system_prompt` (env `MEIVA_SDK_EXPAND`, default `shell,files,agents,tasks`),
+  `settings.sdk_expand_in_system_prompt` (env `MEIVA_SDK_EXPAND`, default `shell,files,agents`),
   deduped keep-first — full `meiva.help(meiva.<path>)` stubs right after the
   overview. `*` recursively expands public namespaces (discovered from
   `__all_for_meiva__`, sorted; top-level functions like `help`/`understand` are skipped
@@ -260,7 +260,7 @@ eligible call volume. Top-level functions are already in the overview; skills
 and MCPs belong in the capability index. Review workload mix and missing mirrors
 before applying its suggested `MEIVA_SDK_EXPAND` list. Plugin-declared expansions
 still apply. The report never changes configuration, and an empty sample yields
-no recommendation. The shipped SDK default is `shell,files,agents,tasks`:
+no recommendation. The shipped SDK default is `shell,files,agents`:
 these whole modules cover 95.410% of 134,744 eligible agent-attributed calls in the production
 database queried on 2026-10-06. The query used a 30-day window, but available
 SDK records span 2026-09-26 through 2026-10-03; subsequent SDK events were not
@@ -488,7 +488,7 @@ Landed so far:
   exploring or planning; the user pins or defers the working rhythm. Distinct
   from action-caution: the direction of substantial work, not individual
   irreversible ops.
-- Expanded SDK reference (`MEIVA_SDK_EXPAND`, default `shell,files,agents,tasks`) —
+- Expanded SDK reference (`MEIVA_SDK_EXPAND`, default `shell,files,agents`) —
   full contracts after the overview.
 - One skill index and a mandatory step that reads it: `# Capabilities` lists
   the whole catalog (`skills_to_inject_into_system_prompt` default `*`), and

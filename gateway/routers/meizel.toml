@@ -1,8 +1,7 @@
-exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "guide.py", "host_permissions.py", "memory_api", "notifications.py", "proxies", "receipts", "settings.py", "shell.py", "tasks.py", "upload"]
+exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "guide.py", "host_permissions.py", "memory_api", "notifications.py", "proxies", "receipts", "settings.py", "shell.py", "upload"]
 
 [uses]
 "configuration" = ["refusal.py"]
-"tasks.py" = ["receipts"]
 "tests" = ["memory_api"]
 
 [purity]

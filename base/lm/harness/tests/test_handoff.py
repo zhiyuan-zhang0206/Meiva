@@ -16,7 +16,7 @@ from base.lm.harness.handoff import (
 )
 
 DEFAULT_CLUSTER = (ClusterFact("macmini", "primary host"),)
-DEFAULT_ENTRIES = (EntryPoint("meiva.tasks", "read and update tasks"),)
+DEFAULT_ENTRIES = (EntryPoint("meiva.schedules", "run scheduled work"),)
 
 
 def handoff(
@@ -52,7 +52,7 @@ def test_render_carries_the_six_sections_in_order(tmp_path: Path) -> None:
     ]
 
 
-def test_render_mentions_identity_and_task(tmp_path: Path) -> None:
+def test_render_mentions_identity_and_schedule(tmp_path: Path) -> None:
     text = handoff(tmp_path).render()
     assert "# Role & Operating Context — Agent #6984 (claude-sdk-bridge)" in text
     assert "Handoff" not in text
@@ -93,7 +93,7 @@ def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None
         home=tmp_path / "home",
     ).render()
     assert "meiva.files" not in text
-    assert "meiva.tasks" not in text
+    assert "meiva.schedules" not in text
     assert "meiva.watcher" not in text
     assert "meiva.agents" in text
     assert "meiva.self" in text
@@ -131,7 +131,7 @@ def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) 
         HarnessContribution(
             harnesses=frozenset({Harness.CODEX, Harness.CLAUDE_CODE}),
             entries=(
-                EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
+                EntryPoint("meiva.schedules", "run scheduled work"),
                 EntryPoint("meiva.agents", "duplicate should be ignored"),
             ),
             discipline=("Report progress to your agreed delegator.",),
@@ -143,7 +143,7 @@ def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) 
     )
     merged = base.with_contributions(contributions, harness=Harness.CODEX)
     text = merged.render()
-    assert "meiva.tasks" in text
+    assert "meiva.schedules" in text
     assert "duplicate should be ignored" not in text
     assert "meiva.agy_only" not in text
     assert "Report progress to your agreed delegator." in text

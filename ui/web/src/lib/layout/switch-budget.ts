@@ -14,11 +14,7 @@
 //   (agent-reconcile.ts) refreshes all three in one request, and a switch
 //   back renders the cached conversation immediately.
 // - BACK_VISIT_REVALIDATE_MAX: the most background revalidations one
-//   back-visit may fire — the two live inspector reads (current state +
-//   statistics; each is independent and fails independently). The widget set
-//   is selection-invariant: task events refresh it while open, the 60s
-//   interval repairs across gaps, and a reconnect invalidates it — so
-//   switching agents alone never refetches it.
+//   back-visit may fire — current state and statistics fail independently.
 //
 // Steady-state target the policy serves (batch 1 + batch 2, both landed): at
 // most 5 requests per switch between two warm agents with the panel open —

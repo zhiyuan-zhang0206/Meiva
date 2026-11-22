@@ -11,7 +11,6 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [meiva.files — File System](files.md) — file system operations
 - [meiva.shell — Shell Operations](../shell/docs/shell.md) — shell commands and persistent sessions
 - [meiva.agents — Agent Interop](../agents/docs/agents.md) — agent interop
-- [Tasks](../../meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.md) — task registry `meiva.tasks` (injected by meiva_fleet plugin)
 - [MCP Server System](../mcps/docs/mcps.md) — MCP tool servers
 - [meiva.web — Web Access](../web/docs/web.md) — network access
 - [meiva.understand — Multimodal Understanding Primitive](../understand/README.md) — multimodal understanding primitives

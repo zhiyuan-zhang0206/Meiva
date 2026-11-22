@@ -57,6 +57,7 @@ def _restore_previous_schema(conn: psycopg.Connection) -> None:
         "ALTER TABLE agent_notices ADD CONSTRAINT agent_notices_blocking_requires_response "
         "CHECK (NOT blocking OR require_response)"
     )
+    conn.execute("CREATE TABLE agent_tasks (id bigint PRIMARY KEY)")
     conn.execute(
         "ALTER TABLE agent_notices ADD CONSTRAINT agent_notices_task_id_fkey "
         "FOREIGN KEY (task_id) REFERENCES agent_tasks(id)"

@@ -132,16 +132,6 @@ SURFACES: tuple[Surface, ...] = (
         ),
     ),
     Surface(
-        id="inspectWidgets",
-        entry_points=(PluginContributions,),
-        manifest_key="inspectWidgets",
-        protocol="InspectWidgetSpec",
-        note=(
-            "`inspect_widgets` of what the plugin's `inspector.py` `contribute()` returns: a "
-            "closed-set widget the console renders in the agent inspector from kernel-resolved data"
-        ),
-    ),
-    Surface(
         id="providers",
         entry_points=(ProviderContribution,),
         manifest_key="providers",
@@ -328,7 +318,7 @@ def _data_records(*, home: Path) -> dict[str, tuple[Contribution, ...]]:
     records: dict[str, tuple[Contribution, ...]] = {}
     for name, directory in enabled_plugin_dirs(home=home):
         found: list[Contribution] = []
-        for face in ("metrics", "inspector", "provider"):
+        for face in ("metrics", "provider"):
             path = directory / f"{face}.py"
             if not path.is_file():
                 continue

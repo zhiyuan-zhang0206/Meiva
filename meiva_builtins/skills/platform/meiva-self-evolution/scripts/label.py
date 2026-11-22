@@ -32,10 +32,8 @@ def _rule_label(rec: RecordBody) -> str:
 
 # meiva:note
 # True when the agent delivered results through send_message, ask, publish, or a result file
-# (files.write / files.append) — even though final_output may be empty. File delivery is the
-# standard meiva-fleet worker pattern: the worker writes its result JSON and terminates without a
-# report string. Without it, completed workers are mislabeled `failed` (2026-08-03 weekly run:
-# 9 of 25 failed runs were file-delivering workers).
+# (files.write / files.append). Counting file delivery keeps workers with empty final output
+# from being mislabeled `failed` (2026-08-03 weekly run: 9 of 25 failed runs wrote a result file).
 def _delivered_via_side_channel(rec: RecordBody) -> bool:
     tools_called = rec["tools_called"]
     return (

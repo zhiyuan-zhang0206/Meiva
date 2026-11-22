@@ -19,7 +19,6 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // per-device selection deliberately kept out of the DB.
 const SETITEM_ALLOWLIST = new Set<string>([
   "app/control/config/page.tsx", // control.config.collapsedGroups — per-device group disclosure state
-  "components/fleet/fleet-view.tsx", // meiva.fleet.mobileTab — current mobile tab
   "lib/agents/use-agents.ts", // meiva.active.agent_id — last-viewed agent
   // meiva:note
   // meiva.home.contextPanelOpen: shared-context panel open/closed on this device.
@@ -30,17 +29,14 @@ const SETITEM_ALLOWLIST = new Set<string>([
 // Files permitted to configure a react-resizable-panels split layout through
 // useDefaultLayout (a per-viewport ratio persisted by the library itself).
 const AUTOSAVE_ALLOWLIST = new Set<string>([
-  "components/fleet/fleet-view.tsx", // meiva.fleet.split
   "components/shell/home-layout.tsx", // home Agent Tree + Inspector panel split ratios (task #2556)
   "components/run-timeline/run-timeline-workspace.tsx", // meiva.run-timeline.split (run-timeline details panel width)
 ]);
 
 // The complete set of meiva-namespaced storage keys allowed in source.
 const ALLOWED_KEYS = new Set<string>([
-  "meiva.fleet.mobileTab",
   "meiva.active.agent_id",
   "meiva.home.contextPanelOpen",
-  "meiva.fleet.split",
   "meiva.memory.graph.split",
   "meiva.run-timeline.split",
   "meiva.home.columns.context",

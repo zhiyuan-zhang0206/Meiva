@@ -15,11 +15,9 @@ from base.host.proc import run_bounded
 from base.packages.plugins.config_registration import (
     disk_image_path,
     plugin_bootstrap_config,
-    service_config_packet,
 )
 from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
-from meiva_builtins.plugins.meiva_fleet.services import services
 
 _CHILD = Path(__file__).with_name("child_plugin_config.py")
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -105,26 +103,9 @@ def compose_in_child(mode: str, env: dict[str, str]) -> dict[str, Any]:
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
-def test_remote_cluster_projection_never_overrides_local_host_gate() -> None:
-    write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=99))
-    gateway = FleetConfig(task_escalate_n=7, reduce_context_switch=False).model_dump(mode="json")
-    for name in _host_fields():
-        gateway.pop(name)
-    composed = compose_in_child(
-        "image", _PURE_RUNNER | {PLUGIN_CLUSTER_CONFIG_ENV: json.dumps({"meiva_fleet": gateway})}
-    )["config"]
-    assert composed["task_maintenance_enabled"] is False
-    assert composed["task_escalate_n"] == 7
-    assert composed["reduce_context_switch"] is False
-    refused = compose_in_child("image", _PURE_RUNNER)
-    assert refused["refused"] == "InvalidConfigData"
-    assert "lacks cluster" in refused["message"]
-
-
 def test_gateway_unit_without_a_packet_composes_from_its_local_image() -> None:
-    write_image(FleetConfig(task_escalate_n=7, reduce_context_switch=False))
+    write_image(FleetConfig(reduce_context_switch=False))
     composed = compose_in_child("image", _GATEWAY_UNIT)["config"]
-    assert composed["task_escalate_n"] == 7
     assert composed["reduce_context_switch"] is False
 
 
@@ -136,10 +117,9 @@ def test_invalid_present_projection_is_rejected_even_on_gateway(packet: str) -> 
 
 
 def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None:
-    write_image(FleetConfig(task_escalate_n=7, task_maintenance_enabled=False))
+    write_image(FleetConfig(reduce_context_switch=False))
     packet = json.loads(plugin_bootstrap_config(home=meiva_home()))["meiva_fleet"]
     assert set(packet) == set(FleetConfig.model_fields) - _host_fields()
-    assert packet["task_escalate_n"] == 7
 
     def deliver(delivered: dict[str, object]) -> dict[str, Any]:
         return compose_in_child(
@@ -147,26 +127,12 @@ def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None
             _GATEWAY_UNIT | {PLUGIN_CLUSTER_CONFIG_ENV: json.dumps({"meiva_fleet": delivered})},
         )
 
-    assert deliver(packet | {"task_escalate_n": 99})["config"]["task_escalate_n"] == 7
-    assert deliver(packet | {"task_escalate_n": "invalid"})["refused"] == "InvalidConfigData"
-    without_field = {name: value for name, value in packet.items() if name != "task_escalate_n"}
+    assert deliver(packet)["config"]["reduce_context_switch"] is False
+    assert deliver(packet | {"reduce_context_switch": "invalid"})["refused"] == "InvalidConfigData"
+    without_field = {
+        name: value for name, value in packet.items() if name != "reduce_context_switch"
+    }
     assert deliver(without_field)["refused"] == "SchemaDriftError"
-
-
-def test_gate_and_daemon_birth_share_one_captured_image() -> None:
-    image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=7))
-    service = services(home=meiva_home(), endpoints=_table())[0]
-    assert service.config_inputs == (image,)
-    assert service.gate is not None and "disabled" in str(service.gate())
-    assert service.plugin_config is not None
-    name, captured = service.plugin_config
-    write_image(FleetConfig(task_maintenance_enabled=True, task_escalate_n=99))
-    actual = compose_in_child(
-        "service", {SERVICE_PLUGIN_CONFIG_ENV: service_config_packet(name, captured)}
-    )["config"]
-    assert actual["task_escalate_n"] == 7
-    assert actual["task_maintenance_enabled"] is False
-    assert "disabled" in str(service.gate())
 
 
 def test_fleet_declares_no_core_flag_dependency() -> None:

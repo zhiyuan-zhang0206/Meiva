@@ -4,9 +4,7 @@ A plugin ships a `services.py` exposing `services() -> tuple[ServiceSpec, ...]`;
 `services.supervision.roster.plugin_services.plugin_services()` discovers the INSTALLED plugins (by code presence,
 via `base.packages.plugins.enable_config`) and folds their specs onto `build_services()` so the
 roster stays single-source. These lock the load-bearing invariants:
-- the real meiva_fleet plugin registers task-maintenance (venv-direct cmd whose
-  module lives in the plugin namespace, not core `services.*`, as a standard
-  `/healthz` daemon);
+- the memory plugin contributes the memory indexer;
 - discovery keys on presence, NOT the agent-facing enable-state (a plugin
   disabled via plugins_config still contributes its service);
 - no installed plugins -> nothing folded;
@@ -17,7 +15,6 @@ roster stays single-source. These lock the load-bearing invariants:
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 import pytest
@@ -40,38 +37,18 @@ def _table() -> ServiceEndpoints:
     return ServiceEndpoints.from_fields(get_field, runtime=run_dir(meiva_home()))
 
 
-def test_fleet_plugin_registers_task_maintenance() -> None:
-    """task-maintenance is contributed by the meiva_fleet plugin, not hardcoded in
-    ops — its entry module lives under the plugin namespace."""
+def test_built_in_plugin_registers_its_service() -> None:
     by_session = {s.session: s for s in composition.build_services(home=meiva_home())}
-    tm = by_session["task-maintenance"]
-    # venv-direct launch (no `uv run` wrapper), relative to the source checkout.
-    assert (
-        tm.cmd == ".venv/bin/python -m meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon"
-    )
-    assert tm.health_name == "task_maintenance"
-    assert tm.capabilities == frozenset({"gateway"})
-    # It carries its own gate (the fleet toggle travels with the plugin).
-    assert tm.gate is not None
-
-
-def test_ops_spec_has_no_task_maintenance_hardcoded() -> None:
-    """The core roster groups must not name task-maintenance — it only reaches the
-    roster via plugin discovery."""
-    source = Path(composition.__file__).read_text()
-    literals = {
-        node.value
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
-    assert "task-maintenance" not in literals
+    indexer = by_session["memory-indexer"]
+    assert indexer.cmd == ".venv/bin/python -m services.derived.memory_indexer.daemon"
+    assert indexer.health_name == "memory_indexer"
+    assert indexer.capabilities == frozenset({"gateway"})
+    assert indexer.gate is not None
 
 
 def test_no_installed_plugins_contributes_nothing() -> None:
-    """When no plugin is present, `plugin_services()` contributes nothing and
-    task-maintenance is absent from the roster."""
     names = {s.session for s in composition.build_services(plugin_dirs={}, home=meiva_home())}
-    assert "task-maintenance" not in names
+    assert "memory-indexer" not in names
 
 
 @pytest.mark.parametrize("cluster_enabled", [None, False, True])
@@ -89,7 +66,7 @@ def test_discovery_ignores_agent_enable_state(tmp_path: Path, cluster_enabled: b
     assert known
     assert all(entry.enabled == bool(cluster_enabled) for entry in configured.plugins.values())
     names = {s.session for s in composition.build_services(home=home)}
-    assert "task-maintenance" in names
+    assert "memory-indexer" in names
 
 
 def test_session_collision_fails_fast() -> None:

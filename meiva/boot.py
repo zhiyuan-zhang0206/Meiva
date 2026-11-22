@@ -430,7 +430,7 @@ def ensure_plugins_loaded(
     home = paths.meiva_home()
     # meiva:note
     # A process that uses the SDK without a boot seam — an operator's ad-hoc script, a one-shot
-    # that calls `meiva.tasks` before any logger binds — used to write its audit rows as
+    # that calls `meiva.memory` before any logger binds — used to write its audit rows as
     # `machine='unknown', process='unknown'`, which answers nothing (task #6347). Loading the
     # plugin surface is exactly the moment such a process begins acting as an SDK client, and this
     # is the composition root that already resolves the home. It never renames a process that
@@ -748,7 +748,7 @@ def bind_launched_context() -> MeivaContext | None:
 # instead of MEIVA_AGENT_ID, so every "is this an agent-launched child" test above
 # answers no. The attachment is made on the first read that needs an identity —
 # `meiva.context`, `meiva.self.AGENT_ID`, any `meiva.agents` call, a plugin namespace such as
-# `meiva.tasks` — and never at import: attaching replays the agent's plugin-state
+# `meiva.memory` — and never at import: attaching replays the agent's plugin-state
 # snapshot through the codec, which opens the database, and a provider runs a fresh
 # Python per tool call.
 #
@@ -776,7 +776,7 @@ def harness_failure(exc: BaseException) -> HarnessAttachError:
         "this process was started by a harness bridge, but the SDK could not borrow the "
         f"session's identity: {exc}. Calls that do not need the identity still work (an "
         "absolute-path file read); meiva.ui, meiva.self.AGENT_ID, the "
-        "plugin namespaces (meiva.tasks) and meiva.agents all fail with this error. A "
+        "plugin namespaces (meiva.memory) and meiva.agents all fail with this error. A "
         "session that expired or ended cannot be attached again: stop retrying and report "
         "this failure in your reply instead of working around it."
     )

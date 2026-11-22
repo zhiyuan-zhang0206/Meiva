@@ -1,15 +1,14 @@
 # Inspector reads and refresh
 
-Three reads with independent loading and error state
+Two reads with independent loading and error state
 (`lib/inspector/inspector-queries.ts`): current state (`inspectLiveQueryKey`),
-the window statistics of the selected time range (`inspectWindowedQueryKey`), and
-the plugin widgets (`inspectWidgetsQueryKey`). All three keys carry the agent id,
+and statistics for the selected time range (`inspectWindowedQueryKey`). Both keys carry the agent id,
 run only while the panel is open and only for the selected agent, and abort their
 HTTP request when the panel closes or the selection switches away (an observer
 being disabled does not by itself cancel transport).
 
 **Response identity.** Beyond the agent-scoped keys, each response is re-checked
-against the selection before it can render: current state and widgets must echo
+against the selection before it can render: current state must echo
 the selected agent, statistics must also echo the requested window
 (`matchesInspectWindow`). A malformed or misrouted payload is never rendered —
 not even as plain text under React Query's `keepPreviousData` — so one agent's
@@ -34,11 +33,8 @@ showing the old numbers, rendering empty metric skeleton cards, or remounting th
   zoom without enlarging the section header's time range.
 - Question events: the global questions fold invalidates only the live query without
   re-reading statistics.
-- Task events (`task_created` / `task_updated` for the selected agent): refresh
-  the widget read only, since task movement can change the task a widget row
-  points at.
 - 60-second interval (while open) reconciles statistics; compact invalidation is
-  commit-safe; a reconnect repairs the live and widget reads immediately
+  commit-safe; a reconnect repairs the live read immediately
   (statistics reconcile on their next interval), and repeated reconnect storms
   never restart or refetch the expensive historical work.
 
@@ -50,15 +46,11 @@ HTTP waiter does not shorten it.
 without amber stale dots or questions (transient refresh failures remain silent while
 TanStack Query retries in the background); a cold failure with no data replaces
 the section body with an `InlineError` + retry (`Liveness` for the live read,
-`Activity` for the windowed read, and an error block below `Page` when the widget
-read fails without cached widgets), and a retry re-fires only that section's read —
-the live failure cannot hide statistics or widgets and vice versa.
+`Activity` for the windowed read). A retry re-fires only that section's read.
 
 **Retention and the switch budget** (`lib/layout/switch-budget.ts`): inactive
-entries persist for `INSPECTOR_RETENTION_MS` (30 minutes) per agent — both as
-query `gcTime` and as the widget read's `staleTime` — so a back-switch inside the
-window renders the retained snapshot immediately (no cold pending state) and
-revalidates at most the two live reads, never a third widget read; only the
-selected agent's keys are ever rendered, so retention cannot leak across agents.
+queries retain responses per agent for `INSPECTOR_RETENTION_MS` (30 minutes).
+A back-switch within that window renders the retained data immediately and
+revalidates the two reads.
 
 Parent: [Inspector Panel](inspector.md).

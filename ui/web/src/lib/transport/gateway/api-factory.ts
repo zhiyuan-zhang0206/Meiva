@@ -4,7 +4,6 @@ import type {
   AttentionCounts,
   AgentInspectStatistics,
   AgentInspectLive,
-  InspectWidget,
   AgentMessageEnqueued,
   AgentRow,
   WireAgentRow,
@@ -18,10 +17,6 @@ import type {
   DeliveredUploadAcceptance,
   DeliveredUploadStatus,
   StagedFile,
-  TaskListResponse,
-  TaskFields,
-  TaskRow,
-  TaskSummaryRow,
   PendingInbound,
   RunTimelineContext,
   RunTimelineLinkContent,
@@ -34,7 +29,7 @@ import type {
   ReplySuggestionResponse,
 } from "../../contracts/types";
 import { projectAgentStatus } from "../../contracts/types";
-import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath } from "./routes/agent-routes";
+import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath } from "./routes/agent-routes";
 import { createControlApi } from "./api-control";
 import { agentQuestionsPath } from "./routes/control-routes";
 import type { Http } from "./http";
@@ -166,19 +161,6 @@ export function createApi(http: Http) {
       );
     },
 
-    getAgentInspectWidgets: (
-      agentId: number,
-      signal?: AbortSignal,
-    ): Promise<InspectWidget[]> => {
-      return jsonWithTimeout<InspectWidget[]>(
-        `/api/agents/${agentId}/inspect/widgets`,
-        {},
-        INSPECT_REQUEST_TIMEOUT_MS,
-        signal,
-        "Inspector widgets request",
-      );
-    },
-
     getAgentShell: (agentId: number, sessionId: number, lines?: number): Promise<ShellCapture> => {
       return f(agentShellPath(agentId, sessionId, lines)).then(ok<ShellCapture>);
     },
@@ -222,14 +204,6 @@ export function createApi(http: Http) {
 
     getAgent: (agentId: number, signal?: AbortSignal): Promise<AgentRow> =>
       f(`/api/agents/${agentId}`, { signal }).then(ok<WireAgentRow>).then(projectAgentStatus),
-
-    getTasks: <T extends TaskFields = "full">(
-      opts?: { window?: string; fields?: T },
-    ): Promise<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>> => {
-      return f(tasksPath(opts)).then(
-        ok<TaskListResponse<T extends "full" ? TaskRow : TaskSummaryRow>>,
-      );
-    },
 
     stageUploadFile: (
       agentId: number,

@@ -11,7 +11,6 @@ from pydantic import (
 )
 
 from base.agents.observation.evidence import AgentObservation
-from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import LivenessState
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
@@ -354,40 +353,3 @@ class PluginMetricResult(BaseModel):
     error: str | None = None
     value: float | None = None
     series: list[MetricPoint] = Field(default_factory=list[MetricPoint])
-
-
-class InspectWidgetTask(BaseModel):
-    """One task row of a resolved ``taskList`` widget — an element of
-    `InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).
-
-    Kernel-resolved data, not policy: the row carries only what the console
-    renders (id for the `/fleet?task=` link, title for the text, priority
-    for the stakes badge — task #3819, user request 2026-09-17). The list is
-    already filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    id: int
-    title: str
-    priority: Priority
-
-
-class InspectWidgetResult(BaseModel):
-    """One plugin widget rendered for the inspector panel — an element of
-    GET /api/agents/{id}/inspect/widgets.
-
-    The resolved twin of a registered `InspectWidgetSpec`
-    (`base/packages/plugins/surface/inspector.py`): `plugin` + `id` name the registration,
-    `kind` selects the console renderer (a closed set; an unknown kind is
-    skipped by the console), and the payload field the kind reads (`tasks`)
-    carries the kernel-resolved rows. A widget with an empty payload is
-    dropped from the response entirely (the panel's empty-section rule)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    plugin: str
-    id: str
-    kind: Literal["taskList"]
-    order: int
-    title: str | None = None
-    tasks: list[InspectWidgetTask] = Field(default_factory=list[InspectWidgetTask])

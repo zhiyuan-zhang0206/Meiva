@@ -18,7 +18,7 @@ or a blocked graph invocation.
   another incarnation's work.
 - **Foreground steering reservation**: a batch of steerable inbounds (`chat`,
   `system_note`, or `heartbeat`) reserved by an external harness stays pending
-  with a pickup timestamp. Ordinary claim and task-assignment supersession
+  with a pickup timestamp. Ordinary claim and lifecycle supersession
   exclude those rows. Provider acknowledgement commits the batch's timeline
   items and consumes the reservation together. A definite rejection clears the
   timestamps. Recovery retires unresolved reservations with timeline notes

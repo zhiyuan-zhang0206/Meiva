@@ -22,7 +22,6 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import LiteralString
 
 from psycopg import sql
 from psycopg_pool import ConnectionPool
@@ -48,16 +47,6 @@ _log = logging.getLogger("services.wake.delivery_watchdog.stranded_wake")
 # `agents_meta.wake_suppress_reason` must be able to tell a stranded-wake window
 # from the until-human permanent-reject halt.
 STRANDED_WAKE_REASON = "stranded_wake"
-
-# meiva:note
-# What counts as work that may wake a dead owner: a chat, or a task direction —
-# the payload predicate `supersede_task_assignments` settles unclaimed directions
-# by, so the two agree on what a direction is.
-_STRANDED_KIND: LiteralString = (
-    "(m.kind = 'chat' OR (m.kind = 'system_note' "
-    "AND m.payload->'task_notification' = 'true'::jsonb "
-    "AND m.payload->'delivery_resurrect' = 'true'::jsonb))"
-)
 
 # meiva:note
 # The wake this loop runs: production passes `wake_stranded`, and a test passes
@@ -113,7 +102,7 @@ def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOw
                 "JOIN agents_meta ON agents_meta.id = m.agent_id "
                 "WHERE agents_meta.status = 'terminated' "
                 "  AND m.status = 'pending' "
-                "  AND {kind} "
+                "  AND m.kind = 'chat' "
                 "  AND {fence} "
                 "  AND m.created_at > now() - make_interval(secs => %s) "
                 "  AND NOT {notice} "
@@ -123,7 +112,6 @@ def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOw
                 "  AND {breaker} "
                 "ORDER BY m.agent_id, m.id"
             ).format(
-                kind=sql.SQL(_STRANDED_KIND),
                 fence=sql.SQL(TRIGGER_AFTER_KILL_COMMAND),
                 notice=sql.SQL(SYSTEM_NOTICE_SOURCE),
                 breaker=sql.SQL(RECOVERY_BREAKER_CLEAR),

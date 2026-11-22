@@ -2,7 +2,7 @@
 # `record.py` shapes one self-evolution dataset record from telemetry events, log events, inbound messages, and checkpoint transcripts while staying separate from `collect.py`'s database and HTTP transport. `count_tool_calls` parses executed code with `SyntaxWarning` suppressed so agent regex escapes do not leak into schedule stderr. `_is_exec_fail` matches only terminal failure event names (`exec_envelope` is a wrapper, not a failure). `_msg_text` extracts human-visible text from checkpoint message blocks and skips `thinking` and `tool_use` blocks so silent tool turns do not serialize as `"thinking tool_use"`. Broadcast inbound instructions are excluded from per-agent `corrections` and `followup_prompts`.
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.md
 # meiva:note
-# `record._evidence_block` reports what a record is based on; `record._grade` grades that block in priority order — no telemetry events, or no tokens: `none` / `no_telemetry`; no task prompt: `partial` / `no_task`; a lifecycle status other than `terminated`: `partial` / `no_terminal`; all three present: `complete` with no reason. `prompt_source` names the `_task_prompt` branch that supplied the prompt; `task_updates.note` counts note-only receipts; `task_state_changes` counts status receipts whose status differs from the actor's previous declaration on that task, `in_progress` being the birth state. `collect._task_receipts_by_agent` supplies the receipt counts in one grouped query per agent batch, and the inbounds `collect` already fetches carry `claimed`, so the block adds no per-agent query.
+# `record._evidence_block` reports what a record is based on; `record._grade` grades that block in priority order — no telemetry events, or no tokens: `none` / `no_telemetry`; no task prompt: `partial` / `no_task`; a lifecycle status other than `terminated`: `partial` / `no_terminal`; all three present: `complete` with no reason. `prompt_source` names the `_task_prompt` branch that supplied the prompt. The inbounds `collect` already fetches carry `claimed`, so the block adds no per-agent query.
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.md
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from record_inputs import (
     EventFact,
     InboundFact,
     RunInputs,
-    TaskReceipts,
     TranscriptLine,
     TranscriptRow,
 )
@@ -372,7 +371,6 @@ def _grade(ev: Evidence) -> tuple[str, str | None]:
 def _evidence_block(
     run: RunInputs, stats: _EventStats, prompts: PromptFields, final_output: str
 ) -> Evidence:
-    receipts = run.task_receipts if run.task_receipts is not None else TaskReceipts(0, 0, 0, 0)
     return {
         "telemetry_events": len(run.events),
         "audit_events": len(run.log_events),
@@ -385,12 +383,6 @@ def _evidence_block(
         "terminal_status": run.meta.status,
         "inbound_total": len(run.inbounds),
         "inbound_claimed": sum(1 for message in run.inbounds if message.claimed),
-        "task_updates": {
-            "note": receipts.note,
-            "status": receipts.status,
-            "results": receipts.results,
-        },
-        "task_state_changes": receipts.state_changes,
         "exec_ok": stats.exec_ok,
         "exec_failed": stats.exec_failed,
     }
@@ -435,5 +427,5 @@ def build_record(run: RunInputs) -> Record:
     evidence = _evidence_block(run, stats, prompts, record["final_output"])
     record["evidence"] = evidence
     record["evidence_grade"], record["unknown_reason"] = _grade(evidence)
-    record["schema_version"] = 2
+    record["schema_version"] = 3
     return Record(**record, label=label(record))

@@ -6,7 +6,7 @@ Text written as Markdown by a model or an author renders through the one `ChatMa
   through the shared allowlist and local references resolved through the
   authenticated document resource API.
 - Timeline: agent replies, human and inter-agent `inbound_chat` bodies, reasoning, compact summaries, system prompts, and system markers (`memory` / `agent_memory` / `inherited_memory` and guidance notes).
-- Open-question content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
+- Open-question content and memory-note bodies.
 
 Ordinary Markdown images and the workspace file viewer (`WorkspaceFileView`)
 share the same explicit workspace-owner resolution over the authenticated

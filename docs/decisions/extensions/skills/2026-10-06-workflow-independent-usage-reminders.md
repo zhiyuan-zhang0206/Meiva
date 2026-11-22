@@ -35,4 +35,4 @@ drop them after old readers and writers have been retired.
 
 Current owners: [Workflow](../../../../meiva_builtins/skills/practice/meiva-workflow/SKILL.md),
 [usage reports](../../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md),
-and [task records](../../../../meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.meiva.okf.md).
+and task records.

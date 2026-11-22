@@ -30,7 +30,6 @@ from base.daemon.health import DaemonProbe, probe_daemon
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.packages.plugins.config_registration import disk_image_path
 from base.paths import meiva_home, run_dir
-from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster import composition
 from services.supervision.roster.healthz import healthz_url
@@ -60,9 +59,6 @@ def plugin_config_images(unit_home: Path) -> None:
     image = unit_home / "configs" / "meiva_memory" / "config.json"
     image.parent.mkdir(parents=True)
     image.write_text('{"indexer_enabled": true, "lfs_enabled": false, "lfs_url": ""}\n')
-    fleet_image = unit_home / "configs" / "meiva_fleet" / "config.json"
-    fleet_image.parent.mkdir(parents=True)
-    fleet_image.write_text(FleetConfig().model_dump_json())
 
 
 @dataclass(frozen=True)
@@ -133,13 +129,6 @@ _LEGACY = (
         stop_ceiling_s=OPS_STOP_CEILING_S,
     ),
     _Legacy(
-        "task-maintenance",
-        "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon",
-        _GATEWAY,
-        True,
-        gated=True,
-    ),
-    _Legacy(
         "memory-indexer",
         "services.derived.memory_indexer.daemon",
         _GATEWAY,
@@ -173,10 +162,7 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         # Plugin ownership adds an image input; the prior launch facts stay fixed.
         config_inputs=(disk_image_path("meiva_memory", home=meiva_home()),)
         if row.session == "memory-indexer"
-        else (disk_image_path("meiva_fleet", home=meiva_home()),)
-        if row.session == "task-maintenance"
         else (),
-        plugin_config=("meiva_fleet", FleetConfig()) if row.session == "task-maintenance" else None,
         stop_ceiling_s=row.stop_ceiling_s,
     )
 

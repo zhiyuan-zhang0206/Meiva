@@ -94,21 +94,21 @@ def _run_probe(
 def test_a_process_without_a_handle_is_unchanged(marker: Path) -> None:
     report = _run_probe(marker)
 
-    assert report["has_tasks_at_import"] is False
+    assert report["has_memory_at_import"] is False
     assert report["files_read"] == {"ok": "'marker'"}
     assert report["shell_run"] == {"ok": "'hi'"}
     assert report["agent_id"] == {"ok": "None"}
     assert report["context"]["error"] == "ContextOutsideProcessError"
-    assert report["tasks"]["error"] == "AttributeError"
+    assert report["memory"]["error"] == "AttributeError"
 
 
 def test_a_dead_session_keeps_what_needs_no_identity(marker: Path) -> None:
     report = _run_probe(marker, handle="hx_deadbeef")
 
-    assert report["has_tasks_at_import"] is False
+    assert report["has_memory_at_import"] is False
     assert report["files_read"] == {"ok": "'marker'"}
     assert report["shell_run"] == {"ok": "'hi'"}
-    for label in ("agent_id", "agent_id_again", "context", "tasks", "agents_send"):
+    for label in ("agent_id", "agent_id_again", "context", "memory", "agents_send"):
         assert report[label]["error"] == "HarnessAttachError", label
     assert "no harness session matches this handle" in report["agent_id"]["message"]
     assert "stop retrying and report this failure" in report["agent_id"]["message"]
@@ -140,9 +140,9 @@ def test_a_live_registration_attaches_on_the_first_identity_read(
 
     report = _run_probe(marker, handle=handle, home=home)
 
-    assert report["has_tasks_at_import"] is False, "import must not replay the state snapshot"
+    assert report["has_memory_at_import"] is False, "import must not replay the state snapshot"
     assert "error" not in report["agent_id"] or report["agent_id"]["error"] == "HarnessAttachError"
-    assert "error" not in report["tasks"] or report["tasks"]["error"] == "HarnessAttachError"
+    assert "error" not in report["memory"] or report["memory"]["error"] == "HarnessAttachError"
     assert "no harness session matches" not in report["agent_id"].get("message", "")
 
 

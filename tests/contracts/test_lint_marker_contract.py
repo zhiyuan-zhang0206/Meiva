@@ -7,8 +7,6 @@ from uuid import uuid4
 
 import pytest
 
-from base.agents.messages.kwargs import NoteTag
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "meiva_builtins", "demos")
 
@@ -60,12 +58,11 @@ def test_system_note_writers_use_notetag_values() -> None:
             )
 
 
-def test_send_system_note_default_tag_is_live_notetag_value() -> None:
+def test_send_system_note_requires_a_tag() -> None:
     from meiva.agents import send_system_note
 
     default = inspect.signature(send_system_note).parameters["tag"].default
-    assert isinstance(default, str)
-    assert default in {tag.value for tag in NoteTag}
+    assert default is inspect.Parameter.empty
 
 
 def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
@@ -76,9 +73,7 @@ def test_send_system_note_rejects_unknown_notetag_before_gateway() -> None:
             7,
             "note",
             tag="unrecognized",
-            task_id=None,
             resurrect=True,
             idempotency_key=str(uuid4()),
         )
-    assert "task" in str(exc_info.value)
     assert "lifecycle_fork" in str(exc_info.value)

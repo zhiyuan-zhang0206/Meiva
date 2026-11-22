@@ -1,10 +1,8 @@
-exports = ["alerts-badge.tsx", "connection-notice.tsx", "question-form.tsx", "questions-form.tsx", "open-tasks-notice.tsx", "toast.tsx"]
+exports = ["alerts-badge.tsx", "connection-notice.tsx", "question-form.tsx", "questions-form.tsx", "toast.tsx"]
 
 [uses]
 "alerts-badge.test.tsx" = ["alerts-badge.tsx"]
 "connection-notice.test.tsx" = ["connection-notice.tsx"]
 "questions-form.test.tsx" = ["questions-form.tsx"]
 "questions-form.tsx" = ["question-form.tsx"]
-"open-tasks-notice.test.tsx" = ["open-tasks-notice-dialog.tsx", "open-tasks-notice.tsx"]
-"open-tasks-notice.tsx" = ["open-tasks-notice-dialog.tsx"]
 "toast.test.tsx" = ["toast.tsx"]

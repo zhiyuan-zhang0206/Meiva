@@ -40,32 +40,6 @@ class PrFlowDaily(TypedDict):
     ready_to_merge_p90_seconds: NotRequired[float]
 
 
-class TaskReminderDigest(TypedDict):
-    owner_id: int
-    task_count: int
-    task_ids: list[int]
-
-
-class TaskEscalation(TypedDict):
-    owner_id: int
-    task_count: int
-    task_ids: list[int]
-    leg: Literal["delegator"]
-
-
-class TaskReminderUndelivered(TypedDict):
-    owner_id: int
-    count: int
-
-
-class TaskReminderRerouted(TypedDict):
-    owner_id: int
-    leg: Literal["manager"]
-    recipient: int
-    task_count: int
-    task_ids: list[int]
-
-
 class UnderstandingEnqueueFailed(TypedDict):
     agent_id: int
     compact_version: int
@@ -264,51 +238,6 @@ EVENTS: dict[str, EventSpec] = {
         "(absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
         site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
-    ),
-    # meiva:note
-    # Persisted because the reminder/escalation record is the only external evidence a
-    # stalled task leaves: the root's `task-telemetry` diagnostic compares these rows with
-    # the digests the daemon actually delivered. A task row's counters describe one window
-    # and move on; a stall assessment reads this history. Left unmarked, only Loki and the
-    # JSONL mirror keep them, which is how 2026-10-03 → 10-25 went dark unnoticed.
-    "task_reminder_digest": telemetry_event(
-        "task_reminder_digest",
-        "overdue-task owner digest",
-        payload=TaskReminderDigest,
-        tier="noise",
-        site="task_maintenance/daemon.py:run_reminders",
-        persist=True,
-    ),
-    # meiva:note
-    # A task that has stayed overdue past its interval plus one sweep plus the longest digest
-    # hold, with `reminder_count` still zero, has never had a reminder delivered. Counting sits
-    # at delivery, so a broken delivery path leaves both sides quiet: no message, and no counter
-    # to notice (the blind spot #8596 opened, task #6399). One event per owner per sweep, with
-    # the count -- this is an anomaly, not a breadcrumb. Not persisted: `persist` marks an event
-    # a Postgres reader queries by name, and no reader names this one yet. It is read where an
-    # anomaly is read instead -- `core_events_what_happened` lists the name, so the row reaches
-    # the "what happened" board through the log stream.
-    "task_reminder_undelivered": telemetry_event(
-        "task_reminder_undelivered",
-        "overdue task whose owner never received a reminder: zero deliveries past the grace",
-        payload=TaskReminderUndelivered,
-        tier="anomaly",
-        site="task_maintenance/undelivered.py:report_undelivered",
-    ),
-    "task_reminder_rerouted": telemetry_event(
-        "task_reminder_rerouted",
-        "overdue-task reminder delivered to a terminated owner's manager",
-        payload=TaskReminderRerouted,
-        tier="noise",
-        site="task_maintenance/daemon.py:run_reminders",
-        persist=True,
-    ),
-    "task_escalation": telemetry_event(
-        "task_escalation",
-        "stalled-task escalation",
-        payload=TaskEscalation,
-        site="task_maintenance/daemon.py:run_escalate",
-        persist=True,
     ),
     "label_generated": telemetry_event("label_generated", "label auto-generated", tier="noise"),
     "label_generate_failed": telemetry_event(

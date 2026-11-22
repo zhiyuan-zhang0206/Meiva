@@ -2,7 +2,7 @@
 
 Concrete spawn-prompt templates for the meiva-corp role suite. Fill the
 placeholders (`{...}`) for your cluster, then pass as the `prompt` argument to
-`meiva.agents.spawn` (or `create_and_assign` when the role is tied to a task).
+`meiva.agents.spawn`.
 
 Each prompt is self-contained — the new agent has no context about why it was
 spawned. Mention the skills it should use (every worker already indexes all

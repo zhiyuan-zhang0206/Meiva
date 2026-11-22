@@ -20,8 +20,6 @@ from gateway.tests.routers.cluster_endpoints.cluster_support import (
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
     seed_agent_on_machine,
     seed_away_machine,
-    seed_drain_owner,
-    seed_in_progress_task,
 )
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps, completed, runner_ops
 
@@ -253,7 +251,7 @@ class TestAgentMachineList:
 
 
 class TestMachinePauseResume:
-    def test_pause_drains_terminates_and_hides_from_roster(
+    def test_pause_terminates_and_hides_from_roster(
         self,
         db_conn: psycopg.Connection,
         set_machine_identity: MachineIdentitySetter,
@@ -264,16 +262,13 @@ class TestMachinePauseResume:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:  # type: ignore[no-untyped-def]
-        """The full pause contract: tasks of the machine's live agents are
-        drained to #405 with a note, every agent is terminated (graceful via
-        the in-process lifecycle stub), and the machine vanishes from the
-        roster + agent machine list. The row keeps its registration info."""
+        """Pause terminates agents and hides the machine from the live roster
+        while keeping its registration info."""
         # identity carries agent-runner so spawn_agent works; the DB row for
         # the local host stays gateway-only (roster's local lightweight path)
         machine: MachineIdentityReader = set_machine_identity(role="agent-runner", name="test-host")
         seed_away_machine(db_conn)
-        seed_drain_owner(db_conn)
-        aid = seed_agent_on_machine(
+        seed_agent_on_machine(
             db_conn,
             "away",
             config_authority=config_authority,
@@ -289,7 +284,6 @@ class TestMachinePauseResume:
             database_gate=database_gate,
             machine_identity=machine_identity,
         )
-        seed_in_progress_task(db_conn, aid, "task-on-away")  # pyright: ignore[reportUnknownArgumentType]
         # meiva:note
         # The away machine's ops server is the runner that executes lifecycle ops in this process.
         db_conn.execute(
@@ -306,7 +300,6 @@ class TestMachinePauseResume:
         assert body["paused"] is True
         assert body["terminated_agents"] == 2
         assert body["force_marked_agents"] == 0
-        assert body["reassigned_tasks"] == 1
         assert body["pause_reason"] == "\u4f11\u5047\u4e00\u5468"
         assert body["paused_at"] is not None
 
@@ -317,18 +310,11 @@ class TestMachinePauseResume:
             live_row = _existing_row(cur)
             (n_live,) = live_row  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "SELECT owner, results FROM agent_tasks WHERE title = 'task-on-away'"
-            )
-            task_row = _existing_row(cur)
-            owner, results = task_row  # pyright: ignore[reportUnknownMemberType]
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
                 "SELECT gateway_url, role FROM machines WHERE name = 'away'"
             )
             machine_row = _existing_row(cur)
             gateway_url, role = machine_row  # pyright: ignore[reportUnknownMemberType]
         assert n_live == 0
-        assert owner == 405
-        assert "machine pause" in results or "paused" in results
         assert gateway_url == gateway_local_runner.url and role == [
             "agent-runner"
         ]  # registration kept
@@ -470,39 +456,3 @@ class TestMachinePauseResume:
         with gateway_test_client(machine=machine) as client:
             r = client.post("/api/cluster/machines/ghost/resume", json={})
         assert r.status_code == 404
-
-
-# meiva:note
-# The reserved drain-owner id must not be a number the id sequence hands out. The
-# failure this pins is real: with the sequence where the shard's earlier tests left
-# it, the second spawn of the pause test took the reserved id and the insert failed
-# on `agents_pkey`. The sequence is placed by hand here so the collision is a test
-# outcome, not a property of how many agents happened to be born before this file.
-# meiva:link gateway/tests/routers/cluster_endpoints/cluster_support.py
-def test_a_spawn_never_takes_the_reserved_drain_owner_id(
-    db_conn: psycopg.Connection,
-    *,
-    config_authority: ConfigAuthority,
-    model_catalog: ModelCatalog,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentityReader,
-) -> None:
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT setval(pg_get_serial_sequence('agents', 'id'), 404, true)")
-    db_conn.commit()
-
-    seed_away_machine(db_conn)
-    seed_drain_owner(db_conn)
-    born = [
-        seed_agent_on_machine(
-            db_conn,
-            "away",
-            config_authority=config_authority,
-            model_catalog=model_catalog,
-            database_gate=database_gate,
-            machine_identity=machine_identity,
-        )
-        for _ in range(2)
-    ]
-
-    assert born == [406, 407]

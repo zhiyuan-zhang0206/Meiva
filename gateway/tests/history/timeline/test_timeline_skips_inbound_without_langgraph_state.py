@@ -269,6 +269,32 @@ class TestSystemPromptInColdLoad:
         # The rest is the newest window in order (0.0 is prepended, not replacing)
         assert data["items"][1]["item_id"] == "11.0"
 
+    def test_historical_system_note_keeps_its_kind_and_content(
+        self, db_conn: psycopg.Connection, test_client: GatewayTestClient
+    ) -> None:
+        tid = create_agent(db_conn)
+        content = 'Task #1 "old note" was assigned to you.'
+        self._put_checkpoint(
+            tid,
+            [
+                HumanMessage(
+                    content=content,
+                    additional_kwargs={
+                        "meiva_msg_type": "system_note",
+                        "meiva_note_tag": "task",
+                        "meiva_task_id": 1,
+                    },
+                )
+            ],
+        )
+
+        response = test_client.get(f"/api/agents/{tid}/timeline")
+        assert response.status_code == 200
+        (note,) = response.json()["items"]
+        assert note["kind"] == "system_marker"
+        assert note["payload"] == content
+        assert note["source"] == "task"
+
     def test_short_conversation_does_not_duplicate(
         self, db_conn: psycopg.Connection, test_client: GatewayTestClient
     ) -> None:

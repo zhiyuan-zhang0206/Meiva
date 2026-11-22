@@ -11,7 +11,6 @@ from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
     harnesses=frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}),
     entries=(
-        EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
         EntryPoint(
             "meiva.ui",
             "deliver through the configured user delivery protocol",
@@ -25,8 +24,8 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
         "seen by them.",
     ),
     discipline=(
-        "When coordinating Fleet work, record status in `meiva.tasks` and deliver progress to "
-        "your agreed delegator (`meiva.agents.send_message`).",
+        "Send assignments and progress with `meiva.agents.send_message`. When your work "
+        "is complete, `meiva.self.terminate(message=...)` reports to your nearest living ancestor.",
     ),
 )
 
@@ -34,36 +33,33 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
 def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     if _slices.prompt.user_delivery_mode == "sdk":
-        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Apply the core user-attention test before publishing information with meiva.ui.publish; use meiva.ui.ask for questions only the user can answer. Peer reporting does not itself require user publication."
+        return (
+            "## Fleet\n\n"
+            "Send assignments and progress with `meiva.agents.send_message`. "
+            "Use `meiva.ui.ask` for user decisions and apply the core user-attention test "
+            "before publishing information with `meiva.ui.publish`."
+        )
     return (
         "## Fleet\n\n"
-        "Fleet provides user questions "
-        "(`meiva.ui.ask`), task tracking (`meiva.tasks`), and peer collaboration. "
-        "Workflow selection belongs to `meiva-workflow`; enabling Fleet does not "
-        "require a registry task or a management tree. Agents are "
-        "peers; accepted assignments determine reporting, not spawn ancestry. "
-        "Before using Fleet coordination or task tracking, load `meiva-fleet` "
-        "and its applicable operating contract.\n\n"
+        "Workflow selection belongs to `meiva-workflow`. For Fleet coordination, "
+        "load `meiva-fleet` and its applicable operating contract.\n\n"
         "## Agent-to-agent communication\n\n"
-        "Message another agent only when they must reply, decide, act, or know "
-        "something to continue; otherwise record status in the task or your working "
-        "notes. Say what happened, what you need, and what breaks without it. "
-        "Conversation output is not a peer message: use `meiva.agents.send_message` "
-        "to deliver the message directly to whoever must act. Act on received "
-        "messages without courtesy ACKs; explicit reporting agreements still apply. "
-        "Use one reporter per milestone; do not relay unchanged results or "
-        "duplicate task-log writes. Periodic checking does not imply periodic "
-        "broadcasting, including generated watchers and schedules.\n\n"
-        "Apply the core user-attention test before choosing user delivery; completion, "
-        "errors and having no delegator do not alone justify a visible message. "
-        "Deliver qualifying information through the configured protocol. Ask for decisions with "
-        "`meiva.ui.ask`. Text questions have one answer field; choices keep an optional "
-        "Note. Questions persist until "
-        "the user answers or explicitly closes them. User-only decisions reach the user "
-        "directly; progress for accepted delegated work reaches its agreed "
-        "delegator. With no delegator, deliver directly only when the user-attention "
-        "test is met. Keep other results in working records; do not duplicate the "
-        "delegator's user delivery."
+        "Send assignments and progress directly to whoever must act with "
+        "`meiva.agents.send_message`. Message another agent only when they must reply, "
+        "decide, act, or know something to continue. Say what happened, what you need, "
+        "and what breaks without it. Use one reporter per milestone. "
+        "Act on received messages without courtesy ACKs; explicit reporting agreements still apply. "
+        "Periodic checking does not imply periodic broadcasting. "
+        "When your work is complete, `meiva.self.terminate(message=...)` reports the "
+        "result to your nearest living ancestor. If a different agent delegated the work, "
+        "send the result to them directly.\n\n"
+        "Use schedules for timed checks and recurring work, GitHub Issues for repository bugs "
+        "and CI follow-up, and workspace `MEMORY.md` for durable working context.\n\n"
+        "Apply the core user-attention test before choosing user delivery. "
+        "Deliver qualifying information through the configured protocol. "
+        "User-only decisions reach the user directly. Ask for decisions with `meiva.ui.ask`. "
+        "Text questions have one answer field; choices keep an optional Note. "
+        "Questions persist until the user answers or explicitly closes them."
     )
 
 
@@ -87,7 +83,7 @@ def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog)
 def fleet_compact_reminder(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     return (
-        "If you are coordinating work, reconcile changed task status and record "
+        "If you are coordinating work, reconcile changed work status and record "
         "outstanding assignments, promised reports, blockers and artifact locations "
         "in your durable working notes. Keep any user-facing commitments current "
         "in the shared to-user document. Update existing records only when something "

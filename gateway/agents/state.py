@@ -195,7 +195,7 @@ async def post_agent_message(
 @router.post(
     "/api/agents/{agent_id}/system-note",
     status_code=201,
-    description="Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of a chat\npeer message. Task notifications (assign / update / reminder) are the\ncurrent family (`note_tag='task'`).\n\n`body.resurrect` mirrors the chat path's auto-resurrect but is a choice,\nnot a given: task assignment (a delegator direction) wakes a terminated\nowner, while plain update / reminder notices must not (user ruling\n2026-08-27 — notification messages never resurrect a terminated owner).\n\nA required Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
+    description="Deliver a framework system note to the specified agent.\n\nThe note is queued as a kind='system_note' inbound; the agent's claim\nrenders it as a system note (system_marker, NoteTag `body.note_tag`) in\nits timeline — no Agent prefix, no peer timestamp — instead of peer chat.\n\n`body.resurrect` controls whether the gateway wakes a terminated recipient.\n\nA required Idempotency-Key names one logical note, including its\nresurrection policy. Replays return the original inbound id and repair\nits wake tail; changed requests conflict (409). The inbound remains kind='system_note'.\n\n404: agent_id does not exist. 413: content exceeds the 1 MiB transport\nlimit. 422: note_tag is not a NoteTag value, or source is not a legal\nenvelope source.",
 )
 async def post_agent_system_note(
     agent_id: int,
@@ -233,7 +233,6 @@ async def post_agent_system_note(
         body.content,
         body.source,
         body.note_tag,
-        body.task_id,
         request_inbound_provenance(request),
         client_message_id=idempotency_key,
         resurrect=body.resurrect,

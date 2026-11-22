@@ -20,7 +20,6 @@ class CallerFacts:
     agent_id: int | None
     actor: str | None
     owns_loop: bool
-    has_lease: bool
     harness: str = "meiva"
 
 
@@ -44,7 +43,6 @@ def caller_facts(identity: AgentIdentity | None, *, harness: str = "meiva") -> C
         agent_id=identity.agent_id,
         actor=identity.actor,
         owns_loop=bool(identity.owns_loop),
-        has_lease=identity.lease is not None,
         harness=harness,
     )
 

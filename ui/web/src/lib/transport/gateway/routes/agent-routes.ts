@@ -1,4 +1,3 @@
-import type { TaskFields } from "../../../contracts/types";
 import { withQuery } from "./route-query";
 
 export function inspectStatisticsPath(agentId: number, hours?: number | null): string {
@@ -32,11 +31,4 @@ export function listAgentsPath(options: {
 export function toUserPath(agentId: number, files: readonly string[]): string {
   const query = new URLSearchParams(files.map((file) => ["file", file]));
   return `/api/agents/${agentId}/to-user${query.size ? `?${query.toString()}` : ""}`;
-}
-
-export function tasksPath(opts?: { window?: string; fields?: TaskFields }): string {
-  const params = new URLSearchParams();
-  if (opts?.window != null) params.set("window", opts.window);
-  if (opts?.fields != null) params.set("fields", opts.fields);
-  return withQuery("/api/tasks", params);
 }

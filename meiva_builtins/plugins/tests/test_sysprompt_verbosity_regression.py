@@ -37,30 +37,13 @@ def load_meiva_code_plugin(model_installation: Installation) -> Iterator[None]:
     install.uninstall()
 
 
-@pytest.fixture
-def _load_meiva_fleet_plugin(model_installation: Installation) -> Iterator[None]:
-    from meiva_builtins.plugins.meiva_fleet import plugin
-
-    install.install(
-        ExtensionRegistry((("meiva_fleet", plugin.contribute()),)),
-        catalog=model_installation.require_catalog(),
-        authority=model_installation.authority,
-        config_images=DiskPluginConfigImages(resolve_meiva_home()),
-        sampling=fixed_sampling_owner(),
-    )
-
-    yield
-
-    install.uninstall()
-
-
 def test_shell_run_wrapper_renders_trimmed_docstring(load_meiva_code_plugin: None) -> None:
     out = _render_help(meiva.shell.run)
     assert "Run a shell command and return its stdout." not in out
     assert "Non-zero exit does not" in out
 
 
-def test_spawn_wrapper_renders_trimmed_docstring(_load_meiva_fleet_plugin: None) -> None:
+def test_spawn_renders_trimmed_docstring() -> None:
     out = _render_help(meiva.agents.spawn)
     assert "Start a new agent and return its id. Does not block." not in out
     assert "does not block" in out

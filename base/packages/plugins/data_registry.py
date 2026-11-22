@@ -1,22 +1,12 @@
-"""The registry of the data surfaces a plugin declares: metrics and inspector widgets.
+"""Load plugin metric faces and admit each declaration atomically.
 
-These are read by processes that load no agent runtime face — the gateway (per-agent inspector
-panels) and the Grafana dashboard supply — so they live in the plugin's own `metrics.py` /
-`inspector.py`, each exporting `contribute()` (a pure function returning a `PluginContributions`
-with only its field filled). A process builds its registry from whichever of those modules it loads:
+The gateway inspector and Grafana dashboard supply load a plugin's `metrics.py`
+without loading the agent runtime. Its `contribute()` returns the metrics to admit.
+`load_declaration` reports load failures and validates the relevant manifest entry
+while the plugin's tree exists. `build_data_registry` fills each metric's plugin
+name, validates queries and rejects a declaration with a duplicate metric name.
 
-- `load_declaration(plugin, importer, gate)` runs one face fail-soft: an import that raises, a
-  missing `contribute()`, a result that is not a `PluginContributions`, or an `meiva-plugin.json` in the
-  plugin directory that is missing or disagrees with the declaration on the face's own key is reported
-  (`load_report`) and the plugin contributes nothing from that face. The manifest is checked here, while
-  the plugin's tree exists (an unpacked installed plugin is deleted right after its import);
-- `build_data_registry(declared)` validates each declaration and admits it atomically — a spec that
-  fails its query validation, a metric name another plugin already holds, or a widget id repeated within
-  its plugin refuses the whole plugin and leaves the others untouched. Admission fills every spec's
-  `plugin` with the registry entry's name, so a spec cannot claim another plugin.
-
-Nothing is registered anywhere, so a failed face leaves no partial state to clean up and a later call
-sees the fixed file.
+A failed face leaves no partial registry state.
 """
 
 from __future__ import annotations
@@ -31,13 +21,10 @@ from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
-from base.packages.plugins.surface.inspector import DuplicateInspectWidget
 from base.telemetry.metrics.plugin_metrics import DuplicateMetric, validate_spec_sql
 
-# The manifest key each data face owns (key == attribution surface id): a face is gated only on its
-# own key, since the other face of the same plugin is a separate load.
+# The manifest key owned by the metrics face.
 METRICS_KEY = "metrics"
-WIDGETS_KEY = "inspectWidgets"
 
 
 @dataclass(frozen=True)
@@ -101,19 +88,9 @@ def _admitted(face: DeclaredFace, taken_metrics: dict[str, str]) -> PluginContri
             )
         names.add(spec.name)
         validate_spec_sql(spec)
-    seen: set[str] = set()
-    for widget in contributions.inspect_widgets:
-        if widget.id in seen:
-            raise DuplicateInspectWidget(
-                f"widget {widget.id!r} declared twice by plugin {plugin!r}"
-            )
-        seen.add(widget.id)
     return dataclasses.replace(
         contributions,
         metrics=tuple(spec.model_copy(update={"plugin": plugin}) for spec in contributions.metrics),
-        inspect_widgets=tuple(
-            widget.model_copy(update={"plugin": plugin}) for widget in contributions.inspect_widgets
-        ),
     )
 
 

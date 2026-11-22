@@ -30,8 +30,6 @@ from base.events.live.projection import (
     QuestionResolved,
     ReasoningDelta,
     ReasoningStart,
-    TaskCreated,
-    TaskUpdated,
     TokenUsage,
     ToUserChanged,
 )
@@ -128,8 +126,6 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
         "question_resolved",
         {"question_id": 7},
     ),
-    (TaskCreated, "task_created", {"task_id": 3}),
-    (TaskUpdated, "task_updated", {"task_id": 3}),
 ]
 
 
@@ -175,8 +171,6 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "to_user_changed",
         "question_asked",
         "question_resolved",
-        "task_created",
-        "task_updated",
         "notification",
     } == GLOBAL_ROLES
 

@@ -140,7 +140,6 @@ def system_note_message(
     inputs: TimestampPolicy,
     tag: NoteTag,
     picked_up_at: datetime,
-    task_id: int | None = None,
     created_at: datetime | None = None,
 ) -> HumanMessage:
     """A framework-injected, system-styled note added to the conversation.
@@ -157,7 +156,6 @@ def system_note_message(
     additional_kwargs:
         meiva_msg_type: "system_note"
         meiva_note_tag: the NoteTag value (drives the timeline chip)
-        meiva_task_id: task attribution for a task-driven turn. Omitted otherwise.
         meiva_created_at: ISO-8601 wall-clock the note was produced. Omitted when
             not supplied.
         meiva_picked_up_at: ISO-8601 wall-clock the note was put into the LLM
@@ -167,8 +165,6 @@ def system_note_message(
         "meiva_msg_type": MeivaMsgType.SYSTEM_NOTE.value,
         "meiva_note_tag": tag.value,
     }
-    if task_id is not None:
-        kwargs["meiva_task_id"] = task_id
     return HumanMessage(
         content=wrap_system_note(f"{inputs.prefix(created_at or picked_up_at)}{content}"),
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs, picked_up_at), created_at),

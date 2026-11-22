@@ -55,7 +55,7 @@ class AgentPromptSettings(EnvSettings):
 
     sdk_expand_in_system_prompt: Annotated[list[str], NoDecode] = Field(
         title="SDK paths expanded in system prompt",
-        default_factory=lambda: ["shell", "files", "agents", "tasks"],
+        default_factory=lambda: ["shell", "files", "agents"],
         alias="MEIVA_SDK_EXPAND",
         description=(
             "Comma-separated SDK paths whose full contract (signatures + "
@@ -68,7 +68,7 @@ class AgentPromptSettings(EnvSettings):
             "and expanding them here would render a second full index; name one "
             "explicitly (`*,skills`) to override. Names in MEIVA_SDK_DISABLE are "
             "excluded; unresolved entries are skipped with a warning. Empty "
-            "expands nothing. Default shell,files,agents,tasks is the production "
+            "expands nothing. Default shell,files,agents is the production "
             "P95 module set; other contracts load on demand through meiva.help. "
             "Plugin-declared expansions still apply."
         ),

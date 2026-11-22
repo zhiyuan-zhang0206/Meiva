@@ -2,13 +2,12 @@ exports = ["agents.ts", "owner.ts", "timeline.ts"]
 
 [uses]
 "agents.ts" = ["types.ts"]
-"fold.test.ts" = ["agents.ts", "graph.ts", "index.ts", "questions.ts", "tasks.ts"]
+"fold.test.ts" = ["agents.ts", "graph.ts", "index.ts", "questions.ts"]
 "graph.ts" = ["types.ts"]
-"index.ts" = ["agents.ts", "graph.ts", "item-id.ts", "questions.ts", "tasks.ts", "types.ts"]
+"index.ts" = ["agents.ts", "graph.ts", "item-id.ts", "questions.ts", "types.ts"]
 "questions.ts" = ["types.ts"]
 "owner.ts" = ["index.ts", "repair.ts"]
 "repair.test.ts" = ["repair.ts"]
-"tasks.ts" = ["types.ts"]
 "timeline.ts" = ["item-id.ts"]
 
 [purity]
@@ -17,6 +16,5 @@ exports = ["agents.ts", "owner.ts", "timeline.ts"]
 "index.ts" = "strict"
 "item-id.ts" = "strict"
 "questions.ts" = "strict"
-"tasks.ts" = "strict"
 "timeline.ts" = "strict"
 "types.ts" = "strict"

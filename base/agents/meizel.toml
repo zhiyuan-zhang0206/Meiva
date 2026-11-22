@@ -1,4 +1,4 @@
-exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "questions", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery"]
+exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "questions", "recovery", "sdk", "tests", "to_user", "upload_delivery"]
 
 [uses]
 "birth" = ["history", "inbox", "labels.py", "model"]
@@ -8,7 +8,6 @@ exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "
 "lifecycle.py" = ["lifecycle_signals.py"]
 "recovery" = ["messages"]
 "sdk" = ["messages"]
-"tasks" = ["inbox", "messages"]
 "incarnation" = ["to_user"]
 "to_user" = ["messages"]
 "tests" = ["birth", "context", "history", "inbox", "lifecycle.py", "messages", "model", "observation", "to_user", "upload_delivery"]

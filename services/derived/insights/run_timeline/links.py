@@ -94,7 +94,7 @@ def _message_inbound(row: EventRecord) -> int | None:
 
 
 # meiva:note
-# The ids among the page's messages whose inbound row is a chat (a task assignment is a system note).
+# The ids among the page's messages whose inbound row is a chat.
 def _chat_inbounds(conn: SyncConnection, page: Sequence[EventRecord]) -> set[int]:
     ids = [
         inbound

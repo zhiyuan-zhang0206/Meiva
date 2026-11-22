@@ -20,8 +20,7 @@ creation. The existing DTO parsing rules remain intact. The handler renders a
 prompt and delegates to the existing birth/launch owner, rather than calling an
 LLM itself. Subsequent work in the created conversation may incur model costs.
 
-Every keyed creation (guarded drafts, plain creation, the MCP tool and task
-assignment) records an `agent_creation_snapshots` row.
+Every keyed creation (guarded drafts, plain creation and the MCP tool) records an `agent_creation_snapshots` row.
 The birth owner commits the snapshot with the agent, first chat inbound and audit facts, under
 the same creation advisory transaction lock. It retains original machine,
 config overlay, birth config, launch attempt UUID, first prompt IID, content and
@@ -38,6 +37,6 @@ with the original agent ID and no launch. Replays never revert operator config,
 rotate attempts or insert prompts. A response is historical acceptance, not
 proof that the conversation currently exists, is available or executed.
 
-Plain guarded creation, the MCP tool and task assignment retain their original
+Plain guarded creation and the MCP tool retain their original
 birth through the same snapshot owner; each keeps its own request digest and
 operation namespace.

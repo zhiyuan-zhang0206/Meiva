@@ -1,11 +1,9 @@
 # meiva:note
-# Which shipped plugins the gateway's inspector surfaces load faces from.
+# Which shipped plugins supply inspector metrics.
 #
-# The gateway never runs plugin code of its own beyond a plugin's data faces (`metrics.py`,
-# `inspector.py`); a face is loaded for a builtin plugin only while that plugin is ENABLED
+# The gateway loads a builtin plugin's `metrics.py` only while that plugin is enabled
 # (`plugins_config`), consulted per request, so `meiva plugins disable` takes effect without a gateway
-# restart. Metrics and widgets use the same rule. (The Grafana dashboard supply is a different
-# surface: it renders panels for every shipped plugin so a disabled plugin's history stays visible.)
+# restart. Grafana renders panels for every shipped plugin so a disabled plugin's history stays visible.
 #
 # The enable state is read once per request by `enabled_plugin_names`; which face files that selects
 # is `enabled_face_files`, a function of the plugin directory and that set of names.
@@ -18,9 +16,7 @@ from pathlib import Path
 from base.packages.plugins import enable_config
 
 # meiva:note
-# The shipped-plugin directory: every ENABLED builtin plugin dir with a `metrics.py` or an
-# `inspector.py` is part of the in-process registries. External plugin code is not imported by
-# the gateway.
+# The shipped-plugin directory. The gateway builds its metrics registry from enabled shipped plugins.
 SHIPPED_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
 
 

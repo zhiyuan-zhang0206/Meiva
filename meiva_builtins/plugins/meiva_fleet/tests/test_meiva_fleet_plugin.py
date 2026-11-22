@@ -54,7 +54,9 @@ def test_plugin_registers_prompt_section(load_activity_plugin: None):
         home=meiva_home(),
         environ=ENVIRON,
     )
-    assert "meiva.tasks" in prompt
+    assert "meiva.agents.send_message" in prompt
+    assert "meiva.self.terminate(message=...)" in prompt
+    assert "GitHub Issues" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
@@ -70,8 +72,6 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     assert prompt.count("one reporter per milestone") == 1
     assert "Message another agent only when they must reply" in prompt
     assert "directly to whoever must act" in prompt
-    assert "do not relay unchanged results" in prompt
-    assert "duplicate task-log writes" in prompt
 
 
 def test_prompt_section_states_the_message_threshold(load_activity_plugin: None):
@@ -88,7 +88,6 @@ def test_prompt_section_states_the_message_threshold(load_activity_plugin: None)
         "Message another agent only when they must reply, decide, act, or know something to "
         "continue"
     ) in prompt
-    assert "otherwise record status in the task or your working notes" in prompt
     assert "Say what happened, what you need, and what breaks without it" in prompt
 
 
@@ -102,18 +101,13 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
         environ=ENVIRON,
     )
     assert "Workflow selection belongs to `meiva-workflow`" in prompt
-    assert "enabling Fleet does not require a registry task or a management tree" in prompt
     assert prompt.count("Proactively parallelize independent work.") == 1
     assert "Do not let a separate piece of work queue behind your current one" in prompt
     assert "spawn a fresh agent with a written brief when it does not." in prompt
-    assert "Before using Fleet coordination or task tracking" in prompt
-    assert "accepted assignments determine reporting" in prompt
-    assert "With no delegator, deliver directly only when the user-attention test is met" in prompt
     for instruction in (
         "Doing everything yourself is the fallback",
         "spawn one agent per part",
         "delegation is the expected pattern",
-        "When the task registry is available and a noticed signal",
         "Progress and conclusions go to your manager",
         "enabling Fleet does not require delegation",
         "parallelizable work does not require delegation",
@@ -224,7 +218,6 @@ def test_prompt_section_reduce_context_switch_content(
     assert "Milestones, not motion" not in section
     assert "reduce-context-switch-for-human" in section
     assert "explicit request to be woken" in section
-    assert "With no delegator, deliver directly" not in section
 
 
 def test_reduce_context_switch_reaches_the_prompt(
@@ -265,21 +258,12 @@ def test_fleet_operating_contract_is_loaded_on_demand(load_activity_plugin: None
     assert "load `meiva-fleet` and its applicable operating contract" in section
     assert "reference/operating-contract.md" in skill
     for obligation in (
-        "If you choose Fleet task tracking",
-        "parent's active children",
-        "one business delivery to the current delegator",
-        "`created_by` is an audit trail, not a routing field",
-        "no automatic notification to the creator",
-        "reserve `meiva.tasks.create_and_assign` for when the owner must be spawned",
-        "do not plan to terminate it yourself",
         "When you accept delegated work",
         "One reporter per milestone",
         "When the user approves your plan or tells you to start",
     ):
         assert obligation in contract
         assert obligation not in section
-    assert "## Fleet task interaction" not in section
-    assert "meiva.tasks.create" not in section
 
 
 def test_fleet_contract_preserves_numeric_identifier_prefixes():
@@ -292,12 +276,12 @@ def test_fleet_contract_preserves_numeric_identifier_prefixes():
         / "reference"
         / "operating-contract.md"
     ).read_text()
-    for identifier in ("Meiva #<id>", "task #<id>", "PR #<id>"):
+    for identifier in ("Meiva #<id>", "issue #<id>", "PR #<id>"):
         assert identifier in contract
     assert "A bare number is ambiguous" in contract
 
 
-def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
+def test_fleet_guidance_absent_when_plugin_disabled(**changes: Any):
     prompt = build_system_prompt(
         EMPTY,
         AgentSlices.resolve(
@@ -309,9 +293,7 @@ def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
         environ=ENVIRON,
     )
 
-    assert "## Fleet task interaction" not in prompt
-    assert "create directly with `meiva.tasks.create`" not in prompt
-    assert "meiva.tasks.create" not in prompt
+    assert "## Fleet" not in prompt
     assert "One reporter per milestone" not in prompt
 
 
@@ -397,10 +379,6 @@ def test_fleet_declares_compact_preparation_in_its_manifest() -> None:
 
 
 # meiva:note
-# The fleet plugin declares no notification category: a closed task is not a
-# request that needs the user's reply, and no other task event is one either.
-# Adding one is a product decision, not a test fix.
-# meiva:link base/events/notifications/README.md
 def test_fleet_declares_no_notification_category() -> None:
     from pathlib import Path
 

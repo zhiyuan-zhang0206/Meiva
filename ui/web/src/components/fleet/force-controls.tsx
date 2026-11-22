@@ -1,8 +1,4 @@
-// Shared d3-force layout controls — the tunable physics knobs + their live
-// popover UI, used by both the fleet Graph View and the Task Graph. Each view
-// owns its own defaults and DB setting key; this module owns the ForceParams
-// shape, the persistence hook, and the slider panel so the two views can never
-// drift on the control surface.
+// Layout controls for the Fleet relationship graph.
 
 "use client";
 
@@ -38,35 +34,25 @@ export interface ForceParams {
   zoomFitRatio: number; // viewport fill ratio when focusing (1.0 = fill viewport; 0.5 = half)
 }
 
-// Force params are a DB-backed user setting (display.graph_force_params /
-// display.task_force_params.v2), merged over the view's defaults so only tuned
-// knobs are stored. Sliders are dragged (high-frequency), so the write is
-// debounced via useDebouncedSetting. Each view passes its own setting key +
-// defaults so their tunings stay independent. The merged object is memoized so
-// its identity is stable between edits (the graph's simulation effect depends
-// on it — a fresh object every render would needlessly re-heat the layout).
 export function useForceParams(
-  settingKey: string,
-  defaults: ForceParams,
 ): {
   params: ForceParams;
   setParams: (p: ForceParams) => void;
   reset: () => void;
 } {
   const [stored, setStored] = useDebouncedSetting<Partial<ForceParams> | undefined>(
-    settingKey,
+    "display.graph_force_params",
     undefined,
   );
-  const params = useMemo<ForceParams>(() => ({ ...defaults, ...(stored ?? {}) }), [defaults, stored]);
+  const params = useMemo<ForceParams>(() => ({ ...FORCE_DEFAULTS, ...(stored ?? {}) }), [stored]);
   const setParams = useCallback((p: ForceParams) => setStored(p), [setStored]);
-  const reset = useCallback(() => setStored(defaults), [setStored, defaults]);
+  const reset = useCallback(() => setStored(FORCE_DEFAULTS), [setStored]);
   return { params, setParams, reset };
 }
 
 // Layout-tuning popover grouped by category. Each slider maps to a ForceParams
 // key; changes apply live (the running simulation is re-heated) and persist to
-// the DB (debounced). A view may pass its own `groups` (e.g. relabeled sliders) —
-// FORCE_GROUPS is the default set the Graph View uses.
+// the DB through a debounced write.
 type ForceLabelKey =
   | "node"
   | "edge"
@@ -83,30 +69,20 @@ type ForceLabelKey =
   | "yGravity"
   | "coolSpeed"
   | "fillRatio"
-  | "padding"
-  | "size";
+  | "padding";
 
-export interface ForceSliderDef {
+interface ForceSliderDef {
   key: keyof ForceParams;
   label: ForceLabelKey;
   min: number;
   max: number;
   step: number;
 }
-export interface ForceGroup {
+interface ForceGroup {
   label: ForceLabelKey;
   sliders: ForceSliderDef[];
 }
 
-// ── Shared defaults ──
-// meiva:note
-// ONE default set for every force graph (fleet Graph View, Task Graph): the
-// user asked for the Task Graph to reuse the Agent Graph's parameter system
-// wholesale, so both views share FORCE_DEFAULTS — only the persisted setting
-// key differs (display.graph_force_params / display.task_force_params.v2,
-// user ruling 2026-08-10 #1127: the two graphs are independent UIs and must
-// not share tuning state).
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 // meiva:note
 // alphaDecay defaults to 0.08 rather than d3's 0.0228. At 0.0228 the 40-node
 // Agent Graph ran 295 ticks — 4.9 s at 60 fps — and every node travelled 108 px
@@ -114,9 +90,9 @@ export interface ForceGroup {
 // while still liking the landing itself (2026-10-21). 0.08 settles in 82 ticks
 // (1.4 s) with the same layout and no overlapping nodes, and the entrance still
 // shows a landing. Only a default changes: a browser that already stored
-// display.*_force_params keeps its value, and the slider range stays 0.001-0.2.
+// display.graph_force_params keeps its value, and the slider range stays 0.001-0.2.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
-export const FORCE_DEFAULTS: ForceParams = {
+const FORCE_DEFAULTS: ForceParams = {
   nodeSizeMin: 18,
   nodeSizeMax: 26,
   linkDistance: 70,
@@ -131,7 +107,7 @@ export const FORCE_DEFAULTS: ForceParams = {
   zoomFitRatio: 1,
 };
 
-export const FORCE_GROUPS: ForceGroup[] = [
+const FORCE_GROUPS: ForceGroup[] = [
   {
     label: "node",
     sliders: [
@@ -166,29 +142,14 @@ export const FORCE_GROUPS: ForceGroup[] = [
   },
 ];
 
-// Task Graph controls: the user ruling 2026-08-10 (#1127) — task nodes have
-// ONE size, no min/max band (they never scale with content), and the two
-// graphs are independent UIs. So the Node group collapses to a single "Size"
-// slider writing nodeSizeMin (all task nodes sit at it — score is always 0);
-// the other groups stay identical to the Agent Graph's.
-export const TASK_FORCE_GROUPS: ForceGroup[] = [
-  {
-    label: "node",
-    sliders: [{ key: "nodeSizeMin", label: "size", min: 6, max: 48, step: 1 }],
-  },
-  ...FORCE_GROUPS.slice(1),
-];
-
 export const ForceControls = memo(function ForceControls({
   params,
   setParams,
   reset,
-  groups = FORCE_GROUPS,
 }: {
   params: ForceParams;
   setParams: (p: ForceParams) => void;
   reset: () => void;
-  groups?: ForceGroup[];
 }) {
   const t = useTranslations("fleet.force");
   return (
@@ -216,7 +177,7 @@ export const ForceControls = memo(function ForceControls({
             </button>
           </div>
           <div className={cn("gap-3", FLEX, FLEX_COL)}>
-            {groups.map((group) => (
+            {FORCE_GROUPS.map((group) => (
               <div key={group.label}>
                 <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
                   {t(group.label)}

@@ -32,7 +32,7 @@ class HarnessAttachment:
     The read filters on nothing, expiry included: a row whose `expires_at` has passed is
     still reported with that past instant, so None and a lapsed row are different answers.
 
-    Advisory, like `TerminateOutcome.open_tasks`: it refuses nothing, and a
+    Advisory only. A
     terminate carries it without changing what the call did."""
 
     agent_id: int

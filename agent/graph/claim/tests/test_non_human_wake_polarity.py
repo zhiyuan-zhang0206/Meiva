@@ -76,7 +76,7 @@ def test_a_user_message_resolves_human_polarity_from_idle_or_background_run() ->
         ("chat", "system", None),
         ("chat", "system:harness", None),
         ("heartbeat", "system", None),
-        ("system_note", "agent:12", {"note_tag": NoteTag.TASK.value}),
+        ("system_note", "agent:12", {"note_tag": NoteTag.CONTEXT.value}),
         ("resurrect", "system", None),
         ("fork", "agent:5", None),
         ("reminder", "system", None),

@@ -75,7 +75,6 @@ from record_inputs import (
     Event,
     Inbound,
     RunInputs,
-    TaskReceipts,
     TranscriptLine,
     event_facts,
     inbound_facts,
@@ -273,18 +272,6 @@ class _WindowInboundRow:
 
 
 # meiva:note
-# One `task_update_receipts` group row: the receipts an agent accepted, by request field, and how
-# many of them moved the task's status.
-@dataclass(frozen=True)
-class _TaskReceiptRow:
-    actor_agent_id: int
-    note: int
-    status: int
-    results: int
-    state_changes: int
-
-
-# meiva:note
 # One `agents_meta` lifecycle row: who spawned the agent, its status and its last message.
 @dataclass(frozen=True)
 class _AgentMetaRow:
@@ -374,40 +361,6 @@ def _inbounds_by_agent(
         agent_id: [message for _, message in sorted(entries, key=lambda entry: entry[0])]
         for agent_id, entries in rows.items()
     }
-
-
-def _task_receipts_by_agent(conn: psycopg.Connection, ids: list[int]) -> dict[int, TaskReceipts]:
-    with conn.cursor(row_factory=class_row(_TaskReceiptRow)) as cur:
-        cur.execute(
-            "WITH status_receipts AS ("
-            "SELECT actor_agent_id, task_id, request->>'status' AS declared, "
-            "lag(request->>'status') OVER ("
-            "PARTITION BY actor_agent_id, task_id ORDER BY accepted_at, operation_key"
-            ") AS previous "
-            "FROM task_update_receipts "
-            "WHERE actor_agent_id = ANY(%s) AND request->>'status' IS NOT NULL"
-            "), state_changes AS ("
-            "SELECT actor_agent_id, count(*) AS changes FROM status_receipts "
-            "WHERE declared IS DISTINCT FROM COALESCE(previous, 'in_progress') "
-            "GROUP BY actor_agent_id"
-            ") "
-            "SELECT r.actor_agent_id, "
-            "count(*) FILTER ("
-            "WHERE r.request->>'note' IS NOT NULL AND r.request->>'status' IS NULL"
-            ") AS note, "
-            "count(*) FILTER (WHERE r.request->>'status' IS NOT NULL) AS status, "
-            "count(*) FILTER (WHERE r.request->>'results' IS NOT NULL) AS results, "
-            "COALESCE(max(c.changes), 0) AS state_changes "
-            "FROM task_update_receipts r "
-            "LEFT JOIN state_changes c ON c.actor_agent_id = r.actor_agent_id "
-            "WHERE r.actor_agent_id = ANY(%s) "
-            "GROUP BY r.actor_agent_id",
-            [ids, ids],
-        )
-        return {
-            row.actor_agent_id: TaskReceipts(row.note, row.status, row.results, row.state_changes)
-            for row in cur.fetchall()
-        }
 
 
 def _meta_by_agent(conn: psycopg.Connection, ids: list[int]) -> dict[int, AgentMeta]:
@@ -502,7 +455,6 @@ def collect_with_counts(
     with database.connect() as conn:
         inbounds = _inbounds_by_agent(conn, ids, window.start, window.end)
         meta = _meta_by_agent(conn, ids)
-        receipts = _task_receipts_by_agent(conn, ids)
         test_ids: set[int] = set() if include_test else _test_label_ids(conn, ids)
     selection = select_agents(ids, meta.keys(), test_ids)
     rows = WindowRows(
@@ -510,7 +462,6 @@ def collect_with_counts(
         logs=logs,
         inbounds=inbounds,
         meta=meta,
-        receipts=receipts,
         transcripts={
             agent_id: _transcript(agent_id, database=database) for agent_id in selection.kept
         },
@@ -548,7 +499,6 @@ def collect_one(
     with database.connect() as conn:
         inbounds = _inbounds_by_agent(conn, [agent_id], window.start, window.end).get(agent_id, [])
         meta = _meta_by_agent(conn, [agent_id]).get(agent_id)
-        receipts = _task_receipts_by_agent(conn, [agent_id]).get(agent_id)
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
     record = annotated_record(
@@ -562,7 +512,6 @@ def collect_one(
             transcript=transcript_facts(_transcript(agent_id, database=database)),
             skills_touched=tuple(loaded_skills(log_events)),
             leak_paths=leak_paths,
-            task_receipts=receipts,
         )
     )
     _warn_skipped_plugin_rows([record])

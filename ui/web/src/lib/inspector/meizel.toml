@@ -1,9 +1,6 @@
-exports = ["inspector-panel-store.ts", "inspector-queries.ts", "inspector-widgets.ts", "use-token-usage.ts"]
+exports = ["inspector-panel-store.ts", "inspector-queries.ts", "use-token-usage.ts"]
 
 [uses]
 "inspector-panel-store.test.ts" = ["inspector-panel-store.ts"]
 "use-detail-reconnect.test.ts" = ["use-token-usage.ts"]
 "use-token-usage.test.tsx" = ["use-token-usage.ts"]
-
-[purity]
-"inspector-widgets.ts" = "strict"

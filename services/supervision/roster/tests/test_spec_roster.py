@@ -34,7 +34,6 @@ _GATEWAY_SESSIONS = {
     "heartbeat",
     "delivery-watchdog",
     "events-maintenance",
-    "task-maintenance",
     "memory-search",
     "memory-indexer",
     "frontend",

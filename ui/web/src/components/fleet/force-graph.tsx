@@ -1,16 +1,5 @@
-// Force Graph — the shared force-directed canvas behind the fleet Graph View
-// (agent nodes) and the Task Graph (task nodes).
-//
-// One rendering / interaction / parameter system for both graphs so they can
-// never drift: the same d3-force physics (useForceLayout), the same
-// zoom/pan/reset/focus interactions, the same edge styling, selection ring,
-// hover treatment, ForceControls gear, stats bar and zoom reset. The ONLY
-// visual difference between the two views is node shape — "circle" for agents,
-// "square" for tasks — everything else is this one component.
-//
-// Display data (status color, score, ghost flag) is always read from the latest
-// props on render — the simulation only owns positions, so live SSE updates
-// recolor/resize nodes in place without disturbing the layout.
+// The Fleet relationship graph canvas. The simulation owns positions, while
+// the renderer reads the current status and activity score from node data.
 
 "use client";
 
@@ -28,7 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 
-import { ForceControls, FORCE_GROUPS, type ForceGroup, type ForceParams } from "./force-controls";
+import { ForceControls, type ForceParams } from "./force-controls";
 import {
   buildConnectedNodeIds,
   useGraphFocus,
@@ -58,7 +47,6 @@ export function layoutOptions(nodeCount: number): ForceLayoutOptions {
 export const ForceGraph = memo(function ForceGraph({
   nodes,
   edges,
-  shape,
   statusText,
   selectedId,
   onSelect,
@@ -66,7 +54,6 @@ export const ForceGraph = memo(function ForceGraph({
   params,
   setParams,
   resetParams,
-  groups = FORCE_GROUPS,
   statsText,
   legend,
   overlayLeft,
@@ -75,17 +62,15 @@ export const ForceGraph = memo(function ForceGraph({
 }: {
   nodes: readonly ForceGraphNode[];
   edges: readonly ForceGraphEdge[];
-  shape: "circle" | "square";
   /** Status key → text-* color class (the node paints with fill="currentColor"). */
   statusText: Record<string, string>;
   selectedId: number | null;
   onSelect: (id: number | null) => void;
-  /** Double-click on a node (agents: their timeline; tasks: the owner's). */
+  /** Open the conversation on double-click or a second tap. */
   onOpen: (id: number) => void;
   params: ForceParams;
   setParams: (p: ForceParams) => void;
   resetParams: () => void;
-  groups?: ForceGroup[];
   /** Stats bar text (bottom-left); omitted → no bar. */
   statsText?: string | null;
   /** View-specific status / size legend (bottom-right); omitted → no panel. */
@@ -108,17 +93,16 @@ export const ForceGraph = memo(function ForceGraph({
   const maxEdgeWeight = useMemo(() => Math.max(...edges.map((e) => e.weight), 1), [edges]);
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
-  // Simulation nodes: collide radius = the rendered radius for circles, the
-  // half-diagonal (r·√2) for squares — a square claims its full footprint.
+  // The simulation uses the rendered node radius.
   // Recomputed on params change so the Node sliders resize the collision
   // circles live (useForceLayout tracks radii in a ref).
   const simNodes = useMemo<SimNode[]>(
     () =>
       nodes.map((n) => ({
         id: n.id,
-        r: radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax) * (shape === "square" ? Math.SQRT2 : 1),
+        r: radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax),
       })),
-    [nodes, maxScore, params.nodeSizeMin, params.nodeSizeMax, shape],
+    [nodes, maxScore, params.nodeSizeMin, params.nodeSizeMax],
   );
   const simLinks = useMemo<SimLink[]>(
     () => edges.map((e) => ({ source: e.from, target: e.to })),
@@ -251,7 +235,6 @@ export const ForceGraph = memo(function ForceGraph({
               const r = radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax);
               const isHovered = hovered?.id === n.id;
               const isRinged = selectedId === n.id;
-              const isGhost = n.ghost === true;
               const fill = statusText[n.status] ?? "text-slate-400";
               const showLabel = transform.k >= LABEL_MIN_ZOOM;
               const labelLines = showLabel && n.label ? wrapLabel(n.label, r) : [];
@@ -262,7 +245,7 @@ export const ForceGraph = memo(function ForceGraph({
                   key={n.id}
                   data-node-id={n.id}
                   transform={`translate(${p.x},${p.y})`}
-                  className={cn("cursor-pointer", isGhost && !isHovered && "opacity-40")}
+                  className="cursor-pointer"
                   onPointerDown={(ev) => {
                     ev.stopPropagation();
                   }}
@@ -309,64 +292,29 @@ export const ForceGraph = memo(function ForceGraph({
                   }}
                 >
                   {hoverCard == null ? (
-                    <title>{n.nodeTitle ?? (n.label ? `${n.label} (#${n.id})` : `#${n.id}`)}</title>
+                    <title>{n.label ? `${n.label} (#${n.id})` : `#${n.id}`}</title>
                   ) : null}
                   {isRinged ? (
-                    shape === "circle" ? (
-                      <circle
-                        r={r + 6}
-                        className="text-sky-400"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeOpacity={0.7}
-                        strokeWidth={2}
-                        strokeDasharray="4 3"
-                        pointerEvents="none"
-                      />
-                    ) : (
-                      <rect
-                        x={-(r + 6)}
-                        y={-(r + 6)}
-                        width={2 * (r + 6)}
-                        height={2 * (r + 6)}
-                        rx={r * 0.25}
-                        className="text-sky-400"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeOpacity={0.7}
-                        strokeWidth={2}
-                        strokeDasharray="4 3"
-                        pointerEvents="none"
-                      />
-                    )
-                  ) : null}
-                  {shape === "circle" ? (
                     <circle
-                      data-node-shape=""
-                      r={r}
-                      className={cn(fill, n.pulse && "animate-pulse")}
-                      fill="currentColor"
-                      stroke="var(--background)"
-                      strokeWidth={1.5}
-                      strokeDasharray={isGhost ? "3 2" : undefined}
-                      opacity={isHovered ? 1 : 0.92}
+                      r={r + 6}
+                      className="text-sky-400"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeOpacity={0.7}
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
+                      pointerEvents="none"
                     />
-                  ) : (
-                    <rect
-                      data-node-shape=""
-                      x={-r}
-                      y={-r}
-                      width={2 * r}
-                      height={2 * r}
-                      rx={r * 0.25}
-                      className={cn(fill, n.pulse && "animate-pulse")}
-                      fill="currentColor"
-                      stroke="var(--background)"
-                      strokeWidth={1.5}
-                      strokeDasharray={isGhost ? "3 2" : undefined}
-                      opacity={isHovered ? 1 : 0.92}
-                    />
-                  )}
+                  ) : null}
+                  <circle
+                    data-node-shape=""
+                    r={r}
+                    className={cn(fill, n.pulse && "animate-pulse")}
+                    fill="currentColor"
+                    stroke="var(--background)"
+                    strokeWidth={1.5}
+                    opacity={isHovered ? 1 : 0.92}
+                  />
                   {showLabel ? (
                     <text
                       textAnchor="middle"
@@ -440,7 +388,7 @@ export const ForceGraph = memo(function ForceGraph({
           fit-to-content frame. Order (user ruling 2026-08-06): settings,
           reset zoom, then view extras (the time-window selector). */}
       <div className={cn("pointer-events-auto absolute left-3 top-3 items-center gap-1", FLEX)}>
-        <ForceControls params={params} setParams={setParams} reset={resetParams} groups={groups} />
+        <ForceControls params={params} setParams={setParams} reset={resetParams} />
         <button
           type="button"
           className={cn("size-6 items-center justify-center rounded border border-border bg-background/80 text-[10px] text-muted-foreground backdrop-blur hover:bg-sidebar-accent hover:text-foreground", FLEX)}

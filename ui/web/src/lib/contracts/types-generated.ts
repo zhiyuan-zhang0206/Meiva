@@ -719,22 +719,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/inspect/widgets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/shell/{session_id}": {
         parameters: {
             query?: never;
@@ -2127,54 +2111,6 @@ export interface paths {
         patch: operations["grafana_proxy_patch_grafana__rest__patch"];
         trace?: never;
     };
-    "/api/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_task_api_tasks__task_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["patch_task_api_tasks__task_id__patch"];
-        trace?: never;
-    };
-    "/api/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_tasks_api_tasks_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/task-assignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_task_assignment_api_keyed_v1_task_assignments_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/plugin-ui/{plugin}": {
         parameters: {
             query?: never;
@@ -2615,20 +2551,6 @@ export interface components {
         };
         AskResult: {
             ids: number[];
-        };
-        AssignmentAgentIn: {
-            label?: string | null;
-            machine?: string | null;
-            config?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        AssignmentTaskIn: {
-            title: string;
-            description: string;
-            parent: number;
-            priority: components["schemas"]["Priority"];
-            remind_interval_seconds?: number | null;
         };
         AttentionCounts: {
             unread_agents: number;
@@ -3085,19 +3007,6 @@ export interface components {
             activity: components["schemas"]["MetricEvidence"];
             lifecycle: components["schemas"]["MetricEvidence"];
         };
-        InspectWidgetResult: {
-            plugin: string;
-            id: string;
-            kind: "taskList";
-            order: number;
-            title?: string | null;
-            tasks?: components["schemas"]["InspectWidgetTask"][];
-        };
-        InspectWidgetTask: {
-            id: number;
-            title: string;
-            priority: components["schemas"]["Priority"];
-        };
         InspectorScheduleInfo: {
             id: number;
             name: string;
@@ -3225,7 +3134,6 @@ export interface components {
             paused: boolean;
             terminated_agents: number;
             force_marked_agents: number;
-            reassigned_tasks: number;
             paused_at?: string | null;
             pause_reason?: string | null;
         };
@@ -3400,17 +3308,6 @@ export interface components {
             created_at: string;
             question: components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"];
         };
-        OpenTaskRow: {
-            id: number;
-            title: string;
-            status: "in_progress";
-            updated_at: string;
-        };
-        OpenTasksHint: {
-            count: number;
-            tasks: components["schemas"]["OpenTaskRow"][];
-            more: number;
-        };
         OpsMonitorMeta: {
             window: string;
             bucket_seconds: number;
@@ -3476,7 +3373,6 @@ export interface components {
             updated_by: string | null;
             resets?: components["schemas"]["StatReset"][];
         };
-        Priority: "P0" | "P1" | "P2" | "P3";
         PublishMessage: {
             content: string | null;
             suggestions?: string[];
@@ -4036,110 +3932,11 @@ export interface components {
             content: string;
             source: string;
             note_tag: string;
-            task_id?: number | null;
             resurrect: boolean;
         };
         SystemStatus: {
             services: components["schemas"]["ServicesStatus"];
             cluster: components["schemas"]["ClusterPanel"];
-        };
-        Task: {
-            id: number;
-            parent_id: number | null;
-            title: string;
-            description: string;
-            results: string | null;
-            status: string;
-            owner: number | null;
-            created_by: string;
-            created_at: string;
-            updated_at: string;
-            remind_interval_seconds?: number | null;
-            last_reminded_at?: string | null;
-            reminder_count: number;
-            priority: string;
-            reminders_paused_until?: string | null;
-        };
-        TaskAssignmentAccepted: {
-            task: components["schemas"]["Task"];
-            agent_id: number;
-            launch_attempt_id: string;
-            launch?: components["schemas"]["SpawnedAgent"] | null;
-            launch_failure?: string | null;
-            retry_launch_path?: string | null;
-        };
-        TaskAssignmentIn: {
-            actor_agent_id: number;
-            task: components["schemas"]["AssignmentTaskIn"];
-            agent: components["schemas"]["AssignmentAgentIn"];
-        };
-        TaskGraphRow: {
-            id: number;
-            parent_id: number | null;
-            title: string;
-            status: components["schemas"]["TaskStatus"];
-            owner: number | null;
-            owner_label?: string | null;
-            created_by: string;
-            created_at: string;
-            updated_at: string;
-            remind_interval_seconds?: number | null;
-            last_reminded_at?: string | null;
-            reminder_count: number;
-            reminders_paused_until?: string | null;
-            priority: components["schemas"]["Priority"];
-            ghost: boolean;
-            description: string;
-        };
-        TaskListResponse: {
-            tasks: (components["schemas"]["TaskRow"] | components["schemas"]["TaskSummaryRow"] | components["schemas"]["TaskGraphRow"])[];
-        };
-        TaskRow: {
-            id: number;
-            parent_id: number | null;
-            title: string;
-            description: string;
-            results: string | null;
-            status: components["schemas"]["TaskStatus"];
-            priority: components["schemas"]["Priority"];
-            owner: number | null;
-            owner_label?: string | null;
-            created_by: string;
-            created_at: string;
-            updated_at: string;
-            remind_interval_seconds?: number | null;
-            last_reminded_at?: string | null;
-            reminder_count: number;
-            reminders_paused_until?: string | null;
-            ghost: boolean;
-        };
-        TaskStatus: "in_progress" | "done" | "cancelled";
-        TaskSummaryRow: {
-            id: number;
-            parent_id: number | null;
-            title: string;
-            status: components["schemas"]["TaskStatus"];
-            owner: number | null;
-            owner_label?: string | null;
-            created_by: string;
-            created_at: string;
-            updated_at: string;
-            remind_interval_seconds?: number | null;
-            last_reminded_at?: string | null;
-            reminder_count: number;
-            reminders_paused_until?: string | null;
-            priority: components["schemas"]["Priority"];
-            ghost: boolean;
-        };
-        TaskUpdateRequest: {
-            status?: components["schemas"]["TaskStatus"] | null;
-            title?: string | null;
-            description?: string | null;
-            results?: string | null;
-            remind_interval_seconds?: number | null;
-            owner?: number | null;
-            priority?: components["schemas"]["Priority"] | null;
-            parent_id?: number | null;
         };
         TerminateAgentRequest: {
             force: boolean;
@@ -4149,7 +3946,6 @@ export interface components {
         };
         TerminateAgentResponse: {
             status: components["schemas"]["TerminateResult"];
-            open_tasks?: components["schemas"]["OpenTasksHint"] | null;
             shell_sessions?: components["schemas"]["ShellSessionsKill"] | null;
             attached?: components["schemas"]["HarnessAttachment"] | null;
         };
@@ -5736,35 +5532,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginMetricResult"][];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InspectWidgetResult"][];
                 };
             };
             422: {
@@ -8712,136 +8479,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_task_api_tasks__task_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskRow"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_task_api_tasks__task_id__patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                task_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskRow"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_tasks_api_tasks_get: {
-        parameters: {
-            query?: {
-                window?: string;
-                fields?: "full" | "summary" | "graph";
-                owner?: number | null;
-                status?: components["schemas"]["TaskStatus"] | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskListResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_task_assignment_api_keyed_v1_task_assignments_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaskAssignmentIn"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskAssignmentAccepted"];
                 };
             };
             422: {

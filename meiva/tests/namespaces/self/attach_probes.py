@@ -16,7 +16,7 @@ def main() -> None:
     sys.path.insert(0, root)
     import meiva
 
-    report: dict[str, Any] = {"has_tasks_at_import": "tasks" in dir(meiva)}
+    report: dict[str, Any] = {"has_memory_at_import": "memory" in dir(meiva)}
 
     def attempt(label: str, call: Any) -> None:
         try:
@@ -41,7 +41,7 @@ def main() -> None:
     attempt("agent_id", lambda: meiva.self.AGENT_ID)
     attempt("agent_id_again", lambda: meiva.self.AGENT_ID)
     attempt("context", lambda: meiva.context)
-    attempt("tasks", lambda: meiva.tasks)
+    attempt("memory", lambda: meiva.memory)
     attempt("agents_send", lambda: meiva.agents.send_message(1, "x"))
     print("REPORT " + json.dumps(report))
 

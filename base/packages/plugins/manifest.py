@@ -103,7 +103,6 @@ CONTRIBUTION_KEYS = {
     "systemPromptSections",
     "compactReminderSections",
     "metrics",
-    "inspectWidgets",
     "providers",
     "decisionProviders",
     "opsServices",

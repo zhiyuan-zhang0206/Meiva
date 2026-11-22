@@ -5,17 +5,16 @@ One writer per cache/flag: TanStack Query owns server data and persisted prefere
 ## Three Mechanisms Division of Responsibilities
 
 Termination toasts follow the response: `enqueued` means requested, not exited,
-even for force. Authoritative roster reads update lifecycle rows; a response-carried `open_tasks`
-hint raises the open-tasks notice (display-only, no state write).
+including force requests. Authoritative roster reads update lifecycle rows.
 
 | Mechanism | Responsibility | File |
 |---|---|---|
 | TanStack Query | All **server data** (agent list, status, timeline snapshots, token, agent pages, inspect) **+ persistent UI preferences** (`display.*`/`behavior.*`/`feature.*` in `user_settings`, via `useUserSettings`/`useDebouncedSetting`); SSE merges into cache, no polling | `lib/use-*.ts` |
-| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, open-tasks notice, search) + cluster coordination (`reconnectNonce`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
+| Zustand `store.ts` | **Volatile UI state** (activeId, composer focus token, mobile drawer, toast, search) + cluster coordination (`reconnectNonce`); **not persisted** (`persist` middleware removed) | `lib/store.ts` |
 | Zustand `timeline-store.ts` | **SSE-driven timeline state** (items/turnActive/streamingCode/streamingIds/hasMoreOlder and the compact display buffer); split from `store.ts` so high-frequency code_delta/chat_delta folding only notifies timeline subscribers, not sidebar/spawn/banner | `lib/timeline-store.ts` |
-| localStorage | 7 **per-device values** (not synced): active agent (`meiva.active.agent_id`), Fleet mobile tab (`meiva.fleet.mobileTab`), and library-managed splits (`meiva.fleet.split`, `meiva.memory.graph.split`, `meiva.home.columns.context`, `meiva.home.columns.mobile`, `meiva.home.context.desktop`) | `use-agents.ts`, `fleet-view.tsx`, `home-layout.tsx` |
+| localStorage | **Per-device selections** and library-managed panel widths. The [browser port](browser-port.md) documents how the app reads and stores them. | `use-agents.ts`, `home-layout.tsx` |
 
-`display.*`/`behavior.*`/`feature.*` covers: inspector open state, timestamp/date/clock preferences, sidebar collapse/view mode/sort/stats/show terminated, fleet queue collapse + left panel tab, task graph mode + done/canceled filters, force params (graph + task graph), shell terminal theme, spawn model/reasoning_effort, notification and confirmation toggles, `behavior.replySuggestions`, cross-reload reading-position restore (`feature.reloadReadingRestore`, on by default in `Control -> Preferences -> Advanced`), one-realtime-connection (`web.sseSingleStream`, off by default), UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `docs/decisions/frontend/browser/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/contracts/types.ts:USER_SETTING_DEFAULTS`.
+`display.*`/`behavior.*`/`feature.*` covers: inspector open state, timestamp/date/clock preferences, sidebar collapse/view mode/sort/stats/show terminated, Fleet graph layout controls, shell terminal theme, spawn model/reasoning_effort, notification and confirmation toggles, `behavior.replySuggestions`, cross-reload reading-position restore (`feature.reloadReadingRestore`, on by default in `Control -> Preferences -> Advanced`), one-realtime-connection (`web.sseSingleStream`, off by default), UI language (`display.language`, i18n locale via `i18n/language-provider.tsx`; framework copy only, data plane never translated — `docs/decisions/frontend/browser/2026-08-05-frontend-i18n-next-intl.md`) — defaults in `lib/contracts/types.ts:USER_SETTING_DEFAULTS`.
 
 ## Reaching the browser
 
@@ -51,7 +50,7 @@ or visibility is lost.
 
 ## Zustand `store.ts` (Pure UI + Cluster Coordination)
 
-- **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, the terminate open-tasks notice (`openTasksNotice`), search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
+- **UI state**: `activeId`, composer focus token, mobile drawer, mobile inspector overlay (`mobileInspectorOpen`), toast, search. Spawn selections (`behavior.spawn_*`) and sidebar view mode/sort/stats (`display.sidebar_*`, hooks in `lib/sidebar.ts`) are **not here** — DB settings via `useUserSettings`.
 - **Cluster coordination**: `reconnectNonce` is the SSE-reconnect lever. `AppConnectionBanner` reads connection health directly. No maintenance or update state is mirrored into Zustand; a reload while the app is down is answered by Gate's unavailable page.
 
 ## Selected Timeline State

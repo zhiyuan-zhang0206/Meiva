@@ -19,8 +19,6 @@ to a read-only query only when none fits.
 | One agent's status, machine, harness, last activity | `meiva agents get <agent_id> [--json]` |
 | Whether a message reached an agent and whether it was picked up (pending, claimed, done; chat, system notes, heartbeats) | `meiva agents inbox <agent_id> [--status pending\|claimed\|done] [--kind K] [--source S] [--hours H] [--limit N] [--full]` (newest first; content is a 200-character preview unless `--full`) |
 | What an agent has been doing | `meiva agents timeline <agent_id> [--limit N] [--before ITEM_ID]` |
-| Tasks: read, create, update, log progress | `meiva.tasks` (`get`, `list`, `create`, `update`, `log`; `meiva.help(meiva.tasks)`) |
-| Tasks from a shell: which tasks an agent owns, which are open or stale, one task in full with its reminder state | `meiva tasks ls [--owner ID] [--status in_progress\|done\|cancelled] [--window 24h\|7d\|30d\|all]` (at least one filter), `meiva tasks get <id>`; `--json` for scripts |
 | Audit, telemetry and log events: what happened, when, on which machine | `meiva events ls [--agent ID] [--name EVENT] [--category audit\|telemetry\|log] [--level L] [--machine M] [--hours H] [--limit N]` (newest first; default window: the last 24 hours; `--json` for scripts) |
 | How many events of each kind, machine, level or agent | `meiva events count --by event_name\|machine\|level\|agent_id\|category` with the same filters |
 | What each agent costs (calls, tokens, cost, turn outcomes) | `meiva metrics agents [--days N] [--json]` (costliest first) |
@@ -80,7 +78,6 @@ How to use it:
 | `telemetry_events` | Telemetry and log events, partitioned by month on `ts` | same shape plus `category` (`telemetry` or `log`) and `cluster`; always filter on `ts` so only the months you need are read |
 | `inbound_messages` | Every agent's inbox: chat, system notes, lifecycle commands | `agent_id`, `kind`, `source`, `status` (`pending`, `claimed`, `done`), `created_at`, `claimed_at` |
 | `agents`, `agents_meta` | Agent identity and live status | `agents.label`; `agents_meta.status` (`running`, `idling`, `terminated`), `machine`, `harness`, `last_active_at` |
-| `agent_tasks` | The task board | `parent_id`, `title`, `status`, `priority`, `owner`, `created_at`, `updated_at` |
 | `schedules`, `schedule_runs` | Persistent scheduled work and its run history | `schedules.name`, `enabled`, `status`, `last_error`, `machine`; `schedule_runs.schedule_id`, `ran_at`, `ok`, `note` |
 | `agent_model_tokens_daily` | Per-agent, per-model token and cost totals by day | `agent_id`, `day`, `model`, `llm_calls`, `tokens_in`, `tokens_out`, `cost_usd` |
 | `agent_questions`, `machines`, `machine_status_snapshot` | Open questions for the user; which machines are in the cluster and how they look | see `db/schema.sql` |

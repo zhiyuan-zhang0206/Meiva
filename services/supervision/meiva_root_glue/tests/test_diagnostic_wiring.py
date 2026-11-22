@@ -57,7 +57,6 @@ def test_every_diagnostic_the_roster_builds_has_all_its_required_arguments_bound
         "permissions-helper",
         "redis-acl",
         "pgbouncer",
-        "task-telemetry",
         "observatory-station",
         "browser-reach",
         "lgtm-write-path",

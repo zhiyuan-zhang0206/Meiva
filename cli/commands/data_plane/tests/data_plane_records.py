@@ -28,7 +28,6 @@ def remote_cluster_record() -> cluster.ClusterRecord:
             "frontend": 18001,
             "heartbeat": 18002,
             "labeler": 18004,
-            "task_maintenance": 18005,
             "memory_indexer": 18006,
             "ops": 18007,
             "browser": 18009,

@@ -10,8 +10,7 @@ frozen declaration.
 - `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([Plugin Graph-Edge Hooks](graph-edge-hooks.md)).
 - `state` — `BaseModel` classes whose fields become channels `<plugin>__<field>`; the plugin keeps its own
   `PluginStateHandle(cls, plugin)`.
-- `metrics` / `inspect_widgets` — `MetricSpec` / `InspectWidgetSpec`, declared by the plugin's `metrics.py` /
-  `inspector.py` instead (see below).
+- `metrics` — `MetricSpec` entries declared by the plugin's `metrics.py` (see below).
 - The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_expansions` (dotted paths promoted into the
   prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`) and `skill_sources`.
 - `config`, declared by the plugin's `default_config.py` (the config face): one frozen BaseModel bound from
@@ -69,12 +68,12 @@ reentrant Python import defers until the loader module finishes initializing.
 ## Faces and registries
 
 A declaration lives in the face the consuming process loads: `plugin.py`, `default_config.py` and `agent_runtime.py` for the agent host (the registry above),
-`metrics.py` and `inspector.py` for processes with no agent runtime. Each exports `contribute()` with only its own
+`metrics.py` for processes with no agent runtime. Each exports `contribute()` with only its own
 field filled. The gateway (per-agent inspector panels) and the Grafana supply (dashboard render, repo and
 installed plugins) build a **data registry** with `base/packages/plugins/data_registry.py`: `load_declaration` imports a
 face fail-soft, `build_data_registry` validates and admits each plugin whole (query validation, metric names unique
-across plugins, widget ids unique within one, `plugin` filled from the entry). A face is gated on its own manifest key
-(`metrics`, `inspectWidgets`; `base/packages/plugins/gate.py`). A refused or unloadable face costs only that plugin and
+across plugins, `plugin` filled from the entry). The metrics face is gated on the
+`metrics` manifest key (`base/packages/plugins/gate.py`). A refused or unloadable face costs only that plugin and
 leaves no partial state.
 
 Why: [docs/decisions/extensions/plugins/2026-10-03-plugins-declare-the-framework-registers.md](../../docs/decisions/extensions/plugins/2026-10-03-plugins-declare-the-framework-registers.md).

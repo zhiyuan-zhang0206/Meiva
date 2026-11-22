@@ -24,7 +24,6 @@ import { useNow } from "@/lib/format/now/use-now";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
-import { scheduleHref } from "@/lib/inspector/inspector-widgets";
 import { useWallNow } from "@/lib/transport/transport-context";
 
 import { formatInterval, InspectReadError } from "./inspector-cost-section";
@@ -216,7 +215,7 @@ function ScheduleItemRow({
   return (
     <li>
       <Link
-        href={scheduleHref(schedule.id)}
+        href={`/control/schedules?schedule=${schedule.id}`}
         title={tooltip}
         className={`${rowClass} hover:bg-sidebar-accent`}
       >

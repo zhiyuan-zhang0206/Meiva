@@ -20,7 +20,7 @@ _CODEX = "external_agent:codex"
 
 
 def _local(agent_id: int) -> CallerFacts:
-    return CallerFacts(agent_id=agent_id, actor=None, owns_loop=True, has_lease=False)
+    return CallerFacts(agent_id=agent_id, actor=None, owns_loop=True)
 
 
 def test_external_profile_overrides_the_inherited_local_identity() -> None:

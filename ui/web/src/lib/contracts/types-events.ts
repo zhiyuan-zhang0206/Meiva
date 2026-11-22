@@ -190,14 +190,6 @@ export interface QuestionResolvedEvent extends BaseEvent {
   readonly role: "question_resolved";
   readonly question_id: number;
 }
-export interface TaskCreatedEvent extends BaseEvent {
-  readonly role: "task_created";
-  readonly task_id: number;
-}
-export interface TaskUpdatedEvent extends BaseEvent {
-  readonly role: "task_updated";
-  readonly task_id: number;
-}
 
 export interface NotificationEvent extends BaseEvent {
   readonly role: "notification";
@@ -237,6 +229,4 @@ export type SystemEvent =
   | AgentUpdatedEvent
   | QuestionAskedEvent
   | QuestionResolvedEvent
-  | TaskCreatedEvent
-  | TaskUpdatedEvent
   | NotificationEvent;

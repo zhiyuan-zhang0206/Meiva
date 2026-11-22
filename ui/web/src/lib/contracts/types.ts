@@ -41,8 +41,6 @@ export {
   type ReasoningDeltaEvent,
   type ReasoningStartEvent,
   type SystemEvent,
-  type TaskCreatedEvent,
-  type TaskUpdatedEvent,
   type TimelineResponse,
   type TimelineSnapshotEvent,
   type ToUserChangedEvent,
@@ -55,12 +53,6 @@ export {
   type DateFormat,
   type NotificationCategoriesResponse,
   type NotificationCategoryItem,
-  type TaskFields,
-  type TaskGraphRow,
-  type TaskListResponse,
-  type TaskPriority,
-  type TaskRow,
-  type TaskSummaryRow,
   type ToUserDocument,
   type WorkspaceDirListing,
   type WorkspaceFileResponse,
@@ -72,7 +64,6 @@ export {
 
 type Schemas = components["schemas"];
 
-export type TaskStatus = Schemas["TaskStatus"];
 export type InterruptAgentResponse = Schemas["InterruptAgentResponse"];
 export type CompactAgentResponse = Schemas["CompactAgentResponse"];
 export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];
@@ -228,7 +219,6 @@ export type ModelsResponse = Schemas["ModelsResponse"];
 export type MemoryNoteResponse = Schemas["MemoryNoteResponse"];
 
 export type TerminateAgentResponse = Schemas["TerminateAgentResponse"];
-export type OpenTasksHint = Schemas["OpenTasksHint"];
 export type RestartAgentResponse = Schemas["RestartAgentResponse"];
 export type ResurrectAgentResponse = Schemas["ResurrectAgentResponse"];
 
@@ -268,11 +258,8 @@ export type AgentStats = Schemas["AgentStats"];
 export type AgentTps = Schemas["AgentTps"];
 export type HeartbeatInfo = Schemas["HeartbeatInfo"];
 export type HeartbeatLastPause = Schemas["HeartbeatLastPause"];
-// Plugin widgets embedded in the panel (GET /api/agents/{id}/inspect/widgets):
 // closed-set data rendered by the console's own components — a kind the
 // console does not know is skipped at render time, never interpreted.
-export type InspectWidget = Schemas["InspectWidgetResult"];
-export type InspectWidgetTask = Schemas["InspectWidgetTask"];
 
 export const inspectLiveQueryKey = (agentId: number) =>
   ["agent-inspect-live", agentId] as const;

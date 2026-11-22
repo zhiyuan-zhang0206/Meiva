@@ -32,10 +32,8 @@ _AGENT_RESULT_ENDPOINT = re.compile(
 _GLOBAL_RESULT_ENDPOINTS = (
     "/api/events",
     "/api/memory/search",
-    "/api/tasks",
 )
 _SDK_VECTOR_PREFIXES = (
-    "meiva.tasks.",
     "meiva.mcps.",
     "meiva.ui.",
     "meiva.web.",

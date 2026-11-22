@@ -56,17 +56,10 @@ from meiva.agents.gateway_rows import (
     AgentRow as AgentRow,
 )
 from meiva.agents.gateway_rows import (
-    OpenTaskRow as OpenTaskRow,
-)
-from meiva.agents.gateway_rows import (
-    OpenTasksHint as OpenTasksHint,
-)
-from meiva.agents.gateway_rows import (
     harness_attachment_from_dict,
     machines_from_rows,
     neighbor_from_row,
     object_rows,
-    open_tasks_from_dict,
     optional_integer,
     row_from_dict,
     shell_sessions_from_dict,
@@ -85,8 +78,6 @@ __all_for_meiva__ = [
     "InterruptResult",
     "Machine",
     "Neighbor",
-    "OpenTaskRow",
-    "OpenTasksHint",
     "ProbedHarnessModel",
     "RestartResult",
     "ResurrectResult",
@@ -115,30 +106,26 @@ __all_for_meiva__ = [
 class TerminateOutcome(str):
     """What a terminate call returned: the acceptance status as a string —
     compare it directly ("enqueued" / "already_terminated") — plus `status` as
-    the enum, `open_tasks`: the tasks the agent still owned as it went down, or
-    None, `shell_sessions`: what mandatory shell cleanup did, or None when
+    the enum, `shell_sessions`: what mandatory shell cleanup did, or None when
     older software did not report it, and `attached`: the harness
     registration its home machine held when the call ran, or None when there was
     none or it could not be read."""
 
-    __slots__ = ("attached", "open_tasks", "shell_sessions", "status")
+    __slots__ = ("attached", "shell_sessions", "status")
 
     status: TerminateResult
-    open_tasks: OpenTasksHint | None
     shell_sessions: ShellSessionsKill | None
     attached: HarnessAttachment | None
 
     def __new__(
         cls,
         status: TerminateResult,
-        open_tasks: OpenTasksHint | None = None,
         *,
         shell_sessions: ShellSessionsKill | None = None,
         attached: HarnessAttachment | None = None,
     ) -> TerminateOutcome:
         self = super().__new__(cls, status.value)
         self.status = status
-        self.open_tasks = open_tasks
         self.shell_sessions = shell_sessions
         self.attached = attached
         return self
@@ -146,7 +133,7 @@ class TerminateOutcome(str):
     def __repr__(self) -> str:
         return (
             f"TerminateOutcome(status={self.status.value!r}, "
-            f"open_tasks={self.open_tasks!r}, shell_sessions={self.shell_sessions!r}, "
+            f"shell_sessions={self.shell_sessions!r}, "
             f"attached={self.attached!r})"
         )
 
@@ -430,9 +417,7 @@ def terminate(
     its shell sessions and watchers silently; `kill_all_shell_sessions=True`
     remains a legacy audit marker.
 
-    The result equals its status string and carries `open_tasks` (up to five
-    tasks it still owns, most recently updated first, or None),
-    `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran) and
+    The result equals its status string and carries `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran) and
     `attached` (a `HarnessAttachment` naming the controller driving the agent,
     or None). `attached` is advisory: a controller still attached never blocks
     the terminate."""
@@ -451,7 +436,6 @@ def terminate(
         raise TypeError(f"terminate reply must be an object, got {type(data).__name__}")
     return TerminateOutcome(
         TerminateResult(text(data["status"], "status")),
-        open_tasks_from_dict(data.get("open_tasks")),
         shell_sessions=shell_sessions_from_dict(data.get("shell_sessions")),
         attached=harness_attachment_from_dict(data.get("attached")),
     )
@@ -519,8 +503,7 @@ def send_system_note(
     agent_id: int,
     content: str,
     *,
-    tag: str = "task",
-    task_id: int | None = None,
+    tag: str,
     resurrect: bool = True,
     idempotency_key: str,
 ) -> int:
@@ -528,14 +511,9 @@ def send_system_note(
 
     The note appears in the target agent's timeline as a system note (no
     sender prefix, no peer timestamp), not as a chat message from you. `tag`
-    selects the note chip — a NoteTag value; `task` is the task-notification
-    family (assign / update / reminder). `resurrect` revives a terminated
-    target so it can receive the note: pass True only for real work
-    directions (a task assignment), never for plain notifications (user
-    ruling 2026-08-27).
-
-    `task_id` links this note to a task in the timeline. It does not attribute
-    the target's LLM usage to that task.
+    selects the note chip from the NoteTag values. `resurrect` revives a
+    terminated target so it can receive the note. Set it to False when the
+    note can wait for the target's next turn.
 
     `idempotency_key` identifies one logical send across your own retries.
     Reuse it only for the same note and policy; a new send needs a new key.
@@ -546,7 +524,6 @@ def send_system_note(
         agent_id,
         content,
         tag=tag,
-        task_id=task_id,
         resurrect=resurrect,
         idempotency_key=idempotency_key,
     )
@@ -556,7 +533,6 @@ def send_system_note(
         content=note.content,
         note_tag=note.tag,
         source=source,
-        task_id=note.task_id,
         resurrect=note.resurrect,
         idempotency_key=note.idempotency_key,
     )

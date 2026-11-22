@@ -45,13 +45,6 @@ class AgentMeta(NamedTuple):
     last_message_text: str | None
 
 
-class TaskReceipts(NamedTuple):
-    note: int
-    status: int
-    results: int
-    state_changes: int
-
-
 # meiva:note
 # Only facts the record and its counters consume. Conversions match the original consumers:
 # missing numeric fields use zero, malformed numeric fields raise, and text fields use str.
@@ -128,7 +121,6 @@ class RunInputs:
     transcript: tuple[TranscriptRow, ...]
     skills_touched: tuple[str, ...]
     leak_paths: LeakPaths | None = None
-    task_receipts: TaskReceipts | None = None
 
 
 def inbound_facts(rows: Sequence[Inbound]) -> tuple[InboundFact, ...]:

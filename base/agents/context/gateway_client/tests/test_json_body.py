@@ -7,9 +7,9 @@ from base.agents.context.gateway_client import transport
 
 
 def test_a_json_object_body_is_returned_as_the_object() -> None:
-    response = httpx.Response(200, json={"status": "enqueued", "open_tasks": []})
+    response = httpx.Response(200, json={"status": "enqueued", "shell_sessions": None})
 
-    assert transport.json_object(response) == {"status": "enqueued", "open_tasks": []}
+    assert transport.json_object(response) == {"status": "enqueued", "shell_sessions": None}
 
 
 @pytest.mark.parametrize("body", [[1, 2], "enqueued", 7, None])

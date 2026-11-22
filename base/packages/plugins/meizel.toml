@@ -6,16 +6,16 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "config_face.py" = ["extensions.py", "flags.py", "load_report.py"]
 "config_registration.py" = ["__init__.py", "config_view.py", "plugin_errors.py"]
 "config_view.py" = ["__init__.py", "config_face.py", "enable_config.py", "plugin_errors.py"]
-"data_registry.py" = ["extensions.py", "gate.py", "load_report.py", "surface"]
+"data_registry.py" = ["extensions.py", "gate.py", "load_report.py"]
 "enable_config.py" = ["load_report.py"]
-"extensions.py" = ["contributions.py", "surface"]
+"extensions.py" = ["contributions.py"]
 "flags.py" = ["plugin_errors.py"]
 "gate.py" = ["extensions.py", "manifest.py"]
 "loading" = ["config_face.py", "config_view.py", "enable_config.py", "extensions.py", "gate.py", "load_report.py", "manifest.py", "surface"]
 "manifest.py" = ["surface"]
 "pyproject_mirror.py" = ["manifest.py"]
 "surface" = ["flags.py"]
-"tests" = ["config_registration.py", "config_view.py", "data_registry.py", "enable_config.py", "extensions.py", "flags.py", "gate.py", "load_report.py", "loading", "manifest.py", "mcp_enabled.py", "plugin_errors.py", "pyproject_mirror.py", "surface"]
+"tests" = ["config_registration.py", "config_view.py", "enable_config.py", "extensions.py", "flags.py", "gate.py", "load_report.py", "loading", "manifest.py", "mcp_enabled.py", "plugin_errors.py", "pyproject_mirror.py", "surface"]
 
 [external]
 "config_face.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -36,7 +36,7 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 # construction sites to repay one entry. Reopen when a production caller needs an environment
 # different from the one `build_model_catalog()` runs under.
 "config_view.py#environ base.host.env.registry.process_environment" = { count = 1, owner = "#5816", until = "waits for a second caller that holds the environment: with_cluster_policy(env=None) has two callers and both pass nothing, so the fallback is the only path in use - the TODO in the file names the same trigger" }
-"flags.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for its three callers to hand a config: read_declared_flag() serves composer_commands, the task-maintenance daemon and surface/stats, none of which holds a ConfigBoot today, so a required argument would move the read rather than remove it" }
+"flags.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for its callers to hand a config: read_declared_flag() serves composer_commands and surface/stats, neither of which holds a ConfigBoot today, so a required argument would move the read rather than remove it" }
 
 [debt.impure-edge]
 "config_registration.py#base/packages/plugin_config_images.py" = { count = 1, owner = "#7240", until = "waits for the image writer as a value: plugin_config_images writes the plugin's config image under file_lock and a temp file, and the registration path decides the revision and calls the write . Repair unverified: that the registration path can be handed that writer" }

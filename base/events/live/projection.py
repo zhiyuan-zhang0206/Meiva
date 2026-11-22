@@ -473,27 +473,6 @@ class QuestionResolved(_Base):
     question_id: int
 
 
-class TaskCreated(_Base):
-    """Published when an agent creates a task through the meiva.tasks SDK. Fleet-wide
-    (GLOBAL_ROLES), so every open task board invalidates and refetches /api/tasks.
-    `agent_id` is the creating agent. Carries only the task id — consumers refetch
-    the registry rather than upserting from the event, so no task body rides here."""
-
-    role: Literal["task_created"] = "task_created"
-    task_id: int
-
-
-class TaskUpdated(_Base):
-    """Published when an agent updates a task through the meiva.tasks SDK (status,
-    owner, priority, results, reminder). Same fleet-wide invalidation trigger as
-    TaskCreated; `agent_id` is the acting agent. The gateway PATCH path is a plain
-    column write with no acting agent and does not emit — the board's slow poll
-    reconciles those."""
-
-    role: Literal["task_updated"] = "task_updated"
-    task_id: int
-
-
 # meiva:note
 # Published when the notification spine stages one push; every transport renders from this role
 # instead of deriving its own trigger from agent state. The payload is the row just written to
@@ -541,8 +520,6 @@ Event = Annotated[
     | AgentUpdated
     | QuestionAsked
     | QuestionResolved
-    | TaskCreated
-    | TaskUpdated
     | NotificationEmitted,
     Field(discriminator="role"),
 ]
@@ -580,8 +557,6 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (AgentUpdated, True),
     (QuestionAsked, True),
     (QuestionResolved, True),
-    (TaskCreated, True),
-    (TaskUpdated, True),
     (NotificationEmitted, True),
 )
 

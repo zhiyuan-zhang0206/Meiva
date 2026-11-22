@@ -5,7 +5,6 @@
 | `useAgents` | SQL-bounded live roster + always-fetched terminated history (merged roster = raw lineage for the spawn tree; show-terminated is render-only); fold/SSE keeps both caches live |
 | `useFleetAgents` | `/fleet` read-only agents (pure-read shares `AGENTS_QUERY_KEY` cache) |
 | `useFleetGraph` | Fleet relationship graph (GraphView data source); SSE invalidation + 30s reconciliation poll, served from the backend's 60s whole-response cache |
-| `useTasks` | [Task list data flow](task-list.md) |
 | `useTimeline` | selected timeline tail + live SSE fold, with abortable older-history paging; the retained window (30min) seeds a switch back and the shared composed reconcile refreshes it; see [State management](../frontend-state/frontend-state.md) |
 | `useTokenUsage` | selected context occupancy (abortable cold read + SSE token_usage; a retained snapshot seeds a switch back and the shared composed reconcile refreshes it) |
 | `useCompactHistoryRetention` | consumes the store's compact-replace edge (`compactReplaceSeq`): automatically walks every available older page above the new compact summary (`unlimited` retention until `has_more = false`) through the scroll-up fetch path; reports terminal settlement to the compact display buffer and invalidates stale page owners on a new transition epoch (task #3698; user ruling 2026-11-01) |

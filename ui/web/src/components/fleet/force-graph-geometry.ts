@@ -10,8 +10,6 @@ export interface ForceGraphNode {
   readonly status: string;
   readonly score: number;
   readonly pulse?: boolean;
-  readonly ghost?: boolean;
-  readonly nodeTitle?: string | null;
 }
 
 export type HoverCard = (node: ForceGraphNode) => ReactNode | null;

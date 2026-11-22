@@ -5,7 +5,7 @@
 # ``plugin_services()`` discovers the code-present plugins and returns what they declare, and
 # ``services.supervision.roster.composition.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
 # Each plugin service's own ``ServiceSpec.gate`` keeps cluster-level enablement out of
-# ``services.supervision.roster.spec.gate_reason``. The fleet task daemon follows this path; see
+# ``services.supervision.roster.spec.gate_reason``. See
 # ``docs/decisions/extensions/plugins/2026-07-19-plugin-registered-services.md``.
 
 from __future__ import annotations
@@ -35,8 +35,7 @@ from services.supervision.roster.service_spec import ServiceSpec
 # (``meiva plugins enable/disable``): the roster is a machine/cluster concern, and
 # coupling it to the agent-plugin-registration plane would be cross-plane
 # semantics. A plugin gates its own service (whether it starts) via an explicit
-# settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
-# Fleet ``task_maintenance_enabled`` — which is deterministic at daemon-start and
+# settings field in ``ServiceSpec.gate``, which is deterministic at daemon-start and
 # unaffected by any per-agent config overlay. start / root / status all
 # follow, since they derive from `build_services()`.
 #

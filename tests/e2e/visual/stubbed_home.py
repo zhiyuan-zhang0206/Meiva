@@ -69,35 +69,7 @@ _AWAITING_QUESTIONS = [
     }
 ]
 
-_TASKS = {
-    "tasks": [
-        {
-            "id": 100 + i,
-            "parent_id": None if i == 0 else 100,
-            "title": t,
-            "description": "",
-            "results": None,
-            "status": s,
-            "priority": pr,
-            "owner": None if i == 0 else 1,
-            "owner_label": None if i == 0 else "layout-test",
-            "created_by": "e2e",
-            "created_at": "2026-08-07T00:00:00Z",
-            "updated_at": "2026-08-07T00:00:00Z",
-            "reminder_count": 0,
-        }
-        for i, (t, s, pr) in enumerate(
-            [
-                ("Root", "in_progress", "P2"),
-                ("In-progress subtask", "in_progress", "P1"),
-                ("Done subtask", "done", "P3"),
-            ]
-        )
-    ]
-}
-
-# Endpoint → stub body. Layout invariants hold on any data state; the fleet
-# Inbox/Tasks tabs get real rows so their layout-driving UI renders.
+# Endpoint to response body for the isolated browser fixtures.
 API_STUBS: dict[str, object] = {
     "/api/agents": {"agents": [_AGENT], "next_cursor": None},
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
@@ -108,7 +80,6 @@ API_STUBS: dict[str, object] = {
         "last_probe_at": None,
     },
     "/api/questions/open": _AWAITING_QUESTIONS,
-    "/api/tasks": _TASKS,
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
     "/api/agents/1/token-usage": {
         "input_tokens": 0,
@@ -193,7 +164,6 @@ API_STUBS: dict[str, object] = {
             "exec_seconds": 450,
         },
     },
-    "/api/agents/1/inspect/widgets": [],
     "/api/agents/1/pending": [],
     "/api/fleet/graph": {"nodes": [], "edges": []},
 }
@@ -527,5 +497,5 @@ def open_page(
 
 def wait_layout_settled(page: Page) -> None:
     """Wait for the layout-driving element, then a beat for React + SSE."""
-    page.wait_for_selector("textarea, [role='tablist']", timeout=15_000)
+    page.wait_for_selector("textarea", timeout=15_000)
     page.wait_for_timeout(1500)

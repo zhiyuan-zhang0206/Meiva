@@ -4,6 +4,11 @@ import { applySystemEvent } from "../timeline";
 import type { BackendTimelineItem, SystemEvent } from "../../contracts/types";
 
 describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
+  it.each(["task_created", "task_updated"])("preserves the timeline on a retired %s frame", (role) => {
+    const items = applySystemEvent([], { role: "chat_start", item_id: "5.0", agent_id: 1 });
+    const archived = { role, agent_id: 1, task_id: 7 } as unknown as SystemEvent;
+    expect(applySystemEvent(items, archived)).toBe(items);
+  });
 
   it("code_start starts a live code clock that survives its own event and deltas", () => {
     let items: BackendTimelineItem[] = [];

@@ -25,7 +25,7 @@
 #    placeholders), and a call that cannot be bound statically is skipped, never guessed: `*args` /
 #    `**kwargs` at the call site, a callee reached through an instance or a local variable, a name the
 #    script rebinds, a callable with no introspectable signature. The agent SDK (`meiva.*`) is skipped
-#    too, names and signatures alike: plugins install its namespaces (`meiva.tasks`) and wrap its
+#    too, names and signatures alike: plugins install its namespaces (`meiva.memory`) and wrap its
 #    functions at load time, so the static module is neither the set of names nor the call contract.
 #
 # Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),

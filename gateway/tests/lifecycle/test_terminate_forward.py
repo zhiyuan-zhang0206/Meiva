@@ -7,8 +7,7 @@
 # (`gateway/tests/support/runner_ops`) and registered in `machines`; the gateway's own machine
 # is the in-process runner `gateway_local_runner` registers.
 #
-# `TestTerminateOpenTasksHint` covers the advisory `open_tasks` hint the gateway
-# attaches to the response once the forward returns.
+
 
 from __future__ import annotations
 
@@ -16,7 +15,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -49,7 +47,6 @@ def local_machine(
 
 _ENQUEUED: dict[str, object] = {
     "status": "enqueued",
-    "open_tasks": None,
     "shell_sessions": {"when": "at_exit", "killed": []},
     "attached": None,
 }
@@ -333,105 +330,6 @@ def test_overlay_validation_needs_no_agent_domain_in_a_gateway_process(tmp_path:
         "valid": "accepted",
         "invalid": "rejected",
     }
-
-
-def _insert_open_task(
-    db_conn: psycopg.Connection,
-    *,
-    owner: int,
-    title: str,
-    status: str = "in_progress",
-    age_minutes: int = 0,
-) -> int:
-    """Seed one agent_tasks row for `owner`, `age_minutes` old."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, created_by, owner, updated_at) "
-            "VALUES (%s, '', %s, 'user', %s, now() - make_interval(mins => %s)) RETURNING id",
-            (title, status, owner, age_minutes),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        task_id: int = row[0]
-    db_conn.commit()
-    return task_id
-
-
-class TestTerminateOpenTasksHint:
-    """The terminate response carries `open_tasks` — the agent's still-open
-    tasks, read at the gateway after the home runner accepts the termination."""
-
-    def test_no_open_tasks_reports_null(
-        self,
-        local_machine: MachineIdentityReader,
-        gateway_local_runner: RunnerOps,
-        db_conn: psycopg.Connection,
-    ) -> None:
-        with gateway_test_client(machine=local_machine) as client:
-            agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
-        assert resp.status_code == 200
-        assert resp.json() == {
-            **_ENQUEUED,
-            "shell_sessions": {"when": "at_exit", "killed": []},
-        }
-
-    def test_open_tasks_reported_newest_first(
-        self,
-        local_machine: MachineIdentityReader,
-        gateway_local_runner: RunnerOps,
-        db_conn: psycopg.Connection,
-    ) -> None:
-        """Only in_progress counts; rows come newest first."""
-        with gateway_test_client(machine=local_machine) as client:
-            agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
-            _insert_open_task(
-                db_conn, owner=agent_id, title="done task", status="done", age_minutes=1
-            )
-            _insert_open_task(
-                db_conn, owner=agent_id, title="cancelled task", status="cancelled", age_minutes=2
-            )
-            older = _insert_open_task(
-                db_conn, owner=agent_id, title="older open task", age_minutes=30
-            )
-            newer = _insert_open_task(
-                db_conn, owner=agent_id, title="newer in-progress task", age_minutes=5
-            )
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
-        assert resp.status_code == 200
-        hint = resp.json()["open_tasks"]
-        assert hint["count"] == 2
-        assert hint["more"] == 0
-        assert [(task["id"], task["status"]) for task in hint["tasks"]] == [
-            (newer, "in_progress"),
-            (older, "in_progress"),
-        ]
-        assert hint["tasks"][0]["title"] == "newer in-progress task"
-        assert datetime.fromisoformat(hint["tasks"][0]["updated_at"])
-
-    def test_more_than_five_truncates_to_the_five_newest(
-        self,
-        local_machine: MachineIdentityReader,
-        gateway_local_runner: RunnerOps,
-        db_conn: psycopg.Connection,
-    ) -> None:
-        with gateway_test_client(machine=local_machine) as client:
-            agent_id = spawn_via_http(client, {}).json()["id"]
-            _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
-            seeded = [
-                _insert_open_task(
-                    db_conn, owner=agent_id, title=f"open task {i}", age_minutes=10 - i
-                )
-                for i in range(7)
-            ]
-            resp = client.post(f"/api/agents/{agent_id}/terminate")
-        assert resp.status_code == 200
-        hint = resp.json()["open_tasks"]
-        assert hint["count"] == 7
-        assert hint["more"] == 2
-        assert [task["id"] for task in hint["tasks"]] == list(reversed(seeded))[:5]
 
 
 def _seed_shell_ttls(db_conn: psycopg.Connection, agent_id: int, session_ids: list[int]) -> None:

@@ -54,12 +54,10 @@ def launched_imports_share_boot() -> None:
     # A new configuration read would fail validation; subsequent imports must use the original
     # valid delivery. The entry does not rewrite or filter this nonempty invalid sentinel.
     os.environ["MEIVA_TIMEZONE"] = "invalid-timezone-after-sdk-boot"
-    create = importlib.import_module("meiva.tasks").create
     search = importlib.import_module("meiva.memory").search
 
     assert "label" in inspect.signature(spawn).parameters
     assert spawn is meiva.agents.spawn
-    assert create is meiva.tasks.create
     assert search is meiva.memory.search
     assert meiva.context is context
     assert installed() is installation

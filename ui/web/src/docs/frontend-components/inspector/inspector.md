@@ -2,22 +2,15 @@
 
 `components/inspector/inspector-panel.tsx` — the single-agent counterpart of the
 sidebar's cluster-wide Status popover. Only the selected agent is read, only while the
-panel is open; current state, window statistics and plugin widgets load and fail
+panel is open; current state and window statistics load and fail
 independently ([reads and refresh](queries-and-refresh.md)),
 and each section's own rendering facts live in
 [section details](section-details/section-details.md),
 except the Activity section, which has its own node
 ([Activity section](activity.md)).
 
-**One ordered list, no filter.** The body is a single list of sections
-(`INSPECT_SECTION_ORDER` in `lib/inspector/inspector-widgets.ts`): the Open run
-timeline entry (100) first, then page (200), then the runtime sections in their
-established order — shells (300), schedules (350), liveness (400), configuration overlay (500) —
-then the Context section (600), and the Activity section (900) last (user ruling
-2026-10-18). Plugin widgets carry their own `order` and slot between those keys;
-equal orders stack built-in sections first, then widgets by (plugin, id), so the
-sort is deterministic regardless of registration order and DOM order is visual
-order.
+**Section order.** Open run timeline, persistent shells, schedules, liveness,
+configuration, context, and activity appear in that order.
 
 The Context section is shown only for a Meiva harness, as reported by the shared
 roster or the already-selected detail cache when the agent is outside the roster.
@@ -34,8 +27,8 @@ pending with no matching snapshot, `Section`
 and header controls) so titles do not appear before their data arrives, and
 renders a single centered `Spinner` (`hideSpinner` suppresses a duplicate second
 spinner in `Activity` while `Liveness` is also cold-loading; `Metric` only renders
-resolved string values, user rulings 2026-11-09). Conditional and sparse sections — `Page`,
-`Persistent shells`, `Schedules`, `Configuration`, `Context` and plugin widgets — render nothing
+resolved string values, user rulings 2026-11-09). Conditional and sparse sections —
+`Persistent shells`, `Schedules`, `Configuration`, and `Context` — render nothing
 while pending or empty rather than reserving speculative placeholder rows that
 collapse after fetch.
 

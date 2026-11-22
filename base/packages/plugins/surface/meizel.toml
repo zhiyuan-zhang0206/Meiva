@@ -1,4 +1,4 @@
-exports = ["inspector.py", "schedules.py", "stats.py", "stats_types.py", "ui_contributions.py"]
+exports = ["schedules.py", "stats.py", "stats_types.py", "ui_contributions.py"]
 
 [uses]
 "stats.py" = ["stats_types.py"]
@@ -7,7 +7,6 @@ exports = ["inspector.py", "schedules.py", "stats.py", "stats_types.py", "ui_con
 [purity]
 "stats_types.py" = "strict"
 "__init__.py" = "strict"
-"inspector.py" = "strict"
 "schedules.py" = "strict"
 "ui_contributions.py" = "strict"
 

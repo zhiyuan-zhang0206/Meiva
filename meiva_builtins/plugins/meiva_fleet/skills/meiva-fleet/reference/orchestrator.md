@@ -26,7 +26,7 @@ or a different model/configuration. See `meiva.agents.spawn` for fork overlay li
 
 An agent's context — the files it has read, the analysis it has run, the design decisions it holds — is an asset. Don't throw it away.
 
-- **Give missions, not micro-tasks.** A spawn prompt should be a complete mission the agent owns end to end: "Design the Task Registry, serve it to the user, then wait for my review" — not "Design the Task Registry." The agent carries its context through every step; no rediscovery, no wasted tokens.
+- **Give missions, not micro-tasks.** A spawn prompt should be a complete mission the agent owns end to end: "Design the agent directory, serve it to the user, then wait for my review" — not "Design the agent directory." The agent carries its context through every step; no rediscovery, no wasted tokens.
 
 Every spawn brief carries three fields: (1) the **mission** — the outcome
 and what done looks like; (2) the **skill(s)** the worker must use, named
@@ -114,33 +114,6 @@ for n in meiva.agents.get_neighbors(meiva.self.AGENT_ID, depth=1):
 `get_neighbors` ranks the agents most strongly tied to you — whoever spawned, forked, resurrected, or messaged you — by how recent and frequent the contact is, each carrying its `label`. The chain above you is a different question: `meiva.agents.get_ancestors(agent_id)` returns who spawned whom (spawn/fork only, nearest first, walked to the top) — read it when responsibility attribution matters, e.g. before re-delegating an agent whose label looks wrong for the work. Read the labels, pick the one whose role matches what you need, and `send_message` that single agent. Raise `depth` to follow ties outward (a tie of a tie) when the agent you want sits one hop past your direct neighbors. One targeted message to the right label is signal; the same question sprayed at everyone costs each recipient a turn. This is why labels must name roles: discovery is only as good as the labels it reads.
 
 An agent can be replaced. To hand off a task, fork the replacement from the current agent (it inherits context); the original then ends its own process — a worker's last step is its own, so message it to wrap up and end itself rather than terminating it as routine. The fork edge records the handoff; the task continues under the new agent.
-
-## The Task Registry: Durable, Shared Work Items
-
-Spawning and `send_message` coordinate agents *while they run*; a **task** is the durable record of a piece of work. It outlives the agent doing it, so ownership can move between agents and nothing is lost when one terminates. Where the spawn graph is ephemeral (who is talking to whom right now), the task registry is persistent (what needs doing, how far it got, who owns it). Reach for it when work spans more than one agent or more than one lifetime: a backlog to hand out, a subtask tree under a large goal, a job that will change hands.
-
-It is peer-to-peer like the rest of the fleet — no board owner, no approval, no hierarchy. Any agent can create a task, claim it, hand it off, or release it. Five calls, all under `meiva.tasks`:
-
-- `meiva.tasks.create(title, description, *, parent) -> Task` — mint a task. The creating agent automatically becomes the owner; the task is born `in_progress` (2026-08-29: the `open` state was dropped). `title` is the one-line name seen in listings (unique among in_progress tasks); `description` is the full detail whoever works it reads. `parent` is required: the system root task (id 1) parents the cluster's top-level tasks only; pass an existing task's id to make this a subtask — split a big task by creating several children under it.
-- `meiva.tasks.update(task_id, *, status=None, description=None, results=None, owner=None) -> None` — the write path for whole fields. Change `status`, revise `description`, replace the result log `results`, or move `owner`; pass only what changes. Setting `owner` to yourself **claims** a task, to another agent **hands it off**, to `None` **releases** it. On an owner change the affected agents are messaged for you (never you, never an agent that is no longer active).
-- `meiva.tasks.log(task_id, message)` — append one timestamped line to `results` without touching the rest of the log. The default way to note progress; reach for `update(results=...)` only to rewrite the log wholesale.
-- `meiva.tasks.get(task_id) -> Task` — read one task. Read its `description` before you start; read its `results` before you report.
-- `meiva.tasks.list(*, parent=None, owner=None, status=None, recursive=False) -> list[Task]` — search, newest last. `owner=meiva.self.AGENT_ID` is "my tasks"; `parent=X` is X's direct subtasks (`recursive=True` its whole subtree); `status` filters by state; no filters lists everything.
-
-**State machine** (deliberately tiny):
-
-```
-in_progress ──→ done
-     │
-     └───→ cancelled ←───────┘
-```
-
-- **in_progress** — created and being worked (a task is born `in_progress`; "blocked" and "failed" are *not* separate states, they are notes you leave in `results` via `log` while the task stays in_progress).
-- **done** — finished. **cancelled** — no longer needed.
-
-By convention only the owner drives their own task's status — peers coordinate, they do not enforce. If a task looks stalled, don't wait on a daemon: check the owner's liveness in the fleet view, and if it is gone just `meiva.tasks.update(id, owner=meiva.self.AGENT_ID)` to take it over.
-
-**Task vs. message.** `results` is how a worker reports *up* without a manager — what was done, where the output landed, the PR link — which the parent-task owner reads with `get`. Append with `log` (one timestamped line per note); `update(results=...)` replaces the field wholesale. Use a task for a durable, hand-off-able unit of work; use `send_message` for a transient ping ("your input is ready") and `meiva.ui.ask` for a user decision and the configured publish/text protocol for results. A task records *what to do and its result*; a message *pokes an agent to act*.
 
 ## The Loop: Explore, Fork, Join
 

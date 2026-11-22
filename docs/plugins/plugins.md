@@ -39,7 +39,7 @@ Each declaration derives attribution records (`PluginContributions.as_records`):
 | Plugin | Responsibility |
 |--------|----------------|
 | meiva_code | cwd management + AGENTS.md auto-injection |
-| meiva_fleet | multi-agent collaboration tool registration and task system |
+| meiva_fleet | multi-agent collaboration guidance |
 | meiva_memory | long-term memory pool—read/write and semantic search of markdown notes |
 | meiva_self_evolution | self-evolution compact reminder + to_do_better.md initialization |
 | meiva_to_user | reminds the agent when its to_user panel grows past the soft word limit |
@@ -50,7 +50,7 @@ contribution surfaces (including the console's `contributions.ui`), lifecycle
 shape — and where each is validated: [Package Manifest (spec v2)](package-manifest.md).
 
 ## Notes
-- Plugins can carry **skills** (`meiva_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`, e.g., meiva_fleet's task-maintenance).
+- Plugins can carry **skills** (`meiva_builtins/plugins/<p>/skills/`, converge syncs them with the plugin name as the top-level directory; nodes hang under each plugin subtree) and **MCP server definitions** (`.mcp.json`), and can also register **ops services** (`services.py` declaring `ServiceSpec`).
 - All hooks share a single global HOOKS list—`make_hook_runner` snapshots the reference, not a copy.
 - Config files are per-machine, supporting different plugin combinations on different machines.
 

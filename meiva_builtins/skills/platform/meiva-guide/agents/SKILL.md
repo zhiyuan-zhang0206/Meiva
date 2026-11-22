@@ -108,7 +108,7 @@ harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex
    in its workspace root. This document should cover:
    - Workspace directories and current layout
    - Git branches and active worktree paths
-   - Open tasks, active investigations, and pending decisions
+   - Active investigations and pending decisions
    - Key architectural invariants and constraints
    - Optionally creating a git bundle or archive if switching machines
    The restart caller should then pass the path to this handoff document and a concise

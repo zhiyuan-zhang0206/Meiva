@@ -2,6 +2,5 @@ exports = ["rows.py"]
 
 [uses]
 "test_agent_inspect_metrics.py" = ["rows.py"]
-"test_agent_inspect_widgets.py" = ["rows.py"]
 "test_inspect_metrics.py" = ["rows.py"]
 "test_liveness_contract.py" = ["rows.py"]

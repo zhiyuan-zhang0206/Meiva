@@ -77,7 +77,6 @@ _EXPECTED_UIDS = {
     "meiva-ops-schedule-process-lost",
     "meiva-ops-schedule-stalled",
     "meiva-ops-schedule-convergence-abandoned",
-    "meiva-ops-root-diagnostic-task-telemetry",
 }
 
 
@@ -621,17 +620,6 @@ def test_schedule_state_rules_read_prometheus_gauges(uid: str, metric: str, pend
     assert rule["for"] == pending
     assert threshold_params(rule) == [[0]]
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
-
-
-def test_task_telemetry_rule_reads_latest_diagnostic_state_gauge() -> None:
-    rule = {r["uid"]: r for r in load_rules()}["meiva-ops-root-diagnostic-task-telemetry"]
-    assert rule_query_exprs(rule, "loki") == []
-    assert rule_query_exprs(rule, "prometheus") == [
-        'min by (machine) (meiva_root_diagnostic_state_ok_ratio{diagnostic="task-telemetry"})'
-    ]
-    assert threshold_params(rule) == [[1]]
-    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
-    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
 
 
 _STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`')

@@ -80,8 +80,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `exit` | agent process exited | business | — | events |
 | `label_change` | agent label changed | business | — | events |
 | `skill_invoked` | skill invoked by an agent | business | — | events |
-| `task_create` | task created | business | — | events |
-| `task_update` | task updated | business | status | events |
 | `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id, target_host | events |
 | `env_write` | official .env config write (actor and keys; old/new values for non-sensitive fields stay in the local record; sensitive values never recorded) | business | — | events |
 | `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
@@ -293,10 +291,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events | ✓ |
 | `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events | — |
 | `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds | — | events | — |
-| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events | ✓ |
-| `task_reminder_undelivered` | overdue task whose owner never received a reminder: zero deliveries past the grace | anomaly | owner_id, count | — | events | — |
-| `task_reminder_rerouted` | overdue-task reminder delivered to a terminated owner's manager | noise | owner_id, leg, recipient, task_count, task_ids | — | events | ✓ |
-| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events | ✓ |
 | `label_generated` | label auto-generated | noise | — | — | events | — |
 | `label_generate_failed` | label generation failed | anomaly | — | — | events | — |
 | `label_generate_skipped` | label generation skipped | noise | — | — | events | — |
@@ -409,8 +403,6 @@ same origin as persistent events but uses an independent schema.
 | `question_resolved` | ✓ |
 | `reasoning_delta` | — |
 | `reasoning_start` | — |
-| `task_created` | ✓ |
-| `task_updated` | ✓ |
 | `timeline_snapshot` | — |
 | `to_user_changed` | ✓ |
 | `token_usage` | — |

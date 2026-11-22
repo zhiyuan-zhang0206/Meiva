@@ -2,7 +2,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
-from fastapi import HTTPException
 
 from base.api_contracts.idempotency import keyed_headers
 from base.db import Database, fetch_one, pool
@@ -19,13 +18,14 @@ def test_system_note_replay_and_immutable_policy(db_conn: psycopg.Connection) ->
         agent = spawn_via_http(client, {}).json()["id"]
         path = f"/api/agents/{agent}/system-note"
         headers = keyed_headers("note-receipt")
-        body = {"content": "assigned", "resurrect": False}
+        body = {"content": "Context refreshed", "note_tag": "context", "resurrect": False}
         first = client.post(path, json=body, headers=headers)
         second = client.post(path, json=body, headers=headers)
-        conflict = client.post(path, json={**body, "resurrect": True}, headers=headers)
+        policy_conflict = client.post(path, json={**body, "resurrect": True}, headers=headers)
+        content_conflict = client.post(path, json={**body, "content": "Changed"}, headers=headers)
     assert first.status_code == second.status_code == 201
     assert first.json()["inbound_id"] == second.json()["inbound_id"]
-    assert conflict.status_code == 409
+    assert policy_conflict.status_code == content_conflict.status_code == 409
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,))
         assert cur.fetchone() == (1,)
@@ -36,7 +36,7 @@ def test_system_note_key_requires_the_principal_scope(db_conn: psycopg.Connectio
         agent = spawn_via_http(client, {}).json()["id"]
         response = client.post(
             f"/api/agents/{agent}/system-note",
-            json={"content": "assigned", "resurrect": False},
+            json={"content": "Context refreshed", "note_tag": "context", "resurrect": False},
             headers={"Idempotency-Key": "unscoped-note"},
         )
     assert response.status_code == 422
@@ -70,8 +70,7 @@ def test_concurrent_retries_return_one_inbound(
                 agent,
                 "note",
                 "system",
-                "task",
-                None,
+                "context",
                 client_message_id="concurrent-note",
                 resurrect=False,
             )
@@ -83,50 +82,11 @@ def test_concurrent_retries_return_one_inbound(
         assert cur.fetchone() == (1,)
 
 
-def test_replay_survives_reassignment_and_checks_content(
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        agent = int(fetch_one(cur, "fixture insert")[0])
-        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        later_owner = int(fetch_one(cur, "fixture insert")[0])
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, created_by, owner) "
-            "VALUES ('task', 'd', 'user', %s) RETURNING id",
-            (agent,),
-        )
-        task = int(fetch_one(cur, "fixture insert")[0])
-    db_conn.commit()
-    with pool(max_size=1, gate=database_gate) as note_pool:
-        args = (database, event_bus, note_pool, agent, "note", "system", "task", task)
-        first = system_note_blocking(*args, client_message_id="assignment-note")
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE agent_tasks SET owner = %s WHERE id = %s", (later_owner, task))
-        db_conn.commit()
-        assert system_note_blocking(*args, client_message_id="assignment-note") == first
-        with pytest.raises(HTTPException) as caught:
-            system_note_blocking(
-                database,
-                event_bus,
-                note_pool,
-                agent,
-                "changed",
-                "system",
-                "task",
-                task,
-                client_message_id="assignment-note",
-            )
-        assert caught.value.status_code == 409
-
-
 def test_missing_key_cannot_insert_system_note(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         agent = spawn_via_http(client, {}).json()["id"]
-        response = client.post(f"/api/agents/{agent}/system-note", json={"content": "once"})
+        response = client.post(
+            f"/api/agents/{agent}/system-note", json={"content": "once", "note_tag": "context"}
+        )
     assert response.status_code == 422
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)

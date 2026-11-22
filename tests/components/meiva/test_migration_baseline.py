@@ -274,25 +274,47 @@ def test_inbound_watchdog_partial_index_present(db_conn: psycopg.Connection) -> 
     ).fetchone() != (None,)
 
 
-# meiva:note
-# Verify the retired task-cost columns are absent from agent_tasks.
-def test_retired_task_cost_columns_are_absent(db_conn: psycopg.Connection) -> None:
-    cols = [
-        row[0]
-        for row in db_conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = 'agent_tasks' "
-            "AND column_name = ANY(%s)",
-            (
-                [
-                    "token_budget",
-                    "usd_budget",
-                    "token_used",
-                    "usd_used",
-                    "token_budget_notified_at",
-                    "usd_budget_notified_at",
-                ],
-            ),
-        ).fetchall()
+def test_tasks_retirement_drops_owned_objects_and_normalizes_queued_notes(
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tables = [
+        "agent_tasks",
+        "task_update_receipts",
+        "task_creation_receipts",
+        "task_assignment_receipts",
+        "task_patch_receipts",
     ]
-    assert cols == []
+    with throwaway_database("drop_task_registry") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            for table in tables:
+                conn.execute(
+                    sql.SQL("CREATE TABLE {} (id bigserial PRIMARY KEY)").format(
+                        sql.Identifier(table)
+                    )
+                )
+            conn.execute("INSERT INTO agents (id) VALUES (1)")
+            conn.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status, payload) "
+                "VALUES (1, 'queued', 'system_note', 'agent:2', 'pending', "
+                '\'{"note_tag": "task", "task_id": 10}\'), '
+                "(1, 'history', 'system_note', 'agent:2', 'done', '{\"note_tag\": \"task\"}')"
+            )
+        with psycopg.connect(url) as conn:
+            assert "20261122T165616_drop-task-registry" in apply_pending_migrations(
+                conn,
+                machine_name=machine_identity.name,
+                migrations_dir=MIGRATIONS_DIR,
+                home=resolve_meiva_home(),
+            )
+            assert (
+                conn.execute(
+                    "SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace "
+                    "AND relname = ANY(%s)",
+                    (tables + [f"{table}_id_seq" for table in tables],),
+                ).fetchall()
+                == []
+            )
+            assert conn.execute(
+                "SELECT content, payload->>'note_tag' FROM inbound_messages ORDER BY id"
+            ).fetchall() == [("queued", "context"), ("history", "task")]

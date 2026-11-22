@@ -13,7 +13,6 @@ import {
   fixture,
   getAgentInspectLive,
   getAgentInspectStatistics,
-  getAgentInspectWidgets,
   getAgentRoster,
   liveFixture,
   panelState,
@@ -213,13 +212,11 @@ describe("InspectorPanel manual refresh", () => {
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     const statsCallsAfterOpen = getAgentInspectStatistics.mock.calls.length;
     const liveCallsAfterOpen = getAgentInspectLive.mock.calls.length;
-    const widgetCallsAfterOpen = getAgentInspectWidgets.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Refresh cost and activity" }));
     await waitFor(() =>
       expect(getAgentInspectStatistics.mock.calls.length).toBe(statsCallsAfterOpen + 1),
     );
     expect(getAgentInspectLive.mock.calls.length).toBe(liveCallsAfterOpen);
-    expect(getAgentInspectWidgets.mock.calls.length).toBe(widgetCallsAfterOpen);
   });
 
   it("keeps the window picker and refresh control inside the Activity section", async () => {
