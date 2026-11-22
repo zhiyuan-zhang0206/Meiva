@@ -10,12 +10,13 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
-from base.lm.harness.antigravity.tests.support import seed_replay_history, start
+from base.lm.harness.antigravity.tests.support import Harness, seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
 from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
+    SessionFailed,
     ToolUse,
     TurnCompleted,
     TurnOrigin,
@@ -297,5 +298,155 @@ async def test_resumed_cancel_keeps_proven_partial_text_and_usage(tmp_path: Path
         )
         assert again.text == "OK" and harness.session.cli_pid == pid
         assert sink == []
+    finally:
+        await harness.stop()
+
+
+def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
+    return [
+        event.text
+        for event in harness.events
+        if isinstance(event, AssistantText) and event.turn_id == turn_id
+    ]
+
+
+@pytest.mark.parametrize(
+    ("command", "text", "uncertain", "tool_count", "steps", "native_timing"),
+    [
+        (
+            "resumed-command-completion",
+            "MEIVA_DISPLAY_TO_USER\nFresh multi-step reply",
+            False,
+            10,
+            11,
+            "none",
+        ),
+        ("unresolved-attribution", "", True, 6, 6, "after-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "none"),
+        ("unresolved-attribution", "", True, 6, 6, "before-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "before-marker-with-tool"),
+        ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-early"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-interleaved"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-trailing"),
+        ("unresolved-attribution", "", True, 6, 6, "foreground-preamble"),
+    ],
+)
+async def test_resumed_multi_step_command_completion(
+    tmp_path: Path,
+    command: str,
+    text: str,
+    uncertain: bool,
+    tool_count: int,
+    steps: int,
+    native_timing: str,
+) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append, reply_seconds=0.2)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", command)])
+        done = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted | SessionFailed)
+        )
+        assert isinstance(done, TurnCompleted), done
+        assert not done.is_error and done.stop_reason == "end_turn"
+        assert done.text == text and done.usage_uncertain == uncertain and done.num_turns == steps
+        assert [e.text for e in harness.events if isinstance(e, AssistantText)] == (
+            [text] if text else []
+        )
+        assert sum(isinstance(e, ToolUse) for e in harness.events) == tool_count
+
+        await _assert_reused_prompt(harness, done.turn_id, native_timing=native_timing)
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+async def _assert_reused_prompt(
+    harness: Harness, first_turn_id: str, *, native_timing: str
+) -> None:
+    pid = harness.session.cli_pid
+    if native_timing.startswith("before-marker"):
+        if native_timing.endswith("-with-tool"):
+            harness.release("include-native-tool")
+        harness.release("release-native")
+        await harness.wait_for_marker("native-written")
+    followup = {
+        "after-marker": "late-native",
+        "tool-after-marker": "tool-then-foreground",
+        "delayed-planner": "delayed-planner",
+        "delayed-planner-early": "delayed-planner-early",
+        "delayed-planner-interleaved": "delayed-planner-interleaved",
+        "delayed-planner-trailing": "delayed-planner-trailing",
+        "foreground-preamble": "foreground-preamble",
+    }.get(native_timing, "next")
+    await harness.session.deliver([HarnessInput.of("second", followup)])
+    second = await harness.wait_for(
+        lambda event: (
+            isinstance(event, TurnStarted)
+            and event.origin is TurnOrigin.INPUT
+            and event.turn_id != first_turn_id
+        )
+    )
+    if native_timing.startswith("delayed-planner"):
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("release-foreground")
+    again = await harness.wait_for(
+        lambda event: isinstance(event, TurnCompleted) and event.turn_id == second.turn_id
+    )
+    expected = ["Working", "OK"] if native_timing == "foreground-preamble" else ["OK"]
+    assert again.text == "\n".join(expected)
+    assert not again.usage_uncertain and harness.session.cli_pid == pid
+    assert _assistant_texts(harness, second.turn_id) == expected
+    if native_timing not in {"none", "foreground-preamble"}:
+        if native_timing == "tool-after-marker":
+            harness.release("release-native")
+        await _assert_native_reply(harness, with_tool="tool" in native_timing)
+    else:
+        assert [event.origin for event in harness.events if isinstance(event, TurnStarted)] == [
+            TurnOrigin.INPUT,
+            TurnOrigin.INPUT,
+        ]
+
+
+async def _assert_native_reply(harness: Harness, *, with_tool: bool) -> None:
+    native = await harness.wait_for(
+        lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+    )
+    assert native.cause is HarnessCause.BACKGROUND_TASK
+    assert _assistant_texts(harness, native.turn_id) == ["LATE NATIVE REPLY"]
+    if with_tool:
+        completed = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id == native.turn_id
+        )
+        assert completed.steps == (Usage(155, 3, 0, 30), Usage(267, 3, 0, 30))
+        assert completed.num_turns == 2 and completed.usage == Usage(422, 6, 0, 60)
+        assert completed.usage_uncertain
+
+
+@pytest.mark.parametrize("order", ["native-first", "foreground-first"])
+async def test_equal_usage_leaves_both_replies_unassigned(tmp_path: Path, order: str) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append, reply_seconds=0.2)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        first = await harness.wait_for_type(TurnCompleted)
+        assert first.text == "" and first.usage_uncertain
+        pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("second", f"usage-tie-{order}")])
+        second = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != first.turn_id
+        )
+        assert second.text == "" and second.usage_uncertain
+        assert second.stop_reason == "end_turn" and not second.is_error
+        assert [e.origin for e in harness.events if isinstance(e, TurnStarted)] == [
+            TurnOrigin.INPUT,
+            TurnOrigin.INPUT,
+        ]
+        assert not any(isinstance(e, AssistantText) for e in harness.events)
+        assert sink == [] and harness.session.cli_pid == pid
     finally:
         await harness.stop()

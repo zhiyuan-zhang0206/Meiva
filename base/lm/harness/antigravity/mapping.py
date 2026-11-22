@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -86,6 +86,11 @@ class PlannerRow:
     row: dict[str, object]
     input_key: str | None
     notice: BackgroundNotice | None
+    input_index: int
+
+    @property
+    def carries_notice(self) -> bool:
+        return self.notice is not None and self.notice.index < self.input_index
 
     @property
     def final(self) -> bool:
@@ -105,21 +110,91 @@ class PlannerRow:
         return self.final or (self.blank_reply and type(tokens) is int and tokens == 0)
 
 
-def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iterator[PlannerRow]:
+def _launched_command(row: Frame) -> str | None:
+    content, step = row.get("content"), row.get("step_index")
+    if row.get("source") != "MODEL" or row.get("status") != "RUNNING":
+        return None
+    if not isinstance(content, str) or type(step) is not int:
+        return None
+    header, _, body = content.partition("\n")
+    line = body.partition("\n")[0]
+    prefix = "Tool is running as a background task with task id: "
+    task = line.removeprefix(prefix)
+    if (
+        header.startswith("Created At: ")
+        and line.startswith(prefix)
+        and task.endswith(f"/task-{step}")
+        and len(task.split()) == 1
+    ):
+        return task
+    return None
+
+
+def planner_rows(
+    rows: Sequence[Frame],
+    keys: Sequence[str],
+    *,
+    boundaries: Mapping[str, ForegroundBoundary] | None = None,
+    answered_at: Mapping[int, int] | None = None,
+) -> Iterator[PlannerRow]:
+    for event in _attribution_events(rows, keys, boundaries or {}, answered_at or {}):
+        if isinstance(event, PlannerRow):
+            yield event
+
+
+def _attribution_events(
+    rows: Sequence[Frame],
+    keys: Sequence[str],
+    boundaries: Mapping[str, ForegroundBoundary],
+    answered_at: Mapping[int, int],
+) -> Iterator[PlannerRow | BackgroundNotice | None]:
     marks = {input_marker(key): key for key in keys}
     foreground: str | None = None
+    input_index = -1
     background: BackgroundNotice | None = None
+    notice_boundary: ForegroundBoundary | None = None
+    boundary: ForegroundBoundary | None = None
+    commands: set[str] | None = None
     for index, row in enumerate(rows):
         kind = row.get("type")
         if kind == "USER_INPUT":
-            foreground = next(
-                (marks[mark] for mark in received_markers((row,)) if mark in marks), None
-            )
-            background = None
+            input_index = index
+            marker = next(iter(received_markers((row,))), "")
+            foreground = marks.get(marker)
+            boundary = boundaries.get(foreground or "")
+            commands = set() if foreground is not None else None
+            background = _carry_notice(background, notice_boundary, answered_at, index)
+            yield background
+        elif kind == "GENERIC":
+            _remember_launched_command(row, commands)
         elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row, index)) is not None:
-            background = notice
+            if not notice.completes_command(commands, boundary):
+                background = notice
+                notice_boundary = boundary
+                yield notice
         elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
-            yield PlannerRow(index, row, foreground, background)
+            step = PlannerRow(index, row, foreground, background, input_index)
+            if step.terminal:
+                commands = None
+            yield step
+
+
+def _carry_notice(
+    notice: BackgroundNotice | None,
+    boundary: ForegroundBoundary | None,
+    answered_at: Mapping[int, int],
+    marker_index: int,
+) -> BackgroundNotice | None:
+    if notice is None or boundary is None or not boundary.degraded:
+        return None
+    if answered_at.get(notice.index, marker_index) < marker_index:
+        return None
+    return notice
+
+
+def _remember_launched_command(row: Frame, commands: set[str] | None) -> None:
+    if commands is not None and (task := _launched_command(row)) is not None:
+        commands.add(task)
 
 
 class ChildLookup(Protocol):
@@ -132,6 +207,16 @@ class BackgroundNotice:
     prompt: str
     index: int
     cause: HarnessCause
+
+    def completes_command(
+        self, commands: set[str] | None, boundary: ForegroundBoundary | None
+    ) -> bool:
+        return (
+            commands is not None
+            and self.sender in commands
+            and (boundary is None or self.index < boundary.next_row)
+            and self.prompt.startswith(f'Task id "{self.sender}" finished with result:')
+        )
 
     def belongs_to(self, session_id: str | None, subagents: ChildLookup | None = None) -> bool:
         if session_id is None:
@@ -177,6 +262,7 @@ class ForegroundBoundary:
     next_row: int
     accounted: bool
     cancelled: bool
+    degraded: bool
 
     def excludes(self, step: PlannerRow, notice: BackgroundNotice) -> bool:
         tokens = step.row.get("input_tokens")
@@ -184,6 +270,8 @@ class ForegroundBoundary:
             return True
         if step.index < self.next_row:
             return False
+        if self.degraded:
+            return True
         if self.cancelled:
             return step.final
         return self.accounted and type(tokens) is int and tokens > 0
@@ -197,7 +285,7 @@ class OutputProjection:
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
     excluded: set[int] = field(default_factory=set[int])
-    _answered_notices: set[int] = field(default_factory=set[int])
+    _answered_at: dict[int, int] = field(default_factory=dict[int, int])
     _boundaries: dict[str, ForegroundBoundary] = field(
         default_factory=dict[str, ForegroundBoundary]
     )
@@ -208,7 +296,14 @@ class OutputProjection:
         return step.input_key is not None and (step.notice is None or step.index in self.confirmed)
 
     def steps(self, rows: Sequence[Frame]) -> tuple[PlannerRow, ...]:
-        return tuple(planner_rows(rows[self.offset :], self.keys))
+        return tuple(
+            planner_rows(
+                rows[self.offset :],
+                self.keys,
+                boundaries=self._boundaries,
+                answered_at=self._answered_at,
+            )
+        )
 
     def confirm_span(self, span: Sequence[PlannerRow], candidates: Sequence[PlannerRow]) -> None:
         selected = {step.index for step in span}
@@ -216,9 +311,15 @@ class OutputProjection:
         self.excluded.update(step.index for step in candidates if step.index not in selected)
 
     def close_foreground(
-        self, keys: Sequence[str], row_count: int, *, accounted: bool, cancelled: bool = False
+        self,
+        keys: Sequence[str],
+        row_count: int,
+        *,
+        accounted: bool,
+        cancelled: bool = False,
+        degraded: bool = False,
     ) -> None:
-        boundary = ForegroundBoundary(row_count - self.offset, accounted, cancelled)
+        boundary = ForegroundBoundary(row_count - self.offset, accounted, cancelled, degraded)
         self._boundaries.update(dict.fromkeys(keys, boundary))
 
     def _route(self, step: PlannerRow) -> str | BackgroundNotice | None:
@@ -235,29 +336,30 @@ class OutputProjection:
     def background_replies(
         self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
     ) -> Iterator[NativeReply]:
-        steps = (
-            step
-            for step in self.steps(transcript.rows)
-            if isinstance(self._route(step), BackgroundNotice)
-        )
         yield from native_replies(
-            transcript, self.offset, steps, session_id, subagents, self._answered_notices
+            transcript,
+            self.offset,
+            self.steps(transcript.rows),
+            session_id,
+            subagents,
+            self._answered_at,
+            route=self._route,
         )
 
     def has_pending_reply(
         self, rows: Sequence[Frame], session_id: str | None, subagents: ChildLookup
     ) -> bool:
-        for index in range(len(rows) - 1, self.offset - 1, -1):
-            row = rows[index]
-            if row.get("type") == "USER_INPUT":
-                return False
-            if row.get("type") == "SYSTEM_MESSAGE" and (
-                notice := _background_notice(row, index - self.offset)
-            ):
-                return notice.index not in self._answered_notices and notice.belongs_to(
-                    session_id, subagents
-                )
-        return False
+        notice = None
+        for event in _attribution_events(
+            rows[self.offset :], self.keys, self._boundaries, self._answered_at
+        ):
+            if event is None or isinstance(event, BackgroundNotice):
+                notice = event
+        return (
+            notice is not None
+            and notice.index not in self._answered_at
+            and notice.belongs_to(session_id, subagents)
+        )
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -403,6 +505,45 @@ def _text_chunks(
     return tuple(indices) if text.strip() == expected else ()
 
 
+def corroborates_assistant_chunks(
+    frames: Sequence[Frame], foreground: Sequence[str], detached: Sequence[str]
+) -> bool:
+    text_frames = {
+        index for index, frame in enumerate(frames) if content_text(frame.get("content")).strip()
+    }
+    if not foreground or not text_frames:
+        return False
+    consumed: set[int] = set()
+    cursor = 0
+    for text in foreground:
+        indices = _find_text_chunks(frames, text, consumed, start=cursor)
+        if not indices:
+            return False
+        consumed.update(indices)
+        cursor = indices[-1] + 1
+    for text in detached:
+        consumed.update(_find_text_chunks(frames, text, consumed))
+    return text_frames <= consumed
+
+
+def _find_text_chunks(
+    frames: Sequence[Frame],
+    expected: str,
+    consumed: set[int],
+    *,
+    start: int = 0,
+) -> tuple[int, ...]:
+    for interleave in (False, True):
+        for index in range(start, len(frames)):
+            first = content_text(frames[index].get("content"))
+            if index in consumed or not expected.startswith(first.strip()):
+                continue
+            indices = _text_chunks(index, first, expected, frames, consumed, interleave=interleave)
+            if indices:
+                return indices
+    return ()
+
+
 def _calls(row: dict[str, object]) -> Iterator[dict[str, object]]:
     calls = row.get("tool_calls")
     if is_object_list(calls):
@@ -444,6 +585,7 @@ class NativeReply:
     transcript: TranscriptSnapshot
     offset: int
     steps: Sequence[PlannerRow]
+    incomplete_span: bool = False
 
     @property
     def timer_prompt(self) -> str | None:
@@ -483,7 +625,7 @@ class NativeReply:
                 permission_denials=(),
                 steps=steps,
                 generation=generation,
-                usage_uncertain=not complete_usage,
+                usage_uncertain=self.incomplete_span or not complete_usage,
             ),
         )
 
@@ -521,7 +663,7 @@ class IdleReplies:
             planner_rows(transcript.rows[self.offset :], ()),
             session_id,
             subagents,
-            set(),
+            {},
         ):
             self.offset = reply.offset + reply.steps[-1].index + 1
             yield reply
@@ -533,20 +675,31 @@ def native_replies(
     steps: Iterable[PlannerRow],
     session_id: str | None,
     subagents: ChildLookup,
-    answered: set[int],
+    answered_at: dict[int, int],
+    *,
+    route: Callable[[PlannerRow], str | BackgroundNotice | None] | None = None,
 ) -> Iterator[NativeReply]:
     pending: dict[BackgroundNotice, list[PlannerRow]] = {}
+    unresolved: set[int] = set()
     for step in steps:
         notice = step.notice
         if (
             notice is None
-            or notice.index in answered
+            or notice.index in answered_at
             or not notice.belongs_to(session_id, subagents)
         ):
             continue
+        if route is not None:
+            owner = route(step)
+            if owner is None:
+                unresolved.add(notice.index)
+            if owner != notice:
+                continue
         span = pending.setdefault(notice, [])
         span.append(step)
         if step.final:
-            answered.add(notice.index)
-            yield NativeReply(notice, transcript, offset, tuple(span))
+            answered_at[notice.index] = step.index
+            yield NativeReply(
+                notice, transcript, offset, tuple(span), incomplete_span=notice.index in unresolved
+            )
             del pending[notice]

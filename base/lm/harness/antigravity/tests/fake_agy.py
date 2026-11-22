@@ -163,6 +163,96 @@ def resumed_prompt(transcript: Path, request: int) -> None:
     result(request, usage=False)
 
 
+def resumed_command_completion(transcript: Path, request: int, command: str) -> None:
+    message("REPLAYED_OLD_TEXT")
+    message("MEIVA_DISPLAY_TO_USER\nOld native reply")
+    task_id = SID + "/task-2893"
+    counts = (
+        (7115, 308503, 1657),
+        (4306, 315151, 1076),
+        (2953, 319455, 495),
+        (2334, 322406, 614),
+        (2319, 324738, 373),
+        (3395, 325008, 850),
+        (5674, 328401, 600),
+        (3715, 334073, 947),
+        (2213, 337786, 292),
+        (3479, 337950, 4220),
+        (4675, 341427, 679),
+    )
+    unresolved = command == "unresolved-attribution"
+    reply = "MEIVA_DISPLAY_TO_USER\nFresh multi-step reply"
+    for index, (uncached, cached, output) in enumerate(counts):
+        if index == 1 and not unresolved:
+            record(
+                transcript,
+                {
+                    "step_index": 2893,
+                    "source": "MODEL",
+                    "type": "GENERIC",
+                    "status": "RUNNING",
+                    "content": f"Created At: {STAMP}\nTool is running as a background task with task id: {task_id}\nTask Description: sanitized",
+                },
+            )
+        if index == 6:
+            record(
+                transcript,
+                {
+                    "type": "SYSTEM_MESSAGE",
+                    "content": f'[Message] timestamp={STAMP} sender={task_id} priority=MESSAGE_PRIORITY_HIGH content=Task id "{task_id}" finished with result:\nCommand exited with code 0.',
+                },
+            )
+        final = index == len(counts) - 1
+        if final and unresolved:
+            reply = "AMBIGUOUS REPLY"
+        row = {
+            **planner_row(reply if final else None, tokens=uncached),
+            "cache_read_tokens": cached,
+            "output_tokens": output,
+        }
+        if not final:
+            args = {"CommandLine": f"echo step-{index}"}
+            row["tool_calls"] = [{"name": "run_command", "args": args}]
+            update("tool_call", toolCallId=f"step-{index}", name="run_command", rawInput=args)
+            update("tool_call_update", toolCallId=f"step-{index}", status="completed")
+        record(transcript, row)
+    message(reply)
+    usage = {
+        "inputTokens": sum(row[0] for row in counts),
+        "cachedReadTokens": sum(row[1] for row in counts),
+        "outputTokens": sum(row[2] for row in counts),
+    }
+    frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
+
+    if unresolved:
+        after_release(
+            Path("release-native"),
+            lambda: send_late_native(transcript, with_tool=Path("include-native-tool").exists()),
+        )
+
+
+def record_native_tool(transcript: Path) -> None:
+    args = {"CommandLine": "echo native"}
+    record(
+        transcript,
+        {
+            **planner_row(None, tokens=125),
+            "tool_calls": [{"name": "run_command", "args": args}],
+        },
+    )
+    update("tool_call", toolCallId="native-tool", name="run_command", rawInput=args)
+    update("tool_call_update", toolCallId="native-tool", status="completed")
+
+
+def send_late_native(transcript: Path, *, with_tool: bool = False) -> None:
+    if with_tool:
+        record_native_tool(transcript)
+    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+    message("LATE NATIVE REPLY")
+    update("usage_update", used=2, size=10)
+    Path("native-written").touch()
+
+
 def child_overlap(transcript: Path, request: int, command: str) -> None:
     foreground = planner_row("FOREGROUND")
     if command == "child-no-usage-incomplete":
@@ -216,7 +306,72 @@ def cancel_prompt(transcript: Path, request: int) -> None:
     result(request, "cancelled", usage=False)
 
 
+def ambiguous_foreground(transcript: Path, request: int, *, foreground_first: bool) -> None:
+    record_native_tool(transcript)
+    texts = ("OK", "LATE NATIVE REPLY")
+    for text in texts if foreground_first else reversed(texts):
+        record(transcript, planner_row(text))
+    message("O")
+    message("LATE NATIVE REPLY")
+    message("K")
+    result(request)
+
+
+def reply_with_delayed_planner(transcript: Path, request: int, timing: str) -> None:
+    if timing.startswith("usage-tie-"):
+        ambiguous_foreground(
+            transcript, request, foreground_first=timing.endswith("-foreground-first")
+        )
+        return
+    record_native_tool(transcript)
+    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+    if timing == "delayed-planner-early":
+        message("LATE NATIVE REPLY")
+    message("O")
+    if timing == "delayed-planner-interleaved":
+        message("LATE NATIVE REPLY")
+    message("K")
+    if timing == "delayed-planner-trailing":
+        message("LATE NATIVE REPLY")
+    result(request)
+    frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
+
+    def write_foreground() -> None:
+        if timing == "delayed-planner":
+            message("LATE NATIVE REPLY")
+        record(transcript, planner_row("OK"))
+        update("usage_update", used=2, size=10)
+
+    after_release(Path("release-foreground"), write_foreground)
+
+
+def foreground_with_preamble(transcript: Path, request: int) -> None:
+    record(
+        transcript,
+        {
+            **planner_row("Working"),
+            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "echo foreground"}}],
+        },
+    )
+    message("Working")
+    record(transcript, planner_row("OK"))
+    message("O")
+    message("K")
+    frame(
+        {
+            "id": request,
+            "result": {
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 20, "cachedReadTokens": 60, "outputTokens": 6},
+            },
+        }
+    )
+
+
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    if command in {"resumed-command-completion", "unresolved-attribution"}:
+        resumed_command_completion(transcript, request, command)
+        return
     if command == "resumed":
         resumed_prompt(transcript, request)
         return
@@ -228,6 +383,16 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         return
     if command == "child-seed":
         _ = declare_child(transcript)
+    if command == "late-native":
+        send_late_native(transcript)
+    if command == "tool-then-foreground":
+        record_native_tool(transcript)
+    if command == "foreground-preamble":
+        foreground_with_preamble(transcript, request)
+        return
+    if command.startswith(("delayed-planner", "usage-tie-")):
+        reply_with_delayed_planner(transcript, request, command)
+        return
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
@@ -481,6 +646,8 @@ def main() -> None:
                 original = None
         elif method == "session/prompt":
             original, permission_prompt = handle_prompt(transcript, data, original)
+        elif request == "collision-receipt":
+            Path("collision-receipt-read").touch()
         elif request == "permission-1":
             assert permission_prompt is not None
             assert data["result"]["outcome"] == {"outcome": "selected", "optionId": "deny"}

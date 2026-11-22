@@ -67,9 +67,14 @@ output, the adapter buffers unkeyed assistant and new tool frames until the
 corresponding completed planner rows identify the owner. A Hub notice identifies
 a detached task. During overlap, planner rows after the notice stay provisional
 until a unique ordered foreground span matches the prompt's ACP usage receipts.
-Assigning a provisional row also requires a separate terminal planner row for
-the detached reply. Candidate sets larger than ten rows stay unresolved to
-bound the session reader's work. An earlier text block cannot close a turn
+Assigning a provisional row normally requires a separate terminal planner row
+for the detached reply. The session reader searches at most ten provisional rows
+for an ordered subset. The completion of a shell command launched within
+the same marked input before its terminal planner row is a tool result in that
+input. The command's provider-generated launch row carries the task ID and step
+index, and the Hub completion envelope carries the same task ID. A completion
+after the input's terminal planner row or closure boundary retains its native
+notice. An earlier text block cannot close a turn
 while its planner span contradicts complete ACP usage receipts. Closing a
 verified foreground records the transcript boundary and the accounted span.
 A late timer reply requires a separate task notice after that boundary or
@@ -87,7 +92,26 @@ planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete
 counts are marked uncertain. A current textless terminal row can close a
 prompt despite unmatched replay. Cancellation settles proved foreground
-evidence immediately, preserving recorded text and usage.
+evidence immediately, preserving recorded text and usage. At the attribution
+deadline, a successful ACP response with its current input marker in the
+transcript can settle with only attributed foreground output. The adapter logs
+`agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
+planner rows quarantined for native attribution. A pending notice from a
+degraded input can receive the detached planner steps appended after closure
+and before the next input marker. Native usage is uncertain when unresolved
+earlier steps could belong to that reply. Otherwise the notice stays
+provisional across markers until a verified detached terminal precedes the
+marker. A new input with one terminal can confirm the unique ordered subset
+that matches its ACP receipt when every provisional row comes from a carried
+notice. Receipt matches must identify exactly one foreground span before text
+can corroborate a carried terminal. Equal-usage candidates remain unresolved
+regardless of ACP chunk order or planner order. The reader matches text using
+the same interleaved chunk matcher as live projection. A sole terminal must
+account for all remaining text with its own span. When independent terminals
+exist, other planner rows can account for skipped chunks in either order.
+Above the subset limit, only the whole span is tested. The notice remains
+pending for a separate native reply. Missing input evidence retains
+the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes

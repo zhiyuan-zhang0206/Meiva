@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 
@@ -10,6 +10,7 @@ from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_mar
 from base.lm.harness.antigravity.mapping import (
     OutputProjection,
     PlannerRow,
+    corroborates_assistant_chunks,
     has_planner_tokens,
     planner_rows,
     planner_step_usage,
@@ -27,6 +28,7 @@ from base.lm.harness.events import (
     TurnCompleted,
     Usage,
 )
+from base.log import logger
 
 
 def _tokens(value: object) -> int:
@@ -202,30 +204,79 @@ def bill_prompt(
 MAX_AMBIGUOUS_PLANNER_ROWS = 10
 
 
+@dataclass(frozen=True, slots=True)
+class _StopText:
+    chunks: tuple[dict[str, object], ...] = ()
+    seen: frozenset[int] = frozenset()
+
+    def corroborates(self, span: Sequence[PlannerRow], scope: Sequence[PlannerRow]) -> bool:
+        terminal = span[-1]
+        if not self.chunks or not terminal.final or terminal.index in self.seen:
+            return False
+        selected = {step.index for step in span}
+        foreground = tuple(
+            text for step, text in _planner_text(span) if step.index not in self.seen
+        )
+        detached = (
+            tuple(
+                text
+                for step, text in _planner_text(scope)
+                if step.index not in selected and step.index not in self.seen
+            )
+            if sum(step.terminal for step in scope) > 1
+            else ()
+        )
+        return corroborates_assistant_chunks(self.chunks, foreground, detached)
+
+
 def _witnesses(
     known: tuple[PlannerRow, ...],
     possible: tuple[PlannerRow, ...],
     reports: Sequence[PromptUsage],
     keys: Sequence[str],
 ) -> Iterator[tuple[PlannerRow, ...]]:
-    if not reports or len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
+    if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
+        return
+    sole_carried_terminal = _has_sole_carried_terminal(known, possible)
+    for extra in _receipt_candidates(possible, sole_carried_terminal=sole_carried_terminal):
+        span = tuple(sorted((*known, *extra), key=lambda step: step.index))
+        if _matches_reports(span, reports, keys):
+            yield span
+
+
+def _receipt_candidates(
+    possible: tuple[PlannerRow, ...], *, sole_carried_terminal: bool
+) -> Iterator[tuple[PlannerRow, ...]]:
+    if len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
+        if sole_carried_terminal:
+            yield possible
         return
     terminals = {step.index for step in possible if step.final}
-    if not all(has_planner_tokens(step.row) for step in (*known, *possible)):
-        return
     for count in range(len(possible) + 1):
         for extra in combinations(possible, count):
-            if extra and not terminals.difference(step.index for step in extra):
-                continue
-            span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-            if span and _matches_reports(span, reports, keys):
-                yield span
+            if (
+                sole_carried_terminal
+                or not extra
+                or terminals.difference(step.index for step in extra)
+            ):
+                yield extra
+
+
+def _has_sole_carried_terminal(
+    known: tuple[PlannerRow, ...],
+    possible: tuple[PlannerRow, ...],
+) -> bool:
+    return (
+        bool(possible)
+        and all(step.carries_notice for step in possible)
+        and sum(step.terminal for step in (*known, *possible)) == 1
+    )
 
 
 def _matches_reports(
     span: Sequence[PlannerRow], reports: Sequence[PromptUsage], keys: Sequence[str]
 ) -> bool:
-    if not span[-1].terminal or span[-1].input_key != keys[-1]:
+    if not span or not span[-1].terminal or span[-1].input_key != keys[-1]:
         return False
     steps = tuple(planner_tokens(step.row) for step in span)
     cumulative = _covers_cumulative(reports, steps, sum(steps, Usage()))
@@ -257,6 +308,8 @@ class PromptTurn:
     verified_steps: tuple[Usage, ...] | None = None
     _verified_text: tuple[str, ...] = ()
     _verified_usage_partial: bool = False
+    _projection_degraded: bool = False
+    _stop_text: _StopText = _StopText()
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
         yield from self._flush_thoughts()
@@ -289,6 +342,19 @@ class PromptTurn:
         self.verified_steps = None
         self._verified_text = ()
         self._verified_usage_partial = False
+        self._projection_degraded = False
+        self._stop_text = _StopText()
+
+    def record_stop(self, reason: str, projection: OutputProjection) -> None:
+        self.stop_reason = reason
+        self._stop_text = _StopText(
+            chunks=tuple(
+                frame
+                for frame in projection.pending
+                if frame.get("sessionUpdate") == "agent_message_chunk"
+            ),
+            seen=frozenset(index for index, field, _ in projection.seen if field == "content"),
+        )
 
     def require_projection(self, *, required: bool) -> OutputProjection | None:
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
@@ -337,12 +403,30 @@ class PromptTurn:
             and (not reports or (projection.fences_replay and not possible))
         ):
             return known, tuple(step for step in possible if step.index > known[-1].index)
+        span = self._receipt_span(known, possible, reports)
+        if span is None:
+            return None
+        chosen = {step.index for step in span}
+        return span, tuple(step for step in possible if step.index not in chosen)
+
+    def _receipt_span(
+        self,
+        known: tuple[PlannerRow, ...],
+        possible: tuple[PlannerRow, ...],
+        reports: Sequence[PromptUsage],
+    ) -> tuple[PlannerRow, ...] | None:
         witnesses = _witnesses(known, possible, reports, self.keys)
         span = next(witnesses, None)
         if span is None or next(witnesses, None) is not None:
             return None
-        chosen = {step.index for step in span}
-        return span, tuple(step for step in possible if step.index not in chosen)
+        scope = tuple(sorted((*known, *possible), key=lambda step: step.index))
+        if (
+            span[-1].carries_notice
+            and span[-1] not in known
+            and not self._stop_text.corroborates(span, scope)
+        ):
+            return None
+        return span
 
     def _proves_end(self, step: PlannerRow) -> bool:
         report = self.reports.get(self.latest)
@@ -366,6 +450,13 @@ class PromptTurn:
     ) -> bool:
         if self.verified_steps is not None:
             return True
+        if self.stop_reason == "end_turn" and not self._latest_marker_recorded(rows):
+            return False
+        return self._projection_frames_ready(projection, rows)
+
+    def _projection_frames_ready(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> bool:
         scope = [step for step in projection.steps(rows) if step.input_key in self.keys]
         if any(not projection.owns(step) for step in scope):
             return False
@@ -379,13 +470,44 @@ class PromptTurn:
             bool(scope) or not any(report.output for report in self._projection_reports())
         )
 
+    def _latest_marker_recorded(self, rows: Sequence[dict[str, object]]) -> bool:
+        return input_marker(self.keys[-1]) in received_markers(rows[self.transcript_offset :])
+
+    def settle_projection(
+        self,
+        projection: OutputProjection,
+        rows: Sequence[dict[str, object]],
+        monotonic: Callable[[], float],
+    ) -> str | None:
+        reason = self.stop_reason
+        if reason is None or self.projection_ready(projection, rows):
+            return reason
+        if reason != "end_turn" or monotonic() < self.stop_deadline:
+            return None
+        if not self._latest_marker_recorded(rows):
+            return None
+        scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
+        owned = tuple(step for step in scope if projection.owns(step))
+        if owned:
+            self._apply_projection(projection, owned, (), scope_size=len(scope))
+        self._projection_degraded = True
+        logger.warning(
+            "Settling completed agy ACP prompt with only attributed output",
+            event="agy_acp_attribution_degraded",
+            turn_id=self.ticket.turn_id,
+            unresolved_rows=len(scope) - len(owned),
+            pending_frames=len(projection.pending),
+        )
+        return reason
+
     def close_projection(self, projection: OutputProjection, row_count: int) -> None:
         projection.pending.clear()
         projection.close_foreground(
             self.keys,
             row_count,
-            accounted=self.verified_steps is not None,
+            accounted=self.verified_steps is not None and not self._projection_degraded,
             cancelled=self.interrupted,
+            degraded=self._projection_degraded,
         )
 
     def restore_verified_text(
@@ -437,6 +559,7 @@ class PromptTurn:
             duration_ms=int((monotonic_now - (ticket.started_at or 0)) * 1000),
             usage=bill.usage,
             usage_uncertain=bill.uncertain
+            or self._projection_degraded
             or (self._verified_usage_partial and self.latest not in self.reports),
             cost_usd=None,
             cumulative_cost_usd=None,

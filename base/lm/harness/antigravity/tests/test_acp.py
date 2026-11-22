@@ -768,3 +768,31 @@ def test_cancel_boundary_keeps_an_existing_planner_out_of_the_timer_reply() -> N
     [reply] = list(projection.project(rows))
     assert reply.reply == "BACKGROUND" and reply.native_notice("conv") is not None
     assert list(projection.pending) == [_chunk("LATE FOREGROUND")]
+
+
+def test_command_completion_after_foreground_closes_keeps_native_ownership() -> None:
+    key = "one"
+    projection = OutputProjection(0, keys=[key])
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker(key)},
+        {
+            "step_index": 12,
+            "source": "MODEL",
+            "type": "GENERIC",
+            "status": "RUNNING",
+            "content": "Created At: 2026-11-22T19:38:44Z\nTool is running as a background task with task id: conv/task-12",
+        },
+    ]
+    projection.close_foreground([key], len(rows), accounted=False)
+    rows.extend(
+        (
+            {
+                "type": "SYSTEM_MESSAGE",
+                "content": '[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-12 priority=MESSAGE_PRIORITY_HIGH content=Task id "conv/task-12" finished with result:\nDone',
+            },
+            _planner("BACKGROUND", 99),
+        )
+    )
+    projection.pending.append(_chunk("BACKGROUND"))
+    [reply] = list(projection.project(rows))
+    assert reply.input_key is None and reply.native_notice("conv") is not None
