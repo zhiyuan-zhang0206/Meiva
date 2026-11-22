@@ -74,6 +74,8 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
     TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
     completed_turn,
     fault_of_event,
 )
@@ -430,6 +432,7 @@ class ForegroundRun:
                 | SubagentText()
                 | ToolUse()
                 | ToolResult()
+                | TurnStarted(origin=TurnOrigin.HARNESS, record_start=int())
             ):
                 await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):

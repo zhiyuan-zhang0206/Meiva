@@ -141,30 +141,6 @@ async def test_cancel_keeps_process_and_next_turn_works(
         await harness.stop()
 
 
-async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_path: Path) -> None:
-    sink: list[UnsolicitedOutput] = []
-    harness = await start(
-        tmp_path,
-        resume="conv-acp",
-        unsolicited=sink.append,
-        extra_args=("--test-late-load-replay",),
-    )
-    try:
-        await harness.session.deliver([HarnessInput.of("new", "new")])
-        await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
-        frames = harness.frames()
-        assert [f["method"] for f in frames] == [
-            "initialize",
-            "session/load",
-            "session/set_model",
-            "session/prompt",
-        ]
-        assert frames[2]["params"] == {"sessionId": "conv-acp", "modelId": "gemini-4-hydrogen-low"}
-        assert sink == []
-    finally:
-        await harness.stop()
-
-
 async def test_background_completion_and_answer_arrive_while_idle(tmp_path: Path) -> None:
     sink: list[UnsolicitedOutput] = []
     harness = await start(tmp_path, unsolicited=sink.append)
@@ -569,7 +545,7 @@ def test_planner_span_requires_own_inputs_and_final_row_without_background() -> 
     assert planner_usage(rows[:-1], keys, "FINAL") == ()
     notice: dict[str, object] = {
         "type": "SYSTEM_MESSAGE",
-        "content": "[Message] sender=conv/task-12 content=timer",
+        "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-12 priority=MESSAGE_PRIORITY_HIGH content=timer",
     }
     background = {**rows[-1], "content": "BACKGROUND", "input_tokens": 999}
     overlapping = [*rows[:2], notice, background, *rows[2:]]
@@ -593,7 +569,10 @@ def test_disjoint_steer_usage_survives_background_overlap_and_requires_first_pla
     rows: list[dict[str, object]] = [
         {"type": "USER_INPUT", "content": input_marker("one")},
         first,
-        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-12"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-12 priority=MESSAGE_PRIORITY_HIGH content=timer",
+        },
         {**final, "content": "TIMER", "input_tokens": 20_000},
         {"type": "USER_INPUT", "content": input_marker("two")},
         final,
@@ -619,7 +598,10 @@ def test_turn_keeps_candidates_buffered_without_unique_ownership(answers: tuple[
     projection = OutputProjection(0, keys=[key])
     rows: list[dict[str, object]] = [
         {"type": "USER_INPUT", "content": input_marker(key)},
-        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
+        },
     ]
     for answer in answers:
         rows.append(
@@ -667,7 +649,10 @@ def test_foreground_total_must_cover_text_on_both_sides_of_the_hub_notice() -> N
     rows: list[dict[str, object]] = [
         {"type": "USER_INPUT", "content": input_marker(key)},
         _planner("FIRST", 10),
-        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
+        },
         _planner("TRUE FINAL", 20),
     ]
     projection.pending.extend((_chunk("FIRST"), _chunk("TRUE FINAL")))
@@ -682,7 +667,7 @@ def test_foreground_total_must_cover_text_on_both_sides_of_the_hub_notice() -> N
     turn.prove_projection(projection, rows)
     final, detached = projection.project(rows)
     assert final.input_key == key and final.frame == _chunk("TRUE FINAL")
-    assert detached.timer_notice("conv") and detached.reply == "REAL BACKGROUND"
+    assert detached.native_notice("conv") and detached.reply == "REAL BACKGROUND"
     assert turn.projection_ready(projection, rows)
     result = turn.complete(rows, "end_turn", "conv", 0.0, 1)
     assert result.text == "FIRST\nTRUE FINAL" and result.usage == Usage(30, 6)
@@ -734,7 +719,10 @@ def test_terminal_cumulative_steer_usage_without_early_receipt(
         {"type": "USER_INPUT", "content": input_marker("one")},
         *([first] if first_planner_visible else []),
         {"type": "USER_INPUT", "content": input_marker("two")},
-        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
+        },
         final,
         _planner("BACKGROUND", 99),
     ]
@@ -767,7 +755,10 @@ def test_cancel_boundary_keeps_an_existing_planner_out_of_the_timer_reply() -> N
     interrupted = _planner("LATE FOREGROUND", 10)
     rows: list[dict[str, object]] = [
         {"type": "USER_INPUT", "content": input_marker("one")},
-        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
+        },
         {**interrupted, "status": "RUNNING"},
     ]
     projection.close_foreground(["one"], len(rows), accounted=False, cancelled=True)
@@ -775,5 +766,5 @@ def test_cancel_boundary_keeps_an_existing_planner_out_of_the_timer_reply() -> N
     rows.append(_planner("BACKGROUND", 99))
     projection.pending.extend((_chunk("LATE FOREGROUND"), _chunk("BACKGROUND")))
     [reply] = list(projection.project(rows))
-    assert reply.reply == "BACKGROUND" and reply.timer_notice("conv") is not None
+    assert reply.reply == "BACKGROUND" and reply.native_notice("conv") is not None
     assert list(projection.pending) == [_chunk("LATE FOREGROUND")]

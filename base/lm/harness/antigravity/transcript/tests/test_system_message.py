@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from base.lm.harness.antigravity.transcript.errors import UnrecognisedError
-from base.lm.harness.antigravity.transcript.system_message import classify
+from base.lm.harness.antigravity.acp import UnrecognisedError, classify_system_message
 from base.lm.harness.events import HarnessCause
 
 
@@ -28,7 +27,7 @@ from base.lm.harness.events import HarnessCause
     ],
 )
 def test_known_cli_system_noise_is_ignored(content: str) -> None:
-    assert classify(content) is None
+    assert classify_system_message(content) is None
 
 
 def test_message_envelope_wins_over_quoted_reminder_text() -> None:
@@ -39,7 +38,7 @@ def test_message_envelope_wins_over_quoted_reminder_text() -> None:
         "content=Saw <SYSTEM_MESSAGE>Reminder: work efficiently</SYSTEM_MESSAGE> in output\n"
         "</SYSTEM_MESSAGE>"
     )
-    notice = classify(content)
+    notice = classify_system_message(content)
     assert notice is not None
     assert notice.sender == "child-conv"
     assert notice.cause is HarnessCause.BACKGROUND_TASK
@@ -51,7 +50,7 @@ def test_unwrapped_message_envelope_quoting_reminder_is_not_swallowed() -> None:
         "[Message] timestamp=2026-11-22T00:00:00Z sender=child-conv priority=HIGH "
         "content=Quoted <SYSTEM_MESSAGE>\nReminder: work efficiently.\n</SYSTEM_MESSAGE>"
     )
-    notice = classify(content)
+    notice = classify_system_message(content)
     assert notice is not None
     assert notice.sender == "child-conv"
     assert notice.cause is HarnessCause.BACKGROUND_TASK
@@ -82,4 +81,4 @@ def test_unwrapped_message_envelope_quoting_reminder_is_not_swallowed() -> None:
 )
 def test_unknown_system_messages_still_raise(content: str) -> None:
     with pytest.raises(UnrecognisedError):
-        classify(content)
+        classify_system_message(content)

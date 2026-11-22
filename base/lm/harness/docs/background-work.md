@@ -79,8 +79,8 @@ event pump (`pump.py`) keeps that turn's events from its start until a subscribe
 `TurnStarted`, and calls the owner's `own_turn` (the host's wake for the agent). The claim finds no inbox
 row but sees `bridge.has_unpresented_turn` and enters a graph run; its subscription is primed with the
 turn's events so far, so the turn's text and tools reach the timeline as they would for an input's turn,
-with any native task notice projected from the transcript. Antigravity supplies the notice’s record
-offset so a completed native turn can still publish when the graph opens after the reply was written. A turn that
+with any native task notice projected from the transcript. Antigravity supplies the notice and reply record
+offsets so the graph can deliver a completed native reply even when its live reader already passed the row. A turn that
 begins while a run is subscribed is read by that run and never replayed to a later one: the same turn is
 presented once, however it straddles a run's start or end. The revival of a queued input of ours has its
 own timeline entry (the input's). The reply follows the same visibility prefix

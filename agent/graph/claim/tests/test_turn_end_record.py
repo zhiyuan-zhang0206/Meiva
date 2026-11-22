@@ -31,7 +31,16 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import AssistantText, HarnessTurn, Usage
+from base.lm.harness import (
+    AssistantText,
+    HarnessInput,
+    HarnessTurn,
+    TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
+    Usage,
+)
+from base.lm.harness.antigravity.tests.support import seed_replay_history, start
 from base.log.tests.log_records import LogRecords
 
 
@@ -196,6 +205,7 @@ async def test_completed_native_task_uses_recorded_reply_visibility(
             )
             + "\n"
         )
+    offset = path.stat().st_size
     reply = f"{prefix}\nTIMER_PURPLE"
     _write_native_planner(path, created_at="2026-11-22T19:43:05Z", content=reply)
     ctx = MeivaContext(
@@ -207,14 +217,26 @@ async def test_completed_native_task_uses_recorded_reply_visibility(
         clock_factory=system_clock,
         environ={"HOME": str(tmp_path)},
     )
-    for _ in range(2):
+    for index in range(2):
         sink = ReadTimelineSink(
             ctx,
             aid,
             live_events.publisher,
             non_human_wake=True,
             session_id=lambda: sid,
-            unpresented_record_start=start,
+        )
+        if index == 0:
+            await sink.finish()
+            assert (
+                db_conn.execute(
+                    "SELECT content FROM agent_publications WHERE agent_id = %s", (aid,)
+                ).fetchall()
+                == []
+            )
+        await sink.on_event(
+            TurnStarted(
+                "native", TurnOrigin.HARNESS, (), 1, record_start=start, record_reply=offset
+            )
         )
         await sink.on_event(AssistantText("native", reply))
         await sink.finish()
@@ -235,3 +257,50 @@ async def test_completed_native_task_uses_recorded_reply_visibility(
         and "TIMER_PURPLE" in str(item.get("payload"))
         for item in snapshot_items(snapshots)
     )
+
+
+async def test_resumed_acp_replay_cannot_publish_historical_output(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
+    tmp_path: Path,
+    live_events: LiveEvents,
+) -> None:
+    aid = agent_row(db_conn)
+    seed_replay_history(tmp_path)
+    harness = await start(tmp_path, resume="conv-acp", extra_args=("--test-late-load-replay",))
+    ctx = MeivaContext(
+        agent=AgentSlices.resolve({"user_delivery_mode": "prefix"}, default_reader=defaults()),
+        harness=Harness.ANTIGRAVITY,
+        meiva_home=tmp_path,
+        db=Database.from_settings(gate=database_gate),
+        bus=event_bus,
+        clock_factory=system_clock,
+        environ={"HOME": str(harness.home)},
+    )
+    sink = ReadTimelineSink(
+        ctx,
+        aid,
+        live_events.publisher,
+        non_human_wake=False,
+        session_id=lambda: harness.session.session_id,
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("fresh", "resumed")])
+        done = await harness.wait_for_type(TurnCompleted)
+        for event in harness.events:
+            await sink.on_event(event)
+        await sink.finish()
+        db_conn.commit()
+        assert done.usage == Usage(250, 3, 0, 30) and not done.usage_uncertain
+        assert db_conn.execute(
+            "SELECT content FROM agent_publications WHERE agent_id = %s", (aid,)
+        ).fetchall() == [("Fresh reply",)]
+        assert (
+            db_conn.execute(
+                "SELECT id FROM inbound_messages WHERE agent_id = %s", (aid,)
+            ).fetchall()
+            == []
+        )
+    finally:
+        await harness.stop()

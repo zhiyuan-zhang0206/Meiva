@@ -214,7 +214,9 @@ class Schedules:
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
-    def reply_finished(self, sender: str, prompt: str) -> Schedules:
+    def reply_finished(self, sender: str, prompt: str | None) -> Schedules:
+        if prompt is None:
+            return self
         for index, reply in enumerate(self.replies):
             if reply.task_id == sender or (reply.task_id is None and reply.prompt == prompt):
                 return replace(self, replies=(*self.replies[:index], *self.replies[index + 1 :]))

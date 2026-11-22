@@ -105,12 +105,21 @@ def finish_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
+def declare_child(transcript: Path) -> str:
+    sender = "child-conv"
+    descriptors = transcript.parent.parent / "subagents"
+    descriptors.mkdir(exist_ok=True)
+    _ = (descriptors / "child.json").write_text(json.dumps({"conversationId": sender}))
+    return sender
+
+
 def background_notice(transcript: Path) -> None:
+    sender = declare_child(transcript) if "--test-native-child" in sys.argv else SID + "/task-1"
     record(
         transcript,
         {
             "type": "SYSTEM_MESSAGE",
-            "content": f"[Message] sender={SID}/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
+            "content": f"[Message] timestamp={STAMP} sender={sender} priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
         },
     )
 
@@ -144,7 +153,34 @@ def trigger_background(transcript: Path) -> None:
     )
 
 
+def resumed_prompt(transcript: Path, request: int) -> None:
+    message("REPLAYED_OLD_TEXT")
+    message("MEIVA_DISPLAY_TO_USER\nOld native reply")
+    update("usage_update", used=3, size=10)
+    reply = "MEIVA_DISPLAY_TO_USER\nFresh reply"
+    record(transcript, {**planner_row(reply, tokens=220), "created_at": STAMP})
+    message(reply)
+    result(request, usage=False)
+
+
+def child_overlap(transcript: Path, request: int) -> None:
+    record(transcript, planner_row("FOREGROUND"))
+    background_notice(transcript)
+    record(transcript, planner_row("CHILD CALLBACK", tokens=237))
+    message("CHILD CALLBACK")
+    message("FOREGROUND")
+    result(request)
+
+
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    if command == "resumed":
+        resumed_prompt(transcript, request)
+        return
+    if command == "child-overlap":
+        child_overlap(transcript, request)
+        return
+    if command == "child-seed":
+        _ = declare_child(transcript)
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
@@ -359,6 +395,7 @@ def setup_session(method: str, request: int) -> None:
     frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
     if method == "session/load" and "--test-late-load-replay" in sys.argv:
         message("REPLAYED_OLD_TEXT")
+        message("MEIVA_DISPLAY_TO_USER\nOld native reply")
         update("usage_update", used=2, size=10)
 
 

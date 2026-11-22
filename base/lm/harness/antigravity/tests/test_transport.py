@@ -10,10 +10,18 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
-from base.lm.harness.antigravity.tests.support import start
+from base.lm.harness.antigravity.tests.support import seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
 from base.lm.harness.delivery import HarnessInput
-from base.lm.harness.events import TurnCompleted, TurnOrigin, TurnStarted, UnsolicitedOutput, Usage
+from base.lm.harness.events import (
+    AssistantText,
+    HarnessCause,
+    TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
+    UnsolicitedOutput,
+    Usage,
+)
 from base.lm.harness.process import PsutilChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
@@ -137,11 +145,15 @@ async def test_close_recovers_an_unsampled_child_that_created_its_own_session(
     ("command", "prefix"),
     [("native-HIDE", "MEIVA_HIDE_FROM_USER"), ("native-DISPLAY", "MEIVA_DISPLAY_TO_USER")],
 )
+@pytest.mark.parametrize(
+    ("extra_args", "cause"),
+    [((), HarnessCause.SCHEDULED_WAKE), (("--test-native-child",), HarnessCause.BACKGROUND_TASK)],
+)
 async def test_native_task_reply_is_a_harness_turn_without_inbound(
-    tmp_path: Path, command: str, prefix: str
+    tmp_path: Path, command: str, prefix: str, extra_args: tuple[str, ...], cause: HarnessCause
 ) -> None:
     sink: list[UnsolicitedOutput] = []
-    harness = await start(tmp_path, unsolicited=sink.append)
+    harness = await start(tmp_path, unsolicited=sink.append, extra_args=extra_args)
     try:
         await harness.session.deliver([HarnessInput.of("foreground", command)])
         foreground = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
@@ -153,9 +165,63 @@ async def test_native_task_reply_is_a_harness_turn_without_inbound(
             lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
         )
         assert done.turn_id != foreground.turn_id and begun.keys == ()
+        assert begun.cause is cause
         assert done.text == f"{prefix}\nTIMER_PURPLE"
         assert done.usage == Usage(267, 3, 0, 30)
         assert not done.usage_uncertain
         assert len(harness.prompts()) == 1 and sink == []
+    finally:
+        await harness.stop()
+
+
+async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_path: Path) -> None:
+    sink: list[UnsolicitedOutput] = []
+    seed_replay_history(tmp_path)
+    harness = await start(
+        tmp_path,
+        resume="conv-acp",
+        unsolicited=sink.append,
+        extra_args=("--test-late-load-replay",),
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("new", "resumed")])
+        completed = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert completed.text == "MEIVA_DISPLAY_TO_USER\nFresh reply"
+        assert completed.usage == Usage(250, 3, 0, 30) and not completed.usage_uncertain
+        assert [e.text for e in harness.events if isinstance(e, AssistantText)] == [completed.text]
+        frames = harness.frames()
+        assert [f["method"] for f in frames] == [
+            "initialize",
+            "session/load",
+            "session/set_model",
+            "session/prompt",
+        ]
+        assert frames[2]["params"] == {"sessionId": "conv-acp", "modelId": "gemini-4-hydrogen-low"}
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+async def test_subagent_completion_overlaps_a_prompt_without_using_its_usage(
+    tmp_path: Path,
+) -> None:
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, unsolicited=sink.append, extra_args=("--test-native-child",))
+    try:
+        await harness.session.deliver([HarnessInput.of("seed", "child-seed")])
+        await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
+        await harness.session.deliver([HarnessInput.of("overlap", "child-overlap")])
+        native = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        child = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id == native.turn_id
+        )
+        foreground = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.text == "FOREGROUND"
+        )
+        assert child.text == "CHILD CALLBACK" and child.usage == Usage(267, 3, 0, 30)
+        assert foreground.usage == Usage(40, 5, 0, 30) and not foreground.usage_uncertain
+        assert native.cause is HarnessCause.BACKGROUND_TASK and sink == []
     finally:
         await harness.stop()

@@ -19,7 +19,6 @@ from base.lm.harness.antigravity.mapping import (
     OutputProjection,
     TranscriptSnapshot,
     text_update,
-    transcript_path,
 )
 from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, reconcile_acp_inputs
 from base.lm.harness.antigravity.schedules import Schedules
@@ -142,6 +141,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _open_transport(self, resume: str | None) -> AgyTransport:
         generation = self._begin_generation()
         transport = self._factory()
+        self._resume_projection = resume is not None
         self._idle_replies = IdleReplies(len(self._transcript(resume).rows) if resume else 0)
         try:
             await transport.start()
@@ -155,6 +155,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._transport_failed = False
         self._retirement = None
         self._session_id = session_id
+        self._idle_replies.bind(session_id, home=self._home)
         self._model = self.config.model
         self._transport = transport
         self._emit(SessionStarted(session_id, self._model, str(self.config.cwd)))
@@ -292,6 +293,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             pid = transport.pid
             self._baseline = self._probe.tool_processes(pid) if pid is not None else {}
             turn = PromptTurn(ticket, len(self._transcript().rows))
+            if self._projection is None:
+                needs_projection = self._resume_projection or self._subagents.has_children(
+                    self._session_id
+                )
+                self._projection = turn.require_projection(required=needs_projection)
+            self._resume_projection = False
             self._prompt_turn = turn
             ticket.started_at = self._monotonic()
             self._send_prompt(
@@ -512,13 +519,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         for item in projection.project(rows):
             if turn is not None and item.input_key in turn.keys:
                 self._project_update(turn, item.frame, finished=item.text_finished)
-            elif reply := projection.take_background_reply(transcript, item, self._session_id):
+            elif reply := projection.take_background_reply(
+                transcript, item, self._session_id, self._subagents
+            ):
                 self._finish_background_reply(reply)
-        if turn is None:
-            if not self._schedules.has_detached:
-                self._projection = None
-                self._idle_replies.offset = len(rows)
-        elif turn.stop_reason and turn.projection_ready(projection, rows):
+        if turn is None and not self._schedules.has_detached:
+            self._projection = None
+            self._idle_replies.offset = len(rows)
+        elif turn is not None and turn.stop_reason and turn.projection_ready(projection, rows):
             for text in turn.restore_verified_text(projection, rows):
                 self._project_update(turn, text_update(text), finished=True)
             self._finish_turn(turn, turn.stop_reason, rows)
@@ -532,7 +540,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         for event in (begun, text, completed):
             self._emit(event)
-        remaining = self._schedules.reply_finished(reply.notice.sender, reply.notice.prompt)
+        remaining = self._schedules.reply_finished(reply.notice.sender, reply.timer_prompt)
         if remaining is not self._schedules:
             self._schedules = remaining
             self._schedule_changed()
@@ -554,7 +562,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _replay_idle(self) -> None:
         if self._projection is None:
-            for reply in self._idle_replies.read(self._session_id, home=self._home):
+            for reply in self._idle_replies.read(
+                self._session_id, subagents=self._subagents, home=self._home
+            ):
                 self._finish_background_reply(reply)
 
     def _handle_result(self, request: int, response: dict[str, object]) -> None:
@@ -634,8 +644,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         self._schedule_changed()
         self._prompt_turn = None
-        self._idle_replies.pending = False
-        self._idle_replies.offset = len(rows)
+        self._idle_replies = IdleReplies(len(rows))
         if not self._schedules.has_detached:
             self._projection = None
         elif self._projection is None:
@@ -652,10 +661,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._fail_active(exc)
 
     def _transcript(self, session_id: str | None = None) -> TranscriptSnapshot:
-        session_id = session_id or self._session_id
-        return TranscriptSnapshot.read(
-            transcript_path(session_id, home=self._home) if session_id else None
-        )
+        return TranscriptSnapshot.for_session(session_id or self._session_id, home=self._home)
 
     async def _watch(self, transport: AgyTransport, generation: int) -> None:
         while self._transport is transport and self._ledger.accepts(generation):
@@ -681,7 +687,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if projection is not None and (projection.pending or (turn and turn.stop_reason)):
             self._replay(self._transcript())
             turn = self._prompt_turn
-        if self._projection is None and turn is None:
+        if turn is None:
             self._replay_idle()
         if turn is not None and turn.stop_reason and self._monotonic() >= turn.stop_deadline:
             return "agy ACP output attribution timed out"
@@ -758,15 +764,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _live_transport(self) -> AgyTransport | None:
         t = self._transport
-        if (
-            self._closed
-            or self._transport_failed
-            or not self._session_id
-            or t is None
-            or not t.alive
-        ):
+        if self._closed or self._transport_failed or not self._session_id:
             return None
-        return t
+        return t if t is not None and t.alive else None
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
         return None if self._closed else self._schedules.silence_floor_monotonic(turn_ids)

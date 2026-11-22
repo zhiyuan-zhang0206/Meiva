@@ -205,10 +205,6 @@ class FakeEngine:
         return [(i.text, i.key) for batch in self.delivered for i in batch]
 
     @property
-    def unpresented_record_start(self) -> int | None:
-        return None
-
-    @property
     def has_unpresented_turn(self) -> bool:
         return bool(self.own_turn_events)
 
