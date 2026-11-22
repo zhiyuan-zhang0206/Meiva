@@ -765,7 +765,7 @@ async def test_flush_text_wakes_on_disk_growth_while_stdout_is_silent_and_refres
         )
         expected_pub = [(f"harness:antigravity:{session}:{initial_offset}", "reactive reply")]
         assert _agent_publications(db_conn, tid) == expected_pub
-        assert refresh_calls == 1
+        await wait_until(lambda: refresh_calls == 1, "A1 requested timing refresh")
 
         store_timings(path, _reactive_timing_trajectory())
         [update] = await _collect_snapshots_until(live_events, bool)
