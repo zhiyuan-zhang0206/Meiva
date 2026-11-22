@@ -46,6 +46,7 @@ class ScheduleSummary(BaseModel):
     machine: str
     owner_plugin: str | None = None
     owner_agent_id: int | None = None
+    created_by_agent_id: int | None = None
     trigger_kind: TriggerKind
     run_at: datetime | None = None
     cron_expr: str | None = None
@@ -79,6 +80,7 @@ class ScheduleCreate(BaseModel):
     enabled: bool = True
     machine: str | None = None
     owner_agent_id: int | None = None
+    created_by_agent_id: int | None = None
 
     @model_validator(mode="after")
     def _validate_trigger(self) -> Self:

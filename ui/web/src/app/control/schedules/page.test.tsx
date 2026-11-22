@@ -7,6 +7,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
+import { fakeBrowser, type FakeBrowser } from "@/lib/browser/testing";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +75,7 @@ function makeQc() {
 function wrap(
   ui: React.ReactElement,
   highlighter: LazyChunk<typeof HighlightComponentType> = pendingHighlighter,
+  browser?: FakeBrowser,
 ) {
   // meiva:note
   // The row ages its last update on the page's clock; no case asserts an age, so the clock this
@@ -84,6 +86,7 @@ function wrap(
         <PythonCodeHighlighterProvider value={highlighter}>{ui}</PythonCodeHighlighterProvider>
       </QueryClientProvider>
     </WallClockProvider>,
+    browser === undefined ? {} : { browser },
   );
 }
 
@@ -376,6 +379,35 @@ describe("SchedulesPage", () => {
     expect(screen.getByRole("heading", { name: "Create schedule" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Create schedule" })).toBeNull());
+  });
+
+  it("deep-links to ?schedule=<id> by expanding, highlighting, and scrolling that row into view", async () => {
+    const second: ScheduleSummary = { ...SCHEDULE, id: 2, name: "linked-schedule", owner_agent_id: null };
+    const secondFull: ScheduleView = { ...FULL, id: 2, name: "linked-schedule", script: "print('linked')" };
+    transport.listSchedules.mockResolvedValue([SCHEDULE, second]);
+    transport.getSchedule.mockResolvedValue(secondFull);
+    transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
+    transport.scheduleRuns.mockResolvedValue([]);
+
+    const browser = fakeBrowser({ href: "/control/schedules?schedule=2" });
+    wrap(<SchedulesPageView navigate={pushSpy} />, pendingHighlighter, browser);
+
+    const linkedCell = await screen.findByText("linked-schedule");
+    const row = linkedCell.closest("tr");
+    expect(row?.getAttribute("data-highlighted")).toBe("true");
+    expect(screen.getByLabelText<HTMLSelectElement>("Schedule scope").value).toBe("all");
+    await waitFor(() => expect(screen.getByText("print('linked')")).toBeTruthy());
+    expect(browser.actions.scrolled.some((entry) => entry.target === row)).toBe(true);
+  });
+
+  it("ignores invalid ?schedule query parameters", async () => {
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    const browser = fakeBrowser({ href: "/control/schedules?schedule=not-a-number" });
+    wrap(<SchedulesPageView navigate={pushSpy} />, pendingHighlighter, browser);
+
+    const cell = await screen.findByText("memory-arbiter");
+    expect(cell.closest("tr")?.getAttribute("data-highlighted")).toBeNull();
+    expect(transport.getSchedule).not.toHaveBeenCalled();
   });
 });
 

@@ -13,7 +13,11 @@ making retries reconstruct the same response from the receipt's original timesta
 `owner_agent_id` is accepted on create and update. Unless a machine is explicit, an
 owned schedule follows the agent's recorded machine; a system schedule stays on the
 accepting gateway machine. Owned schedules default to cancellation when the owner
-terminates. Foreign keys and missing machine placement surface as request errors.
+terminates. `created_by_agent_id` is accepted on create as immutable provenance only:
+it records which agent created the schedule (including system schedules whose
+`owner_agent_id` is `NULL`) without affecting placement, execution identity, workspace
+locality, or termination cancellation. Foreign keys and missing machine placement
+surface as request errors.
 
 List projections omit script bodies; full reads retain them. Script or command edits
 remain versioned. Edits apply on the next fire. A machine move or deletion is

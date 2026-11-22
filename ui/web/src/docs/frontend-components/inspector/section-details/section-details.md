@@ -41,6 +41,16 @@ bar, not here (user corrections 2026-08-28). A row whose agent or shell id is
 not a valid finite integer renders as plain text, so the panel never navigates
 to `/shell/NaN/NaN`.
 
+**Schedules.** Renders the agent's associated schedules from the live snapshot —
+both schedules owned by the agent (`owner_agent_id = agent_id`) and cluster-level
+schedules created by it (`owner_agent_id IS NULL` with `created_by_agent_id = agent_id`),
+ordered by status priority (`running`, `error`, `scheduled`, `stopped`, others) and
+next launch time. The section hides itself when empty. Each row links to
+`/control/schedules?schedule={id}` (via `scheduleHref`), shows a status dot,
+the truncated name with full trigger/status/machine tooltip, a compact `Cluster`
+badge whenever `owner_agent_id` is null, and either the next fire time (for
+scheduled rows) or the localized status label on the right.
+
 **Configuration.** Rows render every stored configuration entry's value — strings
 pass through, everything else is JSON-stringified. The section is titled
 `Configuration` (renamed from `Configuration overlay`, user 2026-11-08): what it

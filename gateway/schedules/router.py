@@ -256,6 +256,7 @@ def _reconstruct_created_row(
         timeout_seconds=body.timeout_seconds,
         on_owner_terminate=prepared.on_owner_terminate,
         next_launch_at=prepared.next_launch_at,
+        created_by_agent_id=body.created_by_agent_id,
     )
 
 
@@ -286,9 +287,10 @@ def create_blocking(
             cur.execute(
                 "INSERT INTO schedules "
                 "(name, description, script, command, enabled, status, machine, owner_agent_id, "
-                "trigger_kind, run_at, cron_expr, interval_seconds, timezone, timeout_seconds, "
-                "on_owner_terminate, next_launch_at, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "created_by_agent_id, trigger_kind, run_at, cron_expr, interval_seconds, "
+                "timezone, timeout_seconds, on_owner_terminate, next_launch_at, created_at, "
+                "updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
                 "%s, %s) "
                 "RETURNING id",
                 (
@@ -300,6 +302,7 @@ def create_blocking(
                     "scheduled" if body.enabled else "stopped",
                     machine,
                     body.owner_agent_id,
+                    body.created_by_agent_id,
                     body.trigger_kind,
                     body.run_at,
                     body.cron_expr,
@@ -330,7 +333,13 @@ def create_blocking(
             status_code=409, detail=f"schedule named {body.name!r} already exists"
         ) from exc
     except psycopg.errors.ForeignKeyViolation as exc:
-        raise HTTPException(status_code=400, detail="owner_agent_id does not exist") from exc
+        constraint = exc.diag.constraint_name or ""
+        detail = (
+            "created_by_agent_id does not exist"
+            if "created_by_agent_id" in constraint
+            else "owner_agent_id does not exist"
+        )
+        raise HTTPException(status_code=400, detail=detail) from exc
     return row
 
 

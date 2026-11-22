@@ -9049,6 +9049,13 @@
             "type": "array",
             "title": "Shells"
           },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/InspectorScheduleInfo"
+            },
+            "type": "array",
+            "title": "Schedules"
+          },
           "config_overlay": {
             "additionalProperties": true,
             "type": "object",
@@ -13224,6 +13231,117 @@
         ],
         "title": "InspectWidgetTask",
         "description": "One task row of a resolved ``taskList`` widget — an element of\n`InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).\n\nKernel-resolved data, not policy: the row carries only what the console\nrenders (id for the `/fleet?task=` link, title for the text, priority\nfor the stakes badge — task #3819, user request 2026-09-17). The list is\nalready filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."
+      },
+      "InspectorScheduleInfo": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "trigger_kind": {
+            "type": "string",
+            "enum": [
+              "at",
+              "cron",
+              "every"
+            ],
+            "title": "Trigger Kind"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run At"
+          },
+          "next_launch_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Launch At"
+          },
+          "owner_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Agent Id"
+          },
+          "created_by_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "status",
+          "trigger_kind",
+          "machine"
+        ],
+        "title": "InspectorScheduleInfo"
       },
       "InterruptAgentRequest": {
         "properties": {
@@ -17473,6 +17591,17 @@
               }
             ],
             "title": "Owner Agent Id"
+          },
+          "created_by_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Agent Id"
           }
         },
         "type": "object",
@@ -17676,6 +17805,17 @@
               }
             ],
             "title": "Owner Agent Id"
+          },
+          "created_by_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Agent Id"
           },
           "trigger_kind": {
             "$ref": "#/components/schemas/TriggerKind"
@@ -17974,6 +18114,17 @@
               }
             ],
             "title": "Owner Agent Id"
+          },
+          "created_by_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Agent Id"
           },
           "trigger_kind": {
             "$ref": "#/components/schemas/TriggerKind"

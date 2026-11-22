@@ -2424,6 +2424,7 @@ export interface components {
             shells_available?: boolean | null;
             spawned_at: string;
             shells: components["schemas"]["ShellInfo"][];
+            schedules?: components["schemas"]["InspectorScheduleInfo"][];
             config_overlay: {
                 [key: string]: unknown;
             };
@@ -3097,6 +3098,20 @@ export interface components {
             title: string;
             priority: components["schemas"]["Priority"];
         };
+        InspectorScheduleInfo: {
+            id: number;
+            name: string;
+            enabled: boolean;
+            status: string;
+            trigger_kind: "at" | "cron" | "every";
+            cron_expr?: string | null;
+            interval_seconds?: number | null;
+            run_at?: string | null;
+            next_launch_at?: string | null;
+            owner_agent_id?: number | null;
+            created_by_agent_id?: number | null;
+            machine: string;
+        };
         InterruptAgentRequest: {
             source: string;
             message?: string | null;
@@ -3752,6 +3767,7 @@ export interface components {
             enabled: boolean;
             machine?: string | null;
             owner_agent_id?: number | null;
+            created_by_agent_id?: number | null;
         };
         ScheduleDraftRequest: {
             nl: string;
@@ -3784,6 +3800,7 @@ export interface components {
             machine: string;
             owner_plugin?: string | null;
             owner_agent_id?: number | null;
+            created_by_agent_id?: number | null;
             trigger_kind: components["schemas"]["TriggerKind"];
             run_at?: string | null;
             cron_expr?: string | null;
@@ -3819,6 +3836,7 @@ export interface components {
             machine: string;
             owner_plugin?: string | null;
             owner_agent_id?: number | null;
+            created_by_agent_id?: number | null;
             trigger_kind: components["schemas"]["TriggerKind"];
             run_at?: string | null;
             cron_expr?: string | null;

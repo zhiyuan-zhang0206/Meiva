@@ -1099,6 +1099,7 @@ CREATE TABLE schedules (
     machine               TEXT NOT NULL CONSTRAINT schedules_machine_nonempty CHECK (btrim(machine) <> ''),
     owner_plugin          TEXT CONSTRAINT schedules_owner_plugin_nonempty CHECK (owner_plugin IS NULL OR btrim(owner_plugin) <> ''),
     owner_agent_id        BIGINT REFERENCES agents(id),  -- the agent this schedule speaks as; NULL = command-only (task #6102)
+    created_by_agent_id   BIGINT REFERENCES agents(id) ON DELETE SET NULL,
     secret_env_vars       TEXT[] NOT NULL DEFAULT '{}',
     trigger_kind          TEXT NOT NULL
                           CHECK (trigger_kind IN ('at', 'cron', 'every')),
@@ -1123,6 +1124,8 @@ COMMENT ON COLUMN schedules.owner_plugin IS
     'Plugin directory name that owns and declared this schedule; NULL for operator-created and core builtin schedules.';
 COMMENT ON COLUMN schedules.owner_agent_id IS
     'Agent this schedule speaks as and whose workspace contains its declarative run files; NULL means a system-level schedule. The SDK/API may assign it and default placement to that agent''s machine. Written into MEIVA_AGENT_ID and schedule_runs.agent_id; it controls attribution and locality, not additional authority.';
+COMMENT ON COLUMN schedules.created_by_agent_id IS
+    'Agent that created this schedule (provenance only). Does not affect execution identity, workspace, machine placement, or on_owner_terminate lifecycle cancellation.';
 COMMENT ON COLUMN schedules.secret_env_vars IS
     'Environment variable names injected into this schedule''s session at launch.';
 COMMENT ON COLUMN schedules.trigger_kind IS
@@ -1136,6 +1139,10 @@ CREATE INDEX schedules_machine_enabled_idx ON schedules (machine, enabled);
 CREATE INDEX schedules_owner_plugin_idx ON schedules (owner_plugin) WHERE owner_plugin IS NOT NULL;
 CREATE INDEX schedules_declarative_due_idx ON schedules (machine, next_launch_at)
     WHERE enabled;
+CREATE INDEX idx_schedules_created_by_agent_id ON schedules (created_by_agent_id)
+    WHERE created_by_agent_id IS NOT NULL;
+CREATE INDEX idx_schedules_owner_agent_id ON schedules (owner_agent_id)
+    WHERE owner_agent_id IS NOT NULL;
 
 CREATE TABLE resource_creation_receipts (
     operation_key TEXT PRIMARY KEY,

@@ -11,13 +11,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PythonCode, usePythonCodeHighlighter } from "@/components/content/python-code";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { errMsg } from "@/lib/contracts/errors";
 import type { ScheduleCreate, ScheduleSummary, ScheduleUpdate } from "@/lib/contracts/types";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
@@ -51,6 +52,7 @@ function schedulePresentation(schedule: ScheduleSummary) {
 
 export function ScheduleRow({
   schedule,
+  highlighted = false,
   expanded,
   onExpand,
   onEnsureExpanded,
@@ -61,6 +63,7 @@ export function ScheduleRow({
   pending,
 }: {
   schedule: ScheduleSummary;
+  highlighted?: boolean;
   expanded: boolean;
   onExpand: () => void;
   onEnsureExpanded: () => void;
@@ -73,12 +76,24 @@ export function ScheduleRow({
   const t = useTranslations("schedules");
   const now = useWallDate();
   const highlighter = usePythonCodeHighlighter();
+  const { view } = useBrowser();
+  const rowRef = useRef<HTMLTableRowElement>(null);
   const [editing, setEditing] = useState(false);
   const presentation = schedulePresentation(schedule);
 
+  useEffect(() => {
+    if (highlighted && rowRef.current !== null) {
+      view.scrollIntoView(rowRef.current, "center");
+    }
+  }, [highlighted, view]);
+
   return (
     <>
-      <TableRow>
+      <TableRow
+        ref={rowRef}
+        data-highlighted={highlighted ? "true" : undefined}
+        className={highlighted ? "bg-accent/50" : undefined}
+      >
         <TableCell className="pr-0">
           <button
             type="button"

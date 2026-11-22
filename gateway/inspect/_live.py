@@ -14,10 +14,10 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
-from base.db.rows import query_one
+from base.db.rows import query_all, query_one
 from base.host.boundary.json_values import is_object_dict
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
-from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
+from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause, InspectorScheduleInfo
 from services.wake.heartbeat import STALE_PENDING_S
 
 
@@ -40,6 +40,7 @@ class InspectDbRows(NamedTuple):
     last_probe_at: datetime | None
     observation: AgentObservation
     backoff_level: int
+    schedules: list[InspectorScheduleInfo]
 
 
 # meiva:note
@@ -116,6 +117,24 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             (agent_id, STALE_PENDING_S),
         )
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
+        schedules = query_all(
+            conn,
+            InspectorScheduleInfo,
+            "SELECT id, name, enabled, status, trigger_kind, cron_expr, interval_seconds, "
+            "       run_at, next_launch_at, owner_agent_id, created_by_agent_id, machine "
+            "FROM schedules "
+            "WHERE owner_agent_id = %s OR created_by_agent_id = %s "
+            "ORDER BY CASE status "
+            "           WHEN 'running' THEN 0 "
+            "           WHEN 'error' THEN 1 "
+            "           WHEN 'scheduled' THEN 2 "
+            "           WHEN 'stopped' THEN 3 "
+            "           ELSE 4 "
+            "         END ASC, "
+            "         next_launch_at ASC NULLS LAST, "
+            "         id DESC",
+            (agent_id, agent_id),
+        )
         overlay = _resolve_live_overlay(row)
         return InspectDbRows(
             machine=row.machine,
@@ -130,6 +149,7 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             last_probe_at=row.last_probe_at,
             observation=observation(row.machine_probed_at),
             backoff_level=int(row.heartbeat_backoff_level or 0),
+            schedules=schedules,
         )
 
 

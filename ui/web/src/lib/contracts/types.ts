@@ -260,6 +260,7 @@ export type RunTimelineMessagePart = Schemas["RunTimelineMessagePart"];
 
 export type AgentInspectStatistics = Schemas["AgentInspectStatistics"];
 export type AgentInspectLive = Schemas["AgentInspectLive"];
+export type InspectorScheduleInfo = Schemas["InspectorScheduleInfo"];
 export type ShellInfo = Schemas["ShellInfo"];
 export type ShellCapture = Schemas["ShellCaptureResponse"];
 export type AgentCost = Schemas["AgentCost"];

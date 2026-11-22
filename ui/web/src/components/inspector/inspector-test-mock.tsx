@@ -255,6 +255,7 @@ export function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentIns
         uptime_seconds: 660,
       },
     ],
+    schedules: [],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
     heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: false, last_pause: null },
     spawned_at: "2026-06-14T12:00:00Z",

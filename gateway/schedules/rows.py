@@ -71,6 +71,7 @@ class ScheduleSummaryRow:
     timeout_seconds: int
     on_owner_terminate: OwnerTermination
     next_launch_at: datetime | None
+    created_by_agent_id: int | None
 
 
 # meiva:note
@@ -108,6 +109,7 @@ class ScheduleFullRow(NamedTuple):
     timeout_seconds: int
     on_owner_terminate: OwnerTermination
     next_launch_at: datetime | None
+    created_by_agent_id: int | None = None
 
 
 # meiva:note

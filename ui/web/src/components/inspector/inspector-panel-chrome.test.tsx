@@ -237,14 +237,36 @@ describe("InspectorPanel manual refresh", () => {
 describe("InspectorPanel section layout", () => {
   it("renders the run timeline entry first, then the runtime sections, with Activity last", async () => {
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        schedules: [
+          {
+            id: 21,
+            name: "nightly-job",
+            enabled: true,
+            status: "scheduled",
+            trigger_kind: "every",
+            cron_expr: null,
+            interval_seconds: 300,
+            run_at: null,
+            next_launch_at: "2026-06-14T13:00:00Z",
+            owner_agent_id: 1,
+            created_by_agent_id: 1,
+            machine: "test-host",
+          },
+        ],
+      }),
+    );
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
     });
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Schedules")).toBeTruthy());
     await waitFor(() => expect(screen.getByText("Context")).toBeTruthy());
 
     const shells = screen.getByText("Persistent shells");
+    const schedules = screen.getByText("Schedules");
     const liveness = screen.getByText("Liveness");
     const configOverlay = screen.getByText("Configuration");
     const runLink = screen.getByRole("link", { name: "Open run timeline" });
@@ -253,7 +275,8 @@ describe("InspectorPanel section layout", () => {
     const before = (first: Node, second: Node) =>
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
     expect(before(runLink, shells)).toBeTruthy();
-    expect(before(shells, liveness)).toBeTruthy();
+    expect(before(shells, schedules)).toBeTruthy();
+    expect(before(schedules, liveness)).toBeTruthy();
     expect(before(liveness, configOverlay)).toBeTruthy();
     expect(before(configOverlay, context)).toBeTruthy();
     expect(before(context, activity)).toBeTruthy();

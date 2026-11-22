@@ -12,7 +12,7 @@ except the Activity section, which has its own node
 **One ordered list, no filter.** The body is a single list of sections
 (`INSPECT_SECTION_ORDER` in `lib/inspector/inspector-widgets.ts`): the Open run
 timeline entry (100) first, then page (200), then the runtime sections in their
-established order — shells (300), liveness (400), configuration overlay (500) —
+established order — shells (300), schedules (350), liveness (400), configuration overlay (500) —
 then the Context section (600), and the Activity section (900) last (user ruling
 2026-10-18). Plugin widgets carry their own `order` and slot between those keys;
 equal orders stack built-in sections first, then widgets by (plugin, id), so the
@@ -35,7 +35,7 @@ and header controls) so titles do not appear before their data arrives, and
 renders a single centered `Spinner` (`hideSpinner` suppresses a duplicate second
 spinner in `Activity` while `Liveness` is also cold-loading; `Metric` only renders
 resolved string values, user rulings 2026-11-09). Conditional and sparse sections — `Page`,
-`Persistent shells`, `Configuration`, `Context` and plugin widgets — render nothing
+`Persistent shells`, `Schedules`, `Configuration`, `Context` and plugin widgets — render nothing
 while pending or empty rather than reserving speculative placeholder rows that
 collapse after fetch.
 
