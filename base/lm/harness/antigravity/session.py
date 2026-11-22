@@ -62,6 +62,7 @@ from base.lm.harness.session import BackgroundWork, SessionClosedError, SessionT
 from base.log import logger
 
 TRAJECTORY_POLL_SECONDS = 0.5
+TIMING_REFRESH_MIN_INTERVAL_SECONDS = 1.0
 
 
 # meiva:note
@@ -84,6 +85,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         transport_factory: Callable[[], AgyTransport] | None = None,
         clock: SessionClock,
         home: Path | None = None,
+        timing_refresh_interval: float = TIMING_REFRESH_MIN_INTERVAL_SECONDS,
     ) -> None:
         super().__init__(
             config,
@@ -115,6 +117,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._last_turn: str | None = None
         self._schedules = Schedules(max_timer_seconds=config.max_schedule_timer_seconds)
         self._subagents = SubagentReader(home)
+        self._timing_refresh_interval = timing_refresh_interval
+        self._timing_refresh_task: asyncio.Task[None] | None = None
+        self._timing_refresh_pending = False
+        self._timing_refresh_last = 0.0
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -143,6 +149,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._schedules = Schedules(max_timer_seconds=self.config.max_schedule_timer_seconds)
         self._sent_turn = None
         self._phantom = None
+        self._timing_refresh_pending = False
+        self._timing_refresh_task = None
         self._observed.clear()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
@@ -311,6 +319,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return current
         if current is not None:
             self._transport = None
+            self._timing_refresh_pending = False
+            self._timing_refresh_task = None
             await current.close()
         self._lose_schedules()
         self._close_phantom(None)
@@ -529,8 +539,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._track_schedule(event)
         if update.get("state") != "DONE":
             return
-        if update.get("step_type") == "agent_response" and isinstance(update.get("usage"), dict):
-            self._turn_steps.append(parse_usage(update.get("usage")))
+        if update.get("step_type") == "agent_response":
+            if isinstance(update.get("usage"), dict):
+                self._turn_steps.append(parse_usage(update.get("usage")))
+            self.request_timing_refresh()
         done = assistant_text(update, turn_id=ticket.turn_id, text=self._take_step_text(update))
         if done is not None and done.text:
             ticket.parts.append(done.text)
@@ -581,6 +593,69 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             return None
         return self._schedules.silence_floor_monotonic(turn_ids)
+
+    # meiva:note
+    # Single-flight, trailing-throttled background `GetCascadeTrajectory` collector for native
+    # reasoning timing. Triggered on completed `agent_response` steps, non-interrupted turn
+    # completion, and newly persisted `PLANNER_RESPONSE` rows during stdout-silent reactive-IDLE
+    # so `meiva-thinking-timing.json` stays current without blocking live timeline delivery or
+    # piling up concurrent RPCs.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    def request_timing_refresh(self) -> None:
+        if self._closed or not self._session_id:
+            return
+        transport = self._transport
+        if transport is None or transport is self._retired or not transport.alive:
+            return
+        if not transport.has_timing_record(conversation_id=self._session_id):
+            return
+        self._timing_refresh_pending = True
+        task = self._timing_refresh_task
+        if task is not None and not task.done():
+            return
+        self._timing_refresh_task = self._spawn(
+            self._run_timing_refresh(transport, self.generation)
+        )
+
+    def _timing_refresh_active(self, transport: AgyTransport, generation: int) -> bool:
+        return (
+            not self._closed
+            and self._transport is transport
+            and self._transport is not self._retired
+            and self._ledger.accepts(generation)
+            and self._session_id is not None
+        )
+
+    async def _run_timing_refresh(self, transport: AgyTransport, generation: int) -> None:
+        try:
+            while self._timing_refresh_pending and self._timing_refresh_active(
+                transport, generation
+            ):
+                wait = self._timing_refresh_interval - (
+                    self._monotonic() - self._timing_refresh_last
+                )
+                if self._timing_refresh_last > 0.0 and wait > 0.0:
+                    await self._clock.asleep(wait)
+                    if not self._timing_refresh_active(transport, generation):
+                        return
+                self._timing_refresh_pending = False
+                self._timing_refresh_last = self._monotonic()
+                try:
+                    _ = await transport.trajectory(conversation_id=self._session_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning(
+                        "agent {agent_id}: background timing refresh failed ({error}); "
+                        "provider execution is unchanged",
+                        event="harness_timing_refresh_failed",
+                        agent_id=self.agent_id,
+                        error=type(exc).__name__,
+                    )
+                    return
+        finally:
+            if self._timing_refresh_task is asyncio.current_task():
+                self._timing_refresh_task = None
 
     # meiva:note
     # A step with an index below `_floor` was already attributed (a phantom turn closed from the
@@ -682,6 +757,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         if fields.interrupted:
             self._emit(InterruptConfirmed(ticket.turn_id, self.generation))
+        else:
+            self.request_timing_refresh()
         self._schedules = self._schedules.clear_turn(ticket.turn_id)
         self._complete(ticket)
 

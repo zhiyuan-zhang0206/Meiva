@@ -112,6 +112,17 @@ class SilenceFloorReporting(Protocol):
 
 
 # meiva:note
+# Adapters whose native reasoning timing is collected out-of-band (for example, Antigravity's
+# `GetCascadeTrajectory` sidecar) expose a non-blocking refresh trigger so the live timeline sink
+# can ask for fresh timing facts when new planner rows land on disk while stdout is silent.
+# Checked structurally so adapters without sidecar timing need no boilerplate.
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
+@runtime_checkable
+class TimingRefreshing(Protocol):
+    def request_timing_refresh(self) -> None: ...
+
+
+# meiva:note
 # What the graph reads of a subscription: the next event, or None once the stream has ended, and a way
 # to stop watching. `pump.Subscription` is the implementation.
 # meiva:link base/lm/harness/docs/delivery.md

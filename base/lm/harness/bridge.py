@@ -15,6 +15,7 @@ from base.lm.harness.engine import (
     HarnessSession,
     HarnessTurn,
     SilenceFloorReporting,
+    TimingRefreshing,
     completed_turn,
 )
 from base.lm.harness.events import (
@@ -548,6 +549,11 @@ class HarnessBridge:
         if session is None or not isinstance(session, SilenceFloorReporting):
             return None
         return session.silence_floor_monotonic(turn_ids)
+
+    def request_timing_refresh(self) -> None:
+        session = self._session
+        if session is not None and isinstance(session, TimingRefreshing):
+            session.request_timing_refresh()
 
     # meiva:note
     # Interrupt whatever the foreground is running. The target is the session's own running turn,

@@ -18,7 +18,20 @@ class AntigravityRecordFile(RecordFile):
 
     def revision(self) -> int:
         data = self._load()
-        return self._signature[0] if data is not None and self._signature is not None else 0
+        if data is None or self._signature is None:
+            return 0
+        timing_mtime_ns, timing_ino, timing_size = self._signature[:3]
+        return hash((timing_mtime_ns, timing_ino, timing_size, len(data.entries))) or 1
+
+    def watch_signature(self) -> tuple[int, ...] | None:
+        base = super().watch_signature()
+        if base is None:
+            return None
+        try:
+            timing = self._timings.stat()
+        except OSError:
+            return (*base, 0, 0, 0)
+        return (*base, timing.st_ino, timing.st_size, timing.st_mtime_ns)
 
     def _load(self) -> TimingRecord | None:
         try:
@@ -35,7 +48,7 @@ class AntigravityRecordFile(RecordFile):
             signature = None
         if not self._loaded or signature != self._signature:
             self._signature = signature
-            self._data = load_timings(self._record)
+            self._data = load_timings(self._record, allow_growth=True)
             self._loaded = True
         return self._data
 
@@ -58,7 +71,11 @@ class AntigravityRecordFile(RecordFile):
         for file in block.rows:
             row = file.row
             key = timing_key(row.get("step_index"), row.get("created_at"), row.get("thinking"))
-            value = None if data is None else data.entries.get(str(file.offset))
+            value = (
+                None
+                if data is None or file.offset >= data.size
+                else data.entries.get(str(file.offset))
+            )
             ms = value.ms if value is not None and value.fingerprint == key else None
             rows.append(FileRow(file.offset, file.end, {**row, "meiva_reasoning_ms": ms}))
         return Block(block.start, block.end, tuple(rows))

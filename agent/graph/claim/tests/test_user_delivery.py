@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,11 +40,13 @@ from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.agents.tests.langgraph_views import command_update
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.projection import TimelineSnapshot
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
@@ -59,6 +61,8 @@ from base.lm.harness import (
     TurnOrigin,
     TurnStarted,
 )
+from base.lm.harness.antigravity.timing_store import store_timings
+from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.claude.delivery import key_uuid
 from base.paths import meiva_home, workspace_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -632,3 +636,147 @@ async def test_external_harness_publishes_pre_tool_display_before_tool_completes
         flusher.cancel()
         with pytest.raises(asyncio.CancelledError):
             await flusher
+
+
+def _write_antigravity_row(path: Path, **fields: object) -> None:
+    row = {"type": "PLANNER_RESPONSE", "status": "DONE", **fields}
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+def _reactive_timing_trajectory() -> Trajectory:
+    step0 = {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE"}
+    step1 = {
+        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+        "status": "CORTEX_STEP_STATUS_DONE",
+        "metadata": {"createdAt": "2026-11-17T05:30:00.123Z"},
+        "plannerResponse": {"thinking": "synthetic thought", "thinkingDuration": "30.265829s"},
+    }
+    return parse_trajectory(
+        {
+            "status": "CASCADE_RUN_STATUS_IDLE",
+            "numTotalSteps": 2,
+            "trajectory": {"steps": [step0, step1]},
+        }
+    )
+
+
+async def _collect_snapshots_until(
+    live_events: LiveEvents, predicate: Callable[[list[TimelineSnapshot]], bool]
+) -> list[TimelineSnapshot]:
+    snapshots: list[TimelineSnapshot] = []
+    async with asyncio.timeout(2.0):
+        while True:
+            snapshots.extend(await live_events.of_type(TimelineSnapshot))
+            if predicate(snapshots):
+                return snapshots
+            await asyncio.sleep(0.02)
+
+
+def _snapshot_items_of_kind(
+    snaps: Sequence[TimelineSnapshot], kind: str
+) -> list[dict[str, object]]:
+    return [item for snap in snaps for item in snap.items if item.get("kind") == kind]
+
+
+def _agent_publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[object, ...]]:
+    db_conn.commit()
+    return db_conn.execute(
+        "SELECT source_key, content FROM agent_publications WHERE agent_id=%s", (agent_id,)
+    ).fetchall()
+
+
+async def test_flush_text_wakes_on_disk_growth_while_stdout_is_silent_and_refreshes_timing(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
+    tmp_path: Path,
+    live_events: LiveEvents,
+) -> None:
+    tid, session = agent_row(db_conn), "reactive-idle-silent-stdout"
+    path = (
+        tmp_path
+        / ".gemini/antigravity-cli/brain"
+        / session
+        / ".system_generated/logs/transcript_full.jsonl"
+    )
+    path.parent.mkdir(parents=True)
+    _write_antigravity_row(
+        path,
+        step_index=0,
+        created_at="2026-11-17T05:29:59Z",
+        content="MEIVA_HIDE_FROM_USER\ninitial",
+    )
+    refresh_calls = 0
+
+    def on_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    ctx = MeivaContext(
+        agent=AgentSlices.resolve({"user_delivery_mode": "prefix"}, default_reader=defaults()),
+        harness=Harness.ANTIGRAVITY,
+        meiva_home=tmp_path,
+        db=Database.from_settings(gate=database_gate),
+        bus=event_bus,
+        clock_factory=system_clock,
+        environ={"HOME": str(tmp_path)},
+    )
+    sink = ReadTimelineSink(
+        ctx,
+        tid,
+        live_events.publisher,
+        non_human_wake=False,
+        session_id=lambda: session,
+        poll_seconds=0.05,
+        debounce_seconds=0.01,
+        request_timing_refresh=on_refresh,
+    )
+    initial_offset = path.stat().st_size
+    sink._from, sink._timing_start = initial_offset, 0
+    assert sink._file is not None
+    bytes_before_idle = sink._file.bytes_read
+
+    flush_task = asyncio.create_task(sink.flush_text())
+    try:
+        await asyncio.sleep(0.16)
+        assert sink._file.bytes_read == bytes_before_idle
+        assert await live_events.events() == []
+        assert refresh_calls == 0
+
+        _write_antigravity_row(
+            path,
+            step_index=1,
+            created_at="2026-11-17T05:30:00Z",
+            thinking="synthetic thought",
+            content="MEIVA_DISPLAY_TO_USER\nreactive reply",
+        )
+        snapshots = await _collect_snapshots_until(
+            live_events,
+            lambda snaps: any(
+                i.get("payload") == "reactive reply"
+                for i in _snapshot_items_of_kind(snaps, "agent_chat")
+            ),
+        )
+        [reasoning] = _snapshot_items_of_kind(snapshots, "agent_reasoning")
+        assert reasoning["reasoning_ms"] is None
+        await wait_until(
+            lambda: bool(_agent_publications(db_conn, tid)), "A1 persisted publication"
+        )
+        expected_pub = [(f"harness:antigravity:{session}:{initial_offset}", "reactive reply")]
+        assert _agent_publications(db_conn, tid) == expected_pub
+        assert refresh_calls == 1
+
+        store_timings(path, _reactive_timing_trajectory())
+        [update] = await _collect_snapshots_until(live_events, bool)
+        assert len(update.items) == 1
+        assert (
+            update.items[0]["item_id"],
+            update.items[0]["kind"],
+            update.items[0]["reasoning_ms"],
+        ) == (reasoning["item_id"], "agent_reasoning", 30265)
+        assert _agent_publications(db_conn, tid) == expected_pub
+    finally:
+        flush_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await flush_task

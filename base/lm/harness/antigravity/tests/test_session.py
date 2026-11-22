@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 
-from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.antigravity.tests.support import running, say, start
+from base.lm.harness.antigravity.timing_store import timing_path
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
+from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AssistantText,
@@ -13,6 +18,8 @@ from base.lm.harness.events import (
     TurnCompleted,
 )
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.entries import Reasoning
+from base.lm.harness.session.transcript.record_file import UnreadRows
 
 
 async def test_a_turn_streams_text_and_completes(tmp_path: Path) -> None:
@@ -75,5 +82,121 @@ async def test_turn_failure_populates_errors(tmp_path: Path) -> None:
         assert outcome.errors == ("API error (attempt 1): 500 Internal Server Error",)
         completed = harness.of(TurnCompleted)[0]
         assert completed.errors == ("API error (attempt 1): 500 Internal Server Error",)
+    finally:
+        await harness.stop()
+
+
+def _write_native_transcript(home: Path, conversation_id: str) -> Path:
+    path = (
+        home
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / conversation_id
+        / ".system_generated"
+        / "logs"
+        / "transcript_full.jsonl"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "step_index": 0,
+                "created_at": "2026-11-17T05:30:00Z",
+                "thinking": "synthetic thought",
+                "content": "hello",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _measured_reasoning(path: Path) -> list[int | None]:
+    entries = EntryParser(UnreadRows()).entries(AntigravityRecordFile(path).rows_after(0).rows)
+    return [entry.duration_ms for entry in entries if isinstance(entry, Reasoning)]
+
+
+async def test_step_done_and_turn_end_trigger_timing_collection(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    calls = tmp_path / "trajectory-calls.jsonl"
+    fixture = Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
+    harness = await start(
+        tmp_path,
+        turns=[say("hello")],
+        extra_environ={
+            "HOME": str(home),
+            "FAKE_AGY_TRAJECTORY_CALLS": str(calls),
+            "FAKE_AGY_TRAJECTORY_FIXTURE": str(fixture),
+        },
+    )
+    try:
+        transcript = _write_native_transcript(home, "conv-fake")
+        ticket = await send(harness, "hi")
+        outcome = await ticket.outcome()
+        assert outcome.text == "hello"
+        await harness.wait_until(lambda: timing_path(transcript).is_file())
+        assert _measured_reasoning(transcript) == [30265]
+        assert len(calls.read_text().splitlines()) >= 1
+    finally:
+        await harness.stop()
+
+
+async def test_turn_end_without_agent_response_step_still_collects_timing(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    calls = tmp_path / "trajectory-calls.jsonl"
+    fixture = Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
+    turn_without_step: dict[str, object] = {
+        "steps": [],
+        "result": {"status": "SUCCESS", "response": "done"},
+    }
+    harness = await start(
+        tmp_path,
+        turns=[turn_without_step],
+        extra_environ={
+            "HOME": str(home),
+            "FAKE_AGY_TRAJECTORY_CALLS": str(calls),
+            "FAKE_AGY_TRAJECTORY_FIXTURE": str(fixture),
+        },
+    )
+    try:
+        transcript = _write_native_transcript(home, "conv-fake")
+        ticket = await send(harness, "hi")
+        outcome = await ticket.outcome()
+        assert outcome.text == "done"
+        await harness.wait_until(lambda: timing_path(transcript).is_file())
+        assert _measured_reasoning(transcript) == [30265]
+        assert len(calls.read_text().splitlines()) >= 1
+    finally:
+        await harness.stop()
+
+
+async def test_timing_refresh_requests_are_coalesced_and_throttled(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    calls = tmp_path / "trajectory-calls.jsonl"
+    fixture = Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
+    harness = await start(
+        tmp_path,
+        turns=[{"hang": True}],
+        extra_environ={
+            "HOME": str(home),
+            "FAKE_AGY_TRAJECTORY_CALLS": str(calls),
+            "FAKE_AGY_TRAJECTORY_FIXTURE": str(fixture),
+        },
+    )
+    try:
+        transcript = _write_native_transcript(home, "conv-fake")
+        _ = await send(harness, "work")
+        await running(harness, ["work"])
+        for _ in range(5):
+            harness.session.request_timing_refresh()
+        await harness.wait_until(lambda: timing_path(transcript).is_file())
+        await asyncio.sleep(0.15)
+        call_count = len(calls.read_text().splitlines())
+        assert call_count <= 2, f"burst refresh requests must coalesce, got {call_count} RPCs"
+        assert _measured_reasoning(transcript) == [30265]
     finally:
         await harness.stop()

@@ -7,7 +7,7 @@ import pytest
 
 from base.lm.harness.antigravity.timing import duration_ms, timing_key
 from base.lm.harness.antigravity.timing_store import load_timings, store_timings, timing_path
-from base.lm.harness.antigravity.trajectory import parse_trajectory
+from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.session.transcript.entries import Reasoning
@@ -319,3 +319,126 @@ def test_invalid_duration_change_gate_and_recovery(
     assert measured(path) == [1000]
     store_timings(path, snapshot("bad"))
     assert len(loguru_records.events("harness_timing_collection_failed")) == 2
+
+
+def _planner_row(*, index: int, thought: str, content: str = "answer") -> bytes:
+    return (
+        json.dumps(
+            {
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "step_index": index,
+                "created_at": STAMP,
+                "thinking": thought,
+                "content": content,
+            }
+        )
+        + "\n"
+    ).encode()
+
+
+def _multi_snapshot(steps: list[tuple[str, str]]) -> Trajectory:
+    return parse_trajectory(
+        {
+            "status": "CASCADE_RUN_STATUS_IDLE",
+            "numTotalSteps": len(steps),
+            "trajectory": {
+                "steps": [
+                    {
+                        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+                        "status": "CORTEX_STEP_STATUS_DONE",
+                        "metadata": {"createdAt": "2026-11-17T05:30:00.123456789Z"},
+                        "plannerResponse": {
+                            "thinking": thought,
+                            "thinkingDuration": duration,
+                        },
+                    }
+                    for thought, duration in steps
+                ]
+            },
+        }
+    )
+
+
+def test_append_growth_preserves_prior_verified_timings_and_stable_revision(tmp_path: Path) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    path.write_bytes(_planner_row(index=0, thought="private thought"))
+    store_timings(path, snapshot("16.148s"))
+    file = AntigravityRecordFile(path)
+    rev_before = file.revision()
+    assert rev_before != 0
+    assert measured(path) == [16148]
+
+    with path.open("ab") as handle:
+        handle.write(_planner_row(index=1, thought="second thought"))
+
+    assert measured(path) == [16148, None]
+    assert file.revision() == rev_before
+    assert load_timings(path, allow_growth=False) is None
+    loaded = load_timings(path, allow_growth=True)
+    assert loaded is not None and loaded.entries["0"].ms == 16148
+
+
+def test_append_growth_rejects_replaced_inode_truncated_and_out_of_range_offsets(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    raw = _planner_row(index=0, thought="private thought")
+    path.write_bytes(raw)
+    store_timings(path, snapshot("12.378s"))
+    assert measured(path) == [12378]
+
+    replacement = tmp_path / "transcript_replacement.jsonl"
+    replacement.write_bytes(raw)
+    replacement.replace(path)
+    assert measured(path) == [None]
+
+    row1 = _planner_row(index=1, thought="second thought")
+    path.write_bytes(raw + row1)
+    store_timings(path, snapshot("12.378s"))
+    assert measured(path) == [12378, None]
+    path.write_bytes(raw)
+    assert load_timings(path, allow_growth=True) is None
+    assert measured(path) == [None]
+
+    path.write_bytes(raw)
+    store_timings(path, snapshot("12.378s"))
+    sidecar = json.loads(timing_path(path).read_text())
+    entry = sidecar["entries"].pop("0")
+    sidecar["entries"][str(sidecar["size"])] = entry
+    timing_path(path).write_text(json.dumps(sidecar))
+    assert measured(path) == [None]
+
+
+def test_append_colliding_identity_drops_only_colliding_entry_and_bumps_revision(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    row0 = _planner_row(index=0, thought="first thought")
+    row1 = _planner_row(index=1, thought="second thought")
+    path.write_bytes(row0 + row1)
+    store_timings(path, _multi_snapshot([("first thought", "10s"), ("second thought", "20s")]))
+    file = AntigravityRecordFile(path)
+    rev_before = file.revision()
+    assert measured(path) == [10000, 20000]
+
+    with path.open("ab") as handle:
+        handle.write(row0)
+
+    assert measured(path) == [None, 20000, None]
+    assert file.revision() != rev_before
+
+
+def test_partial_line_completion_is_checked_on_append_growth(tmp_path: Path) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    row0 = _planner_row(index=0, thought="private thought")
+    half = row0[:20]
+    rest = row0[20:]
+    path.write_bytes(row0 + half)
+    store_timings(path, snapshot("16.148s"))
+    assert measured(path) == [16148]
+
+    with path.open("ab") as handle:
+        handle.write(rest)
+
+    assert measured(path) == [None, None]
