@@ -515,18 +515,12 @@ def corroborates_assistant_chunks(
         return False
     consumed: set[int] = set()
     cursor = 0
-    for text in foreground[:-1]:
+    for text in foreground:
         indices = _find_text_chunks(frames, text, consumed, start=cursor)
         if not indices:
             return False
         consumed.update(indices)
         cursor = indices[-1] + 1
-    terminal = _find_text_chunks(
-        frames, foreground[-1], consumed, start=cursor, through=max(text_frames)
-    )
-    if not terminal:
-        return False
-    consumed.update(terminal)
     for text in detached:
         consumed.update(_find_text_chunks(frames, text, consumed))
     return text_frames <= consumed
@@ -538,7 +532,6 @@ def _find_text_chunks(
     consumed: set[int],
     *,
     start: int = 0,
-    through: int | None = None,
 ) -> tuple[int, ...]:
     for interleave in (False, True):
         for index in range(start, len(frames)):
@@ -546,7 +539,7 @@ def _find_text_chunks(
             if index in consumed or not expected.startswith(first.strip()):
                 continue
             indices = _text_chunks(index, first, expected, frames, consumed, interleave=interleave)
-            if indices and (through is None or indices[-1] == through):
+            if indices:
                 return indices
     return ()
 

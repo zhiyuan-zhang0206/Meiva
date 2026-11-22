@@ -315,6 +315,8 @@ def late_foreground_with_usage_collision(transcript: Path, request: int, timing:
     if timing == "usage-collision-interleaved":
         message("LATE NATIVE REPLY")
     message("K")
+    if timing == "usage-collision-trailing":
+        message("LATE NATIVE REPLY")
     result(request)
     frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
 

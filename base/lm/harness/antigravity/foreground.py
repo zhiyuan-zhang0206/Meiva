@@ -220,7 +220,9 @@ class _StopText:
         detached = tuple(
             text
             for step, text in _planner_text(scope)
-            if step.index not in selected and step.index not in self.seen
+            if step.index < terminal.index
+            and step.index not in selected
+            and step.index not in self.seen
         )
         return corroborates_assistant_chunks(self.chunks, foreground, detached)
 
