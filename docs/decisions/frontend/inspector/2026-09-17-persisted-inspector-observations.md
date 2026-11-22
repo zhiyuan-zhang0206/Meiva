@@ -10,9 +10,26 @@ camouflage.
 The model is deliberately observed metrics rather than an audited billing ledger.
 Telemetry already has a bounded, lossy queue, and an accounting failure must not
 make an agent execution fail. Costs therefore retain the recorded usage-time
-price, unknown prices remain explicitly unpriced, and successful persistence or
-replay does not certify completeness. A read timestamp and newest observation
-are different facts; neither is a lossless collection watermark.
+price, unknown prices remain explicitly unpriced until cataloged, and successful
+persistence or replay does not certify completeness. A read timestamp and newest
+observation are different facts; neither is a lossless collection watermark.
+
+### Addendum (2026-11-22): Null-to-priced historical backfill
+
+The immutability rule above protects **already-priced** rows (`cost_usd IS NOT NULL`
+/ `unpriced_calls = 0`): a row that captured a usage-time price snapshot is never
+repriced against a newer catalog. It does **not** forbid filling previously blank
+rows (`cost_usd IS NULL` / `unpriced_calls > 0`) that were recorded before a newly
+released external-harness model entered `pricing_catalog_archive.json`.
+
+Once versioned pricing for that model is committed to `pricing_catalog_archive.json`,
+an idempotent maintenance pass (`services/upkeep/events_maintenance/unpriced_backfill.py`,
+invoked automatically by `events_maintenance` and explicitly via
+`meiva metrics backfill-unpriced --dry-run|--apply`) normalizes blank rows' model
+names, quotes them strictly at their original `occurred_at` timestamp, updates the
+blank observation rows, and recomputes affected `(agent_id, day)` sums across
+`agent_metric_days`, `agent_model_tokens_daily`, and `agent_model_tokens_total`.
+Raw `telemetry_events` remains strictly append-only.
 
 Historical family ledgers remain evidence for full UTC days before the collection
 cutover day. They take precedence over replayed observations for that family and

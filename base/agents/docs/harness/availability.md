@@ -42,6 +42,12 @@ ones and marks them `unavailable`); if the model catalogue cannot be read or
 returns empty, the row degrades to `unknown` with the catalogue failure appended
 to `reason`. Neither path starts a turn or spends model quota, and a sign-in or
 model list nobody can prove stays `unknown` rather than an invented answer. When
+external probes return live models whose normalized canonical ID is absent from
+`pricing_catalog_archive.json` (excluding bare Claude CLI shorthand aliases such
+as `sonnet`), `report_unpriced_probed_models` (called by `probe_local_harnesses`
+and deduplicated cluster-wide inside `HarnessProbeCache`) emits a deduplicated
+`harness_model_unpriced_probed` anomaly warning per `(harness, canonical_model)`
+without blocking model selection or trials. When
 PATH misses a user-level install the probe still looks in the conventional bin
 directories, because an agent process starts without the interactive shell
 profile; `on_path=false` says that is how the executable was found.

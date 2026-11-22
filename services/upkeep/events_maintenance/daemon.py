@@ -14,7 +14,7 @@ import signal
 import socket
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
@@ -64,6 +64,10 @@ from services.upkeep.events_maintenance.passes import events_maintenance_log
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
+from services.upkeep.events_maintenance.unpriced_backfill import (
+    load_price_book,
+    run_unpriced_backfill,
+)
 
 
 # meiva:note
@@ -129,10 +133,23 @@ def run_maintenance(
     except Exception:
         events_maintenance_log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
+    prices = load_price_book()
+    today_utc = now.astimezone(UTC).date()
     with pool.connection() as conn:
-        result = compute_rollup(conn, now_utc=now)
-        folded = fold_totals(conn, today=now.date())
+        result = compute_rollup(conn, now_utc=now, prices=prices)
+        backfill = run_unpriced_backfill(conn, today=today_utc, prices=prices, dry_run=False)
+        folded = fold_totals(conn, today=today_utc)
     progress.beat()
+    if backfill.observations_priced or backfill.ledger_calls_priced or backfill.totals_rebuilt:
+        events_maintenance_log.info(
+            "[events-maintenance] backfilled %d unpriced observations (%d metric days) and "
+            "%d ledger calls (%d ledger days, totals_rebuilt=%s)",
+            backfill.observations_priced,
+            backfill.metric_days_recomputed,
+            backfill.ledger_calls_priced,
+            backfill.ledger_days_updated,
+            backfill.totals_rebuilt,
+        )
     if folded:
         events_maintenance_log.info(
             "[events-maintenance] folded settled ledger days into %d agent totals", folded
