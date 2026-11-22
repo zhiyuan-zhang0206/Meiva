@@ -88,3 +88,61 @@ describe("a send", () => {
     view.unmount();
   });
 });
+
+describe("bottom overlay slack (grown composer and pending strip)", () => {
+  it("growing bottomOverlayHeight at the tail moves no messages and opens manual scroll slack", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    const restingTail = model.naturalEnd();
+    const restingRowTop = model.rowTop("2.0");
+    expect(model.top()).toBe(restingTail);
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={180} />);
+    expect(model.top()).toBe(restingTail);
+    expect(model.rowTop("2.0")).toBe(restingRowTop);
+    expect(model.naturalEnd()).toBe(restingTail);
+    expect(model.max()).toBe(restingTail + 180);
+    expect(arrow()).toBeNull();
+    view.unmount();
+  });
+
+  it("holds a reader's manual scroll into overlay slack across commits and resumes tail following when the overlay collapses", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} bottomOverlayHeight={180} />);
+    const restingTail = model.naturalEnd();
+
+    model.scrollTo(restingTail + 180);
+    expect(model.top()).toBe(restingTail + 180);
+    expect(arrow()).toBeNull();
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={180} />);
+    expect(model.top()).toBe(restingTail + 180);
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={100} />);
+    expect(model.top()).toBe(restingTail + 100);
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={100} />);
+    expect(model.top()).toBe(restingTail + 100);
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    expect(model.top()).toBe(restingTail);
+    view.rerender(<TimelineView items={[earlier, sent, reply]} bottomOverlayHeight={0} />);
+    model.grow("3.0", 500);
+    expect(model.top()).toBe(model.naturalEnd());
+    view.unmount();
+  });
+
+  it("leaves a reader in history untouched and lifts the down arrow when bottomOverlayHeight grows", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    model.scrollTo(120);
+    const historyRowTop = model.rowTop("1.0");
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={140} />);
+    expect(model.top()).toBe(120);
+    expect(model.rowTop("1.0")).toBe(historyRowTop);
+    const downArrow = arrow();
+    expect(downArrow).not.toBeNull();
+    expect(downArrow!.parentElement!.style.getPropertyValue("--timeline-footer-h")).toBe("140px");
+    view.unmount();
+  });
+});

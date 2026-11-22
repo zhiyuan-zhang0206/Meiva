@@ -496,13 +496,12 @@
 }
 
 /* meiva:note
-   The log's bottom padding is the 1.5rem breathing room above the composer's rule. A footer
-   floating over that edge (the pending strip, height in --timeline-footer-h) may also use the 1rem
-   blank below the last row (its group's padding and endRef's gap; while messages wait, the last
-   row is the working turn, which has no hover chrome there), so only a taller footer extends it.
+   The log's bottom padding is the constant 1.5rem breathing room above the resting composer's rule.
+   Grown overlays (multi-line composer, pending strip) add scrollable slack outside the log instead
+   of extending this padding, so growing overlays cover rows without pushing them upward.
    meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md */
 .timeline-log {
-  padding-bottom: max(1.5rem, calc(var(--timeline-footer-h, 0px) - 1rem));
+  padding-bottom: 1.5rem;
 }
 
 .timeline-item {

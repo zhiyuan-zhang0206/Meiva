@@ -40,11 +40,12 @@ const COLD_FILL_MAX_PAGES = 2;
 interface Props {
   onQuote?: (quote: Quote) => void;
   // meiva:note
-  // What floats over the bottom of the timeline, just above the composer (the pending strip). It sits
-  // in the blank space below the last row, so it appears without moving the conversation; only the
-  // part taller than that space extends the log's bottom padding.
+  // What floats over the bottom of the timeline, just above the composer. Its height (plus any
+  // `bottomOverlayHeight` from the composer/pending dock rising above its resting band) lifts the
+  // down arrow and opens scrollable slack below the content without pushing existing rows upward.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   footer?: ReactNode;
+  bottomOverlayHeight?: number;
   items: BackendTimelineItem[];
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
@@ -109,6 +110,7 @@ export const TimelineView = memo(function TimelineView({
   reveal = DECIDED_NO_REVEAL,
   onQuote,
   footer,
+  bottomOverlayHeight = 0,
 }: Props) {
   const t = useTranslations("timeline");
   const [quoteRequest, setQuoteRequest] = useState<{ quote: Quote; pages: number } | null>(null);
@@ -141,6 +143,7 @@ export const TimelineView = memo(function TimelineView({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const overlaySlackRef = useRef<HTMLDivElement>(null);
   // meiva:note
   // Extra scroll space below the content: it lets a toggled header stay where it was clicked when the
   // rows below are too short. Outside the content column, so it carries no row spacing.
@@ -168,36 +171,45 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => { pinnedHeadRef.current = pinnedHeadIds; });
   const pinnedHead = useCallback((id: string) => pinnedHeadRef.current.has(id), []);
   const { controls, atEnd } = useViewportAnchor({
-    wrapperRef, viewportRef, contentRef, reserveRef, thresholds,
+    wrapperRef, viewportRef, contentRef, overlaySlackRef, reserveRef, thresholds,
     onChange: onAnchorChange, onUnresolved, pinnedHead, onFree, onRideEnd, viewportObserverFactory,
   });
 
   // meiva:note
-  // The footer's height drives the log's bottom padding and the arrow's offset through one CSS
-  // variable. The writer applies the anchor in the same callback: left to its own layout observer,
-  // the padding change would reach it one observation round later, after a frame with the grown
-  // strip over the last row was already laid out.
+  // The floating bottom overlay's height (optional footer plus grown composer/pending dock above the
+  // resting band) drives the arrow's offset and the manual scroll slack below the log without
+  // resizing the log itself, so growing overlays cover rows instead of pushing them up.
   const footerRef = useRef<HTMLDivElement>(null);
   const hasFooter = footer !== undefined;
+  const normalizedOverlayHeight = Math.max(0, Math.ceil(bottomOverlayHeight));
   useLayoutEffect(() => {
     const wrapper = wrapperRef.current;
-    const node = footerRef.current;
-    if (!wrapper || !node) return;
+    if (!wrapper) return;
     const sync = () => {
-      const next = `${node.offsetHeight}px`;
-      if (wrapper.style.getPropertyValue(FOOTER_HEIGHT_VAR) === next) return;
+      const footerHeight = footerRef.current?.offsetHeight ?? 0;
+      const totalPx = normalizedOverlayHeight + footerHeight;
+      const next = `${totalPx}px`;
+      const slack = overlaySlackRef.current;
+      const slackChanged = slack !== null && slack.style.height !== next;
+      const varChanged = wrapper.style.getPropertyValue(FOOTER_HEIGHT_VAR) !== next;
+      if (!slackChanged && !varChanged) return;
       wrapper.style.setProperty(FOOTER_HEIGHT_VAR, next);
+      if (slack) slack.style.height = next;
       controls.apply();
     };
     sync();
-    if (typeof ResizeObserver === "undefined") return () => wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+    const node = footerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      return () => {
+        if (!hasFooter && normalizedOverlayHeight === 0) wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+      };
+    }
     const observer = new ResizeObserver(sync);
     observer.observe(node);
     return () => {
       observer.disconnect();
-      wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
     };
-  }, [controls, hasFooter]);
+  }, [controls, hasFooter, normalizedOverlayHeight]);
 
   // meiva:note
   // A first page that does not fill the viewport reads up to COLD_FILL_MAX_PAGES older pages before a
@@ -352,8 +364,9 @@ export const TimelineView = memo(function TimelineView({
     if (!viewport) return;
     const end = viewport.scrollHeight - viewport.clientHeight;
     if (end - viewport.scrollTop <= 1) return;
-    const natural = end - controls.reserveHeight();
-    if (viewport.scrollTop > natural + 0.5) {
+    const reserve = controls.reserveHeight();
+    const natural = end - reserve - controls.overlaySlackHeight();
+    if (reserve > 0 && viewport.scrollTop > natural + 0.5) {
       controls.placeScrollTop(end);
       return;
     }
@@ -415,6 +428,7 @@ export const TimelineView = memo(function TimelineView({
         className="h-full text-[13px] leading-relaxed"
         viewportRef={viewportRef}
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
+        scrollbarClassName="z-30"
         scrollbarActivity="input"
       >
         <div
@@ -465,6 +479,7 @@ export const TimelineView = memo(function TimelineView({
             <CompactingBlock />
             <div ref={endRef} />
           </div>
+          <div ref={overlaySlackRef} data-timeline-overlay-slack aria-hidden="true" />
           <div ref={reserveRef} data-timeline-reserve aria-hidden="true" />
         </div>
       </ScrollArea>

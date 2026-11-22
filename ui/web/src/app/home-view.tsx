@@ -5,7 +5,7 @@ import type { Quote } from "@/lib/contracts/types";
 import { useSeenPosition } from "@/lib/context/use-seen-position";
 import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ComponentType } from "react";
 
 import type { AgentSidebar as AgentSidebarComponent } from "@/components/agent-sidebar";
@@ -51,6 +51,9 @@ import { useApi, useStreamHub, useWallNow } from "@/lib/transport/transport-cont
 // surface with the values it wants and the children it wants to watch; nothing here reads a
 // store, a router or a breakpoint on its own, so no test has to patch a module to steer it.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
+
+const COMPOSER_REST_HEIGHT_CSS =
+  "calc(51px + max(1.5rem, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))))";
 
 type AgentSidebarSlot = ComponentType<ComponentProps<typeof AgentSidebarComponent>>;
 type ContextPanelSlot = ComponentType<ComponentProps<typeof ContextPanelComponent>>;
@@ -519,6 +522,25 @@ function HomeContent({
     enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 
+  const dockSlotRef = useRef<HTMLDivElement>(null);
+  const bottomDockRef = useRef<HTMLDivElement>(null);
+  const [bottomOverlayHeight, setBottomOverlayHeight] = useState(0);
+  useLayoutEffect(() => {
+    const slot = dockSlotRef.current;
+    const dock = bottomDockRef.current;
+    if (!slot || !dock) return;
+    const sync = () => {
+      const next = Math.max(0, Math.ceil(dock.offsetHeight - slot.offsetHeight));
+      setBottomOverlayHeight((prev) => (prev === next ? prev : next));
+    };
+    sync();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(slot);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary diagnostics={diagnostics}>
@@ -555,13 +577,7 @@ function HomeContent({
             maxWidthCss={contentColumnMaxWidth}
             reveal={openedUnread.agentId === activeId && openedUnread.unread === false ? NO_UNREAD_REVEAL : seenReveal}
             onQuote={acceptQuote}
-            footer={
-              <PendingStrip
-                items={visiblePendingMessages}
-                deliveringBatch={deliveringBatch}
-                maxWidthCss={composerMaxWidth}
-              />
-            }
+            bottomOverlayHeight={bottomOverlayHeight}
           />
           <HeaderBar
             label={activeLabel}
@@ -583,39 +599,59 @@ function HomeContent({
           >
             {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} />}
           </HeaderBar>
-          <div className="relative z-20 bg-background">
-            {activeAgent?.harness === "meiva" && activeAgent.supports_vision === null && (
-              <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
-                {t("modelCapabilitiesUnavailable")}
-              </p>
-            )}
-            <div className="relative">
-              {activeId !== null && <PendingQuestions key={activeId} agentId={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
-              <Composer
-                diagnostics={diagnostics}
-                quoteSelection={quoteSelection}
+          <div
+            ref={dockSlotRef}
+            data-testid="composer-dock-slot"
+            className="relative z-20 shrink-0 bg-background"
+            style={{ height: COMPOSER_REST_HEIGHT_CSS }}
+          >
+            <div
+              ref={bottomDockRef}
+              data-testid="composer-bottom-dock"
+              className="pointer-events-none absolute inset-x-0 bottom-0"
+            >
+              <PendingStrip
+                items={visiblePendingMessages}
+                deliveringBatch={deliveringBatch}
                 maxWidthCss={composerMaxWidth}
-                mode={composerMode}
-                onSend={handleSend}
-                onStop={handleStop}
-                stageQueue={stageQueue}
-                onDeliveringBatchChange={setDeliveringBatch}
-                onUploadError={handleUploadError}
-                focusToken={store.composerFocusToken}
-                agentId={activeId}
-                agentTerminated={activeAgent?.status === "terminated"}
-                suggestions={replySuggestion?.suggestions}
-                suggestionOfferId={replySuggestion?.offer_id}
-              >
-                <UploadButton
+              />
+              {activeAgent?.harness === "meiva" && activeAgent.supports_vision === null && (
+                <p
+                  role="status"
+                  style={composerMaxWidth ? { maxWidth: composerMaxWidth } : undefined}
+                  className="pointer-events-auto mx-auto w-full bg-background px-3 py-2 text-sm text-muted-foreground"
+                >
+                  {t("modelCapabilitiesUnavailable")}
+                </p>
+              )}
+              <div className="relative">
+                {activeId !== null && <PendingQuestions key={activeId} agentId={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
+                <Composer
+                  diagnostics={diagnostics}
+                  quoteSelection={quoteSelection}
+                  maxWidthCss={composerMaxWidth}
+                  mode={composerMode}
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  stageQueue={stageQueue}
+                  onDeliveringBatchChange={setDeliveringBatch}
+                  onUploadError={handleUploadError}
+                  focusToken={store.composerFocusToken}
                   agentId={activeId}
-                  onUpload={uploadHandler}
-                  uploading={false}
-                  progress={0}
-                  count={0}
-                  error={uploadError}
-                />
-              </Composer>
+                  agentTerminated={activeAgent?.status === "terminated"}
+                  suggestions={replySuggestion?.suggestions}
+                  suggestionOfferId={replySuggestion?.offer_id}
+                >
+                  <UploadButton
+                    agentId={activeId}
+                    onUpload={uploadHandler}
+                    uploading={false}
+                    progress={0}
+                    count={0}
+                    error={uploadError}
+                  />
+                </Composer>
+              </div>
             </div>
           </div>
         </div>

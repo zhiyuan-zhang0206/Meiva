@@ -110,6 +110,7 @@ export function ScrollAreaMock({
   children,
   className,
   viewportClassName,
+  scrollbarClassName: _scrollbarClassName,
   viewportRef,
   viewportTestId,
   onScrollCapture,
@@ -118,6 +119,7 @@ export function ScrollAreaMock({
   children: React.ReactNode;
   className?: string;
   viewportClassName?: string;
+  scrollbarClassName?: string;
   viewportRef?: React.Ref<HTMLDivElement>;
   viewportTestId?: string;
   onScrollCapture?: React.UIEventHandler<HTMLDivElement>;
@@ -299,7 +301,11 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
   const leafHeight = (el: HTMLElement): number | undefined => {
     const custom = options.height?.(el);
     if (custom !== undefined) return custom;
-    if (el.hasAttribute("data-timeline-reserve") || el.hasAttribute("data-timeline-spacer")) {
+    if (
+      el.hasAttribute("data-timeline-reserve") ||
+      el.hasAttribute("data-timeline-overlay-slack") ||
+      el.hasAttribute("data-timeline-spacer")
+    ) {
       return Number.parseFloat(el.style.height) || 0;
     }
     if (el.classList.contains("timeline-item")) {
