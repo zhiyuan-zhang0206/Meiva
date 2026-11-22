@@ -85,7 +85,8 @@ async def test_terminate_escalates_for_a_process_that_ignores_sigterm() -> None:
     )
     try:
         assert process.stdout is not None
-        process.stdout.readline()
+        with process.stdout as stdout:
+            _ = stdout.readline()
         stubborn = await terminate(
             probe, [process.pid], grace_seconds=0.2, poll_seconds=0.02, clock=system_clock()
         )

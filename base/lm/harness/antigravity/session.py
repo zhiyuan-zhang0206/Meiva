@@ -622,8 +622,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         completion = turn.complete(
             rows, reason, self._session_id, self._monotonic(), self.generation
         )
-        if not completion.usage_uncertain:
-            self._totals = self._totals.with_turn(completion.usage, None)
+        self._totals = self._totals.with_turn(
+            completion.usage, measured=not completion.usage_uncertain
+        )
         turn.interrupted = completion.interrupted
         if turn.interrupted:
             for result in self._tools.cancel(ticket.turn_id):

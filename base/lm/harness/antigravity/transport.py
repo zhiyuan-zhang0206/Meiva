@@ -301,7 +301,7 @@ class AgyTransport:
         self, payload: dict[str, object], *, before_write: Callable[[], None] | None = None
     ) -> None:
         stream = self._require_process().stdin
-        if stream is None or not self.alive or self._stream_closed:
+        if stream is None or stream.is_closing() or not self.alive or self._stream_closed:
             raise TransportClosedError("agy ACP stream is closed")
         data = (json.dumps({"jsonrpc": "2.0", **payload}) + "\n").encode()
         if before_write is not None:
