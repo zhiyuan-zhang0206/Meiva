@@ -533,23 +533,25 @@ class ForegroundRun:
         return False
 
     async def _is_waiting_on_background(self) -> bool:
+        was_confirmed = self._confirmed_background_wait
+        confirmed = False
         if (
-            not self.fg.can_wait_on_background
-            or self._settling
-            or not isinstance(self._bridge, BackgroundWaitReporting)
+            self.fg.can_wait_on_background
+            and not self._settling
+            and isinstance(self._bridge, BackgroundWaitReporting)
         ):
-            self._confirmed_background_wait = False
-            return False
-        try:
-            waiting = await self._bridge.waiting_on_background(self.fg.turns)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "agent {agent_id}: background wait check failed; keeping stall guard armed",
-                agent_id=self._agent_id,
-            )
-            waiting = False
-        confirmed = waiting and self.fg.can_wait_on_background and not self._settling
+            try:
+                waiting = await self._bridge.waiting_on_background(self.fg.turns)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "agent {agent_id}: background wait check failed; keeping stall guard armed",
+                    agent_id=self._agent_id,
+                )
+                waiting = False
+            confirmed = waiting and self.fg.can_wait_on_background and not self._settling
         self._confirmed_background_wait = confirmed
+        if confirmed or was_confirmed:
+            self._last_heard = self._clock.monotonic()
         return confirmed
 
     # meiva:note

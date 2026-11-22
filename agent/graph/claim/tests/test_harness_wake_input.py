@@ -21,7 +21,6 @@ from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
-    completed,
     in_a_turn,
     input_key,
     insert_row,
@@ -696,19 +695,15 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
 
 def test_foreground_awaiting_reply_transitions() -> None:
     fg = Foreground(generation=1)
-    assert not fg.awaiting_reply and not fg.can_wait_on_background
-
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (False, False)
     fg = fg.hand((Handed("inbound-1", 1),))
     fg, _ = fg.on_event(TurnStarted("t1", TurnOrigin.INPUT, ("inbound-1",), 1))
     fg, _ = fg.on_event(InputInContext("inbound-1", "t1", 1))
-    assert fg.handed == () and fg.awaiting_reply and not fg.can_wait_on_background
-
+    assert (fg.handed, fg.awaiting_reply, fg.can_wait_on_background) == ((), True, False)
     fg, _ = fg.on_event(AssistantText("t1", "   "))
-    assert fg.awaiting_reply and not fg.can_wait_on_background
-
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
     fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nchecking now"))
-    assert not fg.awaiting_reply and fg.can_wait_on_background
-
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (False, True)
     for activity in (
         ToolUse("t1", "c1", "read_file", {"Path": "/x"}),
         ToolResult("t1", "c1", False, "ok"),
@@ -717,25 +712,21 @@ def test_foreground_awaiting_reply_transitions() -> None:
         ReasoningText("t1", "thought"),
     ):
         rearmed, _ = fg.on_event(activity)
-        assert rearmed.awaiting_reply, f"{type(activity).__name__} must re-arm awaiting_reply"
-
+        assert (rearmed.awaiting_reply, rearmed.can_wait_on_background, rearmed.replied_turns) == (
+            True,
+            False,
+            frozenset(),
+        )
     sub_tool, _ = fg.on_event(ToolUse("t1", "sub1", "read_file", {}, parent_tool_use_id="p1"))
-    assert not sub_tool.awaiting_reply
-
+    assert (sub_tool.awaiting_reply, sub_tool.can_wait_on_background) == (False, True)
+    step, _ = fg.on_event(ToolUse("t1", "c2", "run_command", {}))
+    step, _ = step.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nstep done"))
+    assert (step.awaiting_reply, step.can_wait_on_background) == (False, True)
     fg = fg.hand((Handed("inbound-2", 2),))
     fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nlate old reply"))
-    assert fg.awaiting_reply and not fg.can_wait_on_background
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
     fg, _ = fg.on_event(InputInContext("inbound-2", "t1", 1))
-    assert fg.awaiting_reply and not fg.can_wait_on_background
-
-    fg, _ = fg.on_event(TurnStarted("t2", TurnOrigin.HARNESS, (), 1))
-    fg, _ = fg.on_event(completed("t1", "done"))
-    assert fg.turns == frozenset({"t2"}) and fg.awaiting_reply_turns == frozenset({"t2"})
-
-    fg = fg.hand((Handed("late-1", 3),))
-    fg, _ = fg.on_event(InputInContext("late-1", "t1", 1))
-    assert fg.awaiting_reply_turns <= fg.turns and fg.replied_turns <= fg.turns
-    assert "t1" not in fg.awaiting_reply_turns and "t2" in fg.awaiting_reply_turns
+    assert (fg.awaiting_reply, fg.can_wait_on_background) == (True, False)
 
 
 async def test_concurrent_steer_during_assistant_text_persist_resets_delivery_wave(

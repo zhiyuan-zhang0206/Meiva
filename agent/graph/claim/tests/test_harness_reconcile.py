@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import replace
 
 import psycopg
@@ -28,6 +28,7 @@ from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime, scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    ProbeTimers,
     RuntimeFixture,
     completed,
     in_a_turn,
@@ -36,26 +37,32 @@ from agent.graph.claim.tests.harness_support import (
     read_recorded_items,
     row_status,
     silent_engine,
+    turn_events,
     wait_until,
+    with_virtual_clock,
 )
 from agent.graph.claim.tests.harness_support import (
     harness_runtime as harness_runtime,
 )
 from agent.graph.claim.tests.test_harness_turn import config
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
-from agent.graph.llm_errors import FatalLLMStreamError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.messages.lifecycle_text import interrupt_note
+from base.agents.recovery.breaker import HALT_REASON_TURN_STALLED
 from base.api_contracts.agent_contract import Harness
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     HarnessInput,
     InputInContext,
     Reconciliation,
     SessionClosed,
     TextDelta,
+    ToolResult,
+    ToolUse,
     TurnOrigin,
     TurnStarted,
 )
@@ -701,3 +708,58 @@ async def test_a_passive_note_goes_along_with_the_next_real_input(
         node.cancel()
     assert keys == [f"inbound-{chat}"], "the passive note rides the message and opens no turn"
     assert text.index("was interrupted") < text.index("carry on")
+
+
+@pytest.mark.parametrize("mode", ["return_to_foreground", "rpc_glitch"])
+async def test_background_wait_resume_or_rpc_glitch_gets_fresh_900s_budget(
+    mode: str, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    bg_state = ["wait"]
+
+    def check_bg(_turns: Collection[str]) -> bool:
+        if bg_state[0] == "rpc_glitch":
+            raise RuntimeError("transient rpc timeout")
+        return bg_state[0] == "wait"
+
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "start background job")
+    timers = ProbeTimers(start=100.0)
+    engine = FakeEngine(
+        script=lambda inputs: turn_events(
+            inputs,
+            ToolUse("t1", "t1#1", "run_command", {"CommandLine": "train.sh"}),
+            ToolResult("t1", "t1#1", False, "running in background"),
+            AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nStarted background job."),
+        )
+    )
+    engine.background_waiting = check_bg
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat_id) == "done", "input committed")
+        await timers.advance_and_probe(engine, 100.0)
+        timers.advance(1200.0)
+        bg_state[0] = mode
+        await timers.advance_and_probe(engine, 0.0)
+        assert not task.done() and engine.retired == []
+        await timers.advance_and_probe(engine, 899.0)
+        assert not task.done()
+        timers.advance(1.0)
+        engine.notify_inbound()
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            _ = await task
+    assert halted.value.reason == HALT_REASON_TURN_STALLED and "turn stalled" in engine.retired
+
+
+def test_foreground_multi_turn_and_late_input_invariants() -> None:
+    fg = Foreground(generation=1)
+    fg, _ = fg.on_event(TurnStarted("t1", TurnOrigin.INPUT, ("inbound-1",), 1))
+    fg, _ = fg.on_event(TurnStarted("t2", TurnOrigin.HARNESS, (), 1))
+    fg, _ = fg.on_event(completed("t1", "done"))
+    assert (fg.turns, fg.awaiting_reply_turns) == (frozenset({"t2"}), frozenset({"t2"}))
+    fg = fg.hand((Handed("late-1", 3),))
+    fg, _ = fg.on_event(InputInContext("late-1", "t1", 1))
+    assert fg.awaiting_reply_turns <= fg.turns
+    assert fg.replied_turns <= fg.turns
+    assert fg.awaiting_reply_turns == frozenset({"t2"})

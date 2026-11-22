@@ -124,7 +124,12 @@ class Foreground:
 
     @property
     def can_wait_on_background(self) -> bool:
-        return bool(self.turns) and not self.handed and self.turns <= self.replied_turns
+        return (
+            bool(self.turns)
+            and not self.handed
+            and not self.awaiting_reply_turns
+            and self.turns <= self.replied_turns
+        )
 
     def hand(self, batch: tuple[Handed, ...]) -> Foreground:
         return replace(self, handed=(*self.handed, *batch))
@@ -192,9 +197,15 @@ class Foreground:
         )
 
     def _rearm(self, turn_id: str) -> Foreground:
-        if turn_id not in self.turns or turn_id in self.awaiting_reply_turns:
+        if turn_id not in self.turns or (
+            turn_id in self.awaiting_reply_turns and turn_id not in self.replied_turns
+        ):
             return self
-        return replace(self, awaiting_reply_turns=self.awaiting_reply_turns | {turn_id})
+        return replace(
+            self,
+            awaiting_reply_turns=self.awaiting_reply_turns | {turn_id},
+            replied_turns=self.replied_turns - {turn_id},
+        )
 
     def _mark_replied(self, turn_id: str) -> Foreground:
         if turn_id not in self.turns or self.handed:
