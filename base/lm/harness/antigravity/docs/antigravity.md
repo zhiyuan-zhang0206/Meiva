@@ -96,8 +96,9 @@ evidence immediately, preserving recorded text and usage. At the attribution
 deadline, a successful ACP response with its current input marker in the
 transcript can settle with only attributed foreground output. The adapter logs
 `agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
-planner rows quarantined for native attribution. Missing input evidence retains
-the attribution failure.
+planner rows quarantined for native attribution. A pending notice from a
+degraded input stays provisional across input markers until a verified detached
+terminal precedes the marker. Missing input evidence retains the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes

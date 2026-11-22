@@ -10,7 +10,7 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
-from base.lm.harness.antigravity.tests.support import seed_replay_history, start
+from base.lm.harness.antigravity.tests.support import Harness, seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
 from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import (
@@ -302,6 +302,14 @@ async def test_resumed_cancel_keeps_proven_partial_text_and_usage(tmp_path: Path
         await harness.stop()
 
 
+def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
+    return [
+        event.text
+        for event in harness.events
+        if isinstance(event, AssistantText) and event.turn_id == turn_id
+    ]
+
+
 @pytest.mark.parametrize(
     ("command", "text", "uncertain", "tool_count", "steps"),
     [
@@ -334,16 +342,36 @@ async def test_resumed_multi_step_command_completion(
         )
         assert sum(isinstance(e, ToolUse) for e in harness.events) == tool_count
 
-        pid = harness.session.cli_pid
-        await harness.session.deliver([HarnessInput.of("second", "next")])
-        again = await harness.wait_for(
-            lambda event: isinstance(event, TurnCompleted) and event.turn_id != done.turn_id
+        await _assert_reused_prompt(harness, done.turn_id, late_native=uncertain)
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+async def _assert_reused_prompt(harness: Harness, first_turn_id: str, *, late_native: bool) -> None:
+    pid = harness.session.cli_pid
+    followup = "late-native" if late_native else "next"
+    await harness.session.deliver([HarnessInput.of("second", followup)])
+    second = await harness.wait_for(
+        lambda event: (
+            isinstance(event, TurnStarted)
+            and event.origin is TurnOrigin.INPUT
+            and event.turn_id != first_turn_id
         )
-        assert again.text == "OK" and harness.session.cli_pid == pid
+    )
+    again = await harness.wait_for(
+        lambda event: isinstance(event, TurnCompleted) and event.turn_id == second.turn_id
+    )
+    assert again.text == "OK" and not again.usage_uncertain and harness.session.cli_pid == pid
+    assert _assistant_texts(harness, second.turn_id) == ["OK"]
+    if late_native:
+        native = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        assert native.cause is HarnessCause.BACKGROUND_TASK
+        assert _assistant_texts(harness, native.turn_id) == ["LATE NATIVE REPLY"]
+    else:
         assert [event.origin for event in harness.events if isinstance(event, TurnStarted)] == [
             TurnOrigin.INPUT,
             TurnOrigin.INPUT,
         ]
-        assert sink == []
-    finally:
-        await harness.stop()

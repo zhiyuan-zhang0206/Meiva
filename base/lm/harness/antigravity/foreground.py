@@ -425,6 +425,7 @@ class PromptTurn:
             row_count,
             accounted=self.verified_steps is not None and not self._projection_degraded,
             cancelled=self.interrupted,
+            degraded=self._projection_degraded,
         )
 
     def restore_verified_text(

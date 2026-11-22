@@ -293,6 +293,10 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         return
     if command == "child-seed":
         _ = declare_child(transcript)
+    if command == "late-native":
+        record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+        message("LATE NATIVE REPLY")
+        update("usage_update", used=2, size=10)
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
