@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NewType
+from typing import NewType, Protocol
 
 from base.host.boundary.fields import int_field, str_field
 from base.host.boundary.json_values import is_object_dict
@@ -37,6 +37,12 @@ SecureRandom = NewType("SecureRandom", random.Random)
 # pins the pair the moment both land.
 # meiva:link base/lm/harness/docs/harness.md
 ATTACHED = "attached"
+
+
+class CallerRegistry(Protocol):
+    def register(self, agent_id: int, token: str) -> None: ...
+    def revoke(self, token: str) -> None: ...
+
 
 _REQUIRED = frozenset(
     {

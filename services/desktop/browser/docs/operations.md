@@ -142,3 +142,32 @@ the operating choices below do not redefine either component.
   window is visible on that host's screen.
 - **Verification is manual**: live-browser use (driving a real site) is checked by
   hand, like the other real-MCP-server integrations — not in CI.
+
+
+## Socket and runner routing
+
+The Unix socket accepts newline-delimited JSON. `ping` answers during
+upstream initialization so a watchdog can distinguish a living supervisor
+from one that failed to bind. `status` reports upstream readiness separately.
+
+Each client socket serializes requests. A request may reconnect when
+connection setup fails, when its writer was closed before the first write,
+or when the daemon explicitly rejects it before forwarding. A failure
+after write starts leaves the outcome unknown and surfaces to the caller.
+The authenticated runner RPC and the Chrome stdio wrapper use this framing.
+The target obtains its caller ID by redeeming a 30-second single-use proof
+against the source agent-host. The trusted launcher gives native execution
+children a dedicated caller credential and registers external harness handles
+while their session is active. The shared runner bearer authenticates the
+transport. The browser RPC and proof redemption have separate bounded
+admission, acquired before request body buffering.
+
+Remote uploads stay staged while Chrome can still read the selected file.
+The runner gives an upload a ten-minute retention window and retains up to
+32 outstanding uploads to cap disk consumption at 256 MiB. Each RPC
+carries up to 8 MiB of file bytes. This limit bounds base64 transfer and the
+authenticated request body. The target browser executor manages upload
+staging and removes stale directories on startup. The caller saves outputs
+with directory descriptors that prevent symlink substitutions. An SSH upload
+session expires remotely after ten minutes and sweeps older residue on
+the next upload.

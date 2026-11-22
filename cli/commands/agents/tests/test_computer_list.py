@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import threading
@@ -9,7 +10,11 @@ import pytest
 
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import computer_mcp_socket
-from cli.commands.agents.computer import cmd_computer_list, cmd_computer_release
+from cli.commands.agents.computer import (
+    cmd_computer_list,
+    cmd_computer_release,
+    collect_cluster_rows,
+)
 
 _SAMPLE_TOML = """
 [hosts.zzyasus]
@@ -33,7 +38,7 @@ _CLUSTER_MACHINES = [
 ]
 
 
-def _fake_cluster_probe(url: str) -> dict[str, object]:
+async def _fake_cluster_probe(url: str) -> dict[str, object]:
     if "10.20.30.41" in url:
         return {"ok": True, "available": True, "os": "macos", "holder": 405}
     if "10.20.30.42" in url:
@@ -77,6 +82,10 @@ def test_computer_list_table_hides_secrets_and_self(
         assert forbidden not in table_out
 
 
+async def _fake_browser_probe(url: str) -> bool:
+    return "10.20.30.41" in url
+
+
 def test_computer_list_json_output_schema(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -87,6 +96,7 @@ def test_computer_list_json_output_schema(
         local_machine="ubuntu",
         cluster_machines=_CLUSTER_MACHINES,
         cluster_status_probe=_fake_cluster_probe,
+        browser_status_probe=_fake_browser_probe,
         ssh_health_probe=_fake_ssh_probe,
         json_output=True,
     )
@@ -101,6 +111,7 @@ def test_computer_list_json_output_schema(
         "status": "online",
         "held_by": "agent:405",
         "notes": "Home Mac mini",
+        "browser_status": "online",
     }
     assert by_target["ssh://zzyasus"] == {
         "target": "ssh://zzyasus",
@@ -108,6 +119,7 @@ def test_computer_list_json_output_schema(
         "status": "online",
         "held_by": "meiva-agent-7507",
         "notes": "Win11 · RTX 2060 · CC4 / Headshot",
+        "browser_status": "unprobed (SSH)",
     }
     assert by_target["ssh://winlab"]["held_by"] is None
     assert by_target["meiva://company-mini"]["status"] == "offline"
@@ -152,3 +164,61 @@ def test_computer_release_forwards_optional_host(
         }
     ]
     assert capsys.readouterr().out == "released the screen from agent 7507\n"
+
+
+def test_discovery_keeps_browser_only_and_legacy_runner_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    machines = [
+        ("browser-only", "http://browser.test", "Chrome"),
+        ("legacy", "http://legacy.test", "Previous runner"),
+        ("offline", "http://offline.test", "Offline runner"),
+    ]
+    browser = {"http://browser.test": True, "http://legacy.test": "upgrade runner"}
+
+    async def probe_desktop(url: str) -> dict[str, object]:
+        return {"ok": url != "http://offline.test", "available": False, "os": "linux"}
+
+    async def probe_browser(url: str) -> bool | str | None:
+        return browser.get(url)
+
+    assert (
+        cmd_computer_list(
+            home=tmp_path,
+            platform_system="linux",
+            cluster_machines=machines,
+            browser_status_probe=probe_browser,
+            cluster_status_probe=probe_desktop,
+            json_output=True,
+        )
+        == 0
+    )
+    rows = json.loads(capsys.readouterr().out)
+    assert [(row["target"], row["browser_status"]) for row in rows] == [
+        ("meiva://browser-only", "online"),
+        ("meiva://legacy", "upgrade runner"),
+        ("meiva://offline", "unknown"),
+    ]
+
+
+async def test_discovery_cancels_slow_probes_and_keeps_completed_rows() -> None:
+    running = asyncio.Event()
+    canceled = asyncio.Event()
+
+    async def desktop(_url: str) -> dict[str, object]:
+        running.set()
+        try:
+            await asyncio.Future[None]()
+        finally:
+            canceled.set()
+        return {}
+
+    async def chrome(_url: str) -> bool:
+        await running.wait()
+        return True
+
+    rows = await collect_cluster_rows(
+        [("remote", "http://runner.test", None)], desktop, chrome, timeout_s=0.1
+    )
+    assert canceled.is_set()
+    assert [row.browser_status for row in rows] == ["online"]

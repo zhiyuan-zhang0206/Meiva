@@ -205,14 +205,14 @@ def process_clients(
     # meiva:note
     # The MCP client set reads its request timeout once, when the first MCP call builds it.
     def mcp_clients() -> McpClients:
-        from base.paths import mcp_daemon_shared_socket
         from base.paths.home import resolve_meiva_home
 
-        timeout_s = config.view.sandbox.mcp_connect_timeout_seconds
-        socket_path = Path(
-            mcp_daemon_shared_socket(home if home is not None else resolve_meiva_home())
+        return McpClients.for_home(
+            home if home is not None else resolve_meiva_home(),
+            config.view.sandbox.mcp_connect_timeout_seconds,
+            timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
-        return McpClients(socket_path, timeout_s, timers=SYSTEM_TIMERS)
 
     return ClientSet(
         gateway_url=gateway_url,

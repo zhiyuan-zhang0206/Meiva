@@ -1,9 +1,4 @@
-"""Shared client transport for the browser and computer MCP Unix sockets.
-
-Only connection failures and a socket closed before writing can be retried.
-Once a write begins, the daemon may have executed the request; errors surface
-without resending it.
-"""
+# meiva:link services/desktop/browser/docs/operations.md
 
 from __future__ import annotations
 
@@ -19,9 +14,6 @@ from base.host.boundary.untyped import object_of
 from base.host.net.resilience import Policy, aretry, retry_asleep
 
 
-# meiva:note
-# One response line as a client reads it: every member optional and `object`, because a daemon
-# that answered an error without a message still fails the call with the service's own label.
 class _WireResponse(TypedDict, total=False):
     id: object
     ok: object
@@ -32,15 +24,14 @@ class _WireResponse(TypedDict, total=False):
 _RESPONSE = TypeAdapter(_WireResponse)
 
 LINE_LIMIT = 64 * 1024 * 1024
-_TRANSPORT_ERRNOS = frozenset({32, 54, 61})  # EPIPE, ECONNRESET, ECONNREFUSED
+_TRANSPORT_ERRNOS = frozenset({32, 54, 61})
 
 
 class NotDeliveredError(Exception):
-    """The writer was already closed before this request attempted a write."""
+    pass
 
 
 def is_transport_error(exc: BaseException) -> bool:
-    """Whether a delivered request failed because its connection died."""
     if type(exc).__name__ in (
         "ConnectionError",
         "BrokenPipeError",
@@ -61,7 +52,6 @@ async def dial_unix_socket(
     delay: float = 0.5,
     asleep: Callable[[float], Awaitable[None]] = retry_asleep,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """Dial a supervised daemon, allowing a cold start to finish."""
     policy = Policy(
         max_attempts=attempts,
         backoff=lambda attempt: delay,  # noqa: ARG005 — Backoff keyword name
@@ -85,8 +75,6 @@ async def dial_unix_socket(
 
 
 class SocketLink:
-    """One connection, with serialized request and response pairs."""
-
     def __init__(
         self,
         reader: asyncio.StreamReader,
@@ -135,8 +123,6 @@ class SocketLink:
 
 
 class ReconnectingLink:
-    """Apply each wrapper's retry and close policy to its socket link."""
-
     def __init__(
         self,
         connect: Callable[[], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]],
@@ -158,13 +144,14 @@ class ReconnectingLink:
         self._link: SocketLink | None = None
         self._lock = asyncio.Lock()
 
+    def close(self) -> None:
+        if self._link is not None:
+            self._drop_link()
+
     async def _connect_once(self) -> SocketLink:
         reader, writer = await self._connect()
         return self._link_factory(reader, writer)
 
-    # meiva:note
-    # A daemon that rejected the request up front, before forwarding it anywhere, names the
-    # reason in a `RuntimeError`: that message is the one a wrapper declares retryable.
     def _is_retryable_rejection(self, exc: Exception) -> bool:
         return (
             self._rejection_message is not None

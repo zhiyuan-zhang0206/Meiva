@@ -22,18 +22,18 @@ _MAX_IMAGE_B64_CHARS = ((_MAX_IMAGE_BYTES + 2) // 3) * 4 + 4
 _ALLOWED_IMAGE_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 
-def probe_cluster_computer_status(
+async def probe_cluster_computer_status(
     ops_url: str,
     *,
     headers: Mapping[str, str],
     timeout_s: float = _DEFAULT_PROBE_TIMEOUT_S,
-    client: httpx.Client | None = None,
+    client: httpx.AsyncClient | None = None,
 ) -> dict[str, object]:
     url = f"{ops_url.rstrip('/')}/computer/rpc"
     own = client is None
-    http = client if client is not None else httpx.Client(timeout=timeout_s, trust_env=False)
+    http = client if client is not None else httpx.AsyncClient(timeout=timeout_s, trust_env=False)
     try:
-        resp = http.post(url, json={"action": "status"}, headers=dict(headers))
+        resp = await http.post(url, json={"action": "status"}, headers=dict(headers))
         if resp.status_code != 200:
             return {"ok": False, "available": False, "error": f"HTTP {resp.status_code}"}
         parsed = object_of(resp.json)
@@ -44,7 +44,7 @@ def probe_cluster_computer_status(
         return {"ok": False, "available": False, "error": str(exc)}
     finally:
         if own:
-            http.close()
+            await http.aclose()
 
 
 def _post_cluster_rpc(

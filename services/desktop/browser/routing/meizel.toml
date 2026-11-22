@@ -1,0 +1,16 @@
+exports = ["boot.py", "cdp_screenshot.py", "mcp_socket_bridge.py", "remote_files.py", "remote_pages.py", "remote_rpc.py", "session.py", "staging.py", "wire_server.py"]
+
+[uses]
+"boot.py" = ["session.py"]
+"cdp_screenshot.py" = ["remote_files.py"]
+"remote_files.py" = ["workspace_files.py"]
+"remote_rpc.py" = ["mcp_socket_bridge.py"]
+"session.py" = ["remote_files.py", "remote_pages.py", "remote_rpc.py", "ssh_browser.py"]
+"ssh_browser.py" = ["cdp_screenshot.py", "remote_files.py", "remote_pages.py", "remote_rpc.py", "ssh_upload.py", "staging.py"]
+"ssh_upload.py" = ["remote_files.py"]
+"staging.py" = ["remote_files.py", "remote_pages.py"]
+"tests" = ["remote_files.py", "session.py", "ssh_browser.py", "staging.py", "workspace_files.py"]
+"wire_server.py" = ["remote_pages.py", "staging.py"]
+
+[roots]
+"workspace_files.py" = { kinds = ["random"], why = "Creates a private exclusive temporary entry with an operating-system nonce for each atomic workspace publication" }

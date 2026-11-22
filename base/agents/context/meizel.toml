@@ -1,4 +1,4 @@
-exports = ["clients.py", "external_attachment", "gateway_client", "identity.py"]
+exports = ["browser_identity.py", "clients.py", "external_attachment", "gateway_client", "identity.py"]
 
 [uses]
 "__init__.py" = ["clients.py", "identity.py"]

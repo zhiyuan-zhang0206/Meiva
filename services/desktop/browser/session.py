@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from http.cookies import SimpleCookie
 from typing import NotRequired, TypedDict
 
@@ -200,6 +200,7 @@ async def cdp_call[Answer](
     answer: TypeAdapter[Answer],
     *,
     session_id: str | None = None,
+    observe: Callable[[dict[str, object]], None] | None = None,
 ) -> Answer:
     request_id = next(ids)
     request: dict[str, object] = {"id": request_id, "method": method, "params": params}
@@ -212,6 +213,8 @@ async def cdp_call[Answer](
             raise TypeError("a CDP message is not a JSON object")
         if resp.get("id") == request_id:
             break
+        if observe is not None:
+            observe(resp)
     if "error" in resp:
         raise RuntimeError(f"CDP {method} failed: {resp['error']}")
     return answer.validate_python(resp.get("result") or {})

@@ -32,7 +32,7 @@ from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution, refreshes_for
-from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
+from base.lm.harness.registration import HANDLE_ENV, CallerRegistry, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
 
 # meiva:note
@@ -217,6 +217,7 @@ class BridgeRootValues:
     handle_rng: SecureRandom
     own_turn: Callable[[int], None]
     timestamp_prefix: Callable[[], str]
+    caller_registry: CallerRegistry | None = None
 
 
 # meiva:note
@@ -285,6 +286,7 @@ def bridge_for(
         refreshes=refreshes,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
+        caller_registry=root.caller_registry,
         clock=root.clock,
         handle_rng=root.handle_rng,
         controller_pid=root.controller_pid,

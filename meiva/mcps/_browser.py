@@ -15,6 +15,7 @@ or corrupted response line can never brick the connection for good.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, suppress
@@ -32,6 +33,8 @@ from base.host.net.resilience import Policy, aretry, retry_asleep
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
 # line; lift the stream buffer cap well above StreamReader's 64KiB default
 # (same limit as the wrapper and the browser daemon).
+from ._browser_port import BrowserFactory, BrowserSession
+
 LINE_LIMIT = 64 * 1024 * 1024
 
 # The browser-mcp service is a supervised daemon that should already be up; a
@@ -212,5 +215,40 @@ async def connect_browser_direct(
     reader, writer = await dial_browser_mcp(sock, attempts=attempts, delay_s=delay_s, asleep=asleep)
     session = BrowserLineSession(reader, writer, sock=sock, asleep=asleep)
     stack = AsyncExitStack()
+    stack.push_async_callback(session.close)
+    return session, stack
+
+
+async def connect_routed_browser(
+    home: Path, cdp_port: int, factory: BrowserFactory
+) -> tuple[BrowserSession, AsyncExitStack]:
+    stack = AsyncExitStack()
+    local: BrowserLineSession | None = None
+
+    async def close_local() -> None:
+        nonlocal local
+        if local is not None:
+            await local.close()
+            local = None
+
+    async def request(message: dict[str, object]) -> object:
+        nonlocal local
+        if local is None:
+            try:
+                local, _ = await connect_browser_direct(home, cdp_port)
+            except ConnectionError:
+                raise RuntimeError(
+                    "Local Chrome is unavailable. Run `meiva computer list` to select a remote host."
+                ) from None
+        try:
+            return await local._request(message)
+        except OSError as error:
+            if isinstance(error, ConnectionError) or error.errno in (errno.EPIPE, errno.ECONNRESET):
+                await close_local()
+            raise
+
+    session = factory(request)
+    await session.start()
+    stack.push_async_callback(close_local)
     stack.push_async_callback(session.close)
     return session, stack

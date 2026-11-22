@@ -1,5 +1,6 @@
 exports = ["browser", "computer", "permissions_helper", "remote", "win_helper"]
 
 [uses]
+"browser" = ["remote"]
 "computer" = ["browser", "remote"]
 "tests" = ["browser", "computer"]

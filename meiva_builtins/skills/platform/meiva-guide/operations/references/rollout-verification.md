@@ -13,7 +13,7 @@ code version. After every rollout, verify:
    `ps -eo pid,lstart,command | grep <home>/source` — a process started before
    the rollout window is running stale code (real cases: the mcp
    daemon, a watchdog and a browser daemon were all found this way).
-2. **mcp-daemon**: exactly ONE `meiva.mcps._daemon` per unit
+2. **mcp-daemon**: exactly ONE `services.entrypoints.mcp_daemon` per unit
    (`pgrep -fc "python -m meiva\.mcps\._daemon"`; co-located
    units → one per unit).
    Ghosts accumulate when a respawn storm relaunches while the old detached

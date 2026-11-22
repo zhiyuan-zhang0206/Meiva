@@ -1,24 +1,24 @@
-exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "profile_paths.py", "protocol.py", "session_restore.py", "shutdown_budget.py"]
+exports = ["mcp_daemon.py", "mcp_wrapper.py", "orphan.py", "probe.py", "profile.py", "protocol.py", "routing", "session_restore.py", "shutdown_budget.py"]
 
 [uses]
 "daemon.py" = ["macos_readiness.py", "orphan.py", "probe.py", "profile.py", "session_restore.py"]
 "gateway_session.py" = ["mcp_upstream.py", "session.py"]
-"mcp_daemon.py" = ["gateway_session.py", "mcp_upstream.py", "page_lifecycle.py", "protocol.py", "session_restore.py", "tab_groups"]
+"mcp_daemon.py" = ["gateway_session.py", "mcp_upstream.py", "page_lifecycle.py", "routing", "session_restore.py", "tab_groups"]
 "mcp_upstream.py" = ["shutdown_budget.py"]
-"mcp_wrapper.py" = ["mcp_socket_bridge.py"]
+"mcp_wrapper.py" = ["routing"]
 "page_lifecycle.py" = ["protocol.py", "tab_groups"]
 "probe.py" = ["macos_readiness.py", "orphan.py"]
+"routing" = ["mcp_upstream.py", "page_lifecycle.py", "protocol.py", "session.py"]
 "session_restore.py" = ["session.py", "tab_groups"]
 "tab_groups" = ["session.py"]
-"tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "profile_paths.py", "session.py", "session_restore.py", "tab_groups"]
+"tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "session.py", "session_restore.py", "tab_groups"]
 
 [purity]
 "__init__.py" = "strict"
-"profile_paths.py" = "strict"
 "protocol.py" = "strict"
 "shutdown_budget.py" = "strict"
 
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "platform", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; builds the host of this process with Host.system(); reads the home it runs under once, in main()" }
 "mcp_daemon.py" = { kinds = ["clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; reads the home it runs under once, in main(); builds the random generator its event pipeline mints the process's `service.instance.id` from" }
-"mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; reads the home it runs under once, in main()" }
+"mcp_wrapper.py" = { kinds = ["clock", "environ", "home", "platform", "settings"], why = "Stdio process entry reads its launch identity, Meiva home, clock and settings while composing the Chrome session." }

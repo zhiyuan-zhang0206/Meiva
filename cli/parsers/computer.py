@@ -8,6 +8,7 @@ module docstring).
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import suppress
 
 
@@ -25,9 +26,11 @@ def _h_computer_list(args: argparse.Namespace) -> int:
     from base.cluster.machine import gateway_auth_headers
     from base.cluster.machine.boot import gateway_access_from_boot
     from base.cluster.machines import list_all_with_description
+    from base.paths import chrome_mcp_socket
     from cli.commands.agents.computer import cmd_computer_list
     from cli.database import database_factory_of
     from cli.database.runtime import runtime_of
+    from services.desktop.browser.routing.remote_rpc import call_browser_socket, probe_browser_peer
     from services.desktop.remote.cluster_rpc import probe_cluster_computer_status
 
     runtime = runtime_of(args)
@@ -45,6 +48,13 @@ def _h_computer_list(args: argparse.Namespace) -> int:
         access = gateway_access_from_boot(runtime.config)
         headers = gateway_auth_headers(access)
 
+    local_browser_available = False
+    with suppress(OSError, RuntimeError, ValueError):
+        sock = chrome_mcp_socket(runtime.home, runtime.config.view.services.browser_cdp_port)
+        local_browser_available = (
+            asyncio.run(call_browser_socket(sock, {"method": "status"}, timeout_s=1.0)) is True
+        )
+
     return cmd_computer_list(
         home=runtime.home,
         platform_system=runtime.host.platform.system,
@@ -52,6 +62,8 @@ def _h_computer_list(args: argparse.Namespace) -> int:
         local_description=local_description,
         cluster_machines=cluster_rows,
         cluster_status_probe=lambda url: probe_cluster_computer_status(url, headers=headers),
+        browser_status_probe=lambda url: probe_browser_peer(url, headers=headers),
+        local_browser_available=local_browser_available,
         json_output=bool(getattr(args, "json", False)),
     )
 

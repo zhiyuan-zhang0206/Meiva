@@ -1045,6 +1045,9 @@ root = "services/derived/memory_indexer/tests"
 root = "services/derived/memory_search/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/desktop/browser/routing/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/desktop/browser/tab_groups/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1058,6 +1061,9 @@ root = "services/desktop/computer/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/desktop/permissions_helper/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/remote/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/desktop/tests"

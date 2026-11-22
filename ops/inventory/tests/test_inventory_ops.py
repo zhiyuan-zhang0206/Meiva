@@ -335,7 +335,7 @@ def test_inventory_ops_allow_computer_use_on_headless_host_with_remote_hosts(
     inventory = inventory_read_op(local_machine=machine_identity, host=host, home=home)
     assert inventory.mcp_servers["computer_use"].can_enable is True
     assert inventory.mcp_servers["computer_use"].reason is None
-    assert inventory.mcp_servers["chrome"].can_enable is False
+    assert inventory.mcp_servers["chrome"].can_enable is True
 
     enable = inventory_write_op(
         plugins={},

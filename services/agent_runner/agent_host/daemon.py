@@ -36,10 +36,12 @@ import secrets
 import signal
 import sys
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from uuid import UUID
 
+from base.agents.context.browser_identity import BrowserAuthority, serve_browser_authority
 from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.log import logger, prepare_process_logging
@@ -551,6 +553,11 @@ async def run(
         database(), config, rng, timers=SYSTEM_TIMERS
     )
     secure_rng = secrets.SystemRandom()
+    browser_authority = BrowserAuthority(
+        new_token=lambda: secure_rng.randbytes(32).hex(),
+        now=stamping.clock.monotonic,
+    )
+    browser_server: asyncio.Server | None = None
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None
     host: AgentHost | None = None
@@ -601,13 +608,16 @@ async def run(
             control_pool=control_pool,
             checkpointer=checkpointer,
             graph=build_graph(
-                checkpointer, installation.registry, parent=read_parent_facts(), rng=secure_rng
+                checkpointer,
+                installation.registry,
+                parent=replace(read_parent_facts(), browser_authority=browser_authority),
+                rng=secure_rng,
             ),
             machine=machine,
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=policy,
+            policy=replace(policy, browser_authority=browser_authority),
             handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,
@@ -630,6 +640,7 @@ async def run(
         host.bind_wake(scheduler.wake)
         host.bind_planned_stop(scheduler.in_planned_stop)
         wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)
+        browser_server = await serve_browser_authority(home, browser_authority)
         handed_off = True
         await serve_host_lifecycle(
             host,
@@ -690,6 +701,8 @@ async def run(
             pidfile=endpoint.pidfile,
         )
     finally:
+        if browser_server is not None:
+            await stop_health_server(browser_server)
         if not handed_off:
             await close_process_owners(
                 host,

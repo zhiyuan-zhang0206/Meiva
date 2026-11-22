@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import re
 from collections.abc import Awaitable, Callable
@@ -39,7 +38,6 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_boot
-from base.host.boundary.json_values import is_object_dict
 from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.code_version import CodeVersion
@@ -50,7 +48,6 @@ from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle, session_restore
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
-    UPSTREAM_DOWN_MSG,
     DeathReason,
     StoppingError,
     UpstreamGuard,
@@ -65,12 +62,22 @@ from services.desktop.browser.mcp_upstream import (
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
     expired_page_reaper,
-    handle_release_agent_page,
     renew_agent_page,
     renew_page_tool_dump,
     text_of,
 )
-from services.desktop.browser.protocol import WIRE_REQUEST, Response, WireRequest
+from services.desktop.browser.routing.cdp_screenshot import capture_owned_viewport
+from services.desktop.browser.routing.remote_pages import (
+    PAGE_LIST_TOOLS,
+    PAGE_SCOPED_TOOLS,
+    authorize_page,
+    bound_page_id_required,
+    public_page_schema,
+    reconnected,
+    scope_page_list,
+)
+from services.desktop.browser.routing.staging import BrowserStaging
+from services.desktop.browser.routing.wire_server import serve_line
 from services.desktop.browser.tab_groups.grouping import (
     AgentTabGroups,
     ExtensionWorker,
@@ -158,11 +165,13 @@ class ChromeMcpDaemon:
         self.tab_groups = tab_groups
         self.guard = guard
         self._lock = asyncio.Lock()
-        self._tools: list[types.Tool] | None = None
+        self._tools: dict[str, types.Tool] | None = None
         # meiva:note
         # Set by the guard when the upstream session is judged unusable; run() watches
         # it to terminate this unusable daemon.
         self.dead = guard.dead
+        self.staging: BrowserStaging | None = None
+        self.capture_port: int | None = None
 
     # meiva:note
     # Forward to upstream under the guard's verdict (`UpstreamGuard.request`: a dead
@@ -181,17 +190,21 @@ class ChromeMcpDaemon:
 
     async def list_tools(self) -> list[dict[str, object]]:
         async with self._lock:
-            if self._tools is None:
-                self._tools = (
-                    await self.guard.request("tool listing", self._upstream.list_tools)
-                ).tools
+            tools = await self._tool_catalog()
         # meiva:note
-        # Daemon-owned tool appended after the upstream's verbatim passthrough:
+        # Daemon-owned tool appended after adapting the upstream tool schema:
         # `chrome-devtools-mcp` has no TTL concept, so `renew_page` is
         # implemented entirely on this side (see `page_lifecycle`).
-        return [t.model_dump(mode="json", by_alias=True) for t in self._tools] + [
-            renew_page_tool_dump()
-        ]
+        return [
+            public_page_schema(tool).model_dump(mode="json", by_alias=True)
+            for tool in tools.values()
+        ] + [renew_page_tool_dump()]
+
+    async def _tool_catalog(self) -> dict[str, types.Tool]:
+        if self._tools is None:
+            listed = await self.guard.request("tool listing", self._upstream.list_tools)
+            self._tools = {tool.name: tool for tool in listed.tools}
+        return self._tools
 
     # meiva:note
     # Forward one call under the serial lock, pinned to `current_page`.
@@ -206,17 +219,64 @@ class ChromeMcpDaemon:
     # meiva:note
     # Forward one call pinned to the agent's page (per-agent affinity).
     async def call_tool_for_agent(
-        self, name: str, args: dict[str, object], agent_id: int
+        self, name: str, args: dict[str, object], agent_id: int, *, remote: bool = False
     ) -> types.CallToolResult:
         if name == RENEW_PAGE_TOOL:
             return await renew_agent_page(self, agent_id, args)
         async with self._lock:
             page = await page_lifecycle.restored_page(self, agent_id)
-            result, updated = await self._affinity_call(name, args, page, agent_id)
-            self.pages.set_agent_page(agent_id, updated)
-            if updated != page:
-                await page_lifecycle.remember_selection(self, agent_id, updated, result)
-            return result
+            if remote:
+                return await self._remote_affinity_call(name, args, page, agent_id)
+            return await self._remember_call(name, args, page, agent_id)
+
+    async def _remember_call(
+        self, name: str, args: dict[str, object], page: int | None, agent_id: int
+    ) -> types.CallToolResult:
+        result, updated = await self._affinity_call(name, args, page, agent_id)
+        self.pages.set_agent_page(agent_id, updated)
+        if updated != page:
+            await page_lifecycle.remember_selection(self, agent_id, updated, result)
+        return result
+
+    async def _remote_affinity_call(
+        self, name: str, args: dict[str, object], page: int | None, agent_id: int
+    ) -> types.CallToolResult:
+        def owns(page_id: int) -> bool:
+            record = self.pages.record_for_page(page_id)
+            return record is not None and record.owner == agent_id
+
+        authorize_page(name, args, owns)
+        if page is not None and not owns(page):
+            page = None
+        if isinstance(context := args.get("isolatedContext"), str):
+            args = {**args, "isolatedContext": f"meiva-agent-{agent_id}:{context}"}
+        if (
+            name in PAGE_SCOPED_TOOLS
+            and (selected := _page_id(args.get("pageId")) or page) is not None
+        ):
+            result = await self._call_owned_page(name, args, selected)
+        else:
+            result = await self._remember_call(name, args, page, agent_id)
+        if reconnected(result):
+            self.pages.page_targets.clear()
+            self.pages.affinity.clear()
+            raise ValueError("Remote Chrome reconnected. Open an owned page before calling tools.")
+        if name in PAGE_LIST_TOOLS:
+            return scope_page_list(result, owns, self.pages.get_agent_page(agent_id))
+        return result
+
+    async def _call_owned_page(
+        self,
+        name: str,
+        args: dict[str, object],
+        page: int,
+    ) -> types.CallToolResult:
+        if name == "take_screenshot":
+            target = self.pages.page_targets.get(page)
+            if target is None or self.capture_port is None:
+                raise ValueError("Open an owned Chrome page before taking a screenshot")
+            return await capture_owned_viewport(self.capture_port, target, args)
+        return await self._call(name, {**args, "pageId": page})
 
     # meiva:note
     # Re-pin to this connection's page, dropping affinity if the page vanished.
@@ -284,6 +344,9 @@ class ChromeMcpDaemon:
             current_page = await self._repin(current_page)
             if current_page is None:
                 return await self._bootstrap_page(name, args, agent_id=agent_id)
+            tool = (await self._tool_catalog()).get(name)
+            if "pageId" not in args and tool is not None and bound_page_id_required(tool):
+                args = {**args, "pageId": current_page}
 
         # meiva:note
         # A page created here gets its TTL slot (see `page_lifecycle`) and tab
@@ -323,96 +386,6 @@ class ChromeMcpDaemon:
 _ConnPage = int | None  # the connection's current page
 
 
-async def _call_tool_response(
-    daemon: ChromeMcpDaemon, req: WireRequest, req_id: int | None, conn_page: _ConnPage
-) -> tuple[Response, _ConnPage]:
-    """Serve a `call_tool` request; the response and the connection's page afterwards."""
-    tool = req.get("tool")
-    if not isinstance(tool, str) or not tool:
-        # meiva:note
-        # Missing/empty tool name: reject at the protocol edge
-        # instead of forwarding a nameless call the upstream
-        # would reject with a less legible error.
-        error = "call_tool requires a non-empty 'tool' name"
-        return {"id": req_id, "ok": False, "error": error}, conn_page
-    raw_args = req.get("args")
-    if raw_args is not None and not is_object_dict(raw_args):
-        return {"id": req_id, "ok": False, "error": "args must be an object"}, conn_page
-    args = raw_args or {}
-    agent_id = req.get("agent_id")
-    # meiva:note
-    # bool is an int subclass — reject it so a JSON
-    # `true` can never alias another agent's slot.
-    if isinstance(agent_id, int) and not isinstance(agent_id, bool):
-        result = await daemon.call_tool_for_agent(tool, args, agent_id)
-    else:
-        result, conn_page = await page_lifecycle.forward_legacy_call(daemon, tool, args, conn_page)
-    return {"id": req_id, "ok": True, "result": result.model_dump(mode="json")}, conn_page
-
-
-async def _respond(
-    daemon: ChromeMcpDaemon,
-    req: WireRequest,
-    req_id: int | None,
-    method: str | None,
-    conn_page: _ConnPage,
-) -> tuple[Response, _ConnPage]:
-    """Serve one request on a live daemon; one bad call must not drop the whole connection."""
-    try:
-        if method == "list_tools":
-            return {"id": req_id, "ok": True, "result": await daemon.list_tools()}, conn_page
-        if method == "call_tool":
-            return await _call_tool_response(daemon, req, req_id, conn_page)
-        if method == "release_agent_page":
-            return await handle_release_agent_page(daemon, req, req_id), conn_page
-        return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}, conn_page
-    except Exception as e:
-        return {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}, conn_page
-
-
-async def _serve_line(
-    line: bytes,
-    writer: asyncio.StreamWriter,
-    daemon_ref: list[ChromeMcpDaemon | None],
-    conn_page: _ConnPage,
-) -> _ConnPage:
-    """Parse, serve and answer one request line; the connection's page afterwards."""
-    try:
-        req = WIRE_REQUEST.validate_json(line)
-    except ValueError as e:
-        _write(writer, {"id": None, "ok": False, "error": f"JSON parse error: {e}"})
-        await writer.drain()
-        return conn_page
-
-    raw_id = req.get("id")
-    req_id = raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
-    raw_method = req.get("method")
-    method = raw_method if isinstance(raw_method, str) else None
-
-    # meiva:note
-    # ping is lock-free and must succeed while the upstream connects:
-    # the healthcheck probes the daemon process itself (not the
-    # upstream), so an initial connect window should never trigger a
-    # false-positive death and unnecessary respawn.
-    if method == "ping":
-        _write(writer, {"id": req_id, "ok": True, "result": None})
-        await writer.drain()
-        return conn_page
-
-    daemon = daemon_ref[0]
-    if daemon is None or daemon.dead.is_set():
-        # meiva:note
-        # The initial upstream connection is not ready.
-        _write(writer, {"id": req_id, "ok": False, "error": UPSTREAM_DOWN_MSG})
-        await writer.drain()
-        return conn_page
-
-    resp, conn_page = await _respond(daemon, req, req_id, method, conn_page)
-    _write(writer, resp)
-    await writer.drain()
-    return conn_page
-
-
 async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -432,17 +405,13 @@ async def handle_client(
     try:
         with suppress(ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
             while line := await reader.readline():
-                conn_page = await _serve_line(line, writer, daemon_ref, conn_page)
+                conn_page = await serve_line(line, writer, daemon_ref[0], conn_page)
     finally:
         if clients is not None and task is not None:
             clients.discard(task)
         writer.close()
         with suppress(OSError):
             await writer.wait_closed()
-
-
-def _write(writer: asyncio.StreamWriter, obj: Response) -> None:
-    writer.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
 
 
 async def socket_in_use(path: Path) -> bool:
@@ -578,6 +547,13 @@ async def _serve_daemon_loop(
                 )
             guard = UpstreamGuard(session, clock.timers)
             daemon = ChromeMcpDaemon(session, pages, tab_groups, guard)
+            daemon.capture_port = browser_cdp_port
+            daemon.staging = BrowserStaging(
+                sock.with_suffix(".staging"),
+                lambda tool, args, agent_id: daemon.call_tool_for_agent(
+                    tool, args, agent_id, remote=True
+                ),
+            )
             daemon_ref[0] = daemon
             await _serve_generation(daemon, stop, gateway)
             report_daemon_exit(guard.reason or DeathReason.STOPPED)
@@ -652,7 +628,7 @@ async def run(
         gateway_access=gateway_access,
         default_ttl_seconds=default_ttl_seconds,
         open_upstream=lambda: create_upstream(
-            browser_url, stop, connect_timeout_reader=connect_timeout_reader
+            browser_url, stop, connect_timeout_reader=connect_timeout_reader, explicit_pages=True
         ),
         reapply_session=True,
     )

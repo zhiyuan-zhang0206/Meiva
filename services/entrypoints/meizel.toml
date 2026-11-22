@@ -1,1 +1,4 @@
 exports = ["gate"]
+
+[roots]
+"mcp_daemon.py" = { kinds = ["clock", "environ", "home", "platform", "settings"], why = "MCP daemon process entry boots settings and composes Chrome routing with its own home and clock." }

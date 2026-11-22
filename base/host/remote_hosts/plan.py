@@ -22,6 +22,7 @@ _ALLOWED_HOST_KEYS: frozenset[str] = frozenset(
         "os",
         "ssh_host",
         "helper_port",
+        "browser_port",
         "local_port",
         "token_file",
         "notes",
@@ -30,6 +31,7 @@ _ALLOWED_HOST_KEYS: frozenset[str] = frozenset(
     }
 )
 DEFAULT_WIN_HELPER_PORT = 18792
+DEFAULT_BROWSER_PORT = 9222
 
 
 class RemoteHostConfigError(ValueError):
@@ -51,6 +53,7 @@ class RemoteHostConfig:
     notes: str = ""
     capabilities: str = ""
     protocol: RemoteHostProtocol = "win_bridge_mcp"
+    browser_port: int = DEFAULT_BROWSER_PORT
 
     @property
     def target_uri(self) -> str:
@@ -190,6 +193,7 @@ def _parse_host_entry(alias: str, raw: object) -> RemoteHostConfig:
         notes=_optional_text(raw, "notes", alias),
         capabilities=_optional_text(raw, "capabilities", alias),
         protocol=_parse_protocol(raw, alias, typed_os),
+        browser_port=_optional_port(raw, "browser_port", alias) or DEFAULT_BROWSER_PORT,
     )
 
 
@@ -218,24 +222,14 @@ def _has_control_chars(value: str) -> bool:
 
 
 def _validate_target_name(raw_name: str, *, raw_host: str) -> str:
-    if (
-        not raw_name
-        or ".." in raw_name
-        or any(
-            ch in ("/", "\\", ":", "@", "?", "#")
-            or ch.isspace()
-            or ord(ch) < 0x20
-            or ord(ch) == 0x7F
-            for ch in raw_name
-        )
-    ):
+    if not _ALIAS_RE.fullmatch(raw_name) or ".." in raw_name:
         raise TargetResolutionError(
-            f"Invalid computer_use host {raw_host!r}: bare URLs, ports, paths, and raw IPs are "
+            f"Invalid desktop host {raw_host!r}: bare URLs, ports, paths, and raw IPs are "
             "forbidden. Run `meiva computer list` to view registered targets."
         )
     if is_ip_literal(raw_name):
         raise TargetResolutionError(
-            f"Invalid computer_use host {raw_host!r}: raw IP addresses are forbidden (SSRF guard). "
+            f"Invalid desktop host {raw_host!r}: raw IP addresses are forbidden (SSRF guard). "
             "Register the host in remote_hosts.toml and run `meiva computer list`."
         )
     return raw_name
@@ -247,76 +241,60 @@ def _cluster_or_local(machine: str, local_machine: str | None) -> ResolvedTarget
     return ResolvedTarget(kind="meiva", name=machine, canonical_uri=f"meiva://{machine}")
 
 
-def _resolve_scheme_target(
-    cleaned: str,
-    *,
-    raw_host: str,
-    ssh_set: set[str],
-    cluster_set: set[str],
-    local_machine: str | None,
-) -> ResolvedTarget:
-    scheme, _, remainder = cleaned.partition("://")
-    scheme_lower = scheme.lower()
-    if scheme_lower == "ssh":
-        alias = _validate_target_name(remainder, raw_host=raw_host)
-        if alias not in ssh_set:
-            raise TargetResolutionError(
-                f"Unknown SSH desktop host 'ssh://{alias}'. "
-                "Run `meiva computer list` to view registered targets."
-            )
-        return ResolvedTarget(kind="ssh", name=alias, canonical_uri=f"ssh://{alias}")
-    if scheme_lower == "meiva":
-        machine = _validate_target_name(remainder, raw_host=raw_host)
-        if machine not in cluster_set:
-            raise TargetResolutionError(
-                f"Unknown cluster desktop host 'meiva://{machine}'. "
-                "Run `meiva computer list` to view registered targets."
-            )
-        return _cluster_or_local(machine, local_machine)
+def parse_target_selector(host: object) -> tuple[Literal["local", "ssh", "meiva", "short"], str]:
+    if host is None:
+        return "local", "local"
+    if not isinstance(host, str):
+        raise TargetResolutionError(
+            f"host must be a string, got {type(host).__name__}; "
+            "run `meiva computer list` to view registered targets."
+        )
+    if _has_control_chars(host):
+        raise TargetResolutionError(
+            f"Invalid desktop host {host!r}: control characters are forbidden. "
+            "Run `meiva computer list` to view registered targets."
+        )
+    cleaned = host.strip()
+    if not cleaned or cleaned.lower() in {"local", "local://"}:
+        return "local", "local"
+    scheme, sep, name = cleaned.partition("://")
+    if not sep:
+        return "short", _validate_target_name(cleaned, raw_host=host)
+    if scheme.lower() == "ssh":
+        return "ssh", _validate_target_name(name, raw_host=host)
+    if scheme.lower() == "meiva":
+        return "meiva", _validate_target_name(name, raw_host=host)
     raise TargetResolutionError(
-        f"Unsupported computer_use host scheme in {raw_host!r}: only 'local', 'meiva://<machine>', "
+        f"Unsupported desktop host scheme in {host!r}: only 'local', 'meiva://<machine>', "
         "and 'ssh://<alias>' are allowed. Run `meiva computer list` to view registered targets."
     )
 
 
 def resolve_target(
-    host: str | None,
+    host: object,
     *,
     ssh_aliases: Collection[str],
     cluster_machines: Collection[str],
     local_machine: str | None = None,
 ) -> ResolvedTarget:
-    if host is None:
+    kind, name = parse_target_selector(host)
+    if kind == "local":
         return ResolvedTarget(kind="local", name="local", canonical_uri="local")
-    if _has_control_chars(host):
-        raise TargetResolutionError(
-            f"Invalid computer_use host {host!r}: control characters are forbidden. "
-            "Run `meiva computer list` to view registered targets."
-        )
-    cleaned = host.strip()
-    if not cleaned or cleaned.lower() in {"local", "local://"}:
-        return ResolvedTarget(kind="local", name="local", canonical_uri="local")
-    ssh_set, cluster_set = set(ssh_aliases), set(cluster_machines)
-    if "://" in cleaned:
-        return _resolve_scheme_target(
-            cleaned,
-            raw_host=host,
-            ssh_set=ssh_set,
-            cluster_set=cluster_set,
-            local_machine=local_machine,
-        )
-    short = _validate_target_name(cleaned, raw_host=host)
-    in_ssh, in_cluster = short in ssh_set, short in cluster_set
+    in_ssh = kind != "meiva" and name in ssh_aliases
+    in_cluster = kind != "ssh" and name in cluster_machines
     if in_ssh and in_cluster:
         raise TargetResolutionError(
-            f"Ambiguous computer_use host {short!r}: matches both 'ssh://{short}' and "
-            f"'meiva://{short}'. Specify the explicit URI scheme."
+            f"Ambiguous desktop host {name!r}: matches both 'ssh://{name}' and "
+            f"'meiva://{name}'. Specify the explicit URI scheme."
         )
     if in_ssh:
-        return ResolvedTarget(kind="ssh", name=short, canonical_uri=f"ssh://{short}")
+        return ResolvedTarget(kind="ssh", name=name, canonical_uri=f"ssh://{name}")
     if in_cluster:
-        return _cluster_or_local(short, local_machine)
-    raise TargetResolutionError(
-        f"Unknown computer_use host {host!r}: only registered targets are allowed. "
-        "Run `meiva computer list` to view registered targets."
-    )
+        return _cluster_or_local(name, local_machine)
+    if kind == "ssh":
+        message = f"Unknown SSH desktop host 'ssh://{name}'."
+    elif kind == "meiva":
+        message = f"Unknown cluster desktop host 'meiva://{name}'."
+    else:
+        message = f"Unknown desktop host {host!r}: only registered targets are allowed."
+    raise TargetResolutionError(f"{message} Run `meiva computer list` to view registered targets.")

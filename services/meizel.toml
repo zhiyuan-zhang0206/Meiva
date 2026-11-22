@@ -1,11 +1,11 @@
 exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfile.py", "redis_bridge", "supervision", "upkeep", "wake"]
 
 [uses]
-"agent_runner" = ["backup", "pidfile.py"]
+"agent_runner" = ["backup", "desktop", "pidfile.py"]
 "backup" = ["pidfile.py"]
 "derived" = ["backup", "pidfile.py"]
 "desktop" = ["backup"]
-"entrypoints" = ["backup"]
+"entrypoints" = ["backup", "desktop"]
 "redis_bridge" = ["backup"]
 "supervision" = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "redis_bridge", "wake"]
 "tests" = ["agent_runner", "backup", "derived", "desktop", "pidfile.py", "upkeep", "wake"]

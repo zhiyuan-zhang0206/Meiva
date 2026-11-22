@@ -386,7 +386,7 @@ def build_services(
         # Its configuration is local mcp.json; boot and runtime need no database.
         ServiceSpec(
             session="mcp-daemon",
-            cmd=".venv/bin/python -m meiva.mcps._daemon",
+            cmd=".venv/bin/python -m services.entrypoints.mcp_daemon",
             capabilities=AGENT_RUNNER,
             requires_db=False,
             identity_probe=partial(probe_protocol_service, "mcp-daemon"),

@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-DAEMON_MODULE = "meiva.mcps._daemon"
+DAEMON_MODULES = frozenset({"meiva.mcps._daemon", "services.entrypoints.mcp_daemon"})
 USAGE = "Usage: python -m meiva.mcps._daemon [socket_path]"
 
 
@@ -30,7 +30,8 @@ def refusal_to_start(socket_path: str, *, occupied: bool) -> str | None:
 # True when `cmdline` is an actual `python -m meiva.mcps._daemon` launch. A substring match is not enough: the session backend wraps the launch in `bash -lc '... python -m meiva.mcps._daemon'`, whose single argv element contains the module name but is no daemon, and killing that wrapper orphans the live daemon. The module name must be its own argv element right after `-m`, which also matches a daemon started through `exec`.
 def is_daemon_cmdline(cmdline: Sequence[str]) -> bool:
     return any(
-        part == DAEMON_MODULE and i > 0 and cmdline[i - 1] == "-m" for i, part in enumerate(cmdline)
+        part in DAEMON_MODULES and i > 0 and cmdline[i - 1] == "-m"
+        for i, part in enumerate(cmdline)
     )
 
 

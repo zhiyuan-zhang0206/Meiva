@@ -38,7 +38,7 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 - `meiva/mcps/__init__.py` — agent-facing tool invocation interface
 - `meiva/mcps/config.py` — config loading, four-layer merging, `installed_mcp_dir`
 - `meiva/mcps/_oauth.py` — OAuth 2.1 authorization-code + PKCE client builder (browser flow, loopback callback, per-server token storage)
-- `meiva/mcps/_daemon.py` — **shared daemon process main loop** (`python -m meiva.mcps._daemon`): binds the shared Unix socket (`$MEIVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
+- `meiva/mcps/_daemon.py` — **shared daemon process main loop** (`python -m services.entrypoints.mcp_daemon`): binds the shared Unix socket (`$MEIVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
 - `meiva/mcps/_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.desktop.browser.mcp_wrapper`)
 - `agent/mcp_daemon.py` — **no-op daemon handle** kept for boot-path compatibility (the daemon is now a supervised cluster service, never a per-agent child)
 - `cli/commands/extensions/mcp.py` — `meiva mcp install/uninstall/upgrade/ls/add/remove/enable/disable`

@@ -80,7 +80,7 @@ def _remote_desktop_satisfies_display(
     home: Path | None,
     remote_desktop_available: bool,
 ) -> bool:
-    if spec.get("shared") != "computer_use":
+    if spec.get("shared") not in ("computer_use", "browser"):
         return False
     if remote_desktop_available:
         return True

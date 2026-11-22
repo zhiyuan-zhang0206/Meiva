@@ -219,6 +219,8 @@ async def start_health_server(
     home: Path,
     host: str = "127.0.0.1",
     extra_routes: Mapping[tuple[str, str], ServedRoute] | None = None,
+    body_limits: Mapping[tuple[str, str], int] | None = None,
+    body_slots: Mapping[tuple[str, str], asyncio.Semaphore] | None = None,
     liveness: Liveness | LivenessGroup | None = None,
     components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
@@ -251,6 +253,8 @@ async def start_health_server(
         port=port,
         health_response=health_response,
         extra_routes=extra_routes,
+        body_limits=body_limits,
+        body_slots=body_slots,
         auth_digests=auth_digests,
     )
 

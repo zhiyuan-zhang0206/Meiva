@@ -43,6 +43,7 @@ from base.lm.harness.handoff import (
 from base.lm.harness.pump import EventPump, Subscription
 from base.lm.harness.registration import (
     ATTACHED,
+    CallerRegistry,
     HarnessRegistration,
     RegistrationStore,
     SecureRandom,
@@ -145,6 +146,7 @@ class HarnessBridge:
         refreshes: Sequence[RefreshBuilder] = (),
         registrations: RegistrationStore | None = None,
         registration_ttl_seconds: float,
+        caller_registry: CallerRegistry | None = None,
         clock: SessionClock,
         handle_rng: SecureRandom,
         controller_pid: int,
@@ -170,6 +172,8 @@ class HarnessBridge:
         self._controller_pid = controller_pid
         if registration_ttl_seconds <= 0:
             raise ValueError(f"a harness registration must expire, got {registration_ttl_seconds}s")
+        self._caller_registry = caller_registry
+        self._browser_caller: str | None = None
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
@@ -264,8 +268,15 @@ class HarnessBridge:
             raise HarnessClosedError("this harness bridge is closed")
         handle = base64.urlsafe_b64encode(self._handle_rng.randbytes(32)).rstrip(b"=").decode()
         self._digest = handle_digest(handle)
+        if self._caller_registry is not None:
+            self._caller_registry.register(self._agent_id, handle)
+            self._browser_caller = handle
         self._register("")
-        session = self._factory(handle)
+        try:
+            session = self._factory(handle)
+        except BaseException:
+            self._retire_registration()
+            raise
         try:
             await session.start()
         except BaseException:
@@ -687,6 +698,9 @@ class HarnessBridge:
         )
 
     def _retire_registration(self) -> None:
+        if self._caller_registry is not None and self._browser_caller is not None:
+            self._caller_registry.revoke(self._browser_caller)
+            self._browser_caller = None
         if self._registrations is not None:
             self._registrations.delete(self._agent_id)
 

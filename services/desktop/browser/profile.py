@@ -55,6 +55,16 @@ _EXCLUDED_NAMES = frozenset(
 # The agent's dedicated Chrome profile (`<home>/chrome-profile`): the single source of
 # truth shared by the daemon (which launches Chrome against it) and this module (which
 # may seed it).
+def daily_profile_path(*, system: str, user_home: Path) -> Path:
+    match system:
+        case "darwin":
+            return user_home / "Library" / "Application Support" / "Google" / "Chrome"
+        case "linux":
+            return user_home / ".config" / "google-chrome"
+        case _:
+            raise ValueError(f"unsupported browser profile system {system!r}: linux or darwin")
+
+
 def profile_dir(home: Path) -> Path:
     return home / "chrome-profile"
 

@@ -8,6 +8,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
@@ -380,3 +382,23 @@ async def test_a_served_connection_converges_the_agents_groups_first(
     messages = [r["message"] for r in loguru_records if r["level"].name == "WARNING"]
     converged = [m for m in messages if "converge the agents' tab groups" in m]
     assert converged, messages
+
+
+async def test_remote_tabs_stay_with_the_agent_who_opened_them() -> None:
+    upstream = FakeUpstream()
+    daemon = new_daemon(upstream)
+    first = await daemon.call_tool_for_agent(
+        "new_page", {"url": "https://first.test"}, 70, remote=True
+    )
+    second = await daemon.call_tool_for_agent(
+        "new_page", {"url": "https://second.test"}, 71, remote=True
+    )
+    assert "first.test" in text_of(first)
+    assert "first.test" not in text_of(second)
+    with pytest.raises(ValueError, match="does not belong"):
+        await daemon.call_tool_for_agent("close_page", {"pageId": 1}, 71, remote=True)
+    with pytest.raises(ValueError, match="does not belong"):
+        await daemon.call_tool_for_agent("take_snapshot", {"pageId": 2}, 70, remote=True)
+    snapshot = await daemon.call_tool_for_agent("take_snapshot", {}, 70, remote=True)
+    assert text_of(snapshot) == "ran take_snapshot on page 1"
+    assert upstream.pages == {1: "https://first.test", 2: "https://second.test"}

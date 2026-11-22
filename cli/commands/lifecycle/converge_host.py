@@ -174,10 +174,10 @@ def ensure_browser(ctx: ConvergeCtx) -> None:
         case OfferProfileSeed(interactive=interactive):
             from services.desktop.browser.profile import (
                 Console,
+                daily_profile_path,
                 ensure_browser_profile,
                 profile_dir,
             )
-            from services.desktop.browser.profile_paths import daily_profile_path
 
             ensure_browser_profile(
                 interactive=interactive,

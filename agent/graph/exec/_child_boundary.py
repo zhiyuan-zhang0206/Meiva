@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.execution.protocol import ResultPayload
+from base.agents.context.browser_identity import BrowserAuthority
 from base.sessions.exec_host.child_environment import ChildExecution, build_child_environment
 
 from ._result import (
@@ -38,6 +39,7 @@ class ParentFacts:
     executable: str
     source_root: Path | None
     editable_roots: tuple[Path, ...]
+    browser_authority: BrowserAuthority | None = None
 
 
 @dataclass(frozen=True)
