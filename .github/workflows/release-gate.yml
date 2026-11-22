@@ -238,12 +238,11 @@ jobs:
         if: matrix.lane == 'analysis'
         run: time uv run basedpyright --threads 2
 
-      - name: Validate source notes, structural hooks and codegen freshness
+      - name: Validate structural hooks and codegen freshness
         if: matrix.lane == 'structure'
         env:
-          SKIP: lint-code-structure,check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
+          SKIP: lint-code-structure,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
         run: |
-          bash scripts/content_lint/code_comments/check.sh validate
           env -u VIRTUAL_ENV uv run pre-commit run --all-files
 
       - name: Validate code structure and locality

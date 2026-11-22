@@ -52,10 +52,6 @@ _ENTRIES = [
     ("scripts/codegen/build_android_release.py", None),
     ("scripts/codegen/build_app_update_manifest.py", None),
     ("scripts/codegen/gen_pyright_test_environments.py", None),
-    (
-        "scripts/content_lint/code_comments/__main__.py",
-        "scripts/content_lint/code_comments/cli.py",
-    ),
     ("scripts/content_lint/lint_audit_record.py", None),
     ("scripts/content_lint/lint_core_content_manifests.py", None),
     ("scripts/content_lint/lint_no_cjk.py", None),

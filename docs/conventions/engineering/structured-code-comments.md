@@ -1,108 +1,67 @@
 # Structured code comments
 
-Free prose in source is removed or moves to the component's current documentation.
-An explanation stays in source only when it passes the exceptions below.
+Free prose in source code is disallowed. Explanations live in owning documentation
+and are reached via `meiva:link` pointers, while existing legacy comments (including
+former `meiva:note` blocks) are frozen in a per-file block-count ratchet that only
+moves down.
 
-## One rule: put the explanation where its readers are
+## Enforcement (`meizel` `[comments]` ratchet)
 
-An explanation that one code site needs lives at that site. An explanation that
-several sites share lives in the owning document, and each site links to it.
-Nothing else decides placement: not the file type, not the directory, not a
-classification field.
+`meizel.policy.toml` configures `[comments]` in `mode = "ratchet"` with baseline
+`meizel.comments_baseline.json`:
 
-## Source form
+- **Block-level counting**: consecutive same-column comment lines merge into 1 block;
+  each non-exempt docstring, `/* ... */` block, or unused standalone string literal
+  counts as 1 block. Shortening a multi-line comment does not free quota, and adding
+  any new comment block fails `meizel check` / `meizel check --changed` with
+  `code-comment`.
+- **Ratchet tightening**: deleting a comment block or a file recorded in the baseline
+  fails with `comment-ratchet-stale`; run `uv run python -m meizel comments prune` to
+  tighten `meizel.comments_baseline.json` (prune never raises counts). Once the
+  baseline reaches 0 entries, `meizel check` emits `debt-paid` to upgrade to
+  `mode = "strict"`.
+- **Hard link check**: `broken-comment-link` is always a hard error and can never be
+  baselined.
 
-Python uses `#`, JavaScript and TypeScript use `//`.
+## What stays legal
 
-```python
-# meiva:note
-# The gateway re-resolves the principal on every refresh, so a cached token
-# cannot outlive a role change.
-# meiva:link base/agents/context/gateway_client/docs/memory-search.md
-def refresh() -> None: ...
-```
+1. **Documentation links (`meiva:link`)**:
+   - Python: `# meiva:link <repo_relative_path>`
+   - JS/TS: `// meiva:link <repo_relative_path>`
+   - The target must be a canonical repository-relative path to a tracked regular file
+     (no symlinks, directories, anchors, or URLs).
+2. **Machine directives**:
+   - Line-1 Python entry shebangs (`/usr/bin/env python`, `... python3`,
+     `... python3.12`, `/usr/bin/python3`, `/usr/bin/python3.12`) and Node shebangs
+     (`/usr/bin/env node`, `/usr/bin/node`).
+   - Python `# noqa: CODE[, CODE...]` and `# pyright: ignore[reportRule[, ...]]`
+     (an optional short same-line trailing reason is allowed on a code line, e.g.
+     `# noqa: S603 - fixed git query`; standalone prose lines are rejected).
+   - `# time-bomb-ok: <reason>` (declared in `[comments] inline-directives`).
+   - Exact `/** @deprecated */` attached to a TypeScript declaration (no extra prose).
+   - JS/TS `'use strict'`, `'use client'`, and `'use server'` directive prologues.
+3. **Machine-consumed docstrings**:
+   - `@pytest.fixture` function docstrings (`allow-fixture-docstrings = true`).
+   - Agent-visible SDK help docstrings in non-test modules matching
+     `docstring-marker-symbols` (`__all_for_meiva__`) or `docstring-paths`; see
+     [SDK docstring discipline](../sdk-docstring-discipline.md).
 
-`meiva:note` stands alone on its line and opens a block. The following comment
-lines at the same column are its body; a bare comment line separates paragraphs. Zero
-or more `meiva:link` lines close the block:
+## Retiring legacy comments (four-category discipline)
 
-```python
-# meiva:link base/sessions/docs/session-backend.md
-def kill_session(...) -> None: ...
-```
+Use `uv run python -m meizel comments corpus [--format jsonl|markdown] [--path <prefix>]`
+to inspect remaining legacy blocks and retire them under four categories:
 
-A link alone points a code site at shared documentation. That is how one
-explanation serves several definitions without being copied.
+1. **Tautology** (restates what the code already says) — delete.
+2. **Stale** (contradicts or lags current code) — delete.
+3. **Excuse** (apologizes for messy structure) — refactor the code and delete.
+4. **Decision Record** (non-obvious invariant or trade-off) — move to the owning
+   document / ADR and leave a `# meiva:link <path>` (or `// meiva:link <path>`).
 
-Block placement binds the note: the parser takes the innermost enclosing
-declaration, or the declaration that immediately follows a standalone block. A
-note inside a function body belongs to that function.
-
-Links name repository paths only. The target must be a tracked regular file; a
-missing file fails the check. There are no anchors, no test-node suffixes and no
-URLs. A link is navigation, so review judges whether it points somewhere useful.
-
-A block carries one fact. There is no length limit: an arbitrary cap would force
-rewriting text that is already reviewed, and length outliers are visible in the
-corpus report instead.
-
-## What still fails
-
-Ordinary comments, section banners, commented-out code, internal docstrings and
-unused standalone strings fail the strict check. There is no file allowlist and no
-stored legacy baseline.
-
-Machine syntax is not prose and stays:
-
-- a Python entry shebang (`/usr/bin/env python`, `... python3`, `... python3.12`,
-  `/usr/bin/python3`, `/usr/bin/python3.12`) at the start of the first line
-- `# noqa: CODE[, CODE...]` and `# pyright: ignore[reportRule[, ...]]`
-- `# time-bomb-ok: <reason>` (the time-bomb lint matches that exact form, and the
-  marker has to sit inside the assertion's or binding's span where a note block
-  cannot go, so its reason is carried inline)
-- an exact `/** @deprecated */` attached to a TypeScript declaration
-
-A lint directive needs a `meiva:note` owned by the same definition. Its text, or
-the document its link names, states the constraint; naming a lint rule is not an
-explanation. A time-bomb marker carries its own reason because the time-bomb
-lint must find it on the binding's own lines. Ruff and Pyright keep ownership of
-rule validity, necessity and placement.
-
-Pytest fixture docstrings are user-facing `--fixtures` help and stay on the
-fixture function. Agent-visible SDK docstrings are the `meiva.help` text itself;
-see [SDK docstring discipline](../sdk-docstring-discipline.md). Both are the only
-docstring exceptions: other internal docstrings remain findings.
-
-## Checks
+## Commands
 
 ```bash
-bash scripts/content_lint/code_comments/check.sh validate
-bash scripts/content_lint/code_comments/check.sh check path/to/source.py
-bash scripts/content_lint/code_comments/check.sh inventory
-bash scripts/content_lint/code_comments/check.sh changed
-bash scripts/content_lint/code_comments/check.sh corpus --format markdown
+uv run python -m meizel check
+uv run python -m meizel check --changed <files...>
+uv run python -m meizel comments prune
+uv run python -m meizel comments corpus --format markdown --path <prefix>
 ```
-
-`validate` proves every link across the repository, and CI runs it on every change.
-`check` also rejects free prose; without paths it selects the whole supported tree
-and reports the outstanding legacy inventory. `changed` is the commit gate: it
-strictly checks only notes that are new, rewritten, copied or moved into another
-declaration, and it scans only the sources its Git comparison selected — so a commit
-costs what it touched, and a link broken by a file the change does not touch is
-caught by CI's `validate` rather than by the commit hook. Unchanged legacy prose does
-not block an unrelated code edit.
-
-`corpus` extracts every note as JSONL, or as a Markdown report with the length
-distribution, repeated text and per-note links. A pull request that adds or
-rewrites notes includes its corpus extract, so review reads the notes as a list
-instead of hunting through the diff.
-
-The tools prove syntax and link integrity. They do not prove that a note is true,
-that its test still covers it, or that unchanged prose survived a behaviour
-change. Independent review owns those judgments.
-
-## SDK help
-
-SDK help is not a comment form and has no generated projection: the docstring on
-an agent-visible name is the only copy of the text `meiva.help` renders.
-`scripts/lint/agent_docstrings.py` owns its content rules.
