@@ -66,7 +66,10 @@ stamp retain the adapter/CLI's original defaults on resume, and unknown
 selection versions fail explicitly.
 
 For usage billing and non-`meiva` context-window reads (`token-usage`,
-`context-breakdown`), `resolve_harness_catalog_model` strips a trailing `[1m]`
-or Antigravity `-<effort>` suffix only when the resulting stem exists in the
-target catalog (`catalog.prices` or `catalog.models`) and the raw selector is
-not already an exact catalog entry.
+`context-breakdown`), `resolve_harness_catalog_model` preserves exact catalog
+entries verbatim (for example `qwen3.8-max`), unconditionally strips trailing
+`[1m]` and unambiguous reasoning-effort suffixes (`minimal`, `low`, `medium`,
+`high`, `xhigh`) even when a newly released model is not yet in the target
+catalog, and strips `-max` / `-ultra` only when the resulting stem exists in
+the target catalog (`catalog.prices` or `catalog.models`). This prevents
+uncatalogued external-harness models from splitting ledger rows by effort suffix.

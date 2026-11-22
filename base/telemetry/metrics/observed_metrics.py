@@ -6,8 +6,10 @@ Daily sums and facts commit together; historical readers choose a source per day
 never add these sums to an older ledger of the same observations.
 
 The emitter queue may already have lost records. Neither a successful write nor
-a completed replay scan establishes complete collection. A missing usage-time
-price remains unpriced; replay never consults today's price catalog.
+a completed replay scan establishes complete collection. Recorded usage-time
+prices are immutable and never repriced; only blank unpriced rows (`unpriced_calls > 0`
+with `cost_usd = 0`) may be idempotently backfilled at `occurred_at` once versioned
+pricing enters `pricing_catalog_archive.json` (`services/upkeep/events_maintenance/unpriced_backfill.py`).
 """
 
 from __future__ import annotations

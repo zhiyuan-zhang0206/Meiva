@@ -5,7 +5,9 @@ it, `RECOMPUTE_DAYS` in all) from `telemetry_events` into:
 
 - ``agent_model_tokens_daily`` — per (agent, day, model): calls, token sums, and the cost
   ledger columns (cost_usd = summed usage-time price snapshots, costed_calls / unpriced_calls).
-  Money is summed at usage-time rates, never re-priced. ``estimated_calls`` is never written.
+  Recorded usage-time prices are never repriced; only rows that lacked a price at call time
+  (`cost_usd IS NULL`) may be normalized and backfilled at their `occurred_at` instant once
+  versioned pricing enters `pricing_catalog_archive.json`. ``estimated_calls`` is never written.
 - ``agent_metrics_daily`` — per (agent, day): turn totals/ok/durations, the whole-second turn
   duration histogram and the exec ok/failed split.
 
@@ -42,6 +44,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.host.boundary.options import options
 from base.host.exit_codes import hard_exit
+from base.lm.pricing import PriceBook
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -50,6 +53,11 @@ from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 from base.telemetry.metrics.event_sql import numeric
 from services.upkeep.events_maintenance.config import RECOMPUTE_DAYS, events_maintenance_db
 from services.upkeep.events_maintenance.token_totals import folded_through, rebuild_totals
+from services.upkeep.events_maintenance.unpriced_backfill import (
+    day_has_unpriced_usage,
+    load_price_book,
+    roll_tokens_day_with_backfill,
+)
 
 
 @dataclass(frozen=True)
@@ -153,7 +161,9 @@ _METRICS_SQL = f"""
 """  # noqa: S608 — keys come from the registered payload constants
 
 
-def roll_day(conn: psycopg.Connection, day: date) -> tuple[int, int]:
+def roll_day(
+    conn: psycopg.Connection, day: date, *, prices: PriceBook | None = None
+) -> tuple[int, int]:
     """Recompute one closed UTC day; returns `(metrics_rows, tokens_rows)` written."""
     start = datetime(day.year, day.month, day.day, tzinfo=UTC)
     params = {
@@ -163,18 +173,25 @@ def roll_day(conn: psycopg.Connection, day: date) -> tuple[int, int]:
         "fail": EXEC_FAILURE_EVENTS,
         "subscription": list(SUBSCRIPTION_HARNESSES),
     }
+    if prices is not None and day_has_unpriced_usage(conn, day):
+        tokens, _ = roll_tokens_day_with_backfill(conn, day, prices=prices, dry_run=False)
+        with conn.transaction():
+            metrics = conn.execute(_METRICS_SQL.encode(), params).rowcount
+        return max(metrics, 0), max(tokens, 0)
     with conn.transaction():
-        tokens = conn.execute(_TOKENS_SQL, params).rowcount  # type: ignore[arg-type]
-        metrics = conn.execute(_METRICS_SQL, params).rowcount  # type: ignore[arg-type]
+        tokens = conn.execute(_TOKENS_SQL.encode(), params).rowcount
+        metrics = conn.execute(_METRICS_SQL.encode(), params).rowcount
     return max(metrics, 0), max(tokens, 0)
 
 
-def roll_days(conn: psycopg.Connection, first: date, last: date) -> RollupResult:
+def roll_days(
+    conn: psycopg.Connection, first: date, last: date, *, prices: PriceBook | None = None
+) -> RollupResult:
     """Recompute every closed UTC day in `[first, last]`, oldest first."""
     metrics_rows = tokens_rows = 0
     day = first
     while day <= last:
-        metrics, tokens = roll_day(conn, day)
+        metrics, tokens = roll_day(conn, day, prices=prices)
         metrics_rows += metrics
         tokens_rows += tokens
         day += timedelta(days=1)
@@ -182,11 +199,15 @@ def roll_days(conn: psycopg.Connection, first: date, last: date) -> RollupResult
 
 
 def compute_rollup(
-    conn: psycopg.Connection, *, now_utc: datetime, lookback_days: int = RECOMPUTE_DAYS
+    conn: psycopg.Connection,
+    *,
+    now_utc: datetime,
+    lookback_days: int = RECOMPUTE_DAYS,
+    prices: PriceBook | None = None,
 ) -> RollupResult:
     """Recompute the last `lookback_days` closed UTC days (yesterday and the days before it)."""
     yesterday = now_utc.astimezone(UTC).date() - timedelta(days=1)
-    return roll_days(conn, yesterday - timedelta(days=lookback_days - 1), yesterday)
+    return roll_days(conn, yesterday - timedelta(days=lookback_days - 1), yesterday, prices=prices)
 
 
 def _day_arg(value: str) -> date:
@@ -202,8 +223,15 @@ class RangeReport:
 # meiva:note
 # Recompute the closed days `[first, last]` on `conn` (the monotone guard applies). A day at or before
 # the fold watermark is already inside the folded totals, so a range reaching it also refolds them.
-def roll_range(conn: psycopg.Connection, first: date, last: date, *, today: date) -> RangeReport:
-    result = roll_days(conn, first, last)
+def roll_range(
+    conn: psycopg.Connection,
+    first: date,
+    last: date,
+    *,
+    today: date,
+    prices: PriceBook | None = None,
+) -> RangeReport:
+    result = roll_days(conn, first, last, prices=prices)
     rebuilt = first <= folded_through(conn)
     if rebuilt:
         rebuild_totals(conn, today=today)
@@ -243,7 +271,7 @@ def main(argv: list[str]) -> int:
     with events_maintenance_db(
         config, gate=gate, local_host=machine.host, home=meiva_home()
     ).connect() as conn:
-        report = roll_range(conn, first, last, today=clock.now().date())
+        report = roll_range(conn, first, last, today=clock.now().date(), prices=load_price_book())
     if report.rebuilt:
         sys.stdout.write("rebuilt agent_model_tokens_total\n")
     sys.stdout.write(

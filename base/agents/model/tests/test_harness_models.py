@@ -240,7 +240,40 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
         )
 
 
-def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_exact_ids() -> None:
+@pytest.mark.parametrize(
+    ("raw_model", "expected"),
+    [
+        ("gemini-4-hydrogen-high", "gemini-4-hydrogen"),
+        ("gemini-4-hydrogen-xhigh", "gemini-4-hydrogen"),
+        ("gemini-4-carbon-high", "gemini-4-carbon"),
+        ("gemini-4-neon-high", "gemini-4-neon"),
+        ("gemini-4-neon-xhigh", "gemini-4-neon"),
+        ("gemini-4-neon-medium", "gemini-4-neon"),
+        ("gemini-4-neon-low", "gemini-4-neon"),
+        ("claude-fable-5-2[1m]", "claude-fable-5-2"),
+        ("claude-fable-5-2[1M]", "claude-fable-5-2"),
+        ("qwen3.8-max", "qwen3.8-max"),
+        ("gpt-oss-120b-medium", "gpt-oss-120b"),
+        ("gemini-5-foo-minimal", "gemini-5-foo"),
+        ("gemini-5-foo-low", "gemini-5-foo"),
+        ("gemini-5-foo-medium", "gemini-5-foo"),
+        ("gemini-5-foo-high", "gemini-5-foo"),
+        ("gemini-5-foo-xhigh", "gemini-5-foo"),
+        ("claude-fable-6[1m]", "claude-fable-6"),
+        ("claude-fable-6[1M]", "claude-fable-6"),
+        ("gpt-4o-mini", "gpt-4o-mini"),
+        ("deepseek-flash", "deepseek-flash"),
+        ("claude-fable-5-2-fast", "claude-fable-5-2-fast"),
+        ("claude-opus-5-5-thinking", "claude-opus-5-5-thinking"),
+        ("qwen4-max", "qwen4-max"),
+        ("gemini-5-ultra", "gemini-5-ultra"),
+        ("gemini-4-neon-max", "gemini-4-neon"),
+        ("gemini-4-neon-ultra", "gemini-4-neon"),
+    ],
+)
+def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_exact_ids(
+    raw_model: str, expected: str
+) -> None:
     known = {
         "gemini-4-hydrogen",
         "gemini-4-carbon",
@@ -249,17 +282,7 @@ def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_ex
         "qwen3.8",
         "qwen3.8-max",
     }
-    assert resolve_harness_catalog_model("gemini-4-hydrogen-high", known) == "gemini-4-hydrogen"
-    assert resolve_harness_catalog_model("gemini-4-hydrogen-xhigh", known) == "gemini-4-hydrogen"
-    assert resolve_harness_catalog_model("gemini-4-carbon-high", known) == "gemini-4-carbon"
-    assert resolve_harness_catalog_model("gemini-4-neon-high", known) == "gemini-4-neon"
-    assert resolve_harness_catalog_model("gemini-4-neon-xhigh", known) == "gemini-4-neon"
-    assert resolve_harness_catalog_model("gemini-4-neon-medium", known) == "gemini-4-neon"
-    assert resolve_harness_catalog_model("gemini-4-neon-low", known) == "gemini-4-neon"
-    assert resolve_harness_catalog_model("claude-fable-5-2[1m]", known) == "claude-fable-5-2"
-    assert resolve_harness_catalog_model("claude-fable-5-2[1M]", known) == "claude-fable-5-2"
-    assert resolve_harness_catalog_model("qwen3.8-max", known) == "qwen3.8-max"
-    assert resolve_harness_catalog_model("gpt-oss-120b-medium", known) == "gpt-oss-120b-medium"
+    assert resolve_harness_catalog_model(raw_model, known) == expected
 
 
 def test_classify_codex_account_probe_distinguishes_dead_refresh_network_and_live() -> None:

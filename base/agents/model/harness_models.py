@@ -14,6 +14,7 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _AGY_MODEL_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _AGY_EFFORT_ORDER = ("minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 _AGY_EFFORT_RANK = {level: index for index, level in enumerate(_AGY_EFFORT_ORDER)}
+_UNCONDITIONAL_EFFORT_SUFFIXES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
 
 class CatalogProbeResult(NamedTuple):
@@ -308,18 +309,25 @@ def _split_agy_effort_suffix(cli_id: str) -> tuple[str, str | None]:
 
 
 # meiva:note
-# Maps external CLI selectors (`[1m]` and Antigravity `-<effort>`) back onto an existing catalog stem.
+# Normalizes external CLI selectors (`[1m]` and Antigravity `-<effort>`) to canonical model IDs.
+# Exact entries in `known_ids` are always preserved verbatim (e.g. `qwen3.8-max`). Trailing `[1m]`
+# and unambiguous reasoning-effort suffixes (`minimal`, `low`, `medium`, `high`, `xhigh`) are
+# stripped unconditionally even when the model is not yet in `known_ids`, preventing unpriced new
+# models from writing effort-suffixed names into the usage ledger. `-max` / `-ultra` are stripped
+# only when the resulting stem exists in `known_ids`.
 # meiva:link base/agents/docs/harness/harness-models.md
-def resolve_harness_catalog_model(raw_model: str, known_ids: Container[str]) -> str:
+def resolve_harness_catalog_model(raw_model: str, known_ids: Container[str] = ()) -> str:
     if raw_model in known_ids:
         return raw_model
     candidate = _strip_one_million_suffix(raw_model)
     if candidate in known_ids:
         return candidate
     stem, matched_effort = _split_agy_effort_suffix(candidate)
-    if matched_effort is not None and stem in known_ids:
+    if matched_effort is not None and (
+        stem in known_ids or matched_effort in _UNCONDITIONAL_EFFORT_SUFFIXES
+    ):
         return stem
-    return raw_model
+    return candidate
 
 
 def _build_agy_model(base_id: str, raw_efforts: set[str]) -> ProbedHarnessModel:

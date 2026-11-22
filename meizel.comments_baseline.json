@@ -4037,7 +4037,7 @@
   "services/upkeep/events_maintenance/pass_policy.py": 2,
   "services/upkeep/events_maintenance/passes.py": 9,
   "services/upkeep/events_maintenance/registry_gauge.py": 6,
-  "services/upkeep/events_maintenance/rollup.py": 10,
+  "services/upkeep/events_maintenance/rollup.py": 8,
   "services/upkeep/events_maintenance/telemetry_replay.py": 5,
   "services/upkeep/events_maintenance/tests/db_faults.py": 2,
   "services/upkeep/events_maintenance/tests/ledger/test_events_maintenance_rollup.py": 9,

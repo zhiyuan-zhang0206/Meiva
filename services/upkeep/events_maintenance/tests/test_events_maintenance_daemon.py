@@ -35,6 +35,7 @@ from base.db.tests.pool_probe import PoolProbe
 from base.db.tests.pool_probe import pool_probe as pool_probe
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.mirror import event_id
+from base.telemetry.metrics import observed_metrics
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.tests.db_faults import table_locked, table_missing
 from services.upkeep.events_maintenance.tests.service_probe import (
@@ -191,6 +192,50 @@ def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
         )
 
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
+
+
+def test_the_pass_auto_heals_unpriced_observations_using_archive_pricing(
+    db_conn: psycopg.Connection,
+    database: Database,
+    pool: ConnectionPool,
+    process_config: ConfigBoot,
+    tmp_path: Path,
+) -> None:
+    agent = _agent(db_conn)
+    obs = observed_metrics.observe_row(
+        {
+            "id": event_id("daemon-unpriced-neon", int(1_790_000_001 * 1e9)),
+            "agent_id": agent,
+            "ts": _MIRRORED_AT,
+            "category": "telemetry",
+            "event_name": "llm_usage",
+            "attributes": {
+                "model": "gemini-4-neon-high",
+                "in_total": 100_000,
+                "out_total": 10_000,
+                "reasoning": 0,
+                "source": "antigravity",
+                "unpriced": 1,
+            },
+        }
+    )
+    assert obs is not None
+    assert observed_metrics.write_observations([obs], db=db_conn) == 1
+    db_conn.commit()
+
+    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
+    _pass(pool, database, process_config, tmp_path, progress)
+
+    db_conn.commit()
+    row = db_conn.execute(
+        "SELECT unpriced_calls, unpriced_calls_subscription, cost_usd_subscription "
+        "FROM agent_metric_days WHERE agent_id = %s",
+        (agent,),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 0
+    assert row[1] == 0
+    assert row[2] > 0
 
 
 def test_loop_components_report_fresh_loops_as_ok() -> None:

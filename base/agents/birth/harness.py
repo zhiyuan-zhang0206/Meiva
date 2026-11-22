@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Container, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,6 +15,10 @@ from base.agents.birth.harness_model_probe import (
     ModelProber,
     probe_cli_models,
     probe_codex_status,
+)
+from base.agents.birth.unpriced_probe_alert import (
+    UnpricedProbeReporter,
+    report_unpriced_probed_models,
 )
 from base.agents.model.harness_models import CatalogProbeResult
 from base.api_contracts.agent_contract import (
@@ -727,6 +731,9 @@ def probe_local_harnesses(
     environ: Mapping[str, str],
     cli_runner: CliRunner = subprocess.run,
     model_prober: ModelProber = probe_cli_models,
+    known_priced_models: Container[str] | None = None,
+    unpriced_reporter: UnpricedProbeReporter | None = None,
+    report_unpriced: bool = True,
 ) -> list[HarnessProbe]:
     resolved_home = _resolved_probe_home(home, environ)
     resolved_path_env = environ.get("PATH") if path_env is None else path_env
@@ -748,9 +755,14 @@ def probe_local_harnesses(
             for harness in external
         }
         probed_external = {harness: future.result() for harness, future in futures.items()}
-    return [
+    rows = [
         HarnessProbe(harness, "available", "built-in runtime; needs no external CLI or login")
         if harness is Harness.MEIVA
         else probed_external[harness]
         for harness in Harness
     ]
+    if report_unpriced:
+        _ = report_unpriced_probed_models(
+            rows, known_priced_models=known_priced_models, now=now, reporter=unpriced_reporter
+        )
+    return rows

@@ -30,6 +30,10 @@ from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, 
 
 CLI = "Antigravity"
 
+_PLANNER_NON_DONE_STATUSES = frozenset(
+    {"GENERATING", "RUNNING", "CANCELED", "CANCELLED", "ERROR", "FAILED"}
+)
+
 
 def wire_id(key: str) -> str:
     return key
@@ -91,6 +95,8 @@ class EntryParser:
             return [_unknown(key, order, f"{kind}.content")]
         if kind == "GENERIC":
             return self._generic(file, text, at)
+        if kind == "PLANNER_RESPONSE" and status in _PLANNER_NON_DONE_STATUSES:
+            return []
         if status != "DONE":
             return [_unknown(key, order, f"{kind}.status")]
         return self._done(file, text, stamp, at)
