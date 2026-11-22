@@ -90,6 +90,8 @@ export function useViewportAnchor({
   const touchingRef = useRef(false);
   const rideRef = useRef<{ frame: number; from: number; start: number; duration: number } | null>(null);
   const holdRef = useRef(false);
+  const inOverlaySlackRef = useRef(false);
+  const prevOverlaySlackRef = useRef(0);
   const [atEnd, setAtEnd] = useState(true);
   // meiva:note
   // The reader is in rows that are not mounted (a scrollbar or Home jump into a virtual spacer):
@@ -147,12 +149,12 @@ export function useViewportAnchor({
       } else {
         const box = content.getBoundingClientRect();
         const offset = hit.collapsed ? Math.max(COLLAPSED_MIN_OFFSET_PX, anchor.offset) : anchor.offset;
-        need = hit.node.getBoundingClientRect().top - box.top - offset + vp.clientHeight - box.height;
+        need = hit.node.getBoundingClientRect().top - box.top - offset + vp.clientHeight - box.height - overlaySlackHeight();
       }
     }
     const next = `${Math.max(0, Math.ceil(need))}px`;
     if (reserve.style.height !== next) reserve.style.height = next;
-  }, [contentRef, reserveRef]);
+  }, [contentRef, overlaySlackHeight, reserveRef]);
 
   const write = useCallback((vp: HTMLElement, top: number) => {
     const max = Math.max(0, vp.scrollHeight - vp.clientHeight);
@@ -204,19 +206,23 @@ export function useViewportAnchor({
     const last = lastWrittenRef.current;
     const clamped = last !== null && last > max + 0.5 && Math.abs(vp.scrollTop - max) < 0.5;
     const drift = last === null || clamped ? 0 : vp.scrollTop - last;
-    if (anchor.kind === "row" && clamped && !holdRef.current) {
-      const natural = naturalEnd(vp);
-      if (vp.scrollTop <= natural + 1) {
+    const currentOverlay = overlaySlackHeight();
+    const overlayShrank = currentOverlay < prevOverlaySlackRef.current - 0.5;
+    prevOverlaySlackRef.current = currentOverlay;
+    if (inOverlaySlackRef.current && anchor.kind === "row" && !holdRef.current && overlayShrank) {
+      if (currentOverlay <= 0.5 || (clamped && vp.scrollTop <= naturalEnd(vp) + 1)) {
+        inOverlaySlackRef.current = false;
         anchor = TAIL;
         setAnchor(TAIL, "reader");
-      } else {
+        lastWrittenRef.current = vp.scrollTop;
+      } else if (clamped) {
         const row = readRow(vp);
         if (row) {
           anchor = row;
           setAnchor(row, "reader");
         }
+        lastWrittenRef.current = vp.scrollTop;
       }
-      lastWrittenRef.current = vp.scrollTop;
     } else if (anchor.kind === "row" && Math.abs(drift) >= 0.5) {
       anchor = { kind: "row", row: anchor.row, offset: anchor.offset - drift };
       anchorRef.current = anchor;
@@ -241,7 +247,7 @@ export function useViewportAnchor({
       write(vp, vp.scrollTop + offsetOf(vp, hit.node) - offset);
     }
     refreshEnd(vp);
-  }, [naturalEnd, readRow, refreshEnd, setAnchor, syncReserve, viewport, write]);
+  }, [naturalEnd, overlaySlackHeight, readRow, refreshEnd, setAnchor, syncReserve, viewport, write]);
 
   const finishRide = useCallback(() => {
     const ride = rideRef.current;
@@ -282,26 +288,30 @@ export function useViewportAnchor({
     const following = anchorRef.current?.kind === "tail";
     if (!pastNatural && (distance <= 1 || (zone && (following || towardEnd)))) {
       freeRef.current = false;
+      inOverlaySlackRef.current = false;
       setAnchor(TAIL, "reader");
       return;
     }
     const row = readRow(vp);
     if (row) {
       freeRef.current = false;
+      inOverlaySlackRef.current = pastNatural && reserveHeight() === 0 && overlaySlackHeight() > 0;
       setAnchor(row, "reader");
     } else if (!freeRef.current) {
       // meiva:note
       // A jump into rows that are not mounted: hold no place (nothing to write, no tail to follow)
       // until rows mount there and can be read.
       freeRef.current = true;
+      inOverlaySlackRef.current = false;
       anchorRef.current = null;
       latest.current.onFree?.();
     }
-  }, [naturalEnd, readRow, setAnchor]);
+  }, [naturalEnd, overlaySlackHeight, readRow, reserveHeight, setAnchor]);
 
   const releaseTail = useCallback(() => {
     const vp = viewport();
     if (!vp || anchorRef.current?.kind !== "tail") return;
+    inOverlaySlackRef.current = false;
     const row = readRow(vp);
     if (row) setAnchor(row, "reader");
   }, [readRow, setAnchor, viewport]);
@@ -311,6 +321,7 @@ export function useViewportAnchor({
     cancelRide();
     if (options.hold !== undefined) holdRef.current = options.hold;
     freeRef.current = false;
+    inOverlaySlackRef.current = false;
     setAnchor(anchor, "placement");
     if (!vp) return;
     // meiva:note

@@ -222,7 +222,7 @@ export const TimelineView = memo(function TimelineView({
     const fill = coldFill.current;
     const viewport = controls.viewport();
     if (!fill.open || loading || !viewport || viewport.clientHeight <= 0 || !hasMoreOlder || !onLoadOlder) return false;
-    if (viewport.scrollHeight > viewport.clientHeight) return false;
+    if (viewport.scrollHeight - controls.overlaySlackHeight() > viewport.clientHeight) return false;
     const inFlight = loadingOlder || (fill.requested !== null && fill.requested === (findOldestTimelineCursor(canonicalItems)?.item_id ?? null));
     return fill.pages < COLD_FILL_MAX_PAGES || inFlight;
   }, [canonicalItems, controls, hasMoreOlder, loading, loadingOlder, onLoadOlder]);
@@ -332,7 +332,7 @@ export const TimelineView = memo(function TimelineView({
       return;
     }
     fill.sawLoading = false;
-    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= COLD_FILL_MAX_PAGES || !hasMoreOlder || !onLoadOlder) {
+    if (viewport.scrollHeight - controls.overlaySlackHeight() > viewport.clientHeight || fill.pages >= COLD_FILL_MAX_PAGES || !hasMoreOlder || !onLoadOlder) {
       fill.open = false;
       return;
     }

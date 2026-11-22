@@ -145,4 +145,84 @@ describe("bottom overlay slack (grown composer and pending strip)", () => {
     expect(downArrow!.parentElement!.style.getPropertyValue("--timeline-footer-h")).toBe("140px");
     view.unmount();
   });
+
+  it("does not switch a history reader to tail when the viewport grows and clamps scrollTop with no overlay", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    model.scrollTo(450);
+    expect(model.top()).toBe(450);
+
+    model.setViewportHeight(800);
+    model.resize();
+    expect(model.top()).toBe(model.naturalEnd());
+
+    view.rerender(<TimelineView items={[earlier, sent, reply]} bottomOverlayHeight={0} />);
+    model.grow("3.0", 500);
+    expect(model.top()).not.toBe(model.naturalEnd());
+    view.unmount();
+  });
+
+  it("resumes tail following when overlay collapses in the same commit that appends a delivered message", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier]} bottomOverlayHeight={60} />);
+    const initialEnd = model.naturalEnd();
+
+    model.scrollTo(initialEnd + 60);
+    expect(model.top()).toBe(initialEnd + 60);
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    expect(model.top()).toBe(model.naturalEnd());
+
+    view.rerender(<TimelineView items={[earlier, sent, reply]} bottomOverlayHeight={0} />);
+    model.grow("3.0", 600);
+    expect(model.top()).toBe(model.naturalEnd());
+    view.unmount();
+  });
+
+  it("keeps short conversations still when overlay grows, allows manual scroll, and returns cleanly on collapse", () => {
+    const model = timelineLayout({ viewportHeight: 600, rowHeight: 200 });
+    const view = render(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    expect(model.naturalEnd()).toBe(0);
+    expect(model.top()).toBe(0);
+    const restingRowTop = model.rowTop("2.0");
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={250} />);
+    expect(model.top()).toBe(0);
+    expect(model.rowTop("2.0")).toBe(restingRowTop);
+    expect(model.max()).toBeGreaterThan(0);
+
+    const maxSlack = model.max();
+    model.scrollTo(maxSlack);
+    expect(model.top()).toBe(maxSlack);
+
+    view.rerender(<TimelineView items={[earlier, sent]} bottomOverlayHeight={0} />);
+    expect(model.top()).toBe(0);
+    view.unmount();
+  });
+
+  it("subtracts overlay slack from toggle reserve so closing a turn block does not double-pad the bottom", () => {
+    const workItems = [
+      earlier,
+      makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "step 1" }),
+      makeItem({ item_id: "2.1", kind: "agent_reasoning", payload: "step 2" }),
+      makeItem({ item_id: "2.2", kind: "agent_reasoning", payload: "step 3" }),
+      makeItem({ item_id: "2.3", kind: "agent_chat", payload: "done" }),
+    ];
+    const heights: Record<string, number> = { "1.0": 1000, "2.0": 200, "2.1": 200, "2.2": 200, "2.3": 80 };
+    const model = timelineLayout({ viewportHeight: 600, rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 80 });
+    const view = render(<TimelineView items={workItems} bottomOverlayHeight={0} />);
+    const toggle = screen.getByTestId("turn-toggle");
+    act(() => { toggle.click(); });
+    model.scrollTo(model.naturalEnd() - 200);
+    act(() => { toggle.click(); });
+    const reserveWithoutOverlay = model.reserve();
+    expect(reserveWithoutOverlay).toBeGreaterThan(100);
+
+    view.rerender(<TimelineView items={workItems} bottomOverlayHeight={100} />);
+    expect(model.reserve()).toBe(Math.max(0, reserveWithoutOverlay - 100));
+
+    view.rerender(<TimelineView items={workItems} bottomOverlayHeight={0} />);
+    expect(model.reserve()).toBe(reserveWithoutOverlay);
+    view.unmount();
+  });
 });

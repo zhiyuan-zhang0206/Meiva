@@ -451,12 +451,17 @@ export function Composer({
       className={cn(
         "pointer-events-auto mx-auto w-full bg-background px-4 pt-0.5 transition-colors",
         MIN_W_0,
-        dragOver && "bg-primary/5 ring-1 ring-inset ring-primary/40",
       )}
     >
       <div
         data-testid="composer-band"
-        className={cn("gap-2", COMPOSER_BAND_CLASS, FLEX, FLEX_COL)}
+        className={cn(
+          "gap-2",
+          COMPOSER_BAND_CLASS,
+          FLEX,
+          FLEX_COL,
+          dragOver && "bg-primary/5 ring-1 ring-inset ring-primary/40",
+        )}
       >
         {quote && (
           <div className="rounded border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="composer-quote">

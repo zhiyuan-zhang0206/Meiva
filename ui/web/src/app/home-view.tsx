@@ -53,7 +53,7 @@ import { useApi, useStreamHub, useWallNow } from "@/lib/transport/transport-cont
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 
 const COMPOSER_REST_HEIGHT_CSS =
-  "calc(51px + max(1.5rem, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))))";
+  "calc(1px + 3.125rem + max(1.5rem, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px))))";
 
 type AgentSidebarSlot = ComponentType<ComponentProps<typeof AgentSidebarComponent>>;
 type ContextPanelSlot = ComponentType<ComponentProps<typeof ContextPanelComponent>>;
@@ -530,7 +530,8 @@ function HomeContent({
     const dock = bottomDockRef.current;
     if (!slot || !dock) return;
     const sync = () => {
-      const next = Math.max(0, Math.ceil(dock.offsetHeight - slot.offsetHeight));
+      const diff = dock.getBoundingClientRect().height - slot.getBoundingClientRect().height;
+      const next = diff > 1 ? Math.ceil(diff) : 0;
       setBottomOverlayHeight((prev) => (prev === next ? prev : next));
     };
     sync();
