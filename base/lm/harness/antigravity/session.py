@@ -506,6 +506,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if turn is None:
             self._projection = projection if self._schedules.has_detached else None
         elif turn.stop_reason and turn.projection_ready(projection, rows):
+            for text in turn.restore_verified_text(projection, rows):
+                self._record_text(turn, text)
+                self._flush_text(turn.ticket)
             self._finish_turn(turn, turn.stop_reason, rows)
 
     def _finish_background_reply(self, sender: str, prompt: str, reply: str) -> None:
@@ -640,7 +643,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         elif self._projection is None:
             self._projection = OutputProjection(len(rows))
         else:
-            self._projection.settled.update(turn.keys)
+            self._projection.close_foreground(
+                turn.keys, len(rows), accounted=turn.verified_steps is not None
+            )
         self._complete(ticket)
         turn.finished.set()
 

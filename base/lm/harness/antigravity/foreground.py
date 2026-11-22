@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 
@@ -220,6 +220,13 @@ def _matches_reports(span: Sequence[PlannerRow], reports: Sequence[PromptUsage])
     )
 
 
+def _planner_text(steps: Iterable[PlannerRow]) -> Iterator[tuple[PlannerRow, str]]:
+    for step in steps:
+        value = step.row.get("content")
+        if isinstance(value, str) and (text := value.strip()):
+            yield step, text
+
+
 @dataclass(slots=True)
 class PromptTurn:
     ticket: ActiveTurn
@@ -233,6 +240,7 @@ class PromptTurn:
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     interrupted: bool = False
     verified_steps: tuple[Usage, ...] | None = None
+    _verified_text: tuple[str, ...] = ()
 
     def register_request(self, request: int, key: str) -> None:
         self.keys.append(key)
@@ -240,6 +248,7 @@ class PromptTurn:
         self.latest = request
         self.stop_reason = None
         self.verified_steps = None
+        self._verified_text = ()
 
     def prove_projection(
         self, projection: OutputProjection, rows: Sequence[dict[str, object]]
@@ -252,8 +261,9 @@ class PromptTurn:
         witnesses = _witnesses(known, possible, self._projection_reports())
         span = next(witnesses, None)
         if span is not None and next(witnesses, None) is None:
-            projection.confirmed.update(step.index for step in span)
+            projection.confirm_span(span, possible)
             self.verified_steps = tuple(_planner_tokens(step.row) for step in span)
+            self._verified_text = tuple(text for _, text in _planner_text(span))
 
     def _projection_reports(self) -> tuple[PromptUsage, ...]:
         if len(self.reports) != len(self.keys) or self.latest not in self.reports:
@@ -263,15 +273,35 @@ class PromptTurn:
     def projection_ready(
         self, projection: OutputProjection, rows: Sequence[dict[str, object]]
     ) -> bool:
+        if self.verified_steps is not None:
+            return True
         scope = [step for step in projection.steps(rows) if step.input_key in self.keys]
-        owned = [step for step in scope if projection.owns(step)]
-        if owned and owned[-1].final and owned[-1].input_key == self.keys[-1]:
-            final = owned[-1].index
-            proven = self.verified_steps is not None or all(
-                step.index > final or projection.owns(step) for step in scope
+        if any(not projection.owns(step) for step in scope):
+            return False
+        if scope and scope[-1].final:
+            return (
+                not self._projection_reports()
+                and (scope[-1].index, "content", 0) in projection.seen
             )
-            return proven and (final, "content", 0) in projection.seen
-        return scope == owned and not projection.pending
+        return not projection.pending and (
+            bool(scope) or not any(report.output for report in self._projection_reports())
+        )
+
+    def restore_verified_text(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> Iterator[str]:
+        if self.verified_steps is None:
+            return
+        steps = (
+            step
+            for step in projection.steps(rows)
+            if step.index in projection.confirmed and step.input_key in self.keys
+        )
+        for step, text in _planner_text(steps):
+            evidence = (step.index, "content", 0)
+            if evidence not in projection.seen:
+                projection.seen.add(evidence)
+                yield text
 
     def complete(
         self,
@@ -282,7 +312,8 @@ class PromptTurn:
         generation: int,
     ) -> TurnCompleted:
         ticket = self.ticket
-        final = ticket.parts[-1] if ticket.parts else ""
+        parts = self._verified_text or ticket.parts
+        final = parts[-1] if parts else ""
         bill = bill_prompt(
             rows[self.transcript_offset :],
             self.keys,
@@ -296,7 +327,7 @@ class PromptTurn:
         return TurnCompleted(
             turn_id=ticket.turn_id,
             session_id=session_id,
-            text="\n".join(ticket.parts),
+            text="\n".join(parts),
             subtype=subtype,
             is_error=reason != "end_turn" or bool(ticket.denials),
             interrupted=interrupted,

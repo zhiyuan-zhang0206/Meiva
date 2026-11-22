@@ -62,7 +62,7 @@ def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iter
                 (marks[mark] for mark in received_markers((row,)) if mark in marks), None
             )
             background = None
-        elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row)) is not None:
+        elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row, index)) is not None:
             background = notice
         elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
             yield PlannerRow(index, row, foreground, background)
@@ -75,12 +75,13 @@ _SENDER = re.compile(r"^\[Message\] (?:timestamp=\S+ )?sender=(\S+)([^\n]*)", re
 class BackgroundNotice:
     sender: str
     prompt: str
+    index: int
 
     def is_task_for(self, session_id: str | None) -> bool:
         return bool(session_id and self.sender.startswith(session_id + "/task-"))
 
 
-def _background_notice(row: dict[str, object]) -> BackgroundNotice | None:
+def _background_notice(row: dict[str, object], index: int) -> BackgroundNotice | None:
     content = row.get("content")
     match = _SENDER.search(content) if isinstance(content, str) else None
     if match is None or match[1] == "system":
@@ -88,7 +89,7 @@ def _background_notice(row: dict[str, object]) -> BackgroundNotice | None:
     _, separator, prompt = match[2].partition(" content=")
     if separator and isinstance(content, str):
         prompt += content[match.end() :].partition("</SYSTEM_MESSAGE>")[0]
-    return BackgroundNotice(match[1], prompt.strip())
+    return BackgroundNotice(match[1], prompt.strip(), index)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,13 +110,28 @@ Frame = dict[str, object]
 Evidence = tuple[int, str, int]
 
 
+@dataclass(frozen=True, slots=True)
+class ForegroundBoundary:
+    next_row: int
+    accounted: bool
+
+    def excludes(self, step: PlannerRow, notice: BackgroundNotice) -> bool:
+        tokens = step.row.get("input_tokens")
+        return notice.index >= self.next_row or (
+            self.accounted and step.index >= self.next_row and type(tokens) is int and tokens > 0
+        )
+
+
 @dataclass(slots=True)
 class OutputProjection:
     offset: int
     keys: list[str] = field(default_factory=list[str])
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
-    settled: set[str] = field(default_factory=set[str])
+    excluded: set[int] = field(default_factory=set[int])
+    _boundaries: dict[str, ForegroundBoundary] = field(
+        default_factory=dict[str, ForegroundBoundary]
+    )
     seen: set[Evidence] = field(default_factory=set[Evidence])
     _tool_owners: dict[str, ProjectedFrame] = field(default_factory=dict[str, ProjectedFrame])
 
@@ -124,6 +140,26 @@ class OutputProjection:
 
     def steps(self, rows: Sequence[Frame]) -> tuple[PlannerRow, ...]:
         return tuple(planner_rows(rows[self.offset :], self.keys))
+
+    def confirm_span(self, span: Sequence[PlannerRow], candidates: Sequence[PlannerRow]) -> None:
+        selected = {step.index for step in span}
+        self.confirmed.update(selected)
+        self.excluded.update(step.index for step in candidates if step.index not in selected)
+
+    def close_foreground(self, keys: Sequence[str], row_count: int, *, accounted: bool) -> None:
+        boundary = ForegroundBoundary(row_count - self.offset, accounted)
+        self._boundaries.update(dict.fromkeys(keys, boundary))
+
+    def _route(self, step: PlannerRow) -> str | BackgroundNotice | None:
+        if self.owns(step):
+            return step.input_key
+        notice = step.notice
+        if notice is None:
+            return None
+        boundary = self._boundaries.get(step.input_key) if step.input_key is not None else None
+        if step.input_key is None or step.index in self.excluded:
+            return notice
+        return notice if boundary is not None and boundary.excludes(step, notice) else None
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -134,22 +170,37 @@ class OutputProjection:
     def project(self, rows: Sequence[Frame]) -> Iterator[ProjectedFrame]:
         steps = self.steps(rows)
         while self.pending:
-            consumed: set[int] = set()
-            frames = list(self.pending)
-            for index in range(len(frames)):
-                if index in consumed:
-                    continue
-                match = self._match(index, frames, consumed, steps)
-                if match is not None:
-                    event, indices = match
-                    consumed.update(indices)
-                    yield event
-            if not consumed:
+            count = len(self.pending)
+            yield from self._project_pass(steps, interleave=False)
+            if len(self.pending) != count:
+                continue
+            yield from self._project_pass(steps, interleave=True)
+            if len(self.pending) == count:
                 return
-            self.pending = deque(frame for i, frame in enumerate(frames) if i not in consumed)
+
+    def _project_pass(
+        self, steps: Sequence[PlannerRow], *, interleave: bool
+    ) -> Iterator[ProjectedFrame]:
+        consumed: set[int] = set()
+        frames = list(self.pending)
+        for index in range(len(frames)):
+            if index in consumed:
+                continue
+            match = self._match(index, frames, consumed, steps, interleave=interleave)
+            if match is not None:
+                event, indices = match
+                consumed.update(indices)
+                yield event
+        self.pending = deque(frame for i, frame in enumerate(frames) if i not in consumed)
 
     def _match(
-        self, index: int, frames: Sequence[Frame], consumed: set[int], steps: Sequence[PlannerRow]
+        self,
+        index: int,
+        frames: Sequence[Frame],
+        consumed: set[int],
+        steps: Sequence[PlannerRow],
+        *,
+        interleave: bool,
     ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
         frame = frames[index]
         kind = frame.get("sessionUpdate")
@@ -161,16 +212,17 @@ class OutputProjection:
             item = self._take_tool(frame, tool_id, steps)
             return (item, (index,)) if item is not None else None
         field_name = "thinking" if kind == "agent_thought_chunk" else "content"
-        return self._take_text(index, frames, consumed, steps, field_name)
+        return self._take_text(index, frames, consumed, steps, field_name, interleave=interleave)
 
     def _owner(
         self, step: PlannerRow, frame: Frame, *, text_finished: bool = False
     ) -> ProjectedFrame | None:
-        if self.owns(step):
-            return ProjectedFrame(frame, step.input_key, None, text_finished=text_finished)
-        if step.notice is not None and (step.input_key is None or step.input_key in self.settled):
+        owner = self._route(step)
+        if isinstance(owner, str):
+            return ProjectedFrame(frame, owner, None, text_finished=text_finished)
+        if owner is not None:
             reply = content_text(frame.get("content")) if text_finished and step.final else ""
-            return ProjectedFrame(frame, None, step.notice, reply, text_finished)
+            return ProjectedFrame(frame, None, owner, reply, text_finished)
         return None
 
     def _take_tool(
@@ -199,34 +251,58 @@ class OutputProjection:
         consumed: set[int],
         steps: Sequence[PlannerRow],
         name: str,
+        *,
+        interleave: bool,
     ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
+        kind = frames[index].get("sessionUpdate")
+        first = content_text(frames[index].get("content"))
         options = [
             (step, value.strip())
             for step in steps
             if (step.index, name, 0) not in self.seen
             and isinstance(value := step.row.get(name), str)
-            and value.strip()
+            and value.strip().startswith(first.strip())
         ]
-        indices: list[int] = []
-        text = ""
-        kind = frames[index].get("sessionUpdate")
-        for current in range(index, len(frames)):
-            if current in consumed or frames[current].get("sessionUpdate") != kind:
-                continue
-            indices.append(current)
-            text += content_text(frames[current].get("content"))
-            options = [(step, value) for step, value in options if value.startswith(text.strip())]
-            if not options:
-                return None
-            if len(options) == 1 and options[0][1] == text.strip():
-                step, value = options[0]
-                frame = {"sessionUpdate": kind, "content": {"type": "text", "text": value}}
-                owner = self._owner(step, frame, text_finished=name == "content")
-                if owner is not None:
-                    self.seen.add((step.index, name, 0))
-                    return owner, tuple(indices)
-                return None
+        if not options:
+            return None
+        step, value = options[0]
+        route = self._route(step)
+        if route is None or any(self._route(other) != route for other, _ in options[1:]):
+            return None
+        indices = _text_chunks(index, first, value, frames, consumed, interleave=interleave)
+        if indices:
+            frame = {"sessionUpdate": kind, "content": {"type": "text", "text": value}}
+            owner = self._owner(step, frame, text_finished=name == "content")
+            if owner is not None:
+                self.seen.add((step.index, name, 0))
+                return owner, indices
         return None
+
+
+def _text_chunks(
+    index: int,
+    first: str,
+    expected: str,
+    frames: Sequence[Frame],
+    consumed: set[int],
+    *,
+    interleave: bool,
+) -> tuple[int, ...]:
+    kind = frames[index].get("sessionUpdate")
+    text = first
+    indices = [index]
+    for current in range(index + 1, len(frames)):
+        if text.strip() == expected:
+            return tuple(indices)
+        if current in consumed or frames[current].get("sessionUpdate") != kind:
+            continue
+        candidate = text + content_text(frames[current].get("content"))
+        if expected.startswith(candidate.strip()):
+            text = candidate
+            indices.append(current)
+        elif not interleave:
+            break
+    return tuple(indices) if text.strip() == expected else ()
 
 
 def _calls(row: dict[str, object]) -> Iterator[dict[str, object]]:

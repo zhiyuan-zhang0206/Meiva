@@ -65,12 +65,21 @@ a detached task. During overlap, planner rows after the notice stay provisional
 until a unique ordered foreground span matches the prompt's ACP usage receipts.
 Assigning a provisional row also requires a separate terminal planner row for
 the detached reply. Candidate sets larger than ten rows stay unresolved to
-bound the work done in the session reader. A completed foreground reply and its terminal ACP result settle the foreground
-independently of unmatched timer chunks. Each stream frame can match a completed
-row regardless of the other stream's order. A task-confirmed timer reply goes
-through `UnsolicitedOutput` to the bridge wake sink. Usage updates can trigger a
-transcript read. A future timer still allows foreground input. A due or triggered timer holds new dispatch and keeps the process alive,
-and an unverified reply at its deadline retires the generation. Cron-like
+bound the session reader's work. An earlier text block cannot close a turn
+while its planner span contradicts complete ACP usage receipts. Closing a
+verified foreground records the transcript boundary and the accounted span.
+A late timer reply requires a separate task notice after that boundary or
+planner evidence excluded from the verified foreground span.
+
+The matcher first consumes contiguous text and then joins compatible fragments
+across remaining interleaved frames. Identical text for a single owner consumes
+that owner's earliest unused row. After terminal ACP and a verified planner
+span, the adapter can recover missing foreground text from that span. Foreground
+completion is independent of unmatched timer chunks. A task-confirmed timer
+reply goes through `UnsolicitedOutput` to the bridge wake sink. Usage updates
+can trigger a transcript read. A future timer still allows foreground input.
+A due or triggered timer holds new dispatch and keeps the process alive, and
+an unverified reply at its deadline retires the generation. Cron-like
 calls retain the existing one-day bound. Timers also supply the foreground
 watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).

@@ -218,7 +218,13 @@ async def test_detached_timer_reply_stays_out_of_an_already_active_turn(tmp_path
 
 @pytest.mark.parametrize(
     "args",
-    [(), ("--test-early-hub",), ("--test-background-row-first",)],
+    [
+        (),
+        ("--test-early-hub",),
+        ("--test-background-row-first",),
+        ("--test-early-hub", "--test-interleaved-chunks"),
+        ("--test-early-hub", "--test-truncated-foreground"),
+    ],
 )
 async def test_foreground_tool_and_usage_precede_the_detached_reply(
     tmp_path: Path, args: tuple[str, ...]
@@ -251,6 +257,31 @@ async def test_foreground_tool_and_usage_precede_the_detached_reply(
         background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
         assert background.text == "BACKGROUND"
         assert not harness.session.background_work().items
+    finally:
+        await harness.stop()
+
+
+async def test_foreground_waits_for_verified_tail_after_hub_notice(tmp_path: Path) -> None:
+    harness = await start(tmp_path, extra_args=("--test-early-hub", "--test-multi-planner"))
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        await harness.session.deliver([HarnessInput.of("first", "overlap-first")])
+        await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "first")
+        harness.release("release-foreground")
+        first = await harness.wait_for(lambda e: isinstance(e, AssistantText) and e.text == "FIRST")
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+        harness.release("release-front-result")
+        await harness.wait_for_marker("front-result-sent")
+        assert harness.session.active_turn_id == first.turn_id
+        harness.release()
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+        )
+        assert done.text == "FIRST\nTRUE FINAL" and done.num_turns == 2
+        detached = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        assert detached.text == "BACKGROUND"
     finally:
         await harness.stop()
 
@@ -591,3 +622,63 @@ def test_turn_keeps_candidates_buffered_without_unique_ownership(answers: tuple[
     assert list(projection.project(rows)) == []
     assert len(projection.pending) == len(answers)
     assert not turn.projection_ready(projection, rows)
+
+
+def _planner(text: str, inputs: int) -> dict[str, object]:
+    return {
+        "type": "PLANNER_RESPONSE",
+        "status": "DONE",
+        "content": text,
+        "input_tokens": inputs,
+        "output_tokens": 3,
+    }
+
+
+def _chunk(text: str) -> dict[str, object]:
+    return {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}
+
+
+def test_foreground_total_must_cover_text_on_both_sides_of_the_hub_notice() -> None:
+    key = "one"
+    turn = PromptTurn(ActiveTurn(turn_id="turn", key=key, blocks=()), 0)
+    turn.register_request(1, key)
+    turn.stop_reason = "end_turn"
+    turn.reports[1] = PromptUsage(30, 6, 0, 0, 0)
+    projection = OutputProjection(0, keys=[key])
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker(key)},
+        _planner("FIRST", 10),
+        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+        _planner("TRUE FINAL", 20),
+    ]
+    projection.pending.extend((_chunk("FIRST"), _chunk("TRUE FINAL")))
+    turn.prove_projection(projection, rows)
+    [first] = list(projection.project(rows))
+    assert first.input_key == key and first.frame == _chunk("FIRST")
+    assert not turn.projection_ready(projection, rows)
+    projection.close_foreground([key], len(rows), accounted=False)
+    assert list(projection.project(rows)) == []
+    rows.append(_planner("REAL BACKGROUND", 99))
+    projection.pending.append(_chunk("REAL BACKGROUND"))
+    turn.prove_projection(projection, rows)
+    final, detached = projection.project(rows)
+    assert final.input_key == key and final.frame == _chunk("TRUE FINAL")
+    assert detached.timer_notice("conv") and detached.reply == "REAL BACKGROUND"
+    assert turn.projection_ready(projection, rows)
+    result = turn.complete(rows, "end_turn", "conv", 0.0, 1)
+    assert result.text == "FIRST\nTRUE FINAL" and result.usage == Usage(30, 6)
+
+
+def test_repeated_text_consumes_earliest_row_for_the_same_owner() -> None:
+    projection = OutputProjection(0, keys=["one"])
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker("one")},
+        _planner("SAME", 10),
+        _planner("SAME", 20),
+    ]
+    for index in (1, 2):
+        projection.pending.append(_chunk("SAME"))
+        [projected] = projection.project(rows)
+        assert projected.input_key == "one" and projected.frame == _chunk("SAME")
+        assert projection.seen == {(row, "content", 0) for row in range(1, index + 1)}
+        assert not projection.pending

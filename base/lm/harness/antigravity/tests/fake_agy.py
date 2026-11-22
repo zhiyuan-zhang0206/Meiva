@@ -121,9 +121,13 @@ def finish_background(transcript: Path, early_notice: bool, early_planner: bool)
     missing_tail = "--test-missing-background-planner" in sys.argv
     if not early_planner and not missing_tail:
         record(transcript, planner_row("BACKGROUND", tokens=237))
-    message("BACK")
-    if not missing_tail:
+    if "--test-interleaved-chunks" in sys.argv:
+        message("BACKGROUND")
         message("GROUND")
+    else:
+        message("BACK")
+        if not missing_tail:
+            message("GROUND")
     Path("background-sent").touch()
 
 
@@ -157,11 +161,41 @@ def foreground_after_cancel(request: int) -> None:
     result(request)
 
 
+def foreground_multiple(transcript: Path, request: int) -> None:
+    record(transcript, planner_row("FIRST"))
+    message("FIRST")
+    update("usage_update", used=10, size=1000)
+
+    def finish() -> None:
+        record(transcript, planner_row("TRUE FINAL", tokens=20))
+        message("TRUE FINAL")
+        frame(
+            {
+                "id": request,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        "inputTokens": 30,
+                        "cachedReadTokens": 60,
+                        "outputTokens": 6,
+                    },
+                },
+            }
+        )
+        Path("front-result-sent").touch()
+
+    after_release(Path("release-front-result"), finish)
+
+
 def foreground_first(transcript: Path, request: int) -> None:
+    if "--test-multi-planner" in sys.argv:
+        foreground_multiple(transcript, request)
+        return
     hold_prompt(transcript, "hold")
     update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     record(transcript, planner_row("FOREGROUND"))
-    message("FOREGROUND")
+    split = {"--test-interleaved-chunks", "--test-truncated-foreground"}
+    message("FORE" if split.intersection(sys.argv) else "FOREGROUND")
     update("usage_update", used=50, size=1000)
     Path("foreground-sent").touch()
     after_release(
