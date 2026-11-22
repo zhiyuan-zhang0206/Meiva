@@ -251,6 +251,10 @@ class HarnessBridge:
     def has_unpresented_turn(self) -> bool:
         return self._pump is not None and self._pump.has_unpresented_turn
 
+    @property
+    def unpresented_record_start(self) -> int | None:
+        return None if self._pump is None else self._pump.unpresented_record_start
+
     async def ensure(self) -> HarnessSession:
         if self._close_error is not None:
             raise HarnessClosedError(

@@ -10,6 +10,19 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.jsonl import read_jsonl_rows
 from base.host.env.harness_binaries import resolve_user_home
 from base.lm.harness.antigravity.acp import content_text, input_marker, received_markers
+from base.lm.harness.events import (
+    AssistantText,
+    HarnessCause,
+    TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
+    Usage,
+)
+from base.lm.harness.session.transcript.record_file import RecordFile
+
+
+def text_update(text: str) -> dict[str, object]:
+    return {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}
 
 
 def transcript_path(conversation_id: str, *, home: Path | None = None) -> Path | None:
@@ -40,6 +53,24 @@ def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[d
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptSnapshot:
+    rows: list[dict[str, object]]
+    offsets: tuple[int, ...]
+
+    @classmethod
+    def read(cls, path: Path | None) -> TranscriptSnapshot:
+        if path is None:
+            return cls([], ())
+        try:
+            records = RecordFile(path).rows_after(0).rows
+        except OSError:
+            return cls([], ())
+        return cls(
+            [dict(record.row) for record in records], tuple(record.offset for record in records)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PlannerRow:
     index: int
     row: dict[str, object]
@@ -48,7 +79,8 @@ class PlannerRow:
 
     @property
     def final(self) -> bool:
-        return bool(self.row.get("content")) and not self.row.get("tool_calls")
+        text = self.row.get("content")
+        return isinstance(text, str) and bool(text.strip()) and not self.row.get("tool_calls")
 
 
 def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iterator[PlannerRow]:
@@ -99,6 +131,7 @@ class ProjectedFrame:
     notice: BackgroundNotice | None
     reply: str = ""
     text_finished: bool = False
+    reply_index: int | None = None
 
     def timer_notice(self, session_id: str | None) -> BackgroundNotice | None:
         if self.reply and self.notice is not None and self.notice.is_task_for(session_id):
@@ -134,6 +167,7 @@ class OutputProjection:
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
     excluded: set[int] = field(default_factory=set[int])
+    _answered_notices: set[int] = field(default_factory=set[int])
     _boundaries: dict[str, ForegroundBoundary] = field(
         default_factory=dict[str, ForegroundBoundary]
     )
@@ -167,6 +201,24 @@ class OutputProjection:
         if step.input_key is None or step.index in self.excluded:
             return notice
         return notice if boundary is not None and boundary.excludes(step, notice) else None
+
+    def take_background_reply(
+        self, transcript: TranscriptSnapshot, item: ProjectedFrame, session_id: str | None
+    ) -> NativeReply | None:
+        notice, final = item.timer_notice(session_id), item.reply_index
+        if notice is None or final is None:
+            return None
+        if notice.index in self._answered_notices:
+            return None
+        steps = tuple(
+            step
+            for step in self.steps(transcript.rows)
+            if notice.index < step.index <= final and self._route(step) == notice
+        )
+        if not steps:
+            return None
+        self._answered_notices.add(notice.index)
+        return NativeReply(notice, transcript.offsets[self.offset + notice.index], steps)
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -229,7 +281,9 @@ class OutputProjection:
             return ProjectedFrame(frame, owner, None, text_finished=text_finished)
         if owner is not None:
             reply = content_text(frame.get("content")) if text_finished and step.final else ""
-            return ProjectedFrame(frame, None, owner, reply, text_finished)
+            return ProjectedFrame(
+                frame, None, owner, reply, text_finished, step.index if reply else None
+            )
         return None
 
     def _take_tool(
@@ -322,3 +376,110 @@ def _matches_call(frame: dict[str, object], call: dict[str, object]) -> bool:
     return (frame.get("name") or frame.get("title")) == call.get("name") and (
         frame.get("rawInput", frame.get("args")) or {}
     ) == (call.get("args") or {})
+
+
+def _nonnegative_tokens(value: object) -> int:
+    return value if type(value) is int and value >= 0 else 0
+
+
+def planner_step_usage(rows: Sequence[dict[str, object]]) -> tuple[Usage, ...]:
+    if not all(has_planner_tokens(row) for row in rows):
+        return ()
+    return tuple(planner_tokens(row) for row in rows)
+
+
+def has_planner_tokens(row: dict[str, object]) -> bool:
+    return type(row.get("input_tokens")) is int and type(row.get("output_tokens")) is int
+
+
+def planner_tokens(row: dict[str, object]) -> Usage:
+    cached = _nonnegative_tokens(row.get("cache_read_tokens"))
+    return Usage(
+        _nonnegative_tokens(row.get("input_tokens")) + cached,
+        _nonnegative_tokens(row.get("output_tokens")),
+        cache_read_input_tokens=cached,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NativeReply:
+    notice: BackgroundNotice
+    start: int
+    steps: Sequence[PlannerRow]
+
+    def events(
+        self, turn_id: str, session_id: str | None, generation: int
+    ) -> tuple[TurnStarted, AssistantText, TurnCompleted]:
+        text = content_text({"type": "text", "text": self.steps[-1].row["content"]}).strip()
+        steps = planner_step_usage([step.row for step in self.steps])
+        cause = (
+            HarnessCause.BACKGROUND_TASK
+            if self.notice.prompt.startswith('Task id "')
+            else HarnessCause.SCHEDULED_WAKE
+        )
+        return (
+            TurnStarted(
+                turn_id,
+                TurnOrigin.HARNESS,
+                (),
+                generation,
+                cause=cause,
+                detail=self.notice.sender,
+                record_start=self.start,
+            ),
+            AssistantText(turn_id, text),
+            TurnCompleted(
+                turn_id=turn_id,
+                session_id=session_id,
+                text=text,
+                subtype="success",
+                is_error=False,
+                interrupted=False,
+                stop_reason="end_turn",
+                num_turns=len(self.steps),
+                duration_ms=0,
+                usage=sum(steps, Usage()),
+                cost_usd=None,
+                cumulative_cost_usd=None,
+                permission_denials=(),
+                steps=steps,
+                generation=generation,
+                usage_uncertain=not steps,
+            ),
+        )
+
+
+@dataclass(slots=True)
+class IdleReplies:
+    offset: int
+    pending: bool = False
+    _signature: tuple[int, ...] | None = None
+
+    def read(self, session_id: str | None, *, home: Path | None) -> Iterator[NativeReply]:
+        if not self.pending or session_id is None:
+            return
+        path = transcript_path(session_id, home=home)
+        if path is None:
+            return
+        signature = RecordFile(path).watch_signature()
+        if signature is None or signature == self._signature:
+            return
+        self._signature = signature
+        yield from self._take(TranscriptSnapshot.read(path), session_id)
+
+    def _take(self, transcript: TranscriptSnapshot, session_id: str) -> Iterator[NativeReply]:
+        offset = self.offset
+        pending: list[PlannerRow] = []
+        for step in planner_rows(transcript.rows[offset:], ()):
+            notice = step.notice
+            if notice is None or not notice.is_task_for(session_id):
+                continue
+            if pending and pending[-1].notice != notice:
+                pending.clear()
+            if offset + notice.index < self.offset:
+                continue
+            pending.append(step)
+            if step.final:
+                self.offset = offset + step.index + 1
+                yield NativeReply(notice, transcript.offsets[offset + notice.index], tuple(pending))
+                pending.clear()

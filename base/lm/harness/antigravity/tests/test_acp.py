@@ -89,6 +89,10 @@ async def test_superseded_result_leaves_same_turn_and_tool_running(tmp_path: Pat
         await harness.stop()
 
 
+def _is_background(event: object) -> bool:
+    return isinstance(event, TurnCompleted) and event.text == "BACKGROUND"
+
+
 async def _release_timer(harness: Harness) -> ToolResult:
     harness.release("release-tool")
     return await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
@@ -120,14 +124,10 @@ async def test_cancel_keeps_process_and_next_turn_works(
         timer = await _release_timer(harness)
         assert timer.turn_id == timer_turn.turn_id and not timer.is_error
         harness.release()
-        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        background = await harness.wait_for(_is_background)
         assert background.text == "BACKGROUND"
         await harness.session.deliver([HarnessInput.of("next", "after-cancel")])
-        done = await harness.wait_for(
-            lambda e: (
-                isinstance(e, TurnCompleted) and e.turn_id not in {tool.turn_id, timer_turn.turn_id}
-            )
-        )
+        done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted) and e.text == "OK")
         assert done.text == "OK" and harness.session.cli_pid == pid
         assert [
             event
@@ -144,7 +144,10 @@ async def test_cancel_keeps_process_and_next_turn_works(
 async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_path: Path) -> None:
     sink: list[UnsolicitedOutput] = []
     harness = await start(
-        tmp_path, resume="conv-acp", unsolicited=sink.append, extra_args=("--test-live-load",)
+        tmp_path,
+        resume="conv-acp",
+        unsolicited=sink.append,
+        extra_args=("--test-late-load-replay",),
     )
     try:
         await harness.session.deliver([HarnessInput.of("new", "new")])
@@ -157,7 +160,7 @@ async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_
             "session/prompt",
         ]
         assert frames[2]["params"] == {"sessionId": "conv-acp", "modelId": "gemini-4-hydrogen-low"}
-        assert [event.text for event in sink] == ["LIVE_AFTER_LOAD"]
+        assert sink == []
     finally:
         await harness.stop()
 
@@ -185,11 +188,11 @@ async def test_background_completion_and_answer_arrive_while_idle(tmp_path: Path
             assert not delivery.done()
             assert len(harness.prompts()) == 1
             harness.release()
-        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        background = await harness.wait_for(_is_background)
         new = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id != done.turn_id
+            lambda e: isinstance(e, TurnCompleted) and e.text == "OK" and e.turn_id != done.turn_id
         )
-        assert background.text == "BACKGROUND" and sink == [background]
+        assert background.text == "BACKGROUND" and sink == []
         assert new.text == "OK" and new.usage == Usage(40, 5, 0, 30)
         assert not harness.session.background_work().items
         assert len(harness.prompts()) == 2
@@ -216,7 +219,7 @@ async def test_detached_timer_reply_stays_out_of_an_already_active_turn(tmp_path
         done = await harness.wait_for(
             lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
         )
-        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        background = await harness.wait_for(_is_background)
         assert background.text == "BACKGROUND"
         assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
         assert done.usage == Usage(80, 10, 0, 60) and not done.usage_uncertain
@@ -240,7 +243,7 @@ async def test_foreground_tool_and_usage_precede_the_detached_reply(
     harness = await start(tmp_path, extra_args=args)
     try:
         await harness.session.deliver([HarnessInput.of("timer", "background")])
-        timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
         await harness.session.deliver([HarnessInput.of("first", "overlap-first")])
         await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "first")
         assert len(harness.prompts()) == 2
@@ -258,11 +261,11 @@ async def test_foreground_tool_and_usage_precede_the_detached_reply(
         harness.release()
         harness.release("release-front-result")
         done = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+            lambda e: isinstance(e, TurnCompleted) and e.text == "FOREGROUND"
         )
         assert done.text == "FOREGROUND"
         assert ToolResult(done.turn_id, "tool-1", False, "WORK_DONE") in harness.events
-        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        background = await harness.wait_for(_is_background)
         assert background.text == "BACKGROUND"
         assert not harness.session.background_work().items
     finally:
@@ -285,10 +288,14 @@ async def test_foreground_waits_for_verified_tail_after_hub_notice(tmp_path: Pat
         assert harness.session.active_turn_id == first.turn_id
         harness.release()
         done = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+            lambda e: (
+                isinstance(e, TurnCompleted)
+                and e.turn_id != timer.turn_id
+                and e.text != "BACKGROUND"
+            )
         )
         assert done.text == "FIRST\nTRUE FINAL" and done.num_turns == 2
-        detached = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        detached = await harness.wait_for(_is_background)
         assert detached.text == "BACKGROUND"
     finally:
         await harness.stop()
@@ -311,7 +318,11 @@ async def test_unverified_background_tail_cannot_hold_foreground_completion(tmp_
         await harness.wait_for_marker("background-sent")
         harness.release("release-front-result")
         done = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+            lambda e: (
+                isinstance(e, TurnCompleted)
+                and e.turn_id != timer.turn_id
+                and e.text != "BACKGROUND"
+            )
         )
         assert done.text == "FOREGROUND"
         assert harness.session.background_work().items

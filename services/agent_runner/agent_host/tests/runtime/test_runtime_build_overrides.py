@@ -192,6 +192,10 @@ class FakeEngine:
         return 0
 
     @property
+    def unpresented_record_start(self) -> int | None:
+        return None
+
+    @property
     def has_unpresented_turn(self) -> bool:
         return False
 

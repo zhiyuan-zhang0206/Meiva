@@ -10,7 +10,10 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.tests.support import start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
+from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.events import TurnCompleted, TurnOrigin, TurnStarted, UnsolicitedOutput, Usage
 from base.lm.harness.process import PsutilChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
@@ -128,3 +131,31 @@ async def test_close_recovers_an_unsampled_child_that_created_its_own_session(
         assert not probe.is_alive(pid)
     finally:
         await transport.close(broken=True)
+
+
+@pytest.mark.parametrize(
+    ("command", "prefix"),
+    [("native-HIDE", "MEIVA_HIDE_FROM_USER"), ("native-DISPLAY", "MEIVA_DISPLAY_TO_USER")],
+)
+async def test_native_task_reply_is_a_harness_turn_without_inbound(
+    tmp_path: Path, command: str, prefix: str
+) -> None:
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, unsolicited=sink.append)
+    try:
+        await harness.session.deliver([HarnessInput.of("foreground", command)])
+        foreground = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        harness.release()
+        begun = await harness.wait_for(
+            lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS
+        )
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
+        )
+        assert done.turn_id != foreground.turn_id and begun.keys == ()
+        assert done.text == f"{prefix}\nTIMER_PURPLE"
+        assert done.usage == Usage(267, 3, 0, 30)
+        assert not done.usage_uncertain
+        assert len(harness.prompts()) == 1 and sink == []
+    finally:
+        await harness.stop()

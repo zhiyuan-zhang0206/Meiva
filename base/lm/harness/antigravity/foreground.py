@@ -7,10 +7,26 @@ from itertools import combinations
 
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
-from base.lm.harness.antigravity.mapping import OutputProjection, PlannerRow, planner_rows
+from base.lm.harness.antigravity.mapping import (
+    OutputProjection,
+    PlannerRow,
+    has_planner_tokens,
+    planner_rows,
+    planner_step_usage,
+    planner_tokens,
+)
 from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
 from base.lm.harness.base_session import ActiveTurn
-from base.lm.harness.events import ToolResult, ToolUse, TurnCompleted, Usage
+from base.lm.harness.events import (
+    AssistantText,
+    ReasoningDelta,
+    ReasoningText,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+    TurnCompleted,
+    Usage,
+)
 
 
 def _tokens(value: object) -> int:
@@ -64,22 +80,7 @@ def planner_usage(
     last_text = planner[-1].get("content")
     if not isinstance(last_text, str) or last_text.strip() != final_text.strip():
         return ()
-    if not all(_has_planner_tokens(row) for row in planner):
-        return ()
-    return tuple(_planner_tokens(row) for row in planner)
-
-
-def _has_planner_tokens(row: dict[str, object]) -> bool:
-    return type(row.get("input_tokens")) is int and type(row.get("output_tokens")) is int
-
-
-def _planner_tokens(row: dict[str, object]) -> Usage:
-    cached = _tokens(row.get("cache_read_tokens"))
-    return Usage(
-        _tokens(row.get("input_tokens")) + cached,
-        _tokens(row.get("output_tokens")),
-        cache_read_input_tokens=cached,
-    )
+    return planner_step_usage(planner)
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,7 +209,7 @@ def _witnesses(
     if not reports or len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
         return
     terminals = {step.index for step in possible if step.final}
-    if not all(_has_planner_tokens(step.row) for step in (*known, *possible)):
+    if not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
     for count in range(len(possible) + 1):
         for extra in combinations(possible, count):
@@ -224,7 +225,7 @@ def _matches_reports(
 ) -> bool:
     if not span[-1].final or span[-1].input_key != keys[-1]:
         return False
-    steps = tuple(_planner_tokens(step.row) for step in span)
+    steps = tuple(planner_tokens(step.row) for step in span)
     cumulative = _covers_cumulative(reports, steps, sum(steps, Usage()))
     if len(reports) == len(keys):
         return cumulative or _covers_disjoint(reports, steps)
@@ -250,8 +251,32 @@ class PromptTurn:
     reports: dict[int, PromptUsage] = field(default_factory=dict[int, PromptUsage])
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     interrupted: bool = False
+    text: list[str] = field(default_factory=list[str])
     verified_steps: tuple[Usage, ...] | None = None
     _verified_text: tuple[str, ...] = ()
+
+    def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
+        yield from self._flush_thoughts()
+        self.text.append(text)
+        yield TextDelta(self.ticket.turn_id, text)
+
+    def record_thought(self, text: str) -> ReasoningDelta:
+        self.ticket.thoughts.append(text)
+        return ReasoningDelta(self.ticket.turn_id, text)
+
+    def flush_text(self) -> Iterator[ReasoningText | AssistantText]:
+        yield from self._flush_thoughts()
+        text = "".join(self.text).strip()
+        self.text.clear()
+        if text:
+            self.ticket.parts.append(text)
+            yield AssistantText(self.ticket.turn_id, text)
+
+    def _flush_thoughts(self) -> Iterator[ReasoningText]:
+        text = "".join(self.ticket.thoughts).strip()
+        self.ticket.thoughts.clear()
+        if text:
+            yield ReasoningText(self.ticket.turn_id, text)
 
     def register_request(self, request: int, key: str) -> None:
         self.keys.append(key)
@@ -264,7 +289,7 @@ class PromptTurn:
     def prove_projection(
         self, projection: OutputProjection, rows: Sequence[dict[str, object]]
     ) -> None:
-        if self.verified_steps is not None:
+        if self.stop_reason is None or self.verified_steps is not None:
             return
         scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
         known = tuple(step for step in scope if projection.owns(step))
@@ -273,7 +298,7 @@ class PromptTurn:
         span = next(witnesses, None)
         if span is not None and next(witnesses, None) is None:
             projection.confirm_span(span, possible)
-            self.verified_steps = tuple(_planner_tokens(step.row) for step in span)
+            self.verified_steps = tuple(planner_tokens(step.row) for step in span)
             self._verified_text = tuple(text for _, text in _planner_text(span))
 
     def _projection_reports(self) -> tuple[PromptUsage, ...]:

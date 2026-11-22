@@ -115,6 +115,7 @@ class ReadTimelineSink:
         *,
         non_human_wake: bool,
         session_id: Callable[[], str | None],
+        unpresented_record_start: int | None = None,
         poll_seconds: float = RECORD_POLL_SECONDS,
         debounce_seconds: float = DEBOUNCE_SECONDS,
         request_timing_refresh: Callable[[], None] | None = None,
@@ -156,6 +157,9 @@ class ReadTimelineSink:
         self._closed_turns = 0
         self._invalid = False
         self._history_end = self._start_offset()
+        if unpresented_record_start is not None:
+            self._history_end = min(self._history_end, unpresented_record_start)
+            self._from = unpresented_record_start
         self._seen_stat: tuple[int, ...] | None = (
             None if self._file is None else self._file.watch_signature()
         )

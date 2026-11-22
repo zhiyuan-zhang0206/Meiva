@@ -8,7 +8,8 @@ here to keep a running tool and both inputs through a mid-turn prompt.
 ## Conversation and delivery
 
 `agy acp` exchanges newline-delimited JSON-RPC over stdio. The adapter sends
-`initialize` and either `session/new` or `session/load`. The load response ends history playback. Live frames arriving while the model is being selected are queued. It always reapplies the configured model and reasoning effort
+`initialize` and either `session/new` or `session/load`. The protocol ends history playback at the load response. The adapter queues
+later frames, including while it reapplies the configured model and reasoning effort
 with the combined model ID in `session/set_model`.
 
 Each input is one `session/prompt` with ordered text and base64 image blocks.
@@ -79,9 +80,15 @@ The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
 that owner's earliest unused row. After terminal ACP and a verified planner
 span, the adapter can recover missing foreground text from that span. Foreground
-completion is independent of unmatched timer chunks. A task-confirmed timer
-reply goes through `UnsolicitedOutput` to the bridge wake sink. Usage updates
-can trigger a transcript read. A future timer still allows foreground input.
+completion is independent of unmatched timer chunks. Outside a prompt,
+unkeyed text only signals that the adapter should inspect the transcript.
+A new native task notice and its completed planner response identify a
+provider-started turn. A transcript boundary captured before loading keeps
+historical task replies outside this scan, even if old text frames arrive
+after the load response. The adapter emits a harness-origin turn, with the
+native record offset and planner usage when available. The existing graph
+presents the transcript and applies the normal reply visibility policy.
+A future timer still allows foreground input.
 A due or triggered timer holds new dispatch and keeps the process alive, and
 an unverified reply at its deadline retires the generation. Cron-like
 calls retain the existing one-day bound. Timers also supply the foreground

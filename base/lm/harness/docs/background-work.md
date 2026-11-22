@@ -28,7 +28,7 @@ of a turn does not touch background work, but it does end the foreground command
 
 Every close ends in `HarnessSessions._close` → `HarnessBridge.close`. The adapter reads
 its CLI's stream in its own read loop for as long as the session lives, idle or not; what
-no turn of ours owns is a turn the CLI began itself (below) or, for Codex and Antigravity, goes to the sink
+no turn of ours owns can be a turn the CLI began itself (below). For Codex, unowned reports go to the sink
 (`UnsolicitedOutput`) and wakes the agent as a `system:harness` inbound. Claude's background-task report
 is recorded in the event stream, and goes to the sink only if the CLI opened no turn of its own for it within two minutes
 ([details](../claude/docs/background-tasks.md)).
@@ -79,7 +79,8 @@ event pump (`pump.py`) keeps that turn's events from its start until a subscribe
 `TurnStarted`, and calls the owner's `own_turn` (the host's wake for the agent). The claim finds no inbox
 row but sees `bridge.has_unpresented_turn` and enters a graph run; its subscription is primed with the
 turn's events so far, so the turn's text and tools reach the timeline as they would for an input's turn,
-with no line naming the cause (scheduled wake, background task, its own accord). A turn that
+with any native task notice projected from the transcript. Antigravity supplies the notice’s record
+offset so a completed native turn can still publish when the graph opens after the reply was written. A turn that
 begins while a run is subscribed is read by that run and never replayed to a later one: the same turn is
 presented once, however it straddles a run's start or end. The revival of a queued input of ours has its
 own timeline entry (the input's). The reply follows the same visibility prefix

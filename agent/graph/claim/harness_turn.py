@@ -241,6 +241,7 @@ async def _run_harness_turn(
         event_publisher,
         non_human_wake=state.non_human_wake,
         session_id=session_of(ctx, agent_id, ctx.harness.value),
+        unpresented_record_start=bridge.unpresented_record_start,
     )
     run = ForegroundRun(
         ctx,

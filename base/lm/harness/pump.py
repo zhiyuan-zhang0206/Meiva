@@ -79,6 +79,18 @@ class EventPump:
     def has_unpresented_turn(self) -> bool:
         return bool(self._own)
 
+    @property
+    def unpresented_record_start(self) -> int | None:
+        return min(
+            (
+                event.record_start
+                for events in self._own.values()
+                for event in events[:1]
+                if isinstance(event, TurnStarted) and event.record_start is not None
+            ),
+            default=None,
+        )
+
     def subscribe(self) -> Subscription:
         subscription = Subscription(self)
         for events in self._own.values():

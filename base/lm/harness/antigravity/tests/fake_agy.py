@@ -144,6 +144,28 @@ def trigger_background(transcript: Path) -> None:
     )
 
 
+def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    native = command.startswith("native-")
+    reply = "FOREGROUND" if native else "OK"
+    record(transcript, planner_row(reply))
+    message(reply)
+    result(request)
+    if native:
+        message(reply)
+        update("usage_update", used=2, size=10)
+        after_release(Path("release"), lambda: native_reply(transcript, command))
+
+
+def native_reply(transcript: Path, command: str) -> None:
+    reply = f"MEIVA_{command.removeprefix('native-')}_TO_USER\nTIMER_PURPLE"
+    if command == "native-HIDE":
+        reply = "MEIVA_HIDE_FROM_USER\nTIMER_PURPLE"
+    background_notice(transcript)
+    record(transcript, planner_row(reply, tokens=237))
+    message(reply)
+    update("usage_update", used=2, size=10)
+
+
 def beginning_of_tool() -> None:
     update(
         "tool_call",
@@ -305,9 +327,7 @@ def handle_prompt(
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
-        record(transcript, planner_row("OK"))
-        message("OK")
-        result(request)
+        plain_prompt(transcript, request, command)
     return original, permission_prompt
 
 
@@ -337,8 +357,8 @@ def setup_session(method: str, request: int) -> None:
         message("REPLAYED_OLD_TEXT")
         update("usage_update", used=1, size=10)
     frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
-    if method == "session/load" and "--test-live-load" in sys.argv:
-        message("LIVE_AFTER_LOAD")
+    if method == "session/load" and "--test-late-load-replay" in sys.argv:
+        message("REPLAYED_OLD_TEXT")
         update("usage_update", used=2, size=10)
 
 

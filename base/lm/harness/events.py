@@ -297,6 +297,7 @@ class TurnStarted:
     generation: int
     cause: HarnessCause | None = None
     detail: str | None = None
+    record_start: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
