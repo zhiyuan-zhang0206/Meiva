@@ -50,3 +50,14 @@ class BackupTree:
     @property
     def restore_marker(self) -> Path:
         return self.managed / ".logical-restore-drill.json"
+
+    # meiva:note
+    # Durable last-run outcome markers under `<home>/backups/` (kept outside `managed` so the
+    # dump pool holds only managed artifacts and the existing restore marker).
+    @property
+    def dump_status_marker(self) -> Path:
+        return self.root / ".dump-last-run.json"
+
+    @property
+    def restore_status_marker(self) -> Path:
+        return self.root / ".restore-drill-last-run.json"

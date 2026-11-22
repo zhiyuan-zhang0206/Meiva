@@ -280,37 +280,39 @@ def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-recovery-drill-failed"]
 
-    assert rule_query_exprs(rule, "loki") == [
-        'sum by (attributes_drill) (count_over_time({service_name="unknown_service", '
-        'event_name="recovery_drill_failed"} | json | cluster=".meiva" | '
-        'category="telemetry" | level="error" [1h]))'
+    assert rule_query_exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == [
+        'min by (drill) (meiva_recovery_drill_status_last_run_ok_ratio{cluster=".meiva"})'
     ]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
-    assert threshold_params(rule) == [[0]]
+    assert threshold_params(rule) == [[1]]
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
     assert rule["labels"] == {
         "severity": "error",
         "ruleUID": "meiva-ops-recovery-drill-failed",
         "metric": "recovery_drill_failure",
         "team": "meiva-ops",
     }
-    assert "attributes_drill" in rule["annotations"]["summary"]
+    assert "{{ $labels.drill }}" in rule["annotations"]["summary"]
 
 
-def test_backup_dump_failure_rule_fires_on_any_event_in_a_day() -> None:
+def test_backup_dump_failure_rule_reads_last_run_ok_gauge() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-backup-dump-failed"]
 
-    assert rule_query_exprs(rule, "loki") == [
-        'sum(count_over_time({service_name="unknown_service", '
-        'event_name="backup_dump_failed"} | json | cluster=".meiva" | '
-        'category="telemetry" | level="error" [24h]))'
+    assert rule_query_exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == [
+        'min(meiva_backup_dump_status_last_run_ok_ratio{cluster=".meiva"})'
     ]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
-    assert threshold_params(rule) == [[0]]
+    assert threshold_params(rule) == [[1]]
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
     assert rule["labels"] == {
         "severity": "error",
         "ruleUID": "meiva-ops-backup-dump-failed",

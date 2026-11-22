@@ -16,11 +16,15 @@ from typing import TypeGuard
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.clock import Clock
 from base.daemon.schedules.watcher import next_fire
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
-from base.deploy.schedule_timing import SCHEDULE_LAUNCH_GRACE_S
+from base.deploy.schedule_timing import (
+    SCHEDULE_LAUNCH_GRACE_S,
+    SCHEDULE_STALL_ALERT_AFTER_S,
+)
 from base.host.atomic_io import write_text_atomic
 from base.host.boundary.untyped import object_of
 from base.native_process.process_control import ProcessControl
@@ -41,6 +45,13 @@ from services.wake.schedule_manager.run_custody import (
 _log = logging.getLogger(__name__)
 
 _OUTCOME_PREFIX = ".run-"
+_MISSING_OUTCOME_NOTE = "single-round process ended without an outcome"
+_STATE_REFRESH_INTERVAL_S = 60.0
+
+
+@dataclass(frozen=True)
+class _IdRow:
+    id: int
 
 
 @dataclass(frozen=True)
@@ -156,14 +167,28 @@ class DeclarativeScheduleEngine:
         self._identity_control = identity_control
         self._secret_env_resolver = secret_env_resolver
         self._children: list[subprocess.Popen[bytes]] = []
+        self._last_emitted_state: tuple[int, int, int] | None = None
+        self._last_state_emitted_at: float | None = None
 
     def reconcile(self) -> None:
         now = self._clock.now().astimezone(UTC)
         self._reap_children()
+        custody_blocked: set[int] = set()
+        leader_lost_ids: set[int] = set()
         for open_run in self._open_runs():
-            self._observe_open_run(open_run, now)
+            self._observe_open_run(
+                open_run,
+                now,
+                custody_blocked=custody_blocked,
+                leader_lost_ids=leader_lost_ids,
+            )
         while claimed := self._claim_due(now):
             self._launch(claimed, now)
+        self._publish_state_gauges(
+            now,
+            custody_blocked=custody_blocked,
+            leader_lost_ids=leader_lost_ids,
+        )
 
     def _reap_children(self) -> None:
         self._children = [child for child in self._children if child.poll() is None]
@@ -183,7 +208,14 @@ class DeclarativeScheduleEngine:
                 (self._machine_name,),
             )
 
-    def _observe_open_run(self, run: _OpenRunRow, now: datetime) -> None:
+    def _observe_open_run(
+        self,
+        run: _OpenRunRow,
+        now: datetime,
+        *,
+        custody_blocked: set[int],
+        leader_lost_ids: set[int],
+    ) -> None:
         work_dir = schedule_directory(self._home, run.owner_agent_id, run.schedule_id)
         outcome_path = _outcome_path(work_dir, run.run_id)
         outcome = _Outcome.read(outcome_path)
@@ -195,12 +227,22 @@ class DeclarativeScheduleEngine:
                 claim_reading.state,
                 claim_reading.detail,
                 now,
+                custody_blocked=custody_blocked,
             )
             return
         claim = claim_reading.claim
         if claim is None:
             raise RuntimeError("present run claim has no parsed value")
-        self._observe_claimed_run(run, claim, outcome, outcome_path, work_dir, now)
+        self._observe_claimed_run(
+            run,
+            claim,
+            outcome,
+            outcome_path,
+            work_dir,
+            now,
+            custody_blocked=custody_blocked,
+            leader_lost_ids=leader_lost_ids,
+        )
 
     def _observe_claimless_run(
         self,
@@ -209,8 +251,11 @@ class DeclarativeScheduleEngine:
         claim_state: ClaimReadState,
         detail: str,
         now: datetime,
+        *,
+        custody_blocked: set[int],
     ) -> None:
         if claim_state is ClaimReadState.UNREADABLE:
+            custody_blocked.add(run.schedule_id)
             _log.warning(
                 "schedule %s run %s custody is unprovable: %s",
                 run.schedule_id,
@@ -233,6 +278,9 @@ class DeclarativeScheduleEngine:
         outcome_path: Path,
         work_dir: Path,
         now: datetime,
+        *,
+        custody_blocked: set[int],
+        leader_lost_ids: set[int],
     ) -> None:
         observed = observe_run_group(
             claim,
@@ -240,6 +288,7 @@ class DeclarativeScheduleEngine:
             identity_control=self._identity_control,
         )
         if observed.group is GroupLiveness.UNKNOWN:
+            custody_blocked.add(run.schedule_id)
             _log.warning(
                 "schedule %s run %s process group is unprovable: %s",
                 run.schedule_id,
@@ -251,6 +300,8 @@ class DeclarativeScheduleEngine:
         timed_out = outcome is None and now >= claim.deadline
         leader_lost = observed.leader is not LeaderLiveness.ALIVE
         if observed.group is GroupLiveness.PRESENT:
+            if leader_lost and not cancelled:
+                leader_lost_ids.add(run.schedule_id)
             if cancelled or timed_out or leader_lost:
                 killed = kill_run_group(
                     claim,
@@ -258,6 +309,7 @@ class DeclarativeScheduleEngine:
                     identity_control=self._identity_control,
                 )
                 if killed.group is GroupLiveness.UNKNOWN:
+                    custody_blocked.add(run.schedule_id)
                     _log.warning(
                         "schedule %s run %s process group kill is unprovable: %s",
                         run.schedule_id,
@@ -291,7 +343,7 @@ class DeclarativeScheduleEngine:
             ok=False,
             returncode=1,
             timed_out=False,
-            note="single-round process ended without an outcome",
+            note=_MISSING_OUTCOME_NOTE,
         )
 
     @staticmethod
@@ -529,3 +581,67 @@ class DeclarativeScheduleEngine:
                 "WHERE id = %s AND ok IS NULL",
                 (run_id,),
             )
+
+    def _publish_state_gauges(
+        self,
+        now: datetime,
+        *,
+        custody_blocked: set[int],
+        leader_lost_ids: set[int],
+    ) -> None:
+        stall_cutoff = now - timedelta(seconds=SCHEDULE_STALL_ALERT_AFTER_S)
+        with self._pool.connection() as conn:
+            stalled_rows = query_all(
+                conn,
+                _IdRow,
+                "SELECT s.id FROM schedules s "
+                "WHERE s.machine = %s AND s.enabled AND s.status NOT IN ('completed', 'cancelled') "
+                "AND ("
+                "  (s.next_launch_at IS NOT NULL AND s.next_launch_at <= %s "
+                "   AND NOT EXISTS (SELECT 1 FROM schedule_runs r WHERE r.schedule_id = s.id AND r.ok IS NULL)) "
+                "  OR EXISTS ("
+                "   SELECT 1 FROM schedule_runs r "
+                "   WHERE r.schedule_id = s.id AND r.ok IS NULL "
+                "   AND r.ran_at + make_interval(secs => s.timeout_seconds) <= %s)"
+                ")",
+                (self._machine_name, stall_cutoff, stall_cutoff),
+            )
+            lost_rows = query_all(
+                conn,
+                _IdRow,
+                "SELECT s.id FROM schedules s "
+                "WHERE s.machine = %s AND s.enabled AND s.status = 'error' AND s.last_error = %s",
+                (self._machine_name, _MISSING_OUTCOME_NOTE),
+            )
+        stalled = len(stalled_rows)
+        process_lost = len({row.id for row in lost_rows} | leader_lost_ids)
+        convergence_abandoned = len(custody_blocked)
+        state = (stalled, process_lost, convergence_abandoned)
+        monotonic_now = self._clock.monotonic()
+        if (
+            self._last_emitted_state == state
+            and self._last_state_emitted_at is not None
+            and monotonic_now - self._last_state_emitted_at < _STATE_REFRESH_INTERVAL_S
+        ):
+            return
+        self._emit_schedule_state(
+            stalled=stalled,
+            process_lost=process_lost,
+            convergence_abandoned=convergence_abandoned,
+        )
+        self._last_emitted_state = state
+        self._last_state_emitted_at = monotonic_now
+
+    @staticmethod
+    def _emit_schedule_state(
+        *, stalled: int, process_lost: int, convergence_abandoned: int
+    ) -> None:
+        telemetry.emit(
+            "telemetry",
+            "schedule_manager_state",
+            attributes={
+                "stalled": stalled,
+                "process_lost": process_lost,
+                "convergence_abandoned": convergence_abandoned,
+            },
+        )

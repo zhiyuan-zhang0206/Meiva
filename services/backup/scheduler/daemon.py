@@ -45,6 +45,11 @@ from services.backup.scheduler.recovery_drill import (
     load_local_dump_restore_success,
     record_local_dump_restore_success,
 )
+from services.backup.scheduler.run_status import (
+    record_last_run_status,
+    resolve_dump_last_run_ok,
+    resolve_restore_drill_last_run_ok,
+)
 from services.backup.scheduler.settings import SchedulerSettings
 from services.backup.scheduler.worker import WORKER_MODULE, WorkerLaunch, run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -53,6 +58,24 @@ _log = logging.getLogger("services.backup.scheduler.daemon")
 
 BACKUP_STALE_AFTER_S = 26 * 3600
 _FAILURE_DETAIL_CHARS = 500
+_STATUS_REFRESH_S = 300.0
+_LOGICAL_DUMP_DRILL = "logical_dump"
+
+
+def _emit_dump_status(*, ok: bool) -> None:
+    telemetry.emit(
+        "telemetry",
+        "backup_dump_status",
+        attributes={"last_run_ok": 1 if ok else 0},
+    )
+
+
+def _emit_restore_status(*, ok: bool, drill: str = _LOGICAL_DUMP_DRILL) -> None:
+    telemetry.emit(
+        "telemetry",
+        "recovery_drill_status",
+        attributes={"drill": drill, "last_run_ok": 1 if ok else 0},
+    )
 
 
 # meiva:note
@@ -160,15 +183,19 @@ async def local_restore_round(
             return
         await run_job("restore", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS)
         record_local_dump_restore_success(now, tree.restore_marker)
+        record_last_run_status(tree.restore_status_marker, ok=True, now=now)
+        _emit_restore_status(ok=True)
     except OperationBusyError as exc:
         _log.info("[pg-backup] local restore drill deferred: %s", exc)
     except Exception as exc:
+        record_last_run_status(tree.restore_status_marker, ok=False, now=now)
         telemetry.emit(
             "telemetry",
             "recovery_drill_failed",
             level="error",
-            attributes={"drill": "logical_dump", "detail": str(exc)},
+            attributes={"drill": _LOGICAL_DUMP_DRILL, "detail": str(exc)},
         )
+        _emit_restore_status(ok=False)
         _log.exception("[pg-backup] local restore drill failed")
 
 
@@ -189,15 +216,19 @@ async def backup_round(
             "dump", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS, now=now
         )
         state.record_success(now)
+        record_last_run_status(tree.dump_status_marker, ok=True, now=now)
+        _emit_dump_status(ok=True)
         await local_restore_round(now, settings=settings, tree=tree, launch=launch)
     except Exception as exc:
         state.record_error(str(exc))
+        record_last_run_status(tree.dump_status_marker, ok=False, now=now)
         telemetry.emit(
             "telemetry",
             "backup_dump_failed",
             level="error",
             attributes={"detail": str(exc)[:_FAILURE_DETAIL_CHARS]},
         )
+        _emit_dump_status(ok=False)
         _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
     finally:
         state.running = False
@@ -209,7 +240,10 @@ async def backup_loop(
 ) -> None:
     _log.info("[pg-backup] scheduler started")
     while True:
-        await asyncio.sleep(await backup_round(state, settings=settings, tree=tree, launch=launch))
+        sleep_s = await backup_round(state, settings=settings, tree=tree, launch=launch)
+        _emit_dump_status(ok=resolve_dump_last_run_ok(tree))
+        _emit_restore_status(ok=resolve_restore_drill_last_run_ok(tree))
+        await asyncio.sleep(min(sleep_s, _STATUS_REFRESH_S))
 
 
 async def run(

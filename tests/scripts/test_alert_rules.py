@@ -74,6 +74,10 @@ _EXPECTED_UIDS = {
     "meiva-ops-recovery-drill-failed",
     "meiva-ops-backup-dump-failed",
     "meiva-ops-tempo-backend-down",
+    "meiva-ops-schedule-process-lost",
+    "meiva-ops-schedule-stalled",
+    "meiva-ops-schedule-convergence-abandoned",
+    "meiva-ops-root-diagnostic-task-telemetry",
 }
 
 
@@ -163,7 +167,6 @@ def test_loki_rules_filter_to_prod_cluster_after_json() -> None:
     [
         ("meiva-ops-sse-drop-backlog", 'event_name=~"sse_drop|event_log_drop"'),
         ("meiva-ops-delivery-stalled-backlog", 'event_name="delivery_stalled"'),
-        ("meiva-ops-trace-disk-watermark", 'event_name="trace"'),
         ("meiva-ops-llm-rate-limit", 'event_name="llm_provider_error"'),
         ("meiva-ops-llm-billing-quota", 'event_name="llm_provider_error"'),
     ],
@@ -447,16 +450,18 @@ def test_unlisted_metric_names_have_no_stale_entries() -> None:
     assert not stale, f"stale _UNLISTED_METRIC_NAMES entries: {stale}"
 
 
-def test_trace_watermark_rule_filters_degradation_action() -> None:
+def test_trace_watermark_rule_reads_recording_disabled_gauge() -> None:
     rules = {r["uid"]: r for r in load_rules()}
-    exprs = rule_query_exprs(rules["meiva-ops-trace-disk-watermark"], "loki")
-    assert any('attributes_action="recording_disabled_disk_watermark"' in e for e in exprs)
-    assert any('category="telemetry"' in e for e in exprs)
-    assert any("[24h]" in e for e in exprs)
-    assert threshold_params(rules["meiva-ops-trace-disk-watermark"]) == [[0]]
+    rule = rules["meiva-ops-trace-disk-watermark"]
+    assert rule_query_exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == [
+        'max by (machine) (meiva_trace_recording_disabled_ratio{cluster=".meiva"})'
+    ]
+    assert threshold_params(rule) == [[0]]
+    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 
-def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
+def test_inbound_consumed_unknown_rule_counts_the_event_over_15m() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-inbound-consumed-unknown"]
     exprs = rule_query_exprs(rule, "loki")
@@ -464,7 +469,9 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
     for expr in exprs:
         assert "count_over_time" in expr
         assert 'event_name="inbound_consumed_unknown"' in expr
-        assert "[24h]" in expr
+        assert "[15m]" in expr
+    assert "(24h)" not in rule["title"]
+    assert "24h" not in rule["annotations"]["summary"]
     assert rule["for"] == "10m"
     assert threshold_params(rule) == [[2]]
     assert rule["labels"] == {
@@ -587,5 +594,99 @@ def test_notification_text_names_only_labels_the_first_query_keeps() -> None:
 def test_the_turn_aborted_alert_leaves_out_only_planned_restarts() -> None:
     rule = {r["uid"]: r for r in load_rules()}["meiva-ops-llm-turn-aborted"]
     (expr,) = [" ".join(e.split()) for e in rule_query_exprs(rule, "loki")]
-    assert '| attributes_cause != "planned_restart" [30m]' in expr
+    assert '| attributes_cause != "planned_restart" [15m]' in expr
     assert expr.count("attributes_cause") == 1
+
+
+@pytest.mark.parametrize(
+    ("uid", "metric"),
+    [
+        ("meiva-ops-schedule-stalled", "meiva_schedule_manager_state_stalled_ratio"),
+        ("meiva-ops-schedule-process-lost", "meiva_schedule_manager_state_process_lost_ratio"),
+        (
+            "meiva-ops-schedule-convergence-abandoned",
+            "meiva_schedule_manager_state_convergence_abandoned_ratio",
+        ),
+    ],
+)
+def test_schedule_state_rules_read_prometheus_gauges(uid: str, metric: str) -> None:
+    rule = {r["uid"]: r for r in load_rules()}[uid]
+    assert rule_query_exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == [
+        f'max by (machine) ({metric}{{cluster=".meiva"}})'
+    ]
+    assert threshold_params(rule) == [[0]]
+    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
+
+
+def test_task_telemetry_rule_reads_latest_diagnostic_state_gauge() -> None:
+    rule = {r["uid"]: r for r in load_rules()}["meiva-ops-root-diagnostic-task-telemetry"]
+    assert rule_query_exprs(rule, "loki") == []
+    assert rule_query_exprs(rule, "prometheus") == [
+        'min by (machine) (meiva_root_diagnostic_state_ok_ratio{cluster=".meiva", diagnostic="task-telemetry"})'
+    ]
+    assert threshold_params(rule) == [[1]]
+    threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
+    assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
+
+
+_DURATION_UNITS_S = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_LOGQL_RANGE_RE = re.compile(r"\[(\d+)([smhd])\](?:\s+offset\s+(\d+)([smhd]))?")
+_MAX_LOKI_COUNT_WINDOW_S = 15 * 60
+
+
+def _parse_logql_ranges(expr: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for num, unit, off_num, off_unit in _LOGQL_RANGE_RE.findall(expr):
+        window_s = int(num) * _DURATION_UNITS_S[unit]
+        offset_s = int(off_num) * _DURATION_UNITS_S[off_unit] if off_num else 0
+        ranges.append((window_s, offset_s))
+    return ranges
+
+
+def test_loki_count_over_time_windows_do_not_exceed_15m() -> None:
+    violations: list[str] = []
+    for rule in load_rules():
+        for query in rule["data"]:
+            if query.get("datasourceUid") != "loki":
+                continue
+            expr = " ".join(str(query["model"].get("expr", "")).split())
+            if "count_over_time(" not in expr:
+                continue
+            for window_s, _ in _parse_logql_ranges(expr):
+                if window_s > _MAX_LOKI_COUNT_WINDOW_S:
+                    violations.append(
+                        f"{rule['uid']}[{query['refId']}]: window {window_s}s > {_MAX_LOKI_COUNT_WINDOW_S}s"
+                    )
+    assert not violations, (
+        "Loki count_over_time alert windows must stay <= 15m (use a Prometheus state gauge "
+        "for long-lived conditions): " + "; ".join(violations)
+    )
+
+
+def test_loki_rule_relative_time_range_matches_logql_window() -> None:
+    mismatches: list[str] = []
+    for rule in load_rules():
+        for query in rule["data"]:
+            if query.get("datasourceUid") != "loki":
+                continue
+            expr = " ".join(str(query["model"].get("expr", "")).split())
+            ranges = _parse_logql_ranges(expr)
+            assert ranges, (
+                f"{rule['uid']}[{query['refId']}]: Loki query has no range selector: {expr}"
+            )
+            expected = set(ranges)
+            assert len(expected) == 1, (
+                f"{rule['uid']}[{query['refId']}]: conflicting range selectors {ranges}: {expr}"
+            )
+            window_s, offset_s = ranges[0]
+            rtr = query.get("relativeTimeRange", {})
+            actual = (rtr.get("from"), rtr.get("to"))
+            wanted = (window_s + offset_s, offset_s)
+            if actual != wanted:
+                mismatches.append(
+                    f"{rule['uid']}[{query['refId']}]: relativeTimeRange={actual} != expected {wanted}"
+                )
+    assert not mismatches, (
+        "Loki relativeTimeRange must match LogQL [window] (+ offset): " + "; ".join(mismatches)
+    )

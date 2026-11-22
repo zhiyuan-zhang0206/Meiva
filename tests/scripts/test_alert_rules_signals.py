@@ -38,15 +38,8 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-schedule-verify-failed": Signal(
         "schedule_verify_failed", "meiva-ops", "0m", "error"
     ),
-    "meiva-ops-schedule-process-lost": Signal(
-        "schedule_process_lost", "meiva-ops", "0m", "warning"
-    ),
     "meiva-ops-plugin-collector-silent": Signal(
         "plugin_collector_cycle", "meiva-ops", "5m", "warning"
-    ),
-    "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
-    "meiva-ops-schedule-convergence-abandoned": Signal(
-        "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
     ),
     "meiva-ops-machine-offline-warning": Signal(
         "machine_probe_failed", "meiva-ops", "3m", "warning"
@@ -88,9 +81,6 @@ SIGNALS: dict[str, Signal] = {
     ),
     "meiva-ops-root-diagnostic-browser-reach": Signal(
         "root_diagnostic", "meiva-ops-slow", "0m", "warning", 2
-    ),
-    "meiva-ops-root-diagnostic-task-telemetry": Signal(
-        "root_diagnostic", "meiva-ops-slow", "0m", "warning", 1
     ),
     # meiva:note
     # Five events the 2026-11-06 audit found declared and unheard (#6400). They sit in the fast
@@ -191,7 +181,7 @@ def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
 @pytest.mark.parametrize("diagnostic", ["venv", "browser-reach", "task-telemetry"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
     rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
-    assert "sum by (machine)" in _query(rule)
+    assert "by (machine)" in _query(rule)
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 

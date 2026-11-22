@@ -160,6 +160,14 @@ class RootDiagnostic(TypedDict):
     consecutive_failures: int
 
 
+# meiva:note
+# Latest definitive diagnostic status gauge: ok=1 when alive, ok=0 when down; unknown samples leave
+# the last definitive reading untouched.
+class RootDiagnosticState(TypedDict):
+    diagnostic: str
+    ok: int
+
+
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
@@ -172,6 +180,14 @@ class RecoveryDrillFailed(TypedDict):
     detail: str
 
 
+# meiva:note
+# Latest recovery drill outcome gauge: last_run_ok=1 when healthy or superseded by a newer success
+# marker, and 0 when the latest drill failed.
+class RecoveryDrillStatus(TypedDict):
+    drill: str
+    last_run_ok: int
+
+
 class BackupDumpFailed(TypedDict):
     """`backup_dump_failed` payload — the scheduled daily logical dump.
 
@@ -181,6 +197,13 @@ class BackupDumpFailed(TypedDict):
     """
 
     detail: str
+
+
+# meiva:note
+# Latest scheduled logical dump outcome gauge: last_run_ok=1 when healthy or superseded by a newer
+# managed dump on disk, and 0 when the latest dump failed.
+class BackupDumpStatus(TypedDict):
+    last_run_ok: int
 
 
 class HealthProbeFailing(TypedDict):
@@ -436,6 +459,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=RootDiagnostic,
         tier="anomaly",
     ),
+    "root_diagnostic_state": telemetry_event(
+        "root_diagnostic_state",
+        "latest definitive root diagnostic outcome gauge (ok=1 alive, ok=0 down)",
+        payload=RootDiagnosticState,
+        tier="noise",
+        site="services/supervision/meiva_root_glue/diagnostics.py:DiagnosticMonitor._emit_diagnostic_state",
+    ),
     "root_health_tick": telemetry_event(
         "root_health_tick",
         "root completed one service health and diagnostic observation round",
@@ -460,12 +490,26 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="services/backup/scheduler/daemon.py:backup_loop (positional emit)",
     ),
+    "backup_dump_status": telemetry_event(
+        "backup_dump_status",
+        "latest scheduled logical dump outcome gauge (last_run_ok=1 healthy, 0 failed)",
+        payload=BackupDumpStatus,
+        tier="noise",
+        site="services/backup/scheduler/daemon.py:_emit_dump_status",
+    ),
     "recovery_drill_failed": telemetry_event(
         "recovery_drill_failed",
         "scheduled logical restore drill failed",
         payload=RecoveryDrillFailed,
         tier="anomaly",
         site=("services/backup/scheduler/daemon.py:run_due_local_dump_restore (positional emit)"),
+    ),
+    "recovery_drill_status": telemetry_event(
+        "recovery_drill_status",
+        "latest scheduled recovery drill outcome gauge (last_run_ok=1 healthy, 0 failed)",
+        payload=RecoveryDrillStatus,
+        tier="noise",
+        site="services/backup/scheduler/daemon.py:_emit_restore_status",
     ),
     "health_probe_failing": telemetry_event(
         "health_probe_failing",

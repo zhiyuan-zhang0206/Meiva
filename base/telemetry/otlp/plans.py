@@ -40,6 +40,13 @@ BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("gateway_process", "cpu_percent"): "gauge",
     ("gateway_process", "rss_bytes"): "gauge",
     ("gateway_process", "fd_count"): "gauge",
+    ("trace_recording", "disabled"): "gauge",
+    ("root_diagnostic_state", "ok"): "gauge",
+    ("backup_dump_status", "last_run_ok"): "gauge",
+    ("recovery_drill_status", "last_run_ok"): "gauge",
+    ("schedule_manager_state", "stalled"): "gauge",
+    ("schedule_manager_state", "process_lost"): "gauge",
+    ("schedule_manager_state", "convergence_abandoned"): "gauge",
 }
 
 

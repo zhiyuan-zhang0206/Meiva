@@ -22,6 +22,8 @@ from base.native_process.ownership import LiveReading, OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from base.sessions.posixproc import GroupScan, scan_process_group
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.wake.schedule_manager.declarative import (
     DeclarativeScheduleEngine,
     schedule_directory,
@@ -32,6 +34,7 @@ from services.wake.schedule_manager.run_custody import (
     GroupLiveness,
     ProcessIdentityControl,
     RunClaim,
+    claim_path,
     kill_run_group,
     read_run_claim,
 )
@@ -591,3 +594,73 @@ def test_argparse_payload_succeeds_without_runner_arguments(
         "SELECT ok FROM schedule_runs WHERE schedule_id = %s", (sid,)
     ).fetchall() == [(True,)]
     assert (schedule_directory(unit_home, None, sid) / "parsed.txt").read_text() == "ok"
+
+
+def test_reconcile_publishes_schedule_state_gauges_and_clears_on_recovery(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool[psycopg.Connection],
+    unit_home: Path,
+    emitted_events: EmittedEvents,
+) -> None:
+    now = datetime.now(UTC)
+    sid_lost = _schedule(
+        db_conn,
+        name="gauge-process-lost",
+        now=now,
+        trigger_kind="every",
+        script="pass\n",
+    )
+    sid_blocked = _schedule(
+        db_conn,
+        name="gauge-custody-blocked",
+        now=now,
+        trigger_kind="every",
+        script="pass\n",
+    )
+    db_conn.execute(
+        "UPDATE schedules SET status = 'error', "
+        "last_error = 'single-round process ended without an outcome', "
+        "next_launch_at = %s WHERE id = %s",
+        (now + timedelta(hours=1), sid_lost),
+    )
+    stale_ran_at = now - timedelta(hours=3)
+    run_row = db_conn.execute(
+        "INSERT INTO schedule_runs (schedule_id, agent_id, ran_at, scheduled_for) "
+        "VALUES (%s, NULL, %s, %s) RETURNING id",
+        (sid_blocked, stale_ran_at, stale_ran_at),
+    ).fetchone()
+    assert run_row is not None
+    run_id = run_row[0]
+    work_dir = schedule_directory(unit_home, None, sid_blocked)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    claim_path(work_dir, run_id).write_text("corrupt-json", encoding="utf-8")
+    db_conn.execute(
+        "UPDATE schedules SET status = 'running', next_launch_at = %s WHERE id = %s",
+        (now + timedelta(hours=1), sid_blocked),
+    )
+    db_conn.commit()
+
+    engine = _engine(pool, unit_home, now)
+    engine.reconcile()
+
+    states = [e.attributes for e in emitted_events if e.event_name == "schedule_manager_state"]
+    assert states[-1] == {
+        "stalled": 1,
+        "process_lost": 1,
+        "convergence_abandoned": 1,
+    }
+
+    db_conn.execute("UPDATE schedule_runs SET ok = true WHERE id = %s", (run_id,))
+    db_conn.execute(
+        "UPDATE schedules SET status = 'scheduled', last_error = NULL WHERE id IN (%s, %s)",
+        (sid_lost, sid_blocked),
+    )
+    db_conn.commit()
+
+    engine.reconcile()
+    states = [e.attributes for e in emitted_events if e.event_name == "schedule_manager_state"]
+    assert states[-1] == {
+        "stalled": 0,
+        "process_lost": 0,
+        "convergence_abandoned": 0,
+    }
