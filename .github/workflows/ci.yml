@@ -2339,18 +2339,6 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/uv-sync
 
-      - name: Cache frontend node_modules
-        continue-on-error: true
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ui/web/node_modules
-          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
-
-      - name: Install frontend deps (TypeScript source parser)
-        timeout-minutes: 5
-        continue-on-error: true
-        uses: ./.github/actions/pnpm-install
-
       - name: Restore main recorded passes
         continue-on-error: true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -2454,20 +2442,6 @@ jobs:
       - name: Install Python deps
         continue-on-error: true
         uses: ./.github/actions/uv-sync
-
-      - name: Cache frontend node_modules
-        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
-        continue-on-error: true
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ui/web/node_modules
-          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
-
-      - name: Install frontend deps (TypeScript source parser)
-        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
-        timeout-minutes: 5
-        continue-on-error: true
-        uses: ./.github/actions/pnpm-install
 
       - name: Download the test cache plan
         if: ${{ needs.classify.outputs.test_cache_skip == 'true' }}
