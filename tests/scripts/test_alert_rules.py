@@ -455,7 +455,7 @@ def test_trace_watermark_rule_reads_recording_disabled_gauge() -> None:
     rule = rules["meiva-ops-trace-disk-watermark"]
     assert rule_query_exprs(rule, "loki") == []
     assert rule_query_exprs(rule, "prometheus") == [
-        'max by (machine) (meiva_trace_recording_disabled_ratio{cluster=".meiva"})'
+        "max by (machine) (meiva_trace_recording_disabled_ratio)"
     ]
     assert threshold_params(rule) == [[0]]
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
@@ -472,7 +472,7 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_15m() -> None:
         assert "[15m]" in expr
     assert "(24h)" not in rule["title"]
     assert "24h" not in rule["annotations"]["summary"]
-    assert rule["for"] == "10m"
+    assert rule["for"] == "5m"
     assert threshold_params(rule) == [[2]]
     assert rule["labels"] == {
         "severity": "warning",
@@ -599,22 +599,26 @@ def test_the_turn_aborted_alert_leaves_out_only_planned_restarts() -> None:
 
 
 @pytest.mark.parametrize(
-    ("uid", "metric"),
+    ("uid", "metric", "pending"),
     [
-        ("meiva-ops-schedule-stalled", "meiva_schedule_manager_state_stalled_ratio"),
-        ("meiva-ops-schedule-process-lost", "meiva_schedule_manager_state_process_lost_ratio"),
+        ("meiva-ops-schedule-stalled", "meiva_schedule_manager_state_stalled_ratio", "0m"),
+        (
+            "meiva-ops-schedule-process-lost",
+            "meiva_schedule_manager_state_process_lost_ratio",
+            "0m",
+        ),
         (
             "meiva-ops-schedule-convergence-abandoned",
             "meiva_schedule_manager_state_convergence_abandoned_ratio",
+            "5m",
         ),
     ],
 )
-def test_schedule_state_rules_read_prometheus_gauges(uid: str, metric: str) -> None:
+def test_schedule_state_rules_read_prometheus_gauges(uid: str, metric: str, pending: str) -> None:
     rule = {r["uid"]: r for r in load_rules()}[uid]
     assert rule_query_exprs(rule, "loki") == []
-    assert rule_query_exprs(rule, "prometheus") == [
-        f'max by (machine) ({metric}{{cluster=".meiva"}})'
-    ]
+    assert rule_query_exprs(rule, "prometheus") == [f"max by (machine) ({metric})"]
+    assert rule["for"] == pending
     assert threshold_params(rule) == [[0]]
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
@@ -623,43 +627,104 @@ def test_task_telemetry_rule_reads_latest_diagnostic_state_gauge() -> None:
     rule = {r["uid"]: r for r in load_rules()}["meiva-ops-root-diagnostic-task-telemetry"]
     assert rule_query_exprs(rule, "loki") == []
     assert rule_query_exprs(rule, "prometheus") == [
-        'min by (machine) (meiva_root_diagnostic_state_ok_ratio{cluster=".meiva", diagnostic="task-telemetry"})'
+        'min by (machine) (meiva_root_diagnostic_state_ok_ratio{diagnostic="task-telemetry"})'
     ]
     assert threshold_params(rule) == [[1]]
     threshold = next(d for d in rule["data"] if d["model"].get("type") == "threshold")
     assert threshold["model"]["conditions"][0]["evaluator"]["type"] == "lt"
 
 
-_DURATION_UNITS_S = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-_LOGQL_RANGE_RE = re.compile(r"\[(\d+)([smhd])\](?:\s+offset\s+(\d+)([smhd]))?")
-_MAX_LOKI_COUNT_WINDOW_S = 15 * 60
+_STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"|`[^`]*`')
+_PROM_CLUSTER_MATCHER_RE = re.compile(r"\bcluster\s*(?:=|!=|=~|!~)")
+_DURATION_ATOM_RE = re.compile(r"(\d+)(ms|[smhdwy])")
+_DURATION_UNITS_S: dict[str, float] = {
+    "ms": 0.001,
+    "s": 1.0,
+    "m": 60.0,
+    "h": 3600.0,
+    "d": 86400.0,
+    "w": 7 * 86400.0,
+    "y": 365 * 86400.0,
+}
+_DURATION_PATTERN = r"(?:\d+(?:ms|[smhdwy]))+"
+_LOGQL_RANGE_RE = re.compile(
+    rf"\[({_DURATION_PATTERN})\](?:\s*\)*\s*offset\s+({_DURATION_PATTERN}))?"
+)
+_LOGQL_RANGE_FN_RE = re.compile(
+    r"\b(?:count_over_time|sum_over_time|rate|rate_counter|bytes_over_time|bytes_rate|"
+    r"max_over_time|min_over_time|avg_over_time|quantile_over_time|stdvar_over_time|"
+    r"stddev_over_time|first_over_time|last_over_time)\s*\("
+)
+_MAX_LOKI_RANGE_WINDOW_S = 15 * 60
 
 
-def _parse_logql_ranges(expr: str) -> list[tuple[int, int]]:
-    ranges: list[tuple[int, int]] = []
-    for num, unit, off_num, off_unit in _LOGQL_RANGE_RE.findall(expr):
-        window_s = int(num) * _DURATION_UNITS_S[unit]
-        offset_s = int(off_num) * _DURATION_UNITS_S[off_unit] if off_num else 0
+def _strip_string_literals(expr: str) -> str:
+    return _STRING_LITERAL_RE.sub('""', expr)
+
+
+def _parse_duration_s(raw: str) -> float:
+    atoms = _DURATION_ATOM_RE.findall(raw)
+    assert atoms and "".join(f"{n}{u}" for n, u in atoms) == raw, f"invalid duration: {raw!r}"
+    return sum(int(n) * _DURATION_UNITS_S[u] for n, u in atoms)
+
+
+def _parse_logql_ranges(expr: str) -> list[tuple[float, float]]:
+    stripped = _strip_string_literals(expr)
+    ranges: list[tuple[float, float]] = []
+    for win_raw, off_raw in _LOGQL_RANGE_RE.findall(stripped):
+        window_s = _parse_duration_s(win_raw)
+        offset_s = _parse_duration_s(off_raw) if off_raw else 0.0
         ranges.append((window_s, offset_s))
     return ranges
 
 
-def test_loki_count_over_time_windows_do_not_exceed_15m() -> None:
+def test_logql_range_parser_handles_literals_compound_durations_and_outer_offset() -> None:
+    assert _parse_logql_ranges(
+        'sum(count_over_time({event_name="x"} | attributes_msg="[24h]" [15m]))'
+    ) == [(900.0, 0.0)]
+    assert _parse_logql_ranges('sum(count_over_time({event_name="x"}[15m]) offset 5m)') == [
+        (900.0, 300.0)
+    ]
+    assert _parse_logql_ranges("rate({a=`[2w]`}[1h30m] offset 500ms)") == [(5400.0, 0.5)]
+
+
+def test_prometheus_rules_never_filter_by_unpromoted_cluster_label() -> None:
+    violations: list[str] = []
+    for rule in load_rules():
+        for query in rule["data"]:
+            if query.get("datasourceUid") != "prometheus":
+                continue
+            expr = " ".join(str(query["model"].get("expr", "")).split())
+            if _PROM_CLUSTER_MATCHER_RE.search(_strip_string_literals(expr)):
+                violations.append(f"{rule['uid']}[{query['refId']}]: {expr}")
+    assert not violations, (
+        "Prometheus OTLP does not promote the resource `cluster` attribute to series labels; "
+        "filtering by `cluster=` returns an empty vector and silently disables the alert: "
+        + "; ".join(violations)
+    )
+
+
+def test_loki_range_aggregation_windows_do_not_exceed_15m() -> None:
     violations: list[str] = []
     for rule in load_rules():
         for query in rule["data"]:
             if query.get("datasourceUid") != "loki":
                 continue
             expr = " ".join(str(query["model"].get("expr", "")).split())
-            if "count_over_time(" not in expr:
+            stripped = _strip_string_literals(expr)
+            if not _LOGQL_RANGE_FN_RE.search(stripped):
                 continue
-            for window_s, _ in _parse_logql_ranges(expr):
-                if window_s > _MAX_LOKI_COUNT_WINDOW_S:
+            ranges = _parse_logql_ranges(expr)
+            assert ranges, (
+                f"{rule['uid']}[{query['refId']}]: range function without parseable window: {expr}"
+            )
+            for window_s, _ in ranges:
+                if window_s > _MAX_LOKI_RANGE_WINDOW_S:
                     violations.append(
-                        f"{rule['uid']}[{query['refId']}]: window {window_s}s > {_MAX_LOKI_COUNT_WINDOW_S}s"
+                        f"{rule['uid']}[{query['refId']}]: window {window_s:g}s > {_MAX_LOKI_RANGE_WINDOW_S}s"
                     )
     assert not violations, (
-        "Loki count_over_time alert windows must stay <= 15m (use a Prometheus state gauge "
+        "Loki range-aggregation alert windows must stay <= 15m (use a Prometheus state gauge "
         "for long-lived conditions): " + "; ".join(violations)
     )
 

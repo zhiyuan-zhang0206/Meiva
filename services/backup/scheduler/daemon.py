@@ -11,6 +11,7 @@ import random
 import signal
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,6 +77,13 @@ def _emit_restore_status(*, ok: bool, drill: str = _LOGICAL_DUMP_DRILL) -> None:
         "recovery_drill_status",
         attributes={"drill": drill, "last_run_ok": 1 if ok else 0},
     )
+
+
+def _persist_last_run_status(marker: Path, *, ok: bool, now: datetime) -> None:
+    try:
+        record_last_run_status(marker, ok=ok, now=now)
+    except OSError:
+        _log.warning("[pg-backup] failed persisting run status marker %s", marker, exc_info=True)
 
 
 # meiva:note
@@ -183,12 +191,11 @@ async def local_restore_round(
             return
         await run_job("restore", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS)
         record_local_dump_restore_success(now, tree.restore_marker)
-        record_last_run_status(tree.restore_status_marker, ok=True, now=now)
         _emit_restore_status(ok=True)
+        _persist_last_run_status(tree.restore_status_marker, ok=True, now=now)
     except OperationBusyError as exc:
         _log.info("[pg-backup] local restore drill deferred: %s", exc)
     except Exception as exc:
-        record_last_run_status(tree.restore_status_marker, ok=False, now=now)
         telemetry.emit(
             "telemetry",
             "recovery_drill_failed",
@@ -196,6 +203,7 @@ async def local_restore_round(
             attributes={"drill": _LOGICAL_DUMP_DRILL, "detail": str(exc)},
         )
         _emit_restore_status(ok=False)
+        _persist_last_run_status(tree.restore_status_marker, ok=False, now=now)
         _log.exception("[pg-backup] local restore drill failed")
 
 
@@ -216,12 +224,11 @@ async def backup_round(
             "dump", settings=settings, tree=tree, launch=launch, timers=SYSTEM_TIMERS, now=now
         )
         state.record_success(now)
-        record_last_run_status(tree.dump_status_marker, ok=True, now=now)
         _emit_dump_status(ok=True)
+        _persist_last_run_status(tree.dump_status_marker, ok=True, now=now)
         await local_restore_round(now, settings=settings, tree=tree, launch=launch)
     except Exception as exc:
         state.record_error(str(exc))
-        record_last_run_status(tree.dump_status_marker, ok=False, now=now)
         telemetry.emit(
             "telemetry",
             "backup_dump_failed",
@@ -229,6 +236,7 @@ async def backup_round(
             attributes={"detail": str(exc)[:_FAILURE_DETAIL_CHARS]},
         )
         _emit_dump_status(ok=False)
+        _persist_last_run_status(tree.dump_status_marker, ok=False, now=now)
         _log.exception("[pg-backup] dump failed; next attempt at the next backup hour")
     finally:
         state.running = False
@@ -236,14 +244,29 @@ async def backup_round(
 
 
 async def backup_loop(
-    state: BackupState, *, settings: SchedulerSettings, tree: BackupTree, launch: WorkerLaunch
+    state: BackupState,
+    *,
+    settings: SchedulerSettings,
+    tree: BackupTree,
+    launch: WorkerLaunch,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    round_fn: Callable[..., Awaitable[float]] = backup_round,
 ) -> None:
     _log.info("[pg-backup] scheduler started")
     while True:
-        sleep_s = await backup_round(state, settings=settings, tree=tree, launch=launch)
+        sleep_s = await round_fn(state, settings=settings, tree=tree, launch=launch)
         _emit_dump_status(ok=resolve_dump_last_run_ok(tree))
         _emit_restore_status(ok=resolve_restore_drill_last_run_ok(tree))
-        await asyncio.sleep(min(sleep_s, _STATUS_REFRESH_S))
+        next_round_at = monotonic() + max(0.0, sleep_s)
+        while True:
+            remaining = next_round_at - monotonic()
+            if remaining <= 0:
+                break
+            await sleep(min(remaining, _STATUS_REFRESH_S))
+            if monotonic() < next_round_at:
+                _emit_dump_status(ok=resolve_dump_last_run_ok(tree))
+                _emit_restore_status(ok=resolve_restore_drill_last_run_ok(tree))
 
 
 async def run(

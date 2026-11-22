@@ -282,7 +282,7 @@ def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
 
     assert rule_query_exprs(rule, "loki") == []
     assert rule_query_exprs(rule, "prometheus") == [
-        'min by (drill) (meiva_recovery_drill_status_last_run_ok_ratio{cluster=".meiva"})'
+        "min by (drill) (meiva_recovery_drill_status_last_run_ok_ratio)"
     ]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
@@ -305,7 +305,7 @@ def test_backup_dump_failure_rule_reads_last_run_ok_gauge() -> None:
 
     assert rule_query_exprs(rule, "loki") == []
     assert rule_query_exprs(rule, "prometheus") == [
-        'min(meiva_backup_dump_status_last_run_ok_ratio{cluster=".meiva"})'
+        "min(meiva_backup_dump_status_last_run_ok_ratio)"
     ]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
@@ -351,6 +351,7 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
     query = next(q for q in rule["data"] if q["refId"] == "A")
     assert query["datasourceUid"] == "prometheus"
     assert "meiva_event_log_drop_last_dropped_at_ratio" in query["model"]["expr"]
+    assert "cluster=" not in query["model"]["expr"]
     threshold = next(q for q in rule["data"] if q["refId"] == "D")
     assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}
 

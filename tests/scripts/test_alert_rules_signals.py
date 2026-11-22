@@ -80,7 +80,7 @@ SIGNALS: dict[str, Signal] = {
         "root_diagnostic", "meiva-ops", "0m", "warning", 2
     ),
     "meiva-ops-root-diagnostic-browser-reach": Signal(
-        "root_diagnostic", "meiva-ops-slow", "0m", "warning", 2
+        "root_diagnostic", "meiva-ops", "0m", "warning", 2
     ),
     # meiva:note
     # Five events the 2026-11-06 audit found declared and unheard (#6400). They sit in the fast

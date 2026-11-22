@@ -394,6 +394,92 @@ def test_persisted_backup_and_drill_status_survives_restart_and_clears_on_newer_
     assert resolve_restore_drill_last_run_ok(tree) is True
 
 
+def test_corrupt_or_unreadable_status_markers_fail_closed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    tree = BackupTree(tmp_path / "home")
+    tree.root.mkdir(parents=True)
+    tree.dump_status_marker.write_text("{corrupt", encoding="utf-8")
+    tree.restore_status_marker.mkdir()
+    caplog.set_level("WARNING", logger="services.backup.scheduler.run_status")
+
+    assert resolve_dump_last_run_ok(tree) is False
+    assert resolve_restore_drill_last_run_ok(tree) is False
+    assert "failed reading dump run status marker" in caplog.text
+    assert "failed reading restore drill status marker" in caplog.text
+
+
+async def test_unwritable_status_marker_still_emits_failure_events_without_crashing(
+    tmp_path: Path, emitted_events: EmittedEvents, caplog: pytest.LogCaptureFixture
+) -> None:
+    tree, log = BackupTree(tmp_path / "home"), tmp_path / "workers.log"
+    tree.dump_status_marker.mkdir(parents=True)
+    state = daemon.BackupState(started_at=0.0)
+    caplog.set_level("WARNING", logger="services.backup.scheduler.daemon")
+
+    sleep_s = await daemon.backup_round(
+        state, settings=_settings(), tree=tree, launch=_launch("fail", log)
+    )
+
+    assert 0 < sleep_s <= 24 * 3600
+    assert [(e.event_name, e.attributes.get("last_run_ok")) for e in emitted_events] == [
+        ("backup_dump_failed", None),
+        ("backup_dump_status", 0),
+    ]
+    assert "failed persisting run status marker" in caplog.text
+
+
+async def test_backup_loop_waits_until_next_backup_hour_while_refreshing_gauges(
+    tmp_path: Path, emitted_events: EmittedEvents
+) -> None:
+    tree = BackupTree(tmp_path / "home")
+    record_last_run_status(
+        tree.dump_status_marker, ok=False, now=datetime(2026, 9, 26, 3, 0, tzinfo=UTC)
+    )
+    now_s = 0.0
+    sleeps: list[float] = []
+    round_times: list[float] = []
+
+    class _StopLoop(BaseException):
+        pass
+
+    async def fake_round(
+        _state: daemon.BackupState,
+        *,
+        settings: SchedulerSettings,
+        tree: BackupTree,
+        launch: WorkerLaunch,
+    ) -> float:
+        del settings, tree, launch
+        round_times.append(now_s)
+        if len(round_times) >= 2:
+            raise _StopLoop
+        return 1000.0
+
+    async def fake_sleep(seconds: float) -> None:
+        nonlocal now_s
+        sleeps.append(seconds)
+        now_s += seconds
+
+    with pytest.raises(_StopLoop):
+        await daemon.backup_loop(
+            daemon.BackupState(started_at=0.0),
+            settings=_settings(),
+            tree=tree,
+            launch=_launch("succeed", tmp_path / "workers.log"),
+            monotonic=lambda: now_s,
+            sleep=fake_sleep,
+            round_fn=fake_round,
+        )
+
+    assert round_times == [0.0, 1000.0]
+    assert sleeps == [300.0, 300.0, 300.0, 100.0]
+    dump_statuses = [
+        e.attributes["last_run_ok"] for e in emitted_events if e.event_name == "backup_dump_status"
+    ]
+    assert dump_statuses == [0, 0, 0, 0]
+
+
 async def test_a_busy_restore_kind_defers_the_drill_without_a_failure_event(
     tmp_path: Path, emitted_events: EmittedEvents, caplog: pytest.LogCaptureFixture
 ) -> None:
