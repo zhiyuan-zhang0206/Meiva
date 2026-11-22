@@ -40,7 +40,6 @@ OTHER_CI = {
 
 
 CI_OWNED = {
-    "check-code-comments",
     "pyright",
     "frontend-tsc",
     "frontend-eslint",
@@ -413,7 +412,6 @@ def test_parser_is_unconditional_and_codegen_retains_conservative_selection() ->
     for name in (
         "Install Node",
         "Install frontend deps (source parser and codegen)",
-        "Check source notes and changed-file migration",
     ):
         assert "if" not in STEPS[name]
         assert "continue-on-error" not in STEPS[name]
@@ -421,12 +419,6 @@ def test_parser_is_unconditional_and_codegen_retains_conservative_selection() ->
         FRESHNESS["if"]
         == "steps.codegen.outcome != 'success' || steps.codegen.outputs.run != 'false'"
     )
-    assert (
-        STEPS["Check source notes and changed-file migration"]["run"]
-        == 'bash scripts/content_lint/code_comments/check.sh changed "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}"'
-    )
-    assert HOOKS["check-code-comments"]["always_run"] is True
-    assert HOOKS["check-code-comments"]["pass_filenames"] is False
     order = list(STEPS)
     assert order.index("Fetch base revision for structure guard") < order.index(
         "Run pre-commit structural gates (--all-files)"
@@ -434,11 +426,7 @@ def test_parser_is_unconditional_and_codegen_retains_conservative_selection() ->
     assert order.index("Run pre-commit structural gates (--all-files)") < order.index(
         "Select codegen freshness from changed files"
     )
-    assert (
-        order.index("Install Node")
-        < order.index("Check source notes and changed-file migration")
-        < order.index(LINT["name"])
-    )
+    assert order.index("Install Node") < order.index(LINT["name"])
 
 
 def test_structure_guard_pins_the_merge_refs_base_not_the_event_field() -> None:

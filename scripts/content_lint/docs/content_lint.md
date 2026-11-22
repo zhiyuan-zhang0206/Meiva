@@ -7,7 +7,6 @@ lints: [scripts/lint/ — Code and AST Safety Lints](../../lint/docs/lint.md).
 
 ## The linters
 
-- `code_comments/` — parseable `meiva:note` blocks and file-level `meiva:link` targets; validates every link, checks new or rewritten notes strictly, and extracts the note corpus for review. See [Structured code comment checks](../code_comments/docs/code_comments.md).
 - `lint_no_tailnet.py` — bans 100.64.0.0/10 host literals; allows CIDR, frozen `docs/decisions/`, and `# tailnet-ip-ok:` test lines. Pre-commit + `repo-language` CI (2026-08-03/04 Gateway-URL, 2026-08-20 public-repo rulings).
 - `lint_no_cjk.py` — repo-wide whole-repo scan (git ls-files) banning raw CJK outside the documented i18n-locale exemption (user ruling 2026-08-27).
 - `meizel.lint_common` (the installed checker) — target resolution, UTF-8 reads, and `file:line` output shared by `lint_no_cjk.py` and `lint_no_tailnet.py`, over the `SourceTree` each script's entry builds ([`meizel/checkout.source_tree`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/checkout.source_tree)); the tracked-file listing is [`meizel/checkout.tracked_files`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/checkout.tracked_files).

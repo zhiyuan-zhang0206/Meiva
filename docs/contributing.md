@@ -80,9 +80,9 @@ default, running `meizel`'s transitive reverse-import closure typecheck,
 `meizel check --changed` when manifests and policy are untouched, JUnit XML pytest
 counting, and clean-tree sub-check caching across `git commit --amend`; pass
 `--mode full` for a pre-release whole-tree sweep or `--no-cache` to bypass the cache).
-Before staging, `bash scripts/content_lint/code_comments/check.sh changed --worktree`
-(or `changed origin/main --worktree`) checks working-tree source notes without
-requiring a clean index.
+Comment ratchet and `meiva:link` checks run inside `meizel check` and `meizel check --changed`;
+after removing legacy comments, run `uv run python -m meizel comments prune` to tighten
+`meizel.comments_baseline.json`.
 
 Each test run owns a unique scratch directory under the caller's private
 `$TMPDIR/pytest-of-<user>` (or `/tmp/pytest-of-<user>`). Pytest receives its own

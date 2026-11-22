@@ -116,29 +116,12 @@ Smoke before trusting local results: `uv sync --frozen --dry-run` prints "Would 
 changes", and `.venv/bin/pytest --collect-only -q <affected suite>` collects without
 errors.
 
-**A hook that cannot start has not passed.** The same failure shape hides in the pre-push
-stage: `check-code-comments` runs in a throwaway checkout under `/tmp`, which has no
-`ui/web/node_modules`, so on a host without the frontend dependencies it used to stop at
-`Cannot find module 'typescript'` and report nothing. Twenty-nine free-comment
-violations accumulated on one branch that way, and CI was the first place they showed.
-The all-tree index now classifies the frontend tree first and refuses with the state it
-found — missing, an npm-era install from before the pnpm migration (#8085), or a tree
-installed for another lockfile — naming the command that fixes it and exiting 3, so a
-hook that could not start says so instead of reporting a pass. Point the hook at a
-checkout whose tree was installed from its own lockfile:
-
-```bash
-NODE_PATH=<any-checkout>/ui/web/node_modules git push
-```
-
-A green `pre-commit run --files` before the first commit proves nothing about
-that hook: `check.sh changed` compares the index with `HEAD`, so with nothing
-committed yet it has no source to judge and reports success. The pre-push stage
-compares `merge-base..HEAD` and is the first place the findings appear. Run
-`bash scripts/content_lint/code_comments/check.sh check <paths>` on the files you
-touched to see them before committing — new prose in docstrings and ordinary
-comments both fail; a fact belongs in a `# meiva:note` block, and only pytest
-fixture help and SDK docstrings stay as docstrings.
+**Comment ratchet and links.** `meizel check` (and `meizel check --changed` in
+pre-commit) enforces the `[comments]` ratchet in `meizel.policy.toml`: new free
+comments, non-exempt docstrings, and broken `meiva:link` targets fail immediately;
+removing legacy comments requires tightening `meizel.comments_baseline.json` via
+`uv run python -m meizel comments prune`. Only pytest fixture help and agent-visible
+SDK docstrings stay as docstrings.
 
 **Which home a worktree reads.** With `MEIVA_HOME` unset the home is `~/.meiva`; on a
 development machine that also runs production, that is the production cluster. A

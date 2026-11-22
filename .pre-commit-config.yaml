@@ -78,13 +78,6 @@ repos:
         pass_filenames: false
         verbose: true
 
-      - id: check-code-comments
-        name: check source notes and changed-file migration
-        entry: bash scripts/content_lint/code_comments/check.sh changed
-        language: system
-        always_run: true
-        pass_filenames: false
-
       - id: lint-audit-machine-read
         name: lint audit machine reads (one read path for the machine dimension)
         entry: .venv/bin/python scripts/lint/audit_machine_direct_read.py

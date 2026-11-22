@@ -716,3 +716,32 @@ extensions = [
     ".ts",
     ".tsx",
 ]
+
+[comments]
+mode = "ratchet"
+baseline = "meizel.comments_baseline.json"
+link-prefix = "meiva:link"
+inline-directives = [
+    "^# time-bomb-ok: \\S.*$",
+]
+allow-fixture-docstrings = true
+docstring-marker-symbols = [
+    "__all_for_meiva__",
+]
+docstring-paths = [
+    "meiva/__init__.py",
+    "meiva/files.py",
+    "meiva/ui.py",
+    "meiva/agents/__init__.py",
+    "meiva/mcps/__init__.py",
+    "meiva/schedules/__init__.py",
+    "meiva/self/__init__.py",
+    "meiva/shell/__init__.py",
+    "meiva/skills/__init__.py",
+    "meiva/understand/__init__.py",
+    "meiva/web/__init__.py",
+    "meiva/sdk_surface/**",
+    "meiva_builtins/plugins/*/plugin.py",
+    "meiva_builtins/plugins/meiva_fleet/task_registry.py",
+    "meiva_builtins/plugins/meiva_memory/sdk.py",
+]
