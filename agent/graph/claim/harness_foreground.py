@@ -14,6 +14,7 @@ from types import MappingProxyType
 
 from agent.graph.claim.harness_render import fit_input_images, skipped_images_note
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     HarnessInput,
     ImageBlock,
@@ -88,19 +89,28 @@ Settlement = Commit | Requeue
 
 
 # meiva:note
-# `handed` keeps delivery order. `turns` are the turns the harness is running, whoever began them. The
-# invocation may end only when both are empty: an input that missed a turn's last boundary is settled
-# after that turn ended (Claude Code runs it as a turn of its own about a second later), and ending
-# earlier would leave that settlement with nobody to write it.
+# `handed` keeps delivery order. `turns` are the turns the harness is running, whoever began them.
+# `awaiting_reply_turns` names the open turns that still owe a non-empty `AssistantText` reply —
+# either because the turn just started or because a new input entered its context after an earlier
+# reply. Once every handed input is settled and every open turn has delivered a reply, `awaiting_reply`
+# is False even while `turns` stays non-empty (e.g. Antigravity holding its outer turn open while
+# background commands, subagents, or timers run silently). The invocation still stays alive until
+# `quiet` is True (both `handed` and `turns` empty) so late settlements and background completions
+# are observed, while the foreground stall watchdog bounds only `awaiting_reply` waits.
 @dataclass(frozen=True, slots=True)
 class Foreground:
     handed: tuple[Handed, ...] = ()
     turns: frozenset[str] = frozenset()
     generation: int = 0
+    awaiting_reply_turns: frozenset[str] = frozenset()
 
     @property
     def quiet(self) -> bool:
         return not self.handed and not self.turns
+
+    @property
+    def awaiting_reply(self) -> bool:
+        return bool(self.handed or self.awaiting_reply_turns)
 
     def hand(self, batch: tuple[Handed, ...]) -> Foreground:
         return replace(self, handed=(*self.handed, *batch))
@@ -125,11 +135,29 @@ class Foreground:
             return self, ()
         match event:
             case TurnStarted(turn_id=turn_id):
-                return replace(self, turns=self.turns | {turn_id}), ()
+                return replace(
+                    self,
+                    turns=self.turns | {turn_id},
+                    awaiting_reply_turns=self.awaiting_reply_turns | {turn_id},
+                ), ()
             case TurnCompleted(turn_id=turn_id):
-                return replace(self, turns=self.turns - {turn_id}), ()
+                return replace(
+                    self,
+                    turns=self.turns - {turn_id},
+                    awaiting_reply_turns=self.awaiting_reply_turns - {turn_id, ""},
+                ), ()
             case InputInContext(key=key, turn_id=turn_id):
-                return self._settle(key, lambda h: Commit(h, turn_id))
+                updated, settlements = self._settle(key, lambda h: Commit(h, turn_id))
+                if settlements:
+                    updated = replace(
+                        updated, awaiting_reply_turns=updated.awaiting_reply_turns | {turn_id}
+                    )
+                return updated, settlements
+            case AssistantText(turn_id=turn_id, text=text) if text.strip():
+                remaining = self.awaiting_reply_turns - {turn_id, ""}
+                if remaining == self.awaiting_reply_turns:
+                    return self, ()
+                return replace(self, awaiting_reply_turns=remaining), ()
             case InputRejected(key=key, reason=reason):
                 return self._settle(key, lambda h: Requeue(h, reason))
             case InputLost(key=key):

@@ -21,6 +21,7 @@ from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    ProbeTimers,
     RuntimeFixture,
     completed,
     in_a_turn,
@@ -30,16 +31,20 @@ from agent.graph.claim.tests.harness_support import (
     row_status,
     runtime,
     timeline_inbound_ids,
+    turn_events,
     wait_until,
+    with_virtual_clock,
 )
 from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.test_harness_turn import config
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
+from agent.graph.llm_errors import HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.record.read import read_window
+from base.agents.recovery.breaker import HALT_REASON_TURN_STALLED
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -52,11 +57,13 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.events.live.tests.live_capture import live_events as live_events
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     FileSessionRegistry,
     HarnessInput,
     InputInContext,
     InputRejected,
+    SessionFailed,
     SessionRecord,
     TurnOrigin,
     TurnStarted,
@@ -65,6 +72,8 @@ from base.lm.harness.antigravity.timing_store import store_timings, timing_path
 from base.lm.harness.antigravity.trajectory import parse_trajectory
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import harness_sessions_dir, workspace_dir
 
 
@@ -698,3 +707,89 @@ async def test_fork_sink_fail_closed_when_unanchored_never_falls_back_to_zero(
     assert publications(db_conn, child_id) == [
         ("harness:claude:cccccccc-3333-4333-8333-333333333333", "child recovered reply")
     ]
+
+
+@pytest.mark.parametrize(
+    "reply_to_steer", [False, True], ids=["stalls_at_900s", "replied_resumes_wait"]
+)
+async def test_steer_after_long_background_silence_resets_stall_clock(
+    reply_to_steer: bool,
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+) -> None:
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        if len(engine.delivered) == 1:
+            return turn_events(inputs, AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nJob running."))
+        reply = (
+            [AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nStill running.")] if reply_to_steer else []
+        )
+        return [*(InputInContext(i.key, "t1", 1) for i in inputs), *reply]
+
+    agent_id = agent_row(db_conn)
+    chat1 = insert_row(db_conn, agent_id, "chat", "user", "start background job")
+    timers = ProbeTimers(start=100.0)
+    engine = FakeEngine(script=script)
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat1) == "done", "first chat committed")
+        await timers.advance_and_probe(engine, 1000.0)
+        assert not task.done()
+        chat2 = insert_row(db_conn, agent_id, "chat", "user", "status update?")
+        engine.notify_inbound()
+        await engine.wait_deliveries(2)
+        await wait_until(lambda: row_status(db_conn, chat2) == "done", "steered chat in context")
+        if reply_to_steer:
+            await timers.advance_and_probe(engine, 5000.0)
+            assert not task.done()
+            engine.emit(completed("t1", "MEIVA_DISPLAY_TO_USER\nJob done."))
+            await task
+            assert [row_status(db_conn, i) for i in (chat1, chat2)] == ["done", "done"]
+            assert not loguru_records.extras(event="harness_turn_stalled")
+            assert not loguru_records.extras(event="llm_turn_aborted")
+            return
+        await timers.advance_and_probe(engine, 899.0)
+        assert not task.done()
+        timers.advance(1.0)
+        engine.notify_inbound()
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            await task
+    assert halted.value.reason == HALT_REASON_TURN_STALLED
+    assert halted.value.requeued_inbound_ids == (chat2,)
+    assert [row_status(db_conn, i) for i in (chat1, chat2)] == ["done", "pending"]
+    assert "turn stalled" in engine.retired
+
+
+@pytest.mark.parametrize("close_mode", ["eof", "session_failed"])
+async def test_answered_background_turn_exits_cleanly_on_process_eof_without_abort_error(
+    close_mode: str,
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "watch background build")
+    timers = ProbeTimers(start=100.0)
+    engine = FakeEngine(
+        script=lambda inputs: turn_events(
+            inputs, AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nWatching build in background.")
+        )
+    )
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
+    task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    async with asyncio.timeout(10):
+        await engine.wait_deliveries(1)
+        await wait_until(lambda: row_status(db_conn, chat_id) == "done", "chat committed")
+        await timers.advance_and_probe(engine, 2000.0)
+        assert not task.done()
+        if close_mode == "eof":
+            engine.end_stream()
+        else:
+            engine.emit(SessionFailed("agy stream ended"))
+        command = await task
+    assert command.goto == "claim" and row_status(db_conn, chat_id) == "done"
+    assert "session unavailable" in engine.retired
+    assert not loguru_records.extras(event="harness_turn_stalled")
+    assert not loguru_records.extras(event="llm_turn_aborted")

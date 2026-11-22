@@ -54,7 +54,7 @@
   "agent/graph/claim/tests/test_core.py": 33,
   "agent/graph/claim/tests/test_harness_delivery.py": 6,
   "agent/graph/claim/tests/test_harness_interrupt_note.py": 1,
-  "agent/graph/claim/tests/test_harness_passive_delivery.py": 10,
+  "agent/graph/claim/tests/test_harness_passive_delivery.py": 9,
   "agent/graph/claim/tests/test_harness_reconcile.py": 7,
   "agent/graph/claim/tests/test_harness_requeue.py": 1,
   "agent/graph/claim/tests/test_harness_turn.py": 5,

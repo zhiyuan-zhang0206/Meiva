@@ -15,6 +15,7 @@ import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_foreground import Foreground, Handed
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
@@ -38,11 +39,15 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     HarnessInput,
     HarnessNotDeliveredError,
+    InputInContext,
     Reconciliation,
     TextBlock,
+    TurnOrigin,
+    TurnStarted,
 )
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -679,3 +684,30 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
     ]
     assert again.blocks[1:] == first.blocks, "the same message blocks, delivered again as one input"
     assert isinstance(again.blocks[0], TextBlock) and "restarted" in again.blocks[0].text
+
+
+def test_foreground_awaiting_reply_transitions() -> None:
+    fg = Foreground(generation=1)
+    assert not fg.awaiting_reply
+
+    fg = fg.hand((Handed("inbound-1", 1),))
+    assert fg.awaiting_reply
+
+    fg, _ = fg.on_event(TurnStarted("t1", TurnOrigin.INPUT, ("inbound-1",), 1))
+    fg, _ = fg.on_event(InputInContext("inbound-1", "t1", 1))
+    assert fg.handed == () and fg.turns == frozenset({"t1"}) and fg.awaiting_reply
+
+    fg, _ = fg.on_event(AssistantText("t1", "   "))
+    assert fg.awaiting_reply
+
+    fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nstarted background work"))
+    assert fg.turns == frozenset({"t1"}) and not fg.quiet and not fg.awaiting_reply
+
+    fg = fg.hand((Handed("inbound-2", 2),))
+    assert fg.awaiting_reply
+
+    fg, _ = fg.on_event(InputInContext("inbound-2", "t1", 1))
+    assert fg.handed == () and fg.awaiting_reply
+
+    fg, _ = fg.on_event(AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nnoted"))
+    assert not fg.awaiting_reply

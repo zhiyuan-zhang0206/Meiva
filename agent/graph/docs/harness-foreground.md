@@ -148,27 +148,31 @@ is not detected; the facts above are the whole protection, and no process regist
 
 A turn that stops before it delivered a reply halts the agent instead of failing it: the harness ran out of quota
 (HTTP 429, a usage limit), or the turn stalled, no event from the harness for the agent's
-`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began was still
-unsettled. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
+`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began still awaits a
+reply. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
 process is alive, and `harness_turn` is exempt from the node stall probe. The stall clock is the last event read
-or the last handover; an event being written or waiting to be read counts as heard.
+or the last handover; an event being written or waiting to be read counts as heard. Once every handed input has
+delivered a non-empty `AssistantText` reply and only open background turn(s) remain (`not awaiting_reply`), the
+stall watchdog is disarmed so background commands, sub-agents, and timers may wait silently for as long as the
+underlying CLI process stays alive (if the process exits or EOFs in that state, the session is retired and the
+agent idles cleanly without `llm_turn_aborted` or a crash corpse mark). If a new input is later steered into that
+open turn, `awaiting_reply` becomes true again, the stall clock resets to the new input's handover, and only inputs
+from the new unanswered wave are eligible for requeue if it stalls or hits quota.
 
 Both settle the same way (`harness_turn.py::_settle_halted_turn`, `harness_inbox.py::settle_halted_turn`): the
-session is retired (a stalled CLI cannot act on the inputs later), the turn's rows, those already marked done by
-an echo included, go back to `pending` with their handback counted (`harness_quota_retries` in the payload), and
-the recovery breaker halts the agent in the same transaction with the reason `quota_exhausted` or `turn_stalled`.
+session is retired (a stalled CLI cannot act on the inputs later), the turn's unanswered rows, those already marked
+done by an echo included, go back to `pending` with their handback counted (`harness_quota_retries` in the payload),
+and the recovery breaker halts the agent in the same transaction with the reason `quota_exhausted` or `turn_stalled`.
 The alert is the turn's Error event, the anomaly event (`harness_quota_exhausted` / `harness_turn_stalled`), the
 `recovery halted` line of `meiva agents get`, and health-probe check 10, which counts each reason apart. A new chat
 resumes the agent (`breaker.py::admit_pending_wake`); the handed-back rows ride with it. A stall or quota abort after
-the turn already delivered output (`has_delivered_output`) never requeues already-delivered rows
-(`requeued_inbound_ids=()`) and still finishes flushing the timeline before raising `HarnessTurnHaltedError`
-(never stamping `last_turn_fatal_at` for the corpse reaper): quota exhaustion and stalls after partial output without
-a completed `AssistantText` reply still trip the recovery breaker so background wakes cannot loop, whereas a stall
-after a completed `AssistantText` reply settles without tripping the breaker so an open background wait does not
-strand a responsive agent. When an adapter knows an open turn is legitimately silent (for example, Antigravity's
-explicit timed `schedule(DurationSeconds=...)` tool), `TurnEngine.silence_floor_monotonic()` supplies the per-turn
-monotonic floor so the foreground stall watchdog waits until past the timer's due time without reaching into any
-adapter's tools.
+the current input wave already delivered partial output (`has_delivered_output`) never requeues those side-effecting
+rows (`requeued_inbound_ids=()`) and still finishes flushing the timeline and trips the recovery breaker before
+raising `HarnessTurnHaltedError` (never stamping `last_turn_fatal_at` for the corpse reaper). When an adapter knows
+an open turn awaiting a reply is legitimately silent (for example, Antigravity's explicit timed
+`schedule(DurationSeconds=...)` tool called before any reply), `TurnEngine.silence_floor_monotonic()` supplies the
+per-turn monotonic floor so the foreground stall watchdog waits until past the timer's due time without reaching
+into any adapter's tools.
 
 A handed-back row is handed over again under a new key, `inbound-<id>-handback-<n>`
 (`base/agents/messages/harness_input_key.py`). Its first key is in the harness's record already, and Claude Code

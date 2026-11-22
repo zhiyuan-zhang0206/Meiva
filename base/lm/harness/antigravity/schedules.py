@@ -24,7 +24,6 @@ from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 SCHEDULE_TOOL = "schedule"
 MANAGE_TASK_TOOL = "manage_task"
 UNBOUNDED_SCHEDULE_SECONDS = 24 * 3600.0
-AFTER_DUE_MARGIN_SECONDS = 180.0
 _LIMIT = 100
 _TASK_ID_RE = re.compile(r"task id:\s*([^\s\"']+)", re.IGNORECASE)
 

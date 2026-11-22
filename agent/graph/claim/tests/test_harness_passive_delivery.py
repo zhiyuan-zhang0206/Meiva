@@ -18,13 +18,16 @@ from agent.db import claim_inbound_batch
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    ProbeTimers,
     RuntimeFixture,
     completed,
     in_a_turn,
     input_key,
     insert_row,
     row_status,
+    turn_events,
     wait_until,
+    with_virtual_clock,
 )
 from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
@@ -607,11 +610,32 @@ async def test_a_turn_that_keeps_sending_events_outlives_the_threshold(
     assert engine.retired == []
 
 
+async def _start_virtual_turn(
+    db: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    engine: FakeEngine,
+    *,
+    agent_id: int | None = None,
+    prompt: str = "start job",
+    wait_done: bool = True,
+) -> tuple[int, int, ProbeTimers, asyncio.Task[object]]:
+    aid = agent_row(db) if agent_id is None else agent_id
+    chat_id = insert_row(db, aid, "chat", "user", prompt)
+    timers = ProbeTimers(start=100.0)
+    rt = with_virtual_clock(harness_runtime(engine, agent_id=aid), timers)
+    task: asyncio.Task[object] = asyncio.create_task(
+        harness_turn_node(AgentState(), rt, config(aid))
+    )
+    await engine.wait_deliveries(1)
+    if wait_done:
+        await wait_until(lambda: row_status(db, chat_id) == "done", "initial input committed")
+    return aid, chat_id, timers, task
+
+
 # meiva:note
-# Regression for #7676 (task #7520): stalling after a completed AssistantText reply raises
-# HarnessTurnHaltedError without requeue or breaker halt, and refreshes last_message_text while
-# clearing any prior last_turn_fatal_at so corpse_reaper cannot kill the live agent.
-async def test_a_turn_stalling_after_delivered_output_halts_without_requeue_or_crash_mark(
+# Answered background turns (`awaiting_reply=False`) outlive 900s indefinitely on a virtual clock,
+# exit cleanly on process EOF without llm_turn_aborted, and reset the stall clock on new steers.
+async def test_answered_background_turn_outlives_stall_threshold_indefinitely(
     db_conn: psycopg.Connection, harness_runtime: RuntimeFixture, loguru_records: LogRecords
 ) -> None:
     agent_id = agent_row(db_conn)
@@ -621,36 +645,70 @@ async def test_a_turn_stalling_after_delivered_output_halts_without_requeue_or_c
         (agent_id,),
     )
     db_conn.commit()
-    chat_id = insert_row(db_conn, agent_id, "chat", "user", "activation ratio question")
     engine = FakeEngine(
-        script=lambda inputs: [
-            TurnStarted("t1", TurnOrigin.INPUT, tuple(i.key for i in inputs), 1),
-            *(InputInContext(i.key, "t1", 1) for i in inputs),
-            AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nKimi K2 is ~3.2% active."),
-        ]
+        script=lambda inputs: turn_events(
+            inputs,
+            ToolUse("t1", "t1#1", "run_command", {"CommandLine": "train.sh"}),
+            ToolResult("t1", "t1#1", False, "running in background"),
+            AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nStarted background training."),
+        )
     )
-    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 0.3)
     async with asyncio.timeout(10):
-        with pytest.raises(HarnessTurnHaltedError) as halted:
-            await harness_turn_node(AgentState(), rt, config(agent_id))
-    assert halted.value.reason == HALT_REASON_TURN_STALLED
-    assert halted.value.requeued_inbound_ids == ()
-    assert row_status(db_conn, chat_id) == "done"
-    assert _halt(db_conn, agent_id) == (0, None, None)
-    assert "turn stalled" in engine.retired
+        _, _, timers, task = await _start_virtual_turn(
+            db_conn, harness_runtime, engine, agent_id=agent_id
+        )
+        await timers.advance_and_probe(engine, 10_000.0)
+        assert not task.done() and engine.retired == []
+        engine.emit(completed("t1", "MEIVA_DISPLAY_TO_USER\nBackground training finished."))
+        await task
+    assert engine.retired == [] and _halt(db_conn, agent_id) == (0, None, None)
+    assert not loguru_records.extras(event="harness_turn_stalled")
+    assert not loguru_records.extras(event="llm_turn_aborted")
     db_conn.commit()
     row = db_conn.execute(
-        "SELECT last_message_text, last_turn_fatal_at, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
+        "SELECT last_message_text, last_turn_fatal_at, last_turn_fatal_reason "
+        "FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone()
-    assert row == ("Kimi K2 is ~3.2% active.", None, None)
+    assert row == ("Background training finished.", None, None)
+
+
+@pytest.mark.parametrize(
+    "acknowledged", [False, True], ids=["unacked_handed", "in_context_no_reply"]
+)
+async def test_unanswered_input_stalls_at_900s_virtual_clock_and_requeues(
+    acknowledged: bool,
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+) -> None:
+    engine = FakeEngine(script=turn_events if acknowledged else (lambda _i: []))
+    agent_id = agent_row(db_conn)
+    async with asyncio.timeout(10):
+        _, chat_id, timers, task = await _start_virtual_turn(
+            db_conn, harness_runtime, engine, agent_id=agent_id, wait_done=acknowledged
+        )
+        engine.records = {input_key(chat_id): Reconciliation.NOT_FOUND}
+        await timers.advance_and_probe(engine, 899.0)
+        assert not task.done()
+        timers.advance(1.0)
+        engine.notify_inbound()
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            await task
+    assert (
+        halted.value.reason == HALT_REASON_TURN_STALLED
+        and halted.value.requeued_inbound_ids == (chat_id,)
+    )
+    _assert_requeued_pending(db_conn, (chat_id,), expected_retries=1)
+    assert "turn stalled" in engine.retired and _halt(db_conn, agent_id) == (
+        1,
+        HALT_REASON_TURN_STALLED,
+        None,
+    )
     (warning,) = loguru_records.extras(event="harness_turn_stalled", level="WARNING")
-    assert warning["requeued_count"] == 0 and warning["breaker_halted"] is False
+    assert warning["requeued_count"] == 1 and warning["stall_seconds"] == 900.0
 
 
-# meiva:note
-# Post-output quota exhaustion and partial-output stalls without an AssistantText reply both avoid
-# requeuing side-effecting inputs while still tripping the recovery breaker.
 @pytest.mark.parametrize(
     ("tail_events", "expected_reason", "expected_event"),
     [
@@ -670,77 +728,60 @@ async def test_post_tool_quota_or_stall_without_reply_trips_breaker_without_requ
     harness_runtime: RuntimeFixture,
     loguru_records: LogRecords,
 ) -> None:
-    agent_id = agent_row(db_conn)
-    chat_id = insert_row(db_conn, agent_id, "chat", "user", "run tool then abort")
     engine = FakeEngine(
-        script=lambda inputs: [
-            TurnStarted("t1", TurnOrigin.INPUT, tuple(i.key for i in inputs), 1),
-            *(InputInContext(i.key, "t1", 1) for i in inputs),
+        script=lambda inputs: turn_events(
+            inputs,
             ToolUse("t1", "t1#1", "run_command", {"CommandLine": "echo ok"}),
             ToolResult("t1", "t1#1", False, "ok"),
             *tail_events,
-        ]
+        )
     )
-    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 0.3)
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(10):
+        agent_id, chat_id, timers, task = await _start_virtual_turn(
+            db_conn, harness_runtime, engine, wait_done=not tail_events
+        )
+        if not tail_events:
+            timers.advance(900.0)
+            engine.notify_inbound()
         with pytest.raises(HarnessTurnHaltedError) as halted:
-            await harness_turn_node(AgentState(), rt, config(agent_id))
+            await task
     assert halted.value.reason == expected_reason and halted.value.requeued_inbound_ids == ()
-    assert row_status(db_conn, chat_id) == "done"
-    assert _halt(db_conn, agent_id) == (1, expected_reason, None)
+    assert row_status(db_conn, chat_id) == "done" and _halt(db_conn, agent_id) == (
+        1,
+        expected_reason,
+        None,
+    )
     (warning,) = loguru_records.extras(event=expected_event, level="WARNING")
-    assert warning["requeued_count"] == 0 and warning["breaker_halted"] is True
+    assert warning["requeued_count"] == 0
 
 
 # meiva:note
-# Harness-agnostic silence floor: an engine reporting a monotonic floor for open turns waits past
-# stall_seconds without the graph inspecting tool names; a "schedule" tool with no floor still stalls.
+# Harness-agnostic silence floor protects pre-reply schedule timers; unreported schedules still stall.
 async def test_engine_silence_floor_outlives_stall_threshold_while_unreported_schedule_stalls(
     db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
-    agent_id = agent_row(db_conn)
-    chat_id = insert_row(db_conn, agent_id, "chat", "user", "check training in a bit")
+    def schedule_script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        return turn_events(
+            inputs,
+            ToolUse("t1", "t1#1", "schedule", {"DurationSeconds": 1800, "Prompt": "check"}),
+            ToolResult("t1", "t1#1", False, "task id: conv-1/task-1"),
+        )
 
-    class FloorEngine(FakeEngine):
-        waiting: asyncio.Task[None] | None = None
-
-        async def deliver(
-            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
-        ) -> None:
-            self.delivered.append(list(inputs))
-            keys = tuple(item.key for item in inputs)
-
-            async def run_timer() -> None:
-                self.emit(
-                    TurnStarted("t1", TurnOrigin.INPUT, keys, 1),
-                    *(InputInContext(key, "t1", 1) for key in keys),
-                    AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nscheduled check"),
-                )
-                await asyncio.sleep(0.7)
-                self.emit(completed("t1", "MEIVA_DISPLAY_TO_USER\ntimer fired"))
-
-            self.waiting = asyncio.get_running_loop().create_task(run_timer())
-
-    engine = FloorEngine()
-    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 0.3)
-    due = rt.context.require_clock().monotonic() + 1.5
-    engine.silence_floor = lambda turns: due if turns == frozenset({"t1"}) else None
+    engine = FakeEngine(script=schedule_script)
+    engine.silence_floor = lambda turns: 1900.0 if turns == frozenset({"t1"}) else None
     async with asyncio.timeout(10):
-        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+        _, chat_id, timers, task = await _start_virtual_turn(db_conn, harness_runtime, engine)
+        await timers.advance_and_probe(engine, 1800.0)
+        assert not task.done()
+        engine.emit(completed("t1", "MEIVA_DISPLAY_TO_USER\ntimer fired"))
+        await task
     assert row_status(db_conn, chat_id) == "done" and engine.retired == []
 
-    other_agent = agent_row(db_conn)
-    _ = insert_row(db_conn, other_agent, "chat", "user", "call mcp schedule tool")
-    mcp_engine = FakeEngine(
-        script=lambda inputs: [
-            TurnStarted("t1", TurnOrigin.INPUT, tuple(i.key for i in inputs), 1),
-            *(InputInContext(i.key, "t1", 1) for i in inputs),
-            ToolUse("t1", "t1#1", "schedule", {"DurationSeconds": 60, "Prompt": "check"}),
-            ToolResult("t1", "t1#1", False, "ok"),
-        ]
-    )
-    rt2 = _with_stall_seconds(harness_runtime(mcp_engine, agent_id=other_agent), 0.3)
-    async with asyncio.timeout(5):
+    mcp_engine = FakeEngine(script=schedule_script)
+    async with asyncio.timeout(10):
+        _, _, timers2, task2 = await _start_virtual_turn(db_conn, harness_runtime, mcp_engine)
+        timers2.advance(900.0)
+        mcp_engine.notify_inbound()
         with pytest.raises(HarnessTurnHaltedError) as halted:
-            await harness_turn_node(AgentState(), rt2, config(other_agent))
+            await task2
     assert halted.value.reason == HALT_REASON_TURN_STALLED and "turn stalled" in mcp_engine.retired

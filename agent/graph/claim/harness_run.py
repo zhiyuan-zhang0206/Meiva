@@ -167,6 +167,18 @@ class ForegroundRun:
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
 
+    @property
+    def awaiting_reply(self) -> bool:
+        return self.fg.awaiting_reply or bool(self._settling)
+
+    @property
+    def settled_for_background_exit(self) -> bool:
+        return (
+            not self.awaiting_reply
+            and not self._synthetic
+            and (bool(self.fg.turns) or self._turn_ended)
+        )
+
     def pending_inputs(self) -> list[dict[str, str]]:
         return [{"key": handed.key, "prompt": prompt} for handed, prompt in self._synthetic]
 
@@ -393,6 +405,8 @@ class ForegroundRun:
                 self._streamed.setdefault(turn_id, []).append(text)
                 await self._projector.on_event(event)
                 if text.strip():
+                    self._committed_by_turn.pop(turn_id, None)
+                    self._committed_by_turn.pop("", None)
                     await persist_last_active(self._ctx, self._agent_id, text)
             case (
                 ReasoningDelta()
@@ -507,20 +521,26 @@ class ForegroundRun:
         return False
 
     # meiva:note
-    # Every wait of the delivery loop is for the harness, so every wait is bounded by how long the
-    # harness may stay silent: while something handed over is unsettled or a turn runs, no event for
-    # `stall_seconds` ends the invocation with `HarnessTurnStalledError` (`harness_turn.py` halts
-    # the agent and alerts). The clock is the last event read or the last handover. The harness is
-    # not silent while an event it sent is being written or waits to be read: how fast this side
-    # writes is not the harness's silence. The host's progress tick does not count either, because it
-    # only says that this process is alive.
+    # Every wait of the delivery loop while an input or open turn still awaits a reply is bounded by
+    # `stall_seconds`: no event for `stall_seconds` ends the invocation with `HarnessTurnStalledError`
+    # (`harness_turn.py` halts the agent and alerts). Once every input has delivered a non-empty
+    # `AssistantText` reply and only open background turn(s) remain (`not self.awaiting_reply`), the
+    # harness may stay silent indefinitely while the underlying process lives (process exit/EOF still
+    # wakes `_read` immediately). If a new input is later steered in, `_deliver_ready` flips
+    # `awaiting_reply` back to True and resets `_last_heard` to that moment so prior background silence
+    # is never charged to the new input. The harness is not silent while an event it sent is being
+    # written or waits to be read, and the host's progress tick does not count as harness activity.
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _wait_for_change(self, timeout: float) -> None:
         now = self._clock.monotonic()
         if self._reading or (self._subscription is not None and self._subscription.unread):
             self._last_heard = now
-        if not self._foreground_quiet():
-            floor = self._bridge.silence_floor_monotonic(self.fg.turns)
+        if self.awaiting_reply:
+            floor = (
+                None
+                if self.fg.handed or self._settling
+                else self._bridge.silence_floor_monotonic(self.fg.awaiting_reply_turns)
+            )
             heard = max(self._last_heard, floor) if floor is not None else self._last_heard
             silent = now - heard
             if silent >= self._stall_seconds:
@@ -614,6 +634,13 @@ class ForegroundRun:
             source="read from the database, not from your summary",
         )
 
+    def _begin_delivery(self, handed: Sequence[Handed]) -> None:
+        if not self.awaiting_reply:
+            self._projector.reset_turn_delivery()
+        self.last_key = handed[-1].key
+        self.fg = self.fg.hand(tuple(handed))
+        self._last_heard = self._clock.monotonic()
+
     async def _deliver_ready(self) -> bool:
         if asyncio.get_running_loop().time() < self._backoff_until:
             return False
@@ -651,8 +678,7 @@ class ForegroundRun:
         if not handed:
             return True
         compaction_note = await self._compaction_note()
-        self.last_key = handed[-1].key
-        self.fg = self.fg.hand(tuple(handed))
+        self._begin_delivery(handed)
         if group is not None:
             await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
         self._projector.note_input_keys([item.key for item in inputs])

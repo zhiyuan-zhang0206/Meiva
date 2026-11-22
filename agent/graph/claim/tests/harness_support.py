@@ -9,7 +9,7 @@ import json
 import os
 from collections.abc import AsyncGenerator, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -28,6 +28,8 @@ from base.agents.history.transcript_timeline.record.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
+from base.clock.tests.fakes import clock_over
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -62,6 +64,7 @@ from base.paths import meiva_home
 __all__ = [
     "FakeEngine",
     "FakeSubscription",
+    "ProbeTimers",
     "completed",
     "config",
     "hosted_resources",
@@ -73,7 +76,9 @@ __all__ = [
     "runtime",
     "silent_engine",
     "timeline_inbound_ids",
+    "turn_events",
     "wait_until",
+    "with_virtual_clock",
 ]
 
 Script = Callable[[Sequence[HarnessInput]], Sequence[BridgeEvent]]
@@ -176,6 +181,7 @@ class FakeEngine:
         self.subscriptions: set[FakeSubscription] = set()
         self.subscribe_count = 0
         self._inbound = asyncio.Event()
+        self._delivery_signal = asyncio.Event()
         self.silence_floor: Callable[[Collection[str]], float | None] | None = None
         # meiva:note
         # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
@@ -220,12 +226,23 @@ class FakeEngine:
             for event in events:
                 subscription.queue.put_nowait(event)
 
+    def end_stream(self) -> None:
+        for subscription in tuple(self.subscriptions):
+            subscription.queue.put_nowait(None)
+
     async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
         self.delivered.append(list(inputs))
         if self.record is not None:
             self.record.inputs.update((item.key, item) for item in inputs)
         self.compaction_notes.append(compaction_note)
         self.emit(*self._script(inputs))
+        self._delivery_signal.set()
+
+    async def wait_deliveries(self, count: int) -> None:
+        while len(self.delivered) < count:
+            self._delivery_signal.clear()
+            if len(self.delivered) < count:
+                await self._delivery_signal.wait()
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         self.reconciled.append(list(keys))
@@ -315,6 +332,42 @@ async def wait_until(condition: Callable[[], bool], what: str) -> None:
                 await asyncio.sleep(0.02)
     except TimeoutError as error:
         raise AssertionError(what) from error
+
+
+class ProbeTimers(ManualTimers):
+    def __init__(self, start: float = 0.0) -> None:
+        super().__init__(start=start)
+        self._read = asyncio.Event()
+
+    def monotonic(self) -> float:
+        self._read.set()
+        return super().monotonic()
+
+    async def advance_and_probe(self, engine: FakeEngine, seconds: float) -> None:
+        self.advance(seconds)
+        self._read.clear()
+        engine.notify_inbound()
+        await self._read.wait()
+        await asyncio.sleep(0)
+
+
+def turn_events(inputs: Sequence[HarnessInput], *tail: BridgeEvent) -> list[BridgeEvent]:
+    keys = tuple(i.key for i in inputs)
+    return [
+        TurnStarted("t1", TurnOrigin.INPUT, keys, 1),
+        *(InputInContext(k, "t1", 1) for k in keys),
+        *tail,
+    ]
+
+
+def with_virtual_clock(
+    rt: Runtime[MeivaContext], timers: ProbeTimers, *, stall_seconds: float = 900.0
+) -> Runtime[MeivaContext]:
+    agent = AgentSlices.resolve(
+        {"harness_turn_stall_seconds": stall_seconds}, default_reader=defaults()
+    )
+    clock = clock_over(timers)
+    return replace(rt, context=replace(rt.context, agent=agent, clock_factory=lambda: clock))
 
 
 def silent_engine() -> FakeEngine:
