@@ -48,8 +48,9 @@ Remote file transfer uses paths inside the calling agent's workspace, with an
 for Chrome to read it after attachment. Submit uploads within ten minutes and
 before an SSH connection ends. The caller writes `take_screenshot` and
 `take_snapshot` artifacts from bounded replies. Remote screenshots capture
-up to 800 by 600 viewport pixels at a bounded scale. Full-page and element
-screenshots remain available through local Chrome. Remote navigation accepts
+up to 800 by 600 viewport pixels at a bounded scale. Screenshot capture brings
+the owned tab to the foreground so Chrome can composite it. Full-page and
+element screenshots remain available through local Chrome. Remote navigation accepts
 HTTP(S) or `about:blank`.
 
 Remote tools use an allowlist of page operations. Browser-wide performance

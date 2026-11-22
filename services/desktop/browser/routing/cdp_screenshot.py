@@ -77,6 +77,7 @@ async def capture_owned_viewport(
             raise TypeError("Could not attach to the owned Chrome target")
         if tab_target:
             session_id = await _page_session(ws, ids, session_id)
+        await cdp_call(ws, ids, "Page.bringToFront", {}, _RESPONSE, session_id=session_id)
         dpr = await _device_scale(ws, ids, session_id)
         metrics = await cdp_call(
             ws, ids, "Page.getLayoutMetrics", {}, _RESPONSE, session_id=session_id
@@ -84,6 +85,7 @@ async def capture_owned_viewport(
         params: dict[str, object] = {
             "format": fmt,
             "captureBeyondViewport": False,
+            "optimizeForSpeed": True,
             "clip": _clip(metrics.get("cssVisualViewport"), dpr),
         }
         if fmt != "png":
