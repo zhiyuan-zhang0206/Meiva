@@ -6886,134 +6886,6 @@
         }
       }
     },
-    "/api/event-resolutions": {
-      "post": {
-        "summary": "Create Event Resolution",
-        "description": "Dismiss one event class and emit its immutable transition marker.\n\nGateway auth establishes that this is an operator action but does not carry\nan agent identity, so `dismissed_by=0` is the documented user/operator\nsentinel. The ops agent uses the same authenticated API surface.",
-        "operationId": "create_event_resolution_api_event_resolutions_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EventResolutionCreate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventResolutionRow"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "List Event Resolutions",
-        "description": "List active dismissals or reopened history for the ops review cycle.",
-        "operationId": "list_event_resolutions_api_event_resolutions_get",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "dismissed",
-                    "reopened"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventResolutionListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/event-resolutions/{dismissal_id}/reopen": {
-      "post": {
-        "summary": "Reopen Event Resolution",
-        "description": "Manually reopen one active dismissal and emit its transition marker.",
-        "operationId": "reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post",
-        "parameters": [
-          {
-            "name": "dismissal_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Dismissal Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventResolutionRow"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/ops/monitor": {
       "get": {
         "summary": "Get Ops Monitor",
@@ -7235,7 +7107,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd` / `google_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd / google_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
+        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog heartbeats) — single source of truth shared with `/api/alerts`\n- `tokens` / cost slices: the window's `llm_usage` rows in `telemetry_events`\n- `diagnostics`: the window's structured error/anomaly classes in `telemetry_events`, automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -7291,11 +7163,11 @@
         }
       }
     },
-    "/api/stats/alert-classes": {
+    "/api/stats/diagnostics": {
       "get": {
-        "summary": "Get Alert Classes",
-        "description": "The selected window's warning/error classes, most frequent first.\n\nOnly unresolved classes by default: a class is resolved when an active dismissal cancels it or when\n`GatewayConfig.alert_class_quiet_seconds` passed with nothing recorded (`resolved_by` says which).\n`include_resolved=true` lists the resolved ones too — the history view. The listed rows are capped at\n`GatewayConfig.alert_classes_limit`; `total_classes` / `total_events` count the whole returned set.\nOne connection, an 8-second statement timeout (a timeout is a retriable 503).",
-        "operationId": "get_alert_classes_api_stats_alert_classes_get",
+        "summary": "Get Diagnostics",
+        "description": "The selected window's diagnostic error/anomaly classes, most frequent first.\n\nOnly active classes by default: a class is automatically archived when it has not\noccurred on the currently deployed commit SHA (`archived_by='deployed_sha'`) or when\n`GatewayConfig.diagnostic_quiet_seconds` passed with nothing recorded (`archived_by='quiet'`).\n`include_archived=true` lists archived classes too. Capped at `GatewayConfig.diagnostics_limit`.",
+        "operationId": "get_diagnostics_api_stats_diagnostics_get",
         "parameters": [
           {
             "name": "hours",
@@ -7307,13 +7179,13 @@
             }
           },
           {
-            "name": "include_resolved",
+            "name": "include_archived",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "Include Resolved"
+              "title": "Include Archived"
             }
           }
         ],
@@ -7323,7 +7195,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AlertClassesResponse"
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
                 }
               }
             }
@@ -7341,11 +7213,11 @@
         }
       }
     },
-    "/api/stats/alert-classes/samples": {
+    "/api/stats/diagnostics/samples": {
       "get": {
-        "summary": "Get Alert Class Samples",
-        "description": "The newest `GatewayConfig.alert_samples_limit` events of one class in the window, with their message and context.\n\n`process` matches exactly (an empty value is the empty-process class). The literal level\npredicate lets the partial index on warning/error/critical rows serve the newest-first scan.",
-        "operationId": "get_alert_class_samples_api_stats_alert_classes_samples_get",
+        "summary": "Get Diagnostic Samples",
+        "description": "The newest `GatewayConfig.diagnostic_samples_limit` events of one diagnostic class in the window, with their message, deployed SHA and context.",
+        "operationId": "get_diagnostic_samples_api_stats_diagnostics_samples_get",
         "parameters": [
           {
             "name": "level",
@@ -7410,7 +7282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AlertClassSamples"
+                  "$ref": "#/components/schemas/DiagnosticSamples"
                 }
               }
             }
@@ -10027,211 +9899,6 @@
         "title": "AgentTps",
         "description": "Token-per-second metrics for one agent — two views of throughput.\n\n`lm_stage_tps` = output tokens / cumulative LLM-call wall-clock,\nisolating just the model's generation speed excluding execute_code and framework\noverhead. Denominator is the sum of all `turn_end.duration_seconds` over the window.\n\n`agent_lifecycle_tps` = output tokens / agent's cumulative alive\nwall-clock, covering the full agent runtime including non-LLM time.\nDenominator is the agent's total time in non-terminated status (sum of each\nspawn/resurrect → terminate interval, excluding gaps spent terminated)."
       },
-      "AlertClassRow": {
-        "properties": {
-          "level": {
-            "type": "string",
-            "enum": [
-              "warning",
-              "error",
-              "critical"
-            ],
-            "title": "Level"
-          },
-          "event_name": {
-            "type": "string",
-            "title": "Event Name"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "process": {
-            "type": "string",
-            "title": "Process"
-          },
-          "category": {
-            "type": "string",
-            "enum": [
-              "telemetry",
-              "log"
-            ],
-            "title": "Category"
-          },
-          "count": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Count"
-          },
-          "first_seen": {
-            "type": "string",
-            "format": "date-time",
-            "title": "First Seen"
-          },
-          "last_seen": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Last Seen"
-          },
-          "dismissal_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dismissal Id"
-          },
-          "resolved_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "dismissed",
-                  "quiet"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved By"
-          }
-        },
-        "type": "object",
-        "required": [
-          "level",
-          "event_name",
-          "source",
-          "process",
-          "category",
-          "count",
-          "first_seen",
-          "last_seen",
-          "dismissal_id"
-        ],
-        "title": "AlertClassRow"
-      },
-      "AlertClassSample": {
-        "properties": {
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
-          "machine": {
-            "type": "string",
-            "title": "Machine"
-          },
-          "trace_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trace Id"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          },
-          "attributes": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Attributes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ts",
-          "agent_id",
-          "machine",
-          "trace_id",
-          "message",
-          "attributes"
-        ],
-        "title": "AlertClassSample",
-        "description": "One recorded event of an alert class: the message and the context it carried."
-      },
-      "AlertClassSamples": {
-        "properties": {
-          "samples": {
-            "items": {
-              "$ref": "#/components/schemas/AlertClassSample"
-            },
-            "type": "array",
-            "title": "Samples"
-          }
-        },
-        "type": "object",
-        "required": [
-          "samples"
-        ],
-        "title": "AlertClassSamples",
-        "description": "GET /api/stats/alert-classes/samples — the newest events of one class in the window."
-      },
-      "AlertClassesResponse": {
-        "properties": {
-          "window_hours": {
-            "$ref": "#/components/schemas/StatsWindowHours"
-          },
-          "classes": {
-            "items": {
-              "$ref": "#/components/schemas/AlertClassRow"
-            },
-            "type": "array",
-            "title": "Classes"
-          },
-          "total_classes": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Classes"
-          },
-          "total_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Events"
-          },
-          "as_of": {
-            "type": "string",
-            "format": "date-time",
-            "title": "As Of"
-          }
-        },
-        "type": "object",
-        "required": [
-          "window_hours",
-          "classes",
-          "total_classes",
-          "total_events",
-          "as_of"
-        ],
-        "title": "AlertClassesResponse",
-        "description": "GET /api/stats/alert-classes — the window's classes, most frequent first.\n\n`classes` is capped at `ALERT_CLASSES_LIMIT` rows; `total_classes` is the uncapped count\nand `total_events` the window's whole event count, so a cut list still states its size."
-      },
       "AlertIngestResult": {
         "properties": {
           "processed": {
@@ -12169,6 +11836,241 @@
         ],
         "title": "DeliveryStatus"
       },
+      "DiagnosticClassRow": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Level"
+          },
+          "event_name": {
+            "type": "string",
+            "title": "Event Name"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "process": {
+            "type": "string",
+            "title": "Process"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "telemetry",
+              "log"
+            ],
+            "title": "Category"
+          },
+          "count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Count"
+          },
+          "current_sha_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Current Sha Count"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "last_deployed_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deployed Sha"
+          },
+          "regressed": {
+            "type": "boolean",
+            "title": "Regressed",
+            "default": false
+          },
+          "archived_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "deployed_sha",
+                  "quiet"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "event_name",
+          "source",
+          "process",
+          "category",
+          "count",
+          "current_sha_count",
+          "first_seen",
+          "last_seen"
+        ],
+        "title": "DiagnosticClassRow"
+      },
+      "DiagnosticSample": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "deployed_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Sha"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "agent_id",
+          "machine",
+          "trace_id",
+          "message",
+          "attributes"
+        ],
+        "title": "DiagnosticSample"
+      },
+      "DiagnosticSamples": {
+        "properties": {
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticSample"
+            },
+            "type": "array",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples"
+        ],
+        "title": "DiagnosticSamples"
+      },
+      "DiagnosticsResponse": {
+        "properties": {
+          "window_hours": {
+            "$ref": "#/components/schemas/StatsWindowHours"
+          },
+          "deployed_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Sha"
+          },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticClassRow"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "total_classes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Classes"
+          },
+          "total_events": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Events"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_hours",
+          "deployed_sha",
+          "classes",
+          "total_classes",
+          "total_events",
+          "as_of"
+        ],
+        "title": "DiagnosticsResponse"
+      },
       "EventCountGroup": {
         "properties": {
           "key": {
@@ -12279,211 +12181,6 @@
           "groups"
         ],
         "title": "EventCountsResponse"
-      },
-      "EventResolutionCreate": {
-        "properties": {
-          "category": {
-            "type": "string",
-            "enum": [
-              "telemetry",
-              "log"
-            ],
-            "title": "Category"
-          },
-          "level": {
-            "type": "string",
-            "enum": [
-              "warning",
-              "error",
-              "critical"
-            ],
-            "title": "Level"
-          },
-          "event_name": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Event Name"
-          },
-          "source": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Source"
-          },
-          "process": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Process",
-            "default": ""
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
-          "note": {
-            "type": "string",
-            "maxLength": 4000,
-            "title": "Note",
-            "default": ""
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "category",
-          "level",
-          "event_name",
-          "source"
-        ],
-        "title": "EventResolutionCreate",
-        "description": "One immutable event class to dismiss through the authenticated API.\n\nAn empty ``process`` is a wildcard that dismisses every process of the\nclass — the scope every pre-dimension row keeps; a concrete value targets\none emitting process (task #4329 B5)."
-      },
-      "EventResolutionListResponse": {
-        "properties": {
-          "resolutions": {
-            "items": {
-              "$ref": "#/components/schemas/EventResolutionRow"
-            },
-            "type": "array",
-            "title": "Resolutions"
-          }
-        },
-        "type": "object",
-        "required": [
-          "resolutions"
-        ],
-        "title": "EventResolutionListResponse",
-        "description": "Status-filtered resolution history for the ops agent's review cycle."
-      },
-      "EventResolutionRow": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "category": {
-            "type": "string",
-            "enum": [
-              "telemetry",
-              "log"
-            ],
-            "title": "Category"
-          },
-          "level": {
-            "type": "string",
-            "enum": [
-              "warning",
-              "error",
-              "critical"
-            ],
-            "title": "Level"
-          },
-          "event_name": {
-            "type": "string",
-            "title": "Event Name"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "process": {
-            "type": "string",
-            "title": "Process"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
-          "dismissed_by": {
-            "type": "integer",
-            "title": "Dismissed By"
-          },
-          "note": {
-            "type": "string",
-            "title": "Note"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "dismissed",
-              "reopened"
-            ],
-            "title": "Status"
-          },
-          "dismissed_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Dismissed At"
-          },
-          "reopened_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reopened At"
-          },
-          "burst_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Burst Count"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "category",
-          "level",
-          "event_name",
-          "source",
-          "process",
-          "agent_id",
-          "dismissed_by",
-          "note",
-          "status",
-          "dismissed_at",
-          "reopened_at",
-          "burst_count",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "EventResolutionRow",
-        "description": "One persisted class dismissal, including reopened history metadata."
       },
       "EventRow": {
         "properties": {
@@ -19280,6 +18977,36 @@
         ],
         "title": "StatReset"
       },
+      "StatsAlerts": {
+        "properties": {
+          "unresolved": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unresolved",
+            "default": 0
+          },
+          "critical": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Critical",
+            "default": 0
+          },
+          "error": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Error",
+            "default": 0
+          },
+          "warning": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Warning",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "StatsAlerts"
+      },
       "StatsDashboard": {
         "properties": {
           "live_count": {
@@ -19350,37 +19077,11 @@
             ],
             "title": "Google Cost Usd"
           },
-          "warnings": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Warnings"
+          "alerts": {
+            "$ref": "#/components/schemas/StatsAlerts"
           },
-          "errors": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors"
-          },
-          "warnings_resolved": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Warnings Resolved",
-            "default": 0
-          },
-          "errors_resolved": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors Resolved",
-            "default": 0
-          },
-          "alert_classes_active": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Alert Classes Active"
-          },
-          "alert_classes_dismissed": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Alert Classes Dismissed"
+          "diagnostics": {
+            "$ref": "#/components/schemas/StatsDiagnostics"
           },
           "plugin_stats": {
             "items": {
@@ -19409,14 +19110,65 @@
           "tokens",
           "cost_usd",
           "subscription_cost_usd",
-          "warnings",
-          "errors",
-          "alert_classes_active",
-          "alert_classes_dismissed",
+          "alerts",
+          "diagnostics",
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `subscription_cost_usd` /\n`openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd` / `warnings` / `errors`) aggregate over the\n`applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n  excluding subscription harnesses; events that pre-date the snapshot field\n  contribute 0\n- `subscription_cost_usd`: the subscription half of the same rows in USD — their\n  usage-time price is the list value the subscription covered, not money the\n  account is billed. Disjoint from `cost_usd`; 0 when no subscription harness ran\n  in the window. The console renders both halves whether or not they are zero\n- `openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd`: the OpenAI,\n  Anthropic, and Google slices of `cost_usd`, resolved via the gateway model\n  catalog (`None` only when the model catalog failed to load)\n- `warnings` / `errors`: event totals over the window of the classes that\n  still need attention (critical folds into error). A class is resolved when\n  an active dismissal cancels it or when nothing of it was recorded for\n  `alert_class_quiet_seconds` — a pulse that stopped hours ago is not an\n  operator's problem now (task #6540). Agent trial-and-error (exec_failed)\n  logs at INFO and is deliberately NOT counted — these numbers are\n  operator-facing alerts, not agent activity.\n- `warnings_resolved` / `errors_resolved`: the same totals over the resolved\n  classes of the window, so a reader can account for what disappeared from\n  the two numbers above.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether the class is unresolved or resolved (a manual\n  dismissal — exact, or a wildcard row with an empty `process` — or the\n  quiet rule above). The sidebar card shows the two unresolved totals; the\n  classes themselves are `GET /api/stats/alert-classes`, which reads the\n  same rows.\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
+        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nPoint-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\nWindowed fields (`tokens`, cost slices, `diagnostics`) aggregate over `applied_window_hours`.\n\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), using the same single source of truth as `/api/alerts`.\n- `diagnostics`: Sentry-style error/anomaly classes from `telemetry_events`, automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`."
+      },
+      "StatsDiagnostics": {
+        "properties": {
+          "active_classes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Active Classes",
+            "default": 0
+          },
+          "archived_classes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Archived Classes",
+            "default": 0
+          },
+          "active_events": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Active Events",
+            "default": 0
+          },
+          "archived_events": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Archived Events",
+            "default": 0
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Errors",
+            "default": 0
+          },
+          "warnings": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Warnings",
+            "default": 0
+          },
+          "deployed_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Sha"
+          }
+        },
+        "type": "object",
+        "title": "StatsDiagnostics"
       },
       "StatsTokens": {
         "properties": {

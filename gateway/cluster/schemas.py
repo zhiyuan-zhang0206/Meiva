@@ -229,8 +229,34 @@ class PluginStat(BaseModel):
 
 
 # meiva:note
+# Point-in-time unresolved Grafana alert counts from `alerts`, matching `/api/alerts`.
+class StatsAlerts(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    unresolved: NonNegativeInt = 0
+    critical: NonNegativeInt = 0
+    error: NonNegativeInt = 0
+    warning: NonNegativeInt = 0
+
+
+# meiva:note
+# Windowed developer error diagnostics summary (Sentry-style), separate from live Grafana alerts.
+class StatsDiagnostics(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    active_classes: NonNegativeInt = 0
+    archived_classes: NonNegativeInt = 0
+    active_events: NonNegativeInt = 0
+    archived_events: NonNegativeInt = 0
+    errors: NonNegativeInt = 0
+    warnings: NonNegativeInt = 0
+    deployed_sha: str | None = None
+
+
+# meiva:note
 # GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.
-# All windowed fields aggregate over the applied_window_hours horizon.
+# All windowed fields aggregate over the applied_window_hours horizon; `live_count`, `alerts`
+# and `plugin_stats` are point-in-time live state.
 # meiva:link gateway/cluster/docs/ops-surfaces.md
 class StatsDashboard(BaseModel):
     model_config = ConfigDict(
@@ -238,47 +264,12 @@ class StatsDashboard(BaseModel):
         json_schema_extra={
             "description": (
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
-                "All windowed fields (`tokens` / `cost_usd` / `subscription_cost_usd` /\n"
-                "`openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd` / `warnings` / `errors`) aggregate over the\n"
-                "`applied_window_hours` horizon.\n"
-                "`window_hours` echoes the selected value — `0` means five minutes; all\n"
-                "other values are hours.\n"
-                "`applied_window_hours` is the served window in hours: the requested one.\n\n"
-                "- `live_count`: current non-terminated count (from agents_meta, not\n"
-                "  events; not windowed)\n"
-                "- `tokens`: windowed telemetry LLM token usage\n"
-                "- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n"
-                "  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n"
-                "  excluding subscription harnesses; events that pre-date the snapshot field\n"
-                "  contribute 0\n"
-                "- `subscription_cost_usd`: the subscription half of the same rows in USD — their\n"
-                "  usage-time price is the list value the subscription covered, not money the\n"
-                "  account is billed. Disjoint from `cost_usd`; 0 when no subscription harness ran\n"
-                "  in the window. The console renders both halves whether or not they are zero\n"
-                "- `openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd`: the OpenAI,\n"
-                "  Anthropic, and Google slices of `cost_usd`, resolved via the gateway model\n"
-                "  catalog (`None` only when the model catalog failed to load)\n"
-                "- `warnings` / `errors`: event totals over the window of the classes that\n"
-                "  still need attention (critical folds into error). A class is resolved when\n"
-                "  an active dismissal cancels it or when nothing of it was recorded for\n"
-                "  `alert_class_quiet_seconds` — a pulse that stopped hours ago is not an\n"
-                "  operator's problem now (task #6540). Agent trial-and-error (exec_failed)\n"
-                "  logs at INFO and is deliberately NOT counted — these numbers are\n"
-                "  operator-facing alerts, not agent activity.\n"
-                "- `warnings_resolved` / `errors_resolved`: the same totals over the resolved\n"
-                "  classes of the window, so a reader can account for what disappeared from\n"
-                "  the two numbers above.\n"
-                "- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n"
-                "  (level, event_name, source, process) warning/error classes the window\n"
-                "  holds, split by whether the class is unresolved or resolved (a manual\n"
-                "  dismissal — exact, or a wildcard row with an empty `process` — or the\n"
-                "  quiet rule above). The sidebar card shows the two unresolved totals; the\n"
-                "  classes themselves are `GET /api/stats/alert-classes`, which reads the\n"
-                "  same rows.\n\n"
-                "`plugin_stats` is not windowed (see `PluginStat`): the runtime values\n"
-                "behind cards that plugins declare under `contributions.ui.stats`, joined\n"
-                "by the console on `(plugin, id)`.\n\n"
-                "`as_of` is the UTC time the payload's reads were assembled."
+                "Point-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\n"
+                "Windowed fields (`tokens`, cost slices, `diagnostics`) aggregate over `applied_window_hours`.\n\n"
+                "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), "
+                "using the same single source of truth as `/api/alerts`.\n"
+                "- `diagnostics`: Sentry-style error/anomaly classes from `telemetry_events`, automatically "
+                "archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`."
             )
         },
     )
@@ -292,80 +283,65 @@ class StatsDashboard(BaseModel):
     openai_cost_usd: float | None = Field(default=None, ge=0)
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     google_cost_usd: float | None = Field(default=None, ge=0)
-    warnings: NonNegativeInt
-    errors: NonNegativeInt
-    warnings_resolved: NonNegativeInt = 0
-    errors_resolved: NonNegativeInt = 0
-    alert_classes_active: NonNegativeInt
-    alert_classes_dismissed: NonNegativeInt
+    alerts: StatsAlerts
+    diagnostics: StatsDiagnostics
     plugin_stats: list[PluginStat]
     as_of: datetime | None = None
 
 
-AlertLevel = Literal["warning", "error", "critical"]
+DiagnosticLevel = Literal["warning", "error", "critical"]
+DiagnosticArchiveReason = Literal["deployed_sha", "quiet"]
 
 
 # meiva:note
-# One warning/error class over the window, tallied across its events. The identity is
-# (level, event_name, source, process), the same one an `event_dismissals` row cancels;
-# `category` is the emission transport to put on a dismissal made from this class (matching
-# ignores it), and `dismissal_id` is the active dismissal (None when there is none).
-#
-# `resolved_by` is why the class does not need attention right now: "dismissed" for that manual
-# row, "quiet" when the class recorded nothing for the gateway's `alert_class_quiet_seconds`,
-# None while unresolved. It is a display verdict, not stored state — the quiet half is
-# recomputed from `last_seen` on every read.
-# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
-class AlertClassRow(BaseModel):
+# One diagnostic error/anomaly class over the window, tallied across `telemetry_events`.
+# `archived_by` is computed on every read: "deployed_sha" when no row matched the running
+# commit SHA, "quiet" when the latest current-SHA row is older than `diagnostic_quiet_seconds`,
+# or None while active.
+class DiagnosticClassRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    level: AlertLevel
+    level: DiagnosticLevel
     event_name: str
     source: str
     process: str
     category: Literal["telemetry", "log"]
     count: PositiveInt
+    current_sha_count: NonNegativeInt
     first_seen: datetime
     last_seen: datetime
-    dismissal_id: int | None
-    resolved_by: Literal["dismissed", "quiet"] | None = None
+    last_deployed_sha: str | None = None
+    regressed: bool = False
+    archived_by: DiagnosticArchiveReason | None = None
 
 
-class AlertClassesResponse(BaseModel):
-    """GET /api/stats/alert-classes — the window's classes, most frequent first.
-
-    `classes` is capped at `ALERT_CLASSES_LIMIT` rows; `total_classes` is the uncapped count
-    and `total_events` the window's whole event count, so a cut list still states its size.
-    """
-
+class DiagnosticsResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     window_hours: StatsWindowHours
-    classes: list[AlertClassRow]
+    deployed_sha: str | None
+    classes: list[DiagnosticClassRow]
     total_classes: NonNegativeInt
     total_events: NonNegativeInt
     as_of: datetime
 
 
-class AlertClassSample(BaseModel):
-    """One recorded event of an alert class: the message and the context it carried."""
-
+class DiagnosticSample(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ts: datetime
     agent_id: int | None
     machine: str
     trace_id: str | None
+    deployed_sha: str | None = None
     message: str | None
     attributes: dict[str, object]
 
 
-class AlertClassSamples(BaseModel):
-    """GET /api/stats/alert-classes/samples — the newest events of one class in the window."""
-
+class DiagnosticSamples(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    samples: list[AlertClassSample]
+    samples: list[DiagnosticSample]
 
 
 # NonNegativeInt / None-able percentile fields

@@ -593,3 +593,47 @@ def test_a_late_boot_seam_replaces_the_unbound_label(
     telemetry.bind_identity(now=system_clock().now, process="agent_host", home=unit_home)
 
     assert telemetry.process_name() == "agent_host"
+
+
+def test_bind_identity_if_unbound_and_init_cli_process_propagate_deployed_sha(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from base.telemetry.process_logging import init_cli_process
+
+    sdk_sha = "1" * 40
+    cli_sha = "2" * 40
+    monkeypatch.setitem(emitter.process_state, "process", "unknown")
+    monkeypatch.setitem(emitter.process_state, "deployed_sha", "")
+    monkeypatch.setitem(emitter.process_state, "machine", None)
+    monkeypatch.setitem(emitter.process_state, "home", None)
+    monkeypatch.setitem(emitter.process_state, "cluster", None)
+
+    assert (
+        telemetry.bind_identity_if_unbound(
+            now=system_clock().now,
+            process="sdk",
+            home=unit_home,
+            deployed_sha=sdk_sha,
+        )
+        is True
+    )
+    assert emitter.process_state["deployed_sha"] == sdk_sha
+    telemetry.emit("telemetry", "turn_end", attributes={"probe": "sdk_sha"})
+    assert _mirror_last("turn_end")["deployed_sha"] == sdk_sha
+
+    pipeline = emitter.process_state["pipeline"]
+    assert isinstance(pipeline, telemetry.EventPipeline)
+    close = init_cli_process(
+        name="cli-sha-probe",
+        producer=lambda: pipeline,
+        machine_reader=lambda: "test-host",
+        home=unit_home,
+        deployed_sha=cli_sha,
+    )
+    try:
+        assert emitter.process_state["deployed_sha"] == cli_sha
+        telemetry.emit("telemetry", "turn_end", attributes={"probe": "cli_sha"})
+        assert _mirror_last("turn_end")["deployed_sha"] == cli_sha
+    finally:
+        if close is not None:
+            close()

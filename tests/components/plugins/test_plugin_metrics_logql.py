@@ -181,23 +181,6 @@ def test_dashboard_has_142_loki_targets() -> None:
     assert len(loki_targets) == 142
 
 
-def test_unresolved_gauge_names_match_the_otlp_contract() -> None:
-
-    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
-
-    specs = {spec.name: spec for spec in _load_core()}
-    for field, name in (
-        ("unresolved_warnings", "core_unresolved_warning"),
-        ("unresolved_errors", "core_unresolved_error"),
-        ("dismissed_warnings", "core_dismissed_warning"),
-        ("dismissed_errors", "core_dismissed_error"),
-    ):
-        assert METRIC_DISPOSITION[("resolution_status", field)] == "gauge"
-        assert specs[name].query == f"meiva_resolution_status_{strip_unit_suffix(field)}_ratio"
-        assert specs[name].query_type == "promql"
-        assert specs[name].panel == "stat"
-
-
 def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
 
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix

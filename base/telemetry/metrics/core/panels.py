@@ -1,66 +1,8 @@
-# ruff: noqa: RUF001 — RUF001: Chinese UI text uses full-width punctuation; S608: query templates interpolate only registry-derived key fragments (base/events/contract.py SQL constants), never user input
-"""Core ops-dashboard panels — the hand-written core section of
-``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``, migrated to core-metric registrations
-(Task #882) and from Postgres-event SQL to Loki LogQL (Task #1280).
-
-The core dashboard panels (ids < 1000) are registered here as core metrics,
-each carrying its as-is placement pins (``panel_id`` / ``section`` /
-``order`` — task #3697). The four statistics-coverage tiles are included with
-the original panels; the JSON stays the deployment source until slice S3 of
-task #3697 flips it to a ``base.telemetry.metrics.grafana_dashboard`` render.
-
-Query dialect (Task #1280): event panels read the stream from Loki instead of
-the retired PG ``events`` table — the same read the alert rules (R1-R7) use.
-Since the 2026-08-23 index-label cutover (Task #1407 B2,
-base/telemetry/loki_index_labels.py) ``event_name``/``agent_id`` are promoted stream
-labels, so event-scoped templates match them inside the stream selector
-(``{service_name="unknown_service", event_name=...}``); ``| json`` stays for
-the level/category/attributes filters (not stream labels). The two
-unresolved tiles
-are the exception: their resolution count is computed by the events-maintenance
-daemon (task #1468) over a fixed six-hour window and published as a Prometheus
-gauge every five minutes. ``core_live_agents`` stays SQL because ``agents_meta``
-is live Postgres state.
-
-Per-panel provenance:
-
-- **12 stat panels** (LLM calls / Warning / Error / Unresolved Warning /
-  Unresolved Error / Live agents / LLM cost / Tokens / LLM input tokens /
-  LLM output tokens / Cache hit rate / Avg turn duration): explicit 8x4 grid
-  (three per row). The generator's stat color default (fixed blue) remains
-  unless a panel overrides it; Warning (fixed orange) and Error (fixed red)
-  set the color via ``field_defaults``, and LLM cost carries the original
-  ``decimals: 2``. Error keeps the original ``unit: "s"`` and the
-  ``noValue: "0"`` option.
-- **Unresolved Warning / Unresolved Error**: fixed-six-hour class totals
-  computed by events-maintenance and published as Prometheus gauges every five
-  minutes; the tiles do not query raw event lines.
-- **8 chart panels** (SSE backlog / LLM throughput / Token usage —
-  Output + Reasoning / Cache hit / Input+Output+Gen-stage TPS / LLM calls /
-  bucket / Event health / Token usage — Input): default 12x7 grid with the
-  red-80 threshold step, except the three TPS panels which have no
-  thresholds at all (``thresholds=[]`` suppresses the default green base).
-  ``custom`` sets only the keys that differ from the generator defaults
-  (fillOpacity 25 / axisLabel / stacking normal A on the two token-usage
-  panels); SSE backlog and LLM calls / minute match the barchart defaults
-  and need no custom.
-- **event_name/category**: taken from each query's semantics (llm_usage/telemetry,
-  delivery_stalled/telemetry, ...). The level/status-based queries (Warning,
-  Error, Live agents, Event health) filter on ``level``/``status`` rather
-  than an event name — their event_name values ("warning" / "error" /
-  "lifecycle" / "event") are descriptive registry metadata only.
-- **LogQL naming**: every rendered Loki target supplies a ``legendFormat``;
-  static semantic names come from ``target_names`` and grouped queries use
-  their label template (for example, ``{{attributes_route}}``).
-- **SQL fixes** (the metric-template whitelist — see
-  ``base/plugin_metrics.validate_metric_sql`` — rejects ``<``/``>``/``/``
-  inside quoted identifiers): the SSE backlog aliases ``"stalled <60s"`` /
-  ``"stalled >600s"`` (subquery columns, outer references and output
-  labels) are renamed to ``"stalled <60s"`` / ``"stalled >600s"`` —
-  the values are unchanged, only the series labels lose the ``<``/``>``
-  glyphs. Loki legend names are supplied at the target level, independent of
-  the LogQL aggregate's label-set result.
-"""
+# meiva:note
+# Core ops-dashboard panels rendered into `meiva-ops-main.json` (ids < 1000).
+# Event panels query Loki LogQL with `event_name`/`agent_id` in the stream selector and
+# level/category/attribute filters after `| json`; `core_live_agents` stays SQL on `agents_meta`.
+# meiva:link deploy/lgtm/config/grafana/provisioning/dashboards/README.md
 
 from __future__ import annotations
 
@@ -219,47 +161,6 @@ def core_metrics() -> list[MetricSpec]:
             panel_id=3,
             section="core",
             order=2,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="core_unresolved_warning",
-            title="Unresolved Warning",
-            event_name="resolution_status",
-            category="telemetry",
-            unit="short",
-            panel="stat",
-            query="meiva_resolution_status_unresolved_warnings_ratio",
-            query_type="promql",
-            target_names=["unresolved_warning"],
-            field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
-            width=8,
-            height=4,
-            panel_id=4,
-            section="core",
-            order=3,
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="core_unresolved_error",
-            title="Unresolved Error",
-            event_name="resolution_status",
-            category="telemetry",
-            unit="short",
-            panel="stat",
-            query="meiva_resolution_status_unresolved_errors_ratio",
-            query_type="promql",
-            target_names=["unresolved_error"],
-            options={"noValue": "0"},
-            field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
-            width=8,
-            height=4,
-            panel_id=5,
-            section="core",
-            order=4,
         )
     )
 
@@ -581,7 +482,7 @@ def core_metrics() -> list[MetricSpec]:
             "core_gen_stage_tps",
             "Gen-stage output TPS (avg / max agent / min agent)",
             "Gen-stage output throughput = Σ(out_total) ÷ Σ(decode_sec), tok/s. "
-            "decode_ms is the 2026-08-04 new instrumentation (stream last chunk − "
+            "decode_ms is the 2026-08-04 new instrumentation (stream last chunk \u2212 "
             "first chunk arrival, excluding network/queue/prefill); out_total is the "
             "log_llm_usage total output tokens (incl. reasoning). Only calls after "
             "the decode_ms instrumentation went live are counted (attributes ? "

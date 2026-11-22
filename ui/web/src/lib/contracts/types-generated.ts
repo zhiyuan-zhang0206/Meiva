@@ -1871,38 +1871,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/event-resolutions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_event_resolutions_api_event_resolutions_get"];
-        put?: never;
-        post: operations["create_event_resolution_api_event_resolutions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/event-resolutions/{dismissal_id}/reopen": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/ops/monitor": {
         parameters: {
             query?: never;
@@ -1999,14 +1967,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/stats/alert-classes": {
+    "/api/stats/diagnostics": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["get_alert_classes_api_stats_alert_classes_get"];
+        get: operations["get_diagnostics_api_stats_diagnostics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2015,14 +1983,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/stats/alert-classes/samples": {
+    "/api/stats/diagnostics/samples": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["get_alert_class_samples_api_stats_alert_classes_samples_get"];
+        get: operations["get_diagnostic_samples_api_stats_diagnostics_samples_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2577,38 +2545,6 @@ export interface components {
             lm_stage_tps: number | null;
             agent_lifecycle_tps: number | null;
         };
-        AlertClassRow: {
-            level: "warning" | "error" | "critical";
-            event_name: string;
-            source: string;
-            process: string;
-            category: "telemetry" | "log";
-            count: number;
-            first_seen: string;
-            last_seen: string;
-            dismissal_id: number | null;
-            resolved_by?: ("dismissed" | "quiet") | null;
-        };
-        AlertClassSample: {
-            ts: string;
-            agent_id: number | null;
-            machine: string;
-            trace_id: string | null;
-            message: string | null;
-            attributes: {
-                [key: string]: unknown;
-            };
-        };
-        AlertClassSamples: {
-            samples: components["schemas"]["AlertClassSample"][];
-        };
-        AlertClassesResponse: {
-            window_hours: components["schemas"]["StatsWindowHours"];
-            classes: components["schemas"]["AlertClassRow"][];
-            total_classes: number;
-            total_events: number;
-            as_of: string;
-        };
         AlertIngestResult: {
             processed: number;
             inserted: number;
@@ -2936,6 +2872,42 @@ export interface components {
             attempts: number;
             next_attempt_at: string | null;
         };
+        DiagnosticClassRow: {
+            level: "warning" | "error" | "critical";
+            event_name: string;
+            source: string;
+            process: string;
+            category: "telemetry" | "log";
+            count: number;
+            current_sha_count: number;
+            first_seen: string;
+            last_seen: string;
+            last_deployed_sha?: string | null;
+            regressed: boolean;
+            archived_by?: ("deployed_sha" | "quiet") | null;
+        };
+        DiagnosticSample: {
+            ts: string;
+            agent_id: number | null;
+            machine: string;
+            trace_id: string | null;
+            deployed_sha?: string | null;
+            message: string | null;
+            attributes: {
+                [key: string]: unknown;
+            };
+        };
+        DiagnosticSamples: {
+            samples: components["schemas"]["DiagnosticSample"][];
+        };
+        DiagnosticsResponse: {
+            window_hours: components["schemas"]["StatsWindowHours"];
+            deployed_sha: string | null;
+            classes: components["schemas"]["DiagnosticClassRow"][];
+            total_classes: number;
+            total_events: number;
+            as_of: string;
+        };
         EventCountGroup: {
             key: string | null;
             count: number;
@@ -2952,35 +2924,6 @@ export interface components {
         EventCountsResponse: {
             meta: components["schemas"]["EventCountsMeta"];
             groups: components["schemas"]["EventCountGroup"][];
-        };
-        EventResolutionCreate: {
-            category: "telemetry" | "log";
-            level: "warning" | "error" | "critical";
-            event_name: string;
-            source: string;
-            process: string;
-            agent_id?: number | null;
-            note: string;
-        };
-        EventResolutionListResponse: {
-            resolutions: components["schemas"]["EventResolutionRow"][];
-        };
-        EventResolutionRow: {
-            id: number;
-            category: "telemetry" | "log";
-            level: "warning" | "error" | "critical";
-            event_name: string;
-            source: string;
-            process: string;
-            agent_id: number | null;
-            dismissed_by: number;
-            note: string;
-            status: "dismissed" | "reopened";
-            dismissed_at: string;
-            reopened_at: string | null;
-            burst_count: number | null;
-            created_at: string;
-            updated_at: string;
         };
         EventRow: {
             id: number;
@@ -4028,6 +3971,12 @@ export interface components {
             label: string;
             resets_at: string;
         };
+        StatsAlerts: {
+            unresolved: number;
+            critical: number;
+            error: number;
+            warning: number;
+        };
         StatsDashboard: {
             live_count: number;
             window_hours: components["schemas"]["StatsWindowHours"];
@@ -4038,14 +3987,19 @@ export interface components {
             openai_cost_usd?: number | null;
             anthropic_cost_usd?: number | null;
             google_cost_usd?: number | null;
-            warnings: number;
-            errors: number;
-            warnings_resolved: number;
-            errors_resolved: number;
-            alert_classes_active: number;
-            alert_classes_dismissed: number;
+            alerts: components["schemas"]["StatsAlerts"];
+            diagnostics: components["schemas"]["StatsDiagnostics"];
             plugin_stats: components["schemas"]["PluginStat"][];
             as_of?: string | null;
+        };
+        StatsDiagnostics: {
+            active_classes: number;
+            archived_classes: number;
+            active_events: number;
+            archived_events: number;
+            errors: number;
+            warnings: number;
+            deployed_sha?: string | null;
         };
         StatsTokens: {
             input: number;
@@ -8172,95 +8126,6 @@ export interface operations {
             };
         };
     };
-    list_event_resolutions_api_event_resolutions_get: {
-        parameters: {
-            query?: {
-                status?: ("dismissed" | "reopened") | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResolutionListResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_event_resolution_api_event_resolutions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventResolutionCreate"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResolutionRow"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reopen_event_resolution_api_event_resolutions__dismissal_id__reopen_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                dismissal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResolutionRow"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_ops_monitor_api_ops_monitor_get: {
         parameters: {
             query?: {
@@ -8439,11 +8304,11 @@ export interface operations {
             };
         };
     };
-    get_alert_classes_api_stats_alert_classes_get: {
+    get_diagnostics_api_stats_diagnostics_get: {
         parameters: {
             query?: {
                 hours?: components["schemas"]["StatsWindowHours"];
-                include_resolved?: boolean;
+                include_archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -8456,7 +8321,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AlertClassesResponse"];
+                    "application/json": components["schemas"]["DiagnosticsResponse"];
                 };
             };
             422: {
@@ -8469,7 +8334,7 @@ export interface operations {
             };
         };
     };
-    get_alert_class_samples_api_stats_alert_classes_samples_get: {
+    get_diagnostic_samples_api_stats_diagnostics_samples_get: {
         parameters: {
             query: {
                 level: "warning" | "error" | "critical";
@@ -8489,7 +8354,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AlertClassSamples"];
+                    "application/json": components["schemas"]["DiagnosticSamples"];
                 };
             };
             422: {

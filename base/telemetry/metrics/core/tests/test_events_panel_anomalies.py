@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from base.telemetry.metrics.core import catalog
@@ -36,7 +37,7 @@ def test_the_shipped_dashboard_lists_it_in_the_same_panel() -> None:
 # `task_reminder_undelivered` reports a delivery path that stopped, and this board is the only
 # place that reading is visible without writing a query (task #6399).
 def test_the_undelivered_reminder_count_is_a_listed_anomaly() -> None:
-    assert "|task_reminder_undelivered|" in _what_happened_query()
+    assert re.search(r'[|"]task_reminder_undelivered[|"]', _what_happened_query())
 
 
 # meiva:note
@@ -50,4 +51,4 @@ def test_the_shipped_dashboard_lists_the_undelivered_count_in_the_same_panel() -
         for target in panel.get("targets", [])
         if "expr" in target
     ]
-    assert any("|task_reminder_undelivered|" in expr for expr in expressions)
+    assert any(re.search(r'[|"]task_reminder_undelivered[|"]', expr) for expr in expressions)

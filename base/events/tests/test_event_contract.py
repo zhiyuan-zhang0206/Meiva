@@ -207,32 +207,6 @@ def test_payload_keys_unknown_event_empty() -> None:
     assert payload_keys("no_such_event") == ()
 
 
-def test_class_resolution_markers_are_telemetry_category() -> None:
-    for name in ("warning_resolved", "error_resolved", "warning_reopened", "error_reopened"):
-        spec = EVENTS[name]
-        assert spec.category == "telemetry"
-        assert spec.destination == "events"
-
-    assert payload_keys("warning_resolved") == (
-        "resolved_by",
-        "category",
-        "level",
-        "event_name",
-        "source",
-        "process",
-        "agent_id",
-        "dismissed_by",
-        "note",
-    )
-    assert payload_keys("resolution_status") == (
-        "unresolved_warnings",
-        "unresolved_errors",
-        "dismissed_warnings",
-        "dismissed_errors",
-        "window",
-    )
-
-
 def test_computer_session_events_registered_as_audit() -> None:
     from base.events.declarations.audit import ComputerSessionEnd, ComputerSessionStart
 

@@ -1,12 +1,6 @@
-"""Core Fleet growth panels (task #2010) — a separate registration module.
-
-The two Fleet growth panels read the gateway's absolute agent-registry
-max-id gauge (``services/upkeep/events_maintenance/registry_gauge.py``, 60s sample): a Prometheus
-timeseries of ``meiva_agent_registry_max_id_ratio`` and its ``deriv()`` slope
-in agents per day. They live here — beside ``dismissed`` — so
-the core panels module (already at 787 lines) stays untouched, while the
-meiva_observability registry count remains locked at 21 metrics by tests.
-"""
+# meiva:note
+# Core Fleet growth panels: reads the gateway's 60s `agent_registry` high-water mark gauge
+# (`meiva_agent_registry_max_id_ratio`) and its daily growth slope (`deriv() * 86400`).
 
 from __future__ import annotations
 
@@ -29,13 +23,9 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             unit="short",
             panel="timeseries",
-            # The absolute registry high-water mark, sampled by the gateway every
-            # 60s (services/upkeep/events_maintenance/registry_gauge.py, task #2010). Unit-"1" gauges export
-            # with the `_ratio` suffix (same naming as the resolution_status
-            # tiles). The gauge is per gateway process and the process restarts on
-            # every rollout, so a bare read draws one overlapping series per
-            # gateway lifetime; max() collapses them into the single high-water
-            # curve the panel promises.
+            # meiva:note
+            # Unit-"1" gauges export with the `_ratio` suffix. The gauge is per gateway process,
+            # so `max()` collapses overlapping rollout series into one high-water curve.
             query="max(meiva_agent_registry_max_id_ratio)",
             query_type="promql",
             target_names=["max_id"],

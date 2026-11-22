@@ -783,38 +783,6 @@ CREATE TABLE alert_notification_members (
 COMMENT ON TABLE alert_notification_members IS
     'One immutable group membership per shadow instance transition; snapshots survive alert retention and are not delivery receipts.';
 
--- ─────────────── event_dismissals (Loki event-class resolution, task #1468) ───────────────
--- Loki log lines are immutable, so a resolution is state about an event class,
--- never a write-back onto an historical event. NULL agent_id means every agent;
--- the first API version rejects per-agent dismissals while retaining the field
--- for the class identity's future extension. An empty `process` means every
--- process — the scope every pre-dimension dismissal keeps (task #4329 B5).
-CREATE TABLE event_dismissals (
-    id           BIGSERIAL PRIMARY KEY,
-    category     TEXT NOT NULL,
-    level        TEXT NOT NULL,
-    event_name   TEXT NOT NULL,
-    source       TEXT NOT NULL,
-    process      TEXT NOT NULL DEFAULT '',
-    agent_id     INTEGER,
-    dismissed_by INTEGER NOT NULL,
-    note         TEXT NOT NULL DEFAULT '',
-    status       TEXT NOT NULL DEFAULT 'dismissed'
-                 CHECK (status IN ('dismissed', 'reopened')),
-    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    reopened_at  TIMESTAMPTZ,
-    burst_count  INTEGER,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON COLUMN event_dismissals.dismissed_by IS
-    'Acting agent id; 0 means a user or operator through the gateway UI/API, -1 is the auto-dismiss system.';
-
-CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
-    ON event_dismissals (category, level, event_name, source, process, agent_id) NULLS NOT DISTINCT
-    WHERE status = 'dismissed';
-
 CREATE TABLE agent_shell_ttls (
     agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     session_id      BIGINT NOT NULL,
@@ -1794,6 +1762,7 @@ CREATE TABLE telemetry_events (
     target_agent_id BIGINT,
     attributes      JSONB NOT NULL DEFAULT '{}'::jsonb,
     imported_from   TEXT,
+    deployed_sha    TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (event_uid, ts)
 ) PARTITION BY RANGE (ts);
 

@@ -22,6 +22,7 @@ import pytest
 
 from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -43,10 +44,12 @@ class _EventRows:
         ts: datetime | None = None,
         category: str = "telemetry",
         cluster: str | None = None,
+        deployed_sha: str | None = None,
     ) -> None:
         when = ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours)
         uid = uuid.uuid4().int % (1 << 62)
         attributes = json.dumps(payload or {})
+        sha = (LOADED_IMAGE.sha or "") if deployed_sha is None else deployed_sha
         if category == "audit":
             self._db.execute(
                 "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
@@ -57,8 +60,8 @@ class _EventRows:
             return
         self._db.execute(
             "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-            "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'test', %s, "
-            "'test', %s, %s, %s, 'test', %s::jsonb)",
+            "category, event_name, level, source, attributes, deployed_sha) VALUES (%s, %s, %s, 'test', %s, "
+            "'test', %s, %s, %s, 'test', %s::jsonb, %s)",
             (
                 uid,
                 when,
@@ -68,6 +71,7 @@ class _EventRows:
                 event,
                 level,
                 attributes,
+                sha,
             ),
         )
 
@@ -102,135 +106,140 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
         resp = client.get("/api/stats/dashboard")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["live_count"] == 0
-    assert body["window_hours"] == 24
-    assert body["tokens"] == {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0}
-    assert body["cost_usd"] == 0
-    assert body["subscription_cost_usd"] == 0
-    assert body["openai_cost_usd"] == 0
-    assert body["anthropic_cost_usd"] == 0
-    assert body["google_cost_usd"] == 0
     assert "avg_turn_seconds" not in body
-    assert body["warnings"] == 0
-    assert body["errors"] == 0
+    assert {
+        "live_count": body["live_count"],
+        "window_hours": body["window_hours"],
+        "tokens": body["tokens"],
+        "cost_usd": body["cost_usd"],
+        "subscription_cost_usd": body["subscription_cost_usd"],
+        "openai_cost_usd": body["openai_cost_usd"],
+        "anthropic_cost_usd": body["anthropic_cost_usd"],
+        "google_cost_usd": body["google_cost_usd"],
+        "alerts": body["alerts"],
+        "diagnostics": {
+            "active_classes": body["diagnostics"]["active_classes"],
+            "archived_classes": body["diagnostics"]["archived_classes"],
+            "active_events": body["diagnostics"]["active_events"],
+            "archived_events": body["diagnostics"]["archived_events"],
+            "errors": body["diagnostics"]["errors"],
+            "warnings": body["diagnostics"]["warnings"],
+        },
+    } == {
+        "live_count": 0,
+        "window_hours": 24,
+        "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0},
+        "cost_usd": 0,
+        "subscription_cost_usd": 0,
+        "openai_cost_usd": 0,
+        "anthropic_cost_usd": 0,
+        "google_cost_usd": 0,
+        "alerts": {"unresolved": 0, "critical": 0, "error": 0, "warning": 0},
+        "diagnostics": {
+            "active_classes": 0,
+            "archived_classes": 0,
+            "active_events": 0,
+            "archived_events": 0,
+            "errors": 0,
+            "warnings": 0,
+        },
+    }
 
 
-def test_dashboard_warn_error_folds_critical(
+def test_dashboard_diagnostics_folds_critical_and_admits_declared_anomalies_only(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """critical-level events count in the sidebar's error gauge — they used to
-    be an observability blind spot (audit 2026-08-08: daemon schema-drift
-    exits, restarter failures etc. never appeared in any warning/error
-    count)."""
     event_rows.add(event="turn_end", level="warning")
+    event_rows.add(event="delivery_stalled", level="warning")
     event_rows.add(event="turn_end", level="error")
     event_rows.add(event="turn_end", level="critical")
     event_rows.add(event="turn_end", level="info")
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 1
-    assert body["errors"] == 2  # error + critical folded
+    diag = body["diagnostics"]
+    assert diag["warnings"] == 1
+    assert diag["errors"] == 2
+    assert diag["active_classes"] == 3
+    assert diag["active_events"] == 3
+    assert body["alerts"] == {"unresolved": 0, "critical": 0, "error": 0, "warning": 0}
 
 
-def _insert_dismissal(
+def _insert_live_alert(
     db: psycopg.Connection,
     *,
-    level: str,
-    event_name: str,
-    category: str = "telemetry",
-    source: str = "test",
+    fingerprint: str,
+    alertname: str,
+    severity: str,
+    status: str = "unresolved",
+    extra_labels: dict[str, str] | None = None,
 ) -> None:
-    """Insert one active class-wide dismissal (the event_dismissals row the
-    resolution daemon and the dashboard both subtract)."""
+    now = datetime.now(UTC)
+    ends_at = now if status == "resolved" else None
+    labels = {"alertname": alertname, "severity": severity, **(extra_labels or {})}
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO event_dismissals (category, level, event_name, source, dismissed_by) "
-            "VALUES (%s, %s, %s, %s, 0)",
-            (category, level, event_name, source),
+            "INSERT INTO alerts (fingerprint, starts_at, ends_at, status, alertname, severity, "
+            "labels, annotations, source) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 'grafana')",
+            (
+                fingerprint,
+                now - timedelta(minutes=5),
+                ends_at,
+                status,
+                alertname,
+                severity,
+                json.dumps(labels),
+                json.dumps({"summary": alertname}),
+            ),
         )
-    db.commit()
 
 
-# meiva:note
-# Unresolved totals and the active count move together; the events of a resolved class keep their
-# own pair, and critical folds into the error side.
-# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
-def test_dashboard_counts_alert_classes_not_events(
+def test_dashboard_alerts_match_grafana_live_alerts_ssot(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    _insert_dismissal(db_conn, level="warning", event_name="dismissed_warning")
-    _insert_dismissal(db_conn, level="error", event_name="dismissed_error")
-    event_rows.add(event="dismissed_warning", level="warning")
-    event_rows.add(event="dismissed_warning", level="warning")
-    event_rows.add(event="remaining_warning", level="warning")
-    event_rows.add(event="remaining_warning", level="warning")
-    event_rows.add(event="dismissed_error", level="error")
-    event_rows.add(event="remaining_critical", level="critical")
+    _insert_live_alert(db_conn, fingerprint="f-crit", alertname="db_down", severity="critical")
+    _insert_live_alert(db_conn, fingerprint="f-err", alertname="llm_fail", severity="error")
+    _insert_live_alert(db_conn, fingerprint="f-warn", alertname="high_lag", severity="warning")
+    _insert_live_alert(
+        db_conn, fingerprint="f-res", alertname="recovered", severity="critical", status="resolved"
+    )
+    _insert_live_alert(
+        db_conn,
+        fingerprint="f-wd",
+        alertname="Alert pipeline watchdog (synthetic heartbeat)",
+        severity="warning",
+        extra_labels={"metric": "alert_pipeline_watchdog"},
+    )
+    event_rows.add(event="turn_end", level="error")
+    db_conn.commit()
+    with gateway_test_client() as client:
+        dashboard = client.get("/api/stats/dashboard").json()
+        alerts_api = client.get("/api/alerts").json()
+    assert dashboard["alerts"] == {"unresolved": 3, "critical": 1, "error": 1, "warning": 1}
+    assert dashboard["alerts"]["unresolved"] == alerts_api["meta"]["unresolved_count"]
+
+
+def test_dashboard_diagnostics_archives_prior_deployed_sha(
+    db_conn: psycopg.Connection, event_rows: _EventRows
+) -> None:
+    current_sha = LOADED_IMAGE.sha or "currentsha1234"
+    old_sha = "0000000000000000"
+    event_rows.add(event="old_only_err", level="error", deployed_sha=old_sha)
+    event_rows.add(event="old_only_err", level="error", deployed_sha=old_sha)
+    event_rows.add(event="curr_err", level="error", deployed_sha=current_sha)
+    event_rows.add(event="regressed_err", level="error", deployed_sha=old_sha)
+    event_rows.add(event="regressed_err", level="error", deployed_sha=current_sha)
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 2
-    assert body["errors"] == 1
-    assert body["warnings_resolved"] == 2
-    assert body["errors_resolved"] == 1
-    assert body["alert_classes_active"] == 2
-    assert body["alert_classes_dismissed"] == 2
-
-
-def test_dashboard_all_classes_dismissed_reports_zero_active(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    _insert_dismissal(db_conn, level="warning", event_name="only_warning")
-    event_rows.add(event="only_warning", level="warning")
-    event_rows.add(event="only_warning", level="warning")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 0
-    assert body["warnings_resolved"] == 2
-    assert body["alert_classes_active"] == 0
-    assert body["alert_classes_dismissed"] == 1
-
-
-def test_dashboard_reopened_dismissal_counts_as_active(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    """A dismissal flipped to reopened (burst safety valve) no longer cancels its class — same
-    active-set semantics as the daemon."""
-    _insert_dismissal(db_conn, level="warning", event_name="burst_warning")
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE event_dismissals SET status = 'reopened', reopened_at = now() "
-            "WHERE event_name = 'burst_warning'"
-        )
-    db_conn.commit()
-    event_rows.add(event="burst_warning", level="warning")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["alert_classes_active"] == 1
-    assert body["alert_classes_dismissed"] == 0
-
-
-def test_dashboard_per_agent_dismissal_has_no_effect_on_the_class(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    """v1 rejects per-agent dismissals; a manually inserted agent-scoped row must not cancel the
-    class-wide class (resolution daemon contract)."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO event_dismissals "
-            "(category, level, event_name, source, agent_id, dismissed_by) "
-            "VALUES ('telemetry', 'warning', 'agent_warning', 'test', 7, 0)"
-        )
-    db_conn.commit()
-    event_rows.add(event="agent_warning", level="warning")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["alert_classes_active"] == 1
-    assert body["alert_classes_dismissed"] == 0
+    diag = body["diagnostics"]
+    assert diag["active_classes"] == 2
+    assert diag["archived_classes"] == 1
+    assert diag["active_events"] == 2
+    assert diag["archived_events"] == 3
+    assert diag["errors"] == 2
+    assert diag["warnings"] == 0
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
@@ -508,36 +517,31 @@ def test_dashboard_default_24h_window_filters_old_rows(
 def test_dashboard_warn_err_counts_by_level(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """Warning/error gauges count telemetry+log rows by level over the 24h
-    window, read from Loki (task #1280 — the PG events read flatlines post-freeze)."""
     aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="some_warning", level="warning", agent_id=aid)
-    event_rows.add(event="some_warning", level="warning", agent_id=aid)
+    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
+    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
     event_rows.add(event="some_error", level="error", agent_id=aid)
     # exec_failed logs at INFO (agent trial-and-error) — must not count
     event_rows.add(event="exec_failed", level="info", agent_id=aid)
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 2
-    assert body["errors"] == 1
+    assert body["diagnostics"]["warnings"] == 2
+    assert body["diagnostics"]["errors"] == 1
 
 
 def test_dashboard_audit_warning_not_counted(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """An audit-category WARNING row (an agent operation with a warning level —
-    e.g. a mislabeled write) must NOT count toward the sidebar warning/error
-    gauge: the query filters category IN (telemetry, log) (appendix scenario 4)."""
     aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="some_warning", level="warning", agent_id=aid)
+    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
     event_rows.add(event="spawn", level="warning", agent_id=aid, category="audit")
     event_rows.add(event="spawn", level="error", agent_id=aid, category="audit")
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 1
-    assert body["errors"] == 0
+    assert body["diagnostics"]["warnings"] == 1
+    assert body["diagnostics"]["errors"] == 0
 
 
 def _assert_provider_costs(
@@ -556,7 +560,7 @@ def test_dashboard_hours_param_selects_window(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="some_warning", level="warning", agent_id=aid, ts_offset_hours=3)
+    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid, ts_offset_hours=3)
     event_rows.add(
         event="llm_usage",
         agent_id=aid,
@@ -588,13 +592,13 @@ def test_dashboard_hours_param_selects_window(
     assert narrow["window_hours"] == 1
     assert narrow["tokens"]["input"] == 10
     assert narrow["tokens"]["output"] == 5
-    assert narrow["warnings"] == 0
+    assert narrow["diagnostics"]["warnings"] == 0
     _assert_provider_costs(narrow, openai=0.0, anthropic=0.1, google=0.0)
     assert wide["window_hours"] == 6
     assert wide["tokens"]["input"] == 110
     assert wide["tokens"]["output"] == 55
-    assert wide["warnings"] == 0
-    assert wide["warnings_resolved"] == 1
+    assert wide["diagnostics"]["warnings"] == 0
+    assert wide["diagnostics"]["archived_events"] == 1
     _assert_provider_costs(wide, openai=1.0, anthropic=0.1, google=0.0)
 
 
@@ -646,7 +650,7 @@ def test_dashboard_counts_the_home_cluster_and_unlabelled_rows_only(
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["errors"] == 2
+    assert body["diagnostics"]["errors"] == 2
     assert body["tokens"]["input"] == 0
 
 

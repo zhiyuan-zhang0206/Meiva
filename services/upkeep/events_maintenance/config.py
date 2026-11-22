@@ -33,11 +33,6 @@ RECOMPUTE_DAYS = 8
 class EventsMaintenanceConfig:
     events_maintenance_interval_seconds: float
     events_maintenance_pass_deadline_s: float
-    events_maintenance_resolution_deadline_s: float
-    events_resolution_burst_threshold: int
-    events_resolution_interval_seconds: int
-    events_auto_dismiss_enabled: bool
-    events_auto_dismiss_days: int
     # meiva:note
     # The escalation pass decides from these three: how often it looks, how long an episode must
     # stand before it counts as unanswered, and how long one episode waits between decisions.

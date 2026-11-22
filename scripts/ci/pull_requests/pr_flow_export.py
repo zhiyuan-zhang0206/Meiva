@@ -539,19 +539,32 @@ def build_snapshot(
 # meiva:note
 # Emits the daily events through the unified telemetry pipeline; dry_run keeps the seam silent.
 def emit_snapshot(
-    snapshot: Snapshot, *, dry_run: bool, pipeline: EventPipeline, home: Path
+    snapshot: Snapshot,
+    *,
+    dry_run: bool,
+    pipeline: EventPipeline,
+    home: Path,
+    deployed_sha: str | None = None,
 ) -> None:
     if dry_run:
         return
-    emit_events(snapshot, pipeline=pipeline, home=home)
+    emit_events(snapshot, pipeline=pipeline, home=home, deployed_sha=deployed_sha)
 
 
 # meiva:note
 # The pipeline write, kept as its own seam so tests can assert dry-run silence.
-def emit_events(snapshot: Snapshot, *, pipeline: EventPipeline, home: Path) -> None:
+def emit_events(
+    snapshot: Snapshot,
+    *,
+    pipeline: EventPipeline,
+    home: Path,
+    deployed_sha: str | None = None,
+) -> None:
     from base import telemetry
 
-    telemetry.init_telemetry(home=home, process=PROCESS_NAME, pipeline=pipeline)
+    telemetry.init_telemetry(
+        home=home, process=PROCESS_NAME, pipeline=pipeline, deployed_sha=deployed_sha
+    )
     pipeline.warmup_exports()
     for day, entry in sorted(snapshot["days"].items()):
         telemetry.emit("telemetry", "pr_flow_daily", attributes={"day": day, **entry})
@@ -631,7 +644,13 @@ def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
         from scripts.ci.pull_requests.export_process import owned_event_pipeline
 
         with owned_event_pipeline(PROCESS_NAME, image=image, home=home) as pipeline:
-            emit_snapshot(snapshot, dry_run=False, pipeline=pipeline, home=home)
+            emit_snapshot(
+                snapshot,
+                dry_run=False,
+                pipeline=pipeline,
+                home=home,
+                deployed_sha=image.sha if image is not None else None,
+            )
 
     if args.print_snapshot:
         print(json.dumps(snapshot, indent=1, sort_keys=True))

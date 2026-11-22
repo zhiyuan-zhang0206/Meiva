@@ -29,8 +29,6 @@ Owners:
 | `POST /api/cluster/machines/{name}/resume` | natural | control-plane op — clears the pause latch (idempotent no-op when not paused) |
 | `PUT /api/config` | natural | full config replace — PUT is idempotent |
 | `PUT /api/config/default-model` | natural | set default model — PUT is idempotent |
-| `POST /api/event-resolutions` | one-shot | create class dismissal — INSERT; retries receive a conflict rather than a replay |
-| `POST /api/event-resolutions/{dismissal_id}/reopen` | natural | guarded active-state transition — repeats cannot reopen twice |
 | `POST /api/frontend-telemetry` | one-shot | telemetry ingest — pure INSERT per event; a retry duplicates rows (client never retries) |
 | `POST /grafana/{rest:path}` | one-shot | reverse proxy — semantics follow upstream |
 | `PATCH /grafana/{rest:path}` | one-shot | reverse proxy — semantics follow upstream |

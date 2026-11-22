@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, LiteralString
 
+import psycopg
 from pydantic import BaseModel, ConfigDict
 
+from base.db.rows import query_all
 from base.events.live.bus import EventBus
 
 _log = logging.getLogger(__name__)
@@ -22,6 +25,58 @@ _log = logging.getLogger(__name__)
 # Store vocabulary (user design 2026-08-12): three severities, two statuses.
 AlertSeverity = Literal["critical", "warning", "error"]
 AlertStatus = Literal["unresolved", "resolved"]
+
+# meiva:note
+# Single exclusion predicate for internal synthetic watchdog heartbeats, shared by
+# `/api/alerts` and `/api/stats/dashboard` so every human-facing Alerts surface reports
+# identical counts and rows.
+NON_WATCHDOG_ALERT_SQL: LiteralString = (
+    "(labels->>'metric' IS DISTINCT FROM 'alert_pipeline_watchdog' "
+    "AND COALESCE(labels->>'ruleUID', '') != 'meiva-ops-alert-pipeline-watchdog' "
+    "AND alertname != 'Alert pipeline watchdog (synthetic heartbeat)')"
+)
+
+
+# meiva:note
+# Point-in-time unresolved Grafana alert counts from `alerts`, split by severity.
+@dataclass(frozen=True)
+class LiveAlertsCounts:
+    unresolved: int = 0
+    critical: int = 0
+    error: int = 0
+    warning: int = 0
+
+
+@dataclass(frozen=True)
+class _SeverityCountRow:
+    severity: str
+    n: int
+
+
+# meiva:note
+# Read the live unresolved Grafana alerts from `alerts`, excluding synthetic watchdog rows.
+def unresolved_alert_counts(conn: psycopg.Connection) -> LiveAlertsCounts:
+    rows = query_all(
+        conn,
+        _SeverityCountRow,
+        f"""
+        SELECT severity, count(*) AS n
+        FROM alerts
+        WHERE status = 'unresolved'
+          AND {NON_WATCHDOG_ALERT_SQL}
+        GROUP BY severity
+        """,  # noqa: S608
+    )
+    counts = {"critical": 0, "error": 0, "warning": 0}
+    for row in rows:
+        if row.severity in counts:
+            counts[row.severity] = row.n
+    return LiveAlertsCounts(
+        unresolved=counts["critical"] + counts["error"] + counts["warning"],
+        critical=counts["critical"],
+        error=counts["error"],
+        warning=counts["warning"],
+    )
 
 
 # meiva:note

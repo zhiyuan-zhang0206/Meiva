@@ -1,56 +1,11 @@
-"""Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
-
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
-loops under one `TaskGroup` (one that raises ends the process):
-
-- Hourly loop (`MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): replay the JSONL mirror
-  into `telemetry_events` (`services.upkeep.events_maintenance.telemetry_replay`), recompute the
-  day-grain rollup tables of the last closed days (`services.upkeep.events_maintenance.rollup`),
-  run the incremental blob VACUUM (`services.upkeep.events_maintenance.blob_vacuum`), and the hourly
-  checkpoint size/row-count telemetry sample.
-- Resolution loop (`MEIVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
-  refresh immutable-event class-resolution state and gauges from `telemetry_events`.
-- Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
-  `agent_registry` event the growth dashboard reads
-  (`services.upkeep.events_maintenance.registry_gauge`).
-- Alert-reconciliation loop (every 5m, only on a unit holding
-  `GRAFANA_ADMIN_PASSWORD`): resolve stored Grafana alert rows the embedded
-  Alertmanager no longer reports firing, for webhooks whose RESOLVE was lost
-  (`services.upkeep.events_maintenance.alert_reconciler`).
-
-Each loop reports independent progress, success, and errors in `/healthz`.
-Only completed bounded work or sleeps beat; exceeding a hard deadline fails
-healthz until the watchdog replaces the process and its orphaned worker thread.
-The service's TaskGroup retains every pass proxy, including expired passes; a
-late worker failure is reported with its original traceback without restoring
-health. Stop cancels those proxies and the existing hard exit skips thread joins.
-The same trackers are projected as unified envelope components, so the legacy
-per-loop snapshots and the component degradation reasons describe one state.
-
-The checkpoint size sample and blob vacuum remain active independently of the
-events pipeline; neither deletes live checkpoint history.
-
-The rollup only covers whole days up to yesterday (UTC); today is served live by
-the readers. The upsert is a full-day overwrite recompute keyed on the PK, so
-re-running is idempotent — a restart or a fast interval never double-counts.
-An indexed slice with zero aggregate rows is warned and skipped rather than
-treated as an empty day, leaving that day's existing ledger rows intact.
-
-Usage:
-    .venv/bin/python -m services.upkeep.events_maintenance.daemon
-
-Kept alive by the root supervisor's health monitor through the roster's
-`/healthz` identity probe, so the schema-drift exit in
-`dispatch_loop` is revived on the next round instead of staying dead. Each loop
-logs an unexpected failed pass and waits out its interval; after five failures in a
-row (`base.daemon.round_loop.RoundFailureBudget`) it raises and the process exits for
-the supervisor. A pass skipped because the database is unreachable does not count.
-
-Health reports progress independently for the rollup and resolution loops.
-The endpoint takes the worst state: only a completed bounded unit refreshes
-a loop's success timestamp, and a worker running beyond its hard
-deadline makes `/healthz` return 503 for watchdog recovery.
-"""
+# meiva:note
+# Gateway-owned events-maintenance daemon. Resident loops under one `TaskGroup`:
+# - Hourly dispatch (`telemetry_replay`, day-grain `rollup`, `blob_vacuum`, checkpoint size sample)
+# - 60s `registry_gauge` (`max(agents.id)` -> `agent_registry`)
+# - Alert escalation (`escalation`) and 5m Grafana `alert_reconciliation` (when credentialed)
+# Each loop tracks independent progress and hard deadlines for `/healthz`; exceeding a deadline
+# fails healthz until the watchdog restarts the process.
+# meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.md
 
 import asyncio
 import os
@@ -106,7 +61,6 @@ from services.upkeep.events_maintenance.blob_vacuum import (
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.health_components import LoopFacts
 from services.upkeep.events_maintenance.passes import events_maintenance_log
-from services.upkeep.events_maintenance.resolution import AutoDismissCadence, run_resolution_slice
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
@@ -126,11 +80,6 @@ def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> Events
     return EventsMaintenanceConfig(
         events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
-        events_maintenance_resolution_deadline_s=config.view.daemon.events_maintenance_resolution_deadline_s,
-        events_resolution_burst_threshold=config.view.daemon.events_resolution_burst_threshold,
-        events_resolution_interval_seconds=config.view.daemon.events_resolution_interval_seconds,
-        events_auto_dismiss_enabled=config.view.daemon.events_auto_dismiss_enabled,
-        events_auto_dismiss_days=config.view.daemon.events_auto_dismiss_days,
         events_escalation_mode=config.view.daemon.events_escalation_mode,
         events_escalation_interval_seconds=config.view.daemon.events_escalation_interval_seconds,
         events_escalation_min_age_seconds=config.view.daemon.events_escalation_min_age_seconds,
@@ -233,24 +182,6 @@ def _clock(config: EventsMaintenanceConfig) -> Clock:
         ),
         timers=SYSTEM_TIMERS,
     )
-
-
-def _run_resolution(
-    pool: ConnectionPool,
-    progress: LoopProgress,
-    config: EventsMaintenanceConfig,
-    cadence: AutoDismissCadence,
-) -> None:
-    """Run the resolution slice while discarding its test-facing summary."""
-
-    run_resolution_slice(
-        pool,
-        config,
-        cadence=cadence,
-        now=_clock(config).now(),
-    )
-    progress.beat()
-    progress.mark_success()
 
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
@@ -357,35 +288,6 @@ async def dispatch_loop(
     )
 
 
-async def resolution_loop(
-    pool: ConnectionPool,
-    progress: LoopProgress,
-    config: EventsMaintenanceConfig,
-    *,
-    tasks: asyncio.TaskGroup,
-) -> None:
-    """Refresh immutable-event class-resolution gauges on their own cadence.
-
-    The six-hour class count and safety-valve write are independent of the hourly
-    rollup pass. As with the rollup loop, a transient backend outage waits one full
-    configured interval; schema drift exits for watchdog recovery.
-    """
-
-    cadence = AutoDismissCadence()
-    interval = config.events_resolution_interval_seconds
-    events_maintenance_log.info(
-        "[events-maintenance] resolution loop started, interval=%ds",
-        interval,
-    )
-    await passes.pass_loop(
-        progress,
-        label="resolution",
-        interval_s=interval,
-        work=lambda: _run_resolution(pool, progress, config, cadence),
-        tasks=tasks,
-    )
-
-
 # meiva:note
 # `pass_loop` runs blocking work that reports success by returning; the pass's own count is a
 # fact for the caller, not for the loop, so it is logged rather than returned.
@@ -467,7 +369,6 @@ async def run(
     # carries no such loop (and no tracker to read as idle).
     loops = loop_roster.roster(
         dispatch_deadline_s=config.events_maintenance_pass_deadline_s,
-        resolution_deadline_s=config.events_maintenance_resolution_deadline_s,
         reconcile_alerts=alert_reconciler.grafana_reconciliation_configured(config),
     )
     liveness = LivenessGroup(clock=clock)
@@ -495,7 +396,6 @@ async def run(
         # the blocking executor thread.
         async with asyncio.TaskGroup() as group:
             group.create_task(dispatch_loop(pool, progress["dispatch"], config, db, tasks=group))
-            group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
             group.create_task(escalation_loop(pool, progress["escalation"], config, tasks=group))
             if "alert_reconciliation" in progress:

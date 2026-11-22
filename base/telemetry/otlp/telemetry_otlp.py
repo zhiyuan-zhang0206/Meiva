@@ -604,23 +604,12 @@ class OtlpBackend:
             raise RuntimeError("the OTLP log provider is not initialized")
         emit_log_record(logs, event)
 
+    # meiva:note
+    # Map a telemetry event's numeric payload fields to OTLP instruments: telemetry category only;
+    # int -> Counter, float -> Histogram, overridden by `METRIC_DISPOSITION` (e.g. `cost_usd`
+    # Counter, `agent_registry` ObservableGauge, `price_*` skipped); bool/short-str become
+    # attributes; None values are skipped.
     def _record_metrics(self, event: Event) -> None:
-        """Map a telemetry event's numeric payload fields to OTLP instruments.
-
-        Rules (deliberately simple, documented):
-        - telemetry category only — log/audit events are the event stream, not
-          a measurement.
-        - int payload field -> Counter (token counts, event counts: things you
-          sum). float -> Histogram (latencies/durations: things you
-          percentile). `METRIC_DISPOSITION` overrides per field: a float that
-          is really a sum (cost_usd) records as a Counter; an absolute state
-          (resolution_status) records an ObservableGauge; a rate snapshot
-          (price_*) records nothing.
-        - bool / short-str payload fields become datapoint attributes (model,
-          ok, fn); `body` and strings over the length cap never do (content /
-          cardinality guard).
-        - None values are skipped (an absent optional metric is not zero).
-        """
         if event.category != "telemetry":
             return
         attrs = self._metric_attributes(event)

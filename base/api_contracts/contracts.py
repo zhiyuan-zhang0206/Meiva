@@ -140,14 +140,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/events"): RouteContract(),
     ("GET", "/api/events/counts"): RouteContract(note="grouped event counts, computed in SQL"),
-    ("GET", "/api/event-resolutions"): RouteContract(),
-    ("POST", "/api/event-resolutions"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="create class dismissal — INSERT; retries receive a conflict rather than a replay",
-    ),
-    ("POST", "/api/event-resolutions/{dismissal_id}/reopen"): RouteContract(
-        note="guarded active-state transition — repeats cannot reopen twice"
-    ),
     ("GET", "/api/fleet/graph"): RouteContract(),
     ("POST", "/api/frontend-telemetry"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
@@ -343,8 +335,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="deliver a framework system note (task assign/update/reminder) — renders as a system marker, not peer chat; resurrect is a body choice",
     ),
     ("GET", "/api/stats/dashboard"): RouteContract(),
-    ("GET", "/api/stats/alert-classes"): RouteContract(),
-    ("GET", "/api/stats/alert-classes/samples"): RouteContract(),
+    ("GET", "/api/stats/diagnostics"): RouteContract(),
+    ("GET", "/api/stats/diagnostics/samples"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),

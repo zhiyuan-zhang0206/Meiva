@@ -97,15 +97,8 @@ def test_collect_core_metrics_includes_statistics_coverage() -> None:
     avg_turn = by_name["core_avg_turn_duration_24h"].query
     assert avg_turn.count('attributes_ok="true"') == 2
     assert "sum(count_over_time(" in avg_turn
-    assert by_name["core_unresolved_warning"].query_type == "promql"
-    assert (
-        by_name["core_unresolved_warning"].query
-        == "meiva_resolution_status_unresolved_warnings_ratio"
-    )
-    assert by_name["core_unresolved_error"].query_type == "promql"
-    assert (
-        by_name["core_unresolved_error"].query == "meiva_resolution_status_unresolved_errors_ratio"
-    )
+    assert "core_unresolved_warning" not in by_name
+    assert "core_unresolved_error" not in by_name
 
 
 # ── LogQL dialect (task #1280) ────────────────────────────────────────────────

@@ -130,6 +130,7 @@ class ProcessState(TypedDict):
     machine_hostname: str
     home: Path | None
     cluster: str | None
+    deployed_sha: str
     now: Callable[[], datetime] | None
     jsonl_day: str | None
     emission_skipped_said: set[str]
@@ -152,6 +153,7 @@ process_state: ProcessState = {
     "machine_hostname": machine_hostname(),
     "home": None,
     "cluster": None,
+    "deployed_sha": "",
     "now": None,
     "jsonl_day": None,
     "emission_skipped_said": set(),

@@ -530,3 +530,18 @@ def test_the_command_runs_a_round_from_its_configuration(
     assert "  ✓ agent population (>= 0)" in out
     assert "schema health" not in out
     assert len(ran) == 1
+
+
+def test_health_probe_stamps_deployed_sha_from_checkout(
+    cluster: Cluster,
+    emitted_events: EmittedEvents,
+) -> None:
+    from base.native_process.loaded_commit import LoadedCommit
+
+    expected_sha = LoadedCommit.capture(cluster.command.checkout).sha
+    assert expected_sha
+
+    cluster.probe()
+    ran_events = emitted_events.named("health_probe_ran")
+    assert len(ran_events) == 1
+    assert ran_events[0].deployed_sha == expected_sha

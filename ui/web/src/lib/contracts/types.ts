@@ -173,14 +173,16 @@ export type PendingInbound = Schemas["PendingInbound"];
 
 export type StatsDashboard = Schemas["StatsDashboard"];
 export type StatsTokens = Schemas["StatsTokens"];
+export type StatsAlerts = Schemas["StatsAlerts"];
+export type StatsDiagnostics = Schemas["StatsDiagnostics"];
 export type PluginStat = Schemas["PluginStat"];
 
-// The sidebar card's warning/error classes: one row per (level, event_name, source, process),
-// and the persisted dismissal a row's Dismiss action creates.
-export type AlertClassRow = Schemas["AlertClassRow"];
-export type AlertClassesResponse = Schemas["AlertClassesResponse"];
-export type AlertClassSample = Schemas["AlertClassSample"];
-export type EventResolutionRow = Schemas["EventResolutionRow"];
+// meiva:note
+// Sentry-style error diagnostics grouped by (level, event_name, source, process), decoupled from
+// live Grafana alerts and automatically archived on release cutover or after the quiet window.
+export type DiagnosticClassRow = Schemas["DiagnosticClassRow"];
+export type DiagnosticsResponse = Schemas["DiagnosticsResponse"];
+export type DiagnosticSample = Schemas["DiagnosticSample"];
 
 // --- Metrics (settings Metrics tab) ---
 //

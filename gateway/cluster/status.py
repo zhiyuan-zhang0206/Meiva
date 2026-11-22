@@ -50,7 +50,7 @@ from base.packages.plugins.loading.ui_declarations import (
 from base.packages.plugins.surface import stats
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
-from gateway.cluster.monitor.alert_classes import alert_class_totals, read_alert_classes
+from gateway.cluster.monitor.diagnostics import diagnostic_totals, read_diagnostic_classes
 from gateway.cluster.roster import roster_probe, roster_rows
 from gateway.cluster.roster.liveness_snapshot import Snapshot
 from gateway.cluster.roster.roster_plan import (
@@ -67,6 +67,7 @@ from gateway.cluster.schemas import (
     PluginStat,
     ServiceItem,
     ServicesStatus,
+    StatsAlerts,
     StatsDashboard,
     StatsTokens,
     SystemStatus,
@@ -83,6 +84,7 @@ from gateway.http.config import (
 )
 from gateway.http.model_catalog import catalog_for_observation, request_catalog
 from gateway.schemas.stats import StatsWindowHours, window_delta
+from ops.alerts import unresolved_alert_counts
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -133,7 +135,16 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
 
 @router.get(
     "/api/stats/dashboard",
-    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd` / `google_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd / google_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
+    description=(
+        "Pull all data for the sidebar Status popover in one shot.\n\n"
+        "Data sources:\n"
+        "- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n"
+        "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog "
+        "heartbeats) — single source of truth shared with `/api/alerts`\n"
+        "- `tokens` / cost slices: the window's `llm_usage` rows in `telemetry_events`\n"
+        "- `diagnostics`: the window's structured error/anomaly classes in `telemetry_events`, "
+        "automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`"
+    ),
 )
 def get_stats_dashboard(
     request: Request,
@@ -163,6 +174,7 @@ def get_stats_dashboard(
             gateway_state(request).gateway_config,
             gateway_clock(request),
             cluster=gateway_cluster(request),
+            current_sha=gateway_state(request).process_image.sha,
             catalog=catalog_for_observation(request_catalog(request)),
             declared_cards=declared_cards,
         )
@@ -207,6 +219,7 @@ def _compute_stats_dashboard(
     clock: Clock,
     *,
     cluster: str,
+    current_sha: str | None,
     catalog: ModelCatalog | None,
     declared_cards: frozenset[tuple[str, str]],
 ) -> StatsDashboard:
@@ -217,12 +230,14 @@ def _compute_stats_dashboard(
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
-        alert_classes = read_alert_classes(
+        live_alerts = unresolved_alert_counts(conn)
+        diagnostics = read_diagnostic_classes(
             conn,
             cluster=cluster,
             start=window_start,
             end=now,
-            quiet_window=timedelta(seconds=config.alert_class_quiet_seconds),
+            current_sha=current_sha,
+            quiet_window=timedelta(seconds=config.diagnostic_quiet_seconds),
         )
         live_count = count_one(
             conn, "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'"
@@ -235,7 +250,6 @@ def _compute_stats_dashboard(
     openai_cost_usd, anthropic_cost_usd, google_cost_usd = _provider_api_costs(
         totals.api_cost_by_model, catalog
     )
-    classes = alert_class_totals(alert_classes)
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
@@ -251,12 +265,13 @@ def _compute_stats_dashboard(
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
         google_cost_usd=google_cost_usd,
-        warnings=classes.warnings,
-        errors=classes.errors,
-        warnings_resolved=classes.warnings_resolved,
-        errors_resolved=classes.errors_resolved,
-        alert_classes_active=classes.classes_unresolved,
-        alert_classes_dismissed=classes.classes_resolved,
+        alerts=StatsAlerts(
+            unresolved=live_alerts.unresolved,
+            critical=live_alerts.critical,
+            error=live_alerts.error,
+            warning=live_alerts.warning,
+        ),
+        diagnostics=diagnostic_totals(diagnostics, deployed_sha=current_sha),
         plugin_stats=_plugin_stat_rows(pool, declared_cards),
         as_of=clock.now(),
     )

@@ -6,8 +6,8 @@
 # halves of the same rows, split by the billing mode of the row's `source` harness: an API row's
 # fee is money the account is billed, a subscription row's usage-time price is the list value the
 # subscription covered. Subscription rows still contribute to the token totals. The cluster filter
-# accepts the home cluster's label and rows with no label, as every dashboard read does. The
-# warning/error classes are `gateway.cluster.monitor.alert_classes`.
+# accepts the home cluster's label and rows with no label, as every dashboard read does.
+# Diagnostic classes live in `gateway.cluster.monitor.diagnostics`.
 # meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations

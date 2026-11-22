@@ -10,7 +10,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 | package | routers |
 |---|---|
 | `gateway/agents/` | `router` (agents), `lifecycle`, `state`, `history.conversation`, `history.timeline`, `notices`; helpers `forward`, `delivery` |
-| `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `resolutions`, `metrics`, `system` |
+| `gateway/events/` | `router` (events), `agent_events`, `computer_traces`, `metrics`, `system` |
 | `gateway/cluster/` | `router` (cluster), `machine_pause`, `bootstrap`, `status`, `ops_monitor` |
 | `gateway/extensions/` | `inventory`, `skills`, `plugin_ui`, `ui_contributions`, `packages` |
 | `gateway/routers/configuration/` | `runtime`, `default_model` |
@@ -29,7 +29,6 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **ops_monitor** (`/api/ops/monitor`) — time-bucketed ops panel series (SSE backlog / LLM latency+TPS / restart counts), see [Ops Monitor Router](../../cluster/docs/ops-monitor.md)
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read [Alerts Router](../../alerts/docs/alerts.md)
-- **event_resolutions** (`/api/event-resolutions`) — authenticated immutable-Loki warning/error class dismissal history: create, status-filtered review list, and manual reopen; writes `event_dismissals` and emits transition markers, while the events-maintenance daemon publishes the resulting gauges
 
 ### Cluster & configuration
 - **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control (admin contracts: [Ops Surfaces (cluster admin + stats dashboard)](../../cluster/docs/ops-surfaces.md))
@@ -47,7 +46,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 [Frontend UI data routers](frontend-ui-data.md)
 
 ### Ops & system
-- **status** + **alert_classes** (`/api/health`, `/api/status`, `/api/stats/dashboard`, `/api/stats/alert-classes[/samples]`) — liveness + status panel + dashboard event totals + warning/error class diagnostics; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([dashboard contract](../../cluster/docs/ops-surfaces.md), [alert classes](../../cluster/docs/alert-classes-api.md))
+- **status** + **diagnostics** (`/api/health`, `/api/status`, `/api/stats/dashboard`, `/api/stats/diagnostics[/samples]`) — liveness + status panel + dashboard event totals + release-aware diagnostic classes; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([dashboard contract](../../cluster/docs/ops-surfaces.md), [diagnostics](../../cluster/docs/alert-classes-api.md))
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — shell session monitor (session backend proxy)

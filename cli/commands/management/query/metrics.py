@@ -117,6 +117,23 @@ class _PluginStat(BaseModel):
     updated_at: datetime
 
 
+class _StatsAlerts(BaseModel):
+    unresolved: int
+    critical: int
+    error: int
+    warning: int
+
+
+class _StatsDiagnostics(BaseModel):
+    active_classes: int
+    archived_classes: int
+    active_events: int
+    archived_events: int
+    errors: int
+    warnings: int
+    deployed_sha: str | None = None
+
+
 class _StatsDashboard(BaseModel):
     live_count: int
     window_hours: int
@@ -126,10 +143,8 @@ class _StatsDashboard(BaseModel):
     openai_cost_usd: float | None
     anthropic_cost_usd: float | None
     google_cost_usd: float | None = None
-    warnings: int
-    errors: int
-    alert_classes_active: int
-    alert_classes_dismissed: int
+    alerts: _StatsAlerts
+    diagnostics: _StatsDiagnostics
     plugin_stats: list[_PluginStat]
 
 
@@ -155,6 +170,9 @@ def cmd_stats(access: GatewayAccess, *, hours: int | None, as_json: bool) -> int
         if stats.tokens.cache_hit_pct is None
         else f", cache hit {stats.tokens.cache_hit_pct:.1f}%"
     )
+    sha_suffix = (
+        f" (sha {stats.diagnostics.deployed_sha[:7]})" if stats.diagnostics.deployed_sha else ""
+    )
     print(f"window:        {window}")
     print(f"live agents:   {stats.live_count}")
     print(
@@ -167,8 +185,15 @@ def cmd_stats(access: GatewayAccess, *, hours: int | None, as_json: bool) -> int
         f"subscription {stats.subscription_cost_usd:.2f}"
     )
     print(
-        f"alerts:        {stats.warnings} warnings, {stats.errors} errors; "
-        f"{stats.alert_classes_active} classes active, {stats.alert_classes_dismissed} resolved"
+        f"alerts:        {stats.alerts.unresolved} unresolved "
+        f"({stats.alerts.critical} critical, {stats.alerts.error} error, "
+        f"{stats.alerts.warning} warning)"
+    )
+    print(
+        f"diagnostics:   {stats.diagnostics.active_classes} active "
+        f"({stats.diagnostics.active_events} events: {stats.diagnostics.errors} errors, "
+        f"{stats.diagnostics.warnings} anomalies), "
+        f"{stats.diagnostics.archived_classes} archived{sha_suffix}"
     )
     if stats.plugin_stats:
         print()

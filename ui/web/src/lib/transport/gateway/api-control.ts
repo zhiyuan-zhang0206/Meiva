@@ -7,16 +7,15 @@ import type {
 import type { HarnessAvailability } from "../../contracts/models";
 import type {
   AgentMachineRow,
-  AlertClassRow,
-  AlertClassesResponse,
-  AlertClassSample,
   AlertsResponse,
   AlertsWindow,
   ClusterStatus,
   CompactAgentResponse,
   ConfigView,
   ConfigWriteResult,
-  EventResolutionRow,
+  DiagnosticClassRow,
+  DiagnosticSample,
+  DiagnosticsResponse,
   GuideDraftResponse,
   ClusterPluginsView,
   ClusterPluginSaved,
@@ -60,7 +59,7 @@ import type {
 } from "../../contracts/types";
 import { toUserPath } from "./routes/agent-routes";
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
-import { alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
+import { alertsPath, diagnosticSamplesPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./plans";
 import { confirmDraftReceipt } from "./plans";
@@ -150,33 +149,25 @@ export function createControlApi(http: Http) {
       );
     },
 
-    getAlertClasses: (hours: number, signal?: AbortSignal): Promise<AlertClassesResponse> => {
-      return jsonWithTimeout<AlertClassesResponse>(
-        `/api/stats/alert-classes?hours=${hours}`,
+    getDiagnostics: (hours: number, signal?: AbortSignal): Promise<DiagnosticsResponse> => {
+      return jsonWithTimeout<DiagnosticsResponse>(
+        `/api/stats/diagnostics?hours=${hours}`,
         {},
         STATS_REQUEST_TIMEOUT_MS,
         signal,
-        "alert classes",
+        "diagnostics",
       );
     },
 
-    getAlertClassSamples: (
-      cls: Pick<AlertClassRow, "level" | "event_name" | "source" | "process">,
+    getDiagnosticSamples: (
+      cls: Pick<DiagnosticClassRow, "level" | "event_name" | "source" | "process">,
       hours: number,
       signal?: AbortSignal,
-    ): Promise<AlertClassSample[]> => {
-      return f(alertClassSamplesPath(cls, hours), { signal })
-        .then(ok<{ samples: AlertClassSample[] }>)
+    ): Promise<DiagnosticSample[]> => {
+      return f(diagnosticSamplesPath(cls, hours), { signal })
+        .then(ok<{ samples: DiagnosticSample[] }>)
         .then((body) => body.samples);
     },
-
-    dismissAlertClass: (
-      cls: Pick<AlertClassRow, "category" | "level" | "event_name" | "source" | "process">,
-    ): Promise<EventResolutionRow> =>
-      f("/api/event-resolutions", postJson(cls)).then(ok<EventResolutionRow>),
-
-    reopenAlertClass: (dismissalId: number): Promise<EventResolutionRow> =>
-      f(`/api/event-resolutions/${dismissalId}/reopen`, postInit).then(ok<EventResolutionRow>),
 
     getAlerts: (params: {
       window?: AlertsWindow;

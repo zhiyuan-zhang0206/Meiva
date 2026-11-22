@@ -19,7 +19,7 @@ def _owner() -> ConfigBoot:
 
 def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
     owner = _owner()
-    owner.set_field("events_resolution_burst_threshold", 17)
+    owner.set_field("events_escalation_interval_seconds", 17.0)
     owner.set_field("timezone", "Asia/Shanghai")
 
     config = daemon.events_maintenance_config(owner, mirror_dir=tmp_path)
@@ -29,7 +29,7 @@ def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
             continue
         flat: Any = owner.get_field(name)
         assert value == flat, name
-    assert config.events_resolution_burst_threshold == 17
+    assert config.events_escalation_interval_seconds == 17.0
     assert config.timezone == "Asia/Shanghai"
     assert config.mirror_dir == tmp_path
 
@@ -37,19 +37,19 @@ def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
 def test_two_entry_slices_remain_independent_at_each_lookup(tmp_path: Path) -> None:
     first = _owner()
     second = _owner()
-    first.set_field("events_resolution_burst_threshold", 17)
-    second.set_field("events_resolution_burst_threshold", 23)
+    first.set_field("events_escalation_interval_seconds", 17.0)
+    second.set_field("events_escalation_interval_seconds", 23.0)
 
-    def threshold(owner: ConfigBoot) -> int:
+    def interval(owner: ConfigBoot) -> float:
         return daemon.events_maintenance_config(
             owner, mirror_dir=tmp_path
-        ).events_resolution_burst_threshold
+        ).events_escalation_interval_seconds
 
-    assert threshold(first) == 17
-    assert threshold(second) == 23
-    first.set_field("events_resolution_burst_threshold", 31)
-    assert threshold(first) == 31
-    assert threshold(second) == 23
+    assert interval(first) == 17.0
+    assert interval(second) == 23.0
+    first.set_field("events_escalation_interval_seconds", 31.0)
+    assert interval(first) == 31.0
+    assert interval(second) == 23.0
 
 
 def test_database_slice_uses_the_supplied_owner_at_each_factory_call(

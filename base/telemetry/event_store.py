@@ -58,13 +58,15 @@ _NUL_ESCAPE = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
 _INSERT: LiteralString = """
 INSERT INTO telemetry_events (
     event_uid, ts, trace_id, span_id, agent_id, machine, cluster, process, category,
-    event_name, level, source, target_agent_id, attributes, imported_from)
+    event_name, level, source, target_agent_id, attributes, imported_from, deployed_sha)
 SELECT event_uid, ts, trace_id, span_id, agent_id, machine, cluster, process, category,
-       event_name, level, source, target_agent_id, attributes, imported_from
+       event_name, level, source, target_agent_id, attributes, imported_from,
+       COALESCE(deployed_sha, '')
 FROM jsonb_to_recordset(%s::jsonb) AS r(
     event_uid bigint, ts timestamptz, trace_id text, span_id text, agent_id bigint,
     machine text, cluster text, process text, category text, event_name text, level text,
-    source text, target_agent_id bigint, attributes jsonb, imported_from text)
+    source text, target_agent_id bigint, attributes jsonb, imported_from text,
+    deployed_sha text)
 ON CONFLICT (event_uid, ts) DO NOTHING
 """
 
@@ -106,6 +108,7 @@ def stored_row(row: dict[str, object], *, imported_from: str | None = None) -> d
         "target_agent_id": row["target_agent_id"],
         "attributes": row["attributes"],
         "imported_from": imported_from,
+        "deployed_sha": row.get("deployed_sha") or "",
     }
 
 

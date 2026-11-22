@@ -24,12 +24,9 @@ class LoopSpec:
     deadline_s: float
 
 
-def roster(
-    *, dispatch_deadline_s: float, resolution_deadline_s: float, reconcile_alerts: bool
-) -> tuple[LoopSpec, ...]:
+def roster(*, dispatch_deadline_s: float, reconcile_alerts: bool) -> tuple[LoopSpec, ...]:
     loops = (
         LoopSpec("dispatch", dispatch_deadline_s),
-        LoopSpec("resolution", resolution_deadline_s),
         LoopSpec("registry_gauge", REGISTRY_GAUGE_DEADLINE_S),
         LoopSpec("escalation", ESCALATION_DEADLINE_S),
     )

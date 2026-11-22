@@ -1,25 +1,9 @@
-"""Agent-registry max-id gauge (task #2010), a loop of the events-maintenance service.
-
-The fleet grows by spawning agents; the registry high-water mark
-(``max(id)`` of the ``agents`` table) is a lossless growth curve — it never
-resets and needs no retention window, so a spurt (e.g. +300 in a day, a batch
-spawn) shows up as a clean slope on the ops dashboard.
-
-The `registry_gauge` loop samples it once per `FLUSH_INTERVAL_S` and emits ONE
-``agent_registry`` telemetry event carrying ``max_id``. The OTLP exporter maps
-an int payload field to a Counter by default, but this value is absolute
-state, never a sum — the ``_METRIC_DISPOSITION`` override in
-``base/telemetry/otlp/telemetry_otlp.py`` records it as an ObservableGauge, exported to
-Prometheus as ``meiva_agent_registry_max_id_ratio`` (the unit-"1" gauge suffix,
-the same naming as ``resolution_status`` / ``checkpoint_table_sizes``).
-
-Wiring mirrors the task #1712 auth-401 aggregate (``gateway/http/auth/rejection_log.py``
-+ ``gateway/http/middleware/latency.py``): bounded row rate (1/min), never per event.
-The gauge is absolute state sampled from the database, so it needs no gateway
-process; it runs in the service that already owns the data plane's periodic reads.
-An unreachable database skips the sample; any other exception ends the loop and,
-through the service's `TaskGroup`, the process (the supervisor restarts it).
-"""
+# meiva:note
+# Agent-registry max-id gauge loop of `events_maintenance`: samples `max(agents.id)` once per
+# `FLUSH_INTERVAL_S` and emits an `agent_registry` telemetry event exported to Prometheus as the
+# unit-"1" ObservableGauge `meiva_agent_registry_max_id_ratio` (same suffix as
+# `checkpoint_table_sizes`). Unreachable DB skips the sample; other errors end the loop for
+# supervisor restart.
 
 from __future__ import annotations
 
