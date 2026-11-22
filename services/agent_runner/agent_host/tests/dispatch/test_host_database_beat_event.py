@@ -96,7 +96,12 @@ def _events(records: list[dict[str, object]], name: str) -> list[dict[str, objec
 # the loop from reaching its reap fails instead of hanging the shard.
 async def _run_beat(host: object) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    sink = logger.add(lambda message: records.append(dict(message.record["extra"])), level="DEBUG")
+    sink = logger.add(
+        lambda message: records.append(
+            {**dict(message.record["extra"]), "_level": message.record["level"].name}
+        ),
+        level="DEBUG",
+    )
     task = asyncio.create_task(
         host_beat.beat_forever(
             cast(host_daemon.Liveness, _FakeLiveness()),
@@ -131,6 +136,7 @@ async def test_each_failed_beat_is_one_event_and_the_third_one_says_it_ends_the_
 
     failures = _events(records, "host_database_beat_failed")
     assert [record["failures"] for record in failures] == [1, 2, 3]
+    assert [record["_level"] for record in failures] == ["WARNING", "WARNING", "WARNING"]
     assert [record["will_exit"] for record in failures] == [False, False, True]
     assert failures[0]["machine"] == "runner-a"
     assert failures[0]["pool"] == "host-reaper"
@@ -148,6 +154,7 @@ async def test_a_beat_that_recovers_reports_what_it_cleared() -> None:
 
     recovered = _events(records, "host_database_beat_recovered")
     assert [record["failures_cleared"] for record in recovered] == [2]
+    assert [record["_level"] for record in recovered] == ["INFO"]
     assert recovered[0]["machine"] == "runner-a"
     assert [record["failures"] for record in _events(records, "host_database_beat_failed")] == [
         1,

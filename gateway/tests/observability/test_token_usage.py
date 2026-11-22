@@ -243,6 +243,8 @@ def test_checkpoint_read_failure_returns_zero(
         ("claude_code", "claude-fable-5-2[1m]", 1_000_000),
         ("antigravity", "gemini-4-hydrogen", 1_048_576),
         ("antigravity", "gemini-4-carbon-high", 1_048_576),
+        ("antigravity", "gemini-4-neon", 1_048_576),
+        ("antigravity", "gemini-4-neon-high", 1_048_576),
         ("meiva", "claude-fable-5-2[1m]", 0),
     ),
 )

@@ -244,6 +244,7 @@ def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_ex
     known = {
         "gemini-4-hydrogen",
         "gemini-4-carbon",
+        "gemini-4-neon",
         "claude-fable-5-2",
         "qwen3.8",
         "qwen3.8-max",
@@ -251,6 +252,10 @@ def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_ex
     assert resolve_harness_catalog_model("gemini-4-hydrogen-high", known) == "gemini-4-hydrogen"
     assert resolve_harness_catalog_model("gemini-4-hydrogen-xhigh", known) == "gemini-4-hydrogen"
     assert resolve_harness_catalog_model("gemini-4-carbon-high", known) == "gemini-4-carbon"
+    assert resolve_harness_catalog_model("gemini-4-neon-high", known) == "gemini-4-neon"
+    assert resolve_harness_catalog_model("gemini-4-neon-xhigh", known) == "gemini-4-neon"
+    assert resolve_harness_catalog_model("gemini-4-neon-medium", known) == "gemini-4-neon"
+    assert resolve_harness_catalog_model("gemini-4-neon-low", known) == "gemini-4-neon"
     assert resolve_harness_catalog_model("claude-fable-5-2[1m]", known) == "claude-fable-5-2"
     assert resolve_harness_catalog_model("claude-fable-5-2[1M]", known) == "claude-fable-5-2"
     assert resolve_harness_catalog_model("qwen3.8-max", known) == "qwen3.8-max"

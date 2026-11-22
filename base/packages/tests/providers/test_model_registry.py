@@ -223,7 +223,11 @@ def test_gemini_4_argon_registry_facts(*, model_catalog: ModelCatalog) -> None:
 
 @pytest.mark.parametrize(
     ("model", "default_effort"),
-    (("gemini-4-carbon", "medium"), ("gemini-4-hydrogen", "high")),
+    (
+        ("gemini-4-carbon", "medium"),
+        ("gemini-4-hydrogen", "high"),
+        ("gemini-4-neon", "high"),
+    ),
 )
 def test_gemini_4_carbon_and_hydrogen_registry_facts(
     model: str, default_effort: str, *, model_catalog: ModelCatalog
@@ -446,6 +450,7 @@ def test_image_media_types_match_the_verified_model_matrix(*, model_catalog: Mod
         "gemini-4-argon",
         "gemini-4-carbon",
         "gemini-4-hydrogen",
+        "gemini-4-neon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",

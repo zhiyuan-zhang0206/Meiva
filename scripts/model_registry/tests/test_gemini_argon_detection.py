@@ -43,6 +43,7 @@ def test_gemini_4_carbon_and_hydrogen_are_classified_as_distinct_series() -> Non
         "gemini-4-argon": _Spec("gemini"),
         "gemini-4-carbon": _Spec("gemini"),
         "gemini-4-hydrogen": _Spec("gemini"),
+        "gemini-4-neon": _Spec("gemini"),
     }
 
     comparison = compare_models(
@@ -54,12 +55,16 @@ def test_gemini_4_carbon_and_hydrogen_are_classified_as_distinct_series() -> Non
             "gemini-4-hydrogen",
             "gemini-4.1-hydrogen",
             "gemini-3.9-hydrogen",
+            "gemini-4-neon",
+            "gemini-4.1-neon",
+            "gemini-3.9-neon",
         ],
         registry,
     )
 
-    assert comparison.candidates == ["gemini-4.1-carbon", "gemini-4.1-hydrogen"]
-    assert comparison.suppressed == ["gemini-3.9-carbon", "gemini-3.9-hydrogen"]
+    assert comparison.candidates == ["gemini-4.1-carbon", "gemini-4.1-hydrogen", "gemini-4.1-neon"]
+    assert comparison.suppressed == ["gemini-3.9-carbon", "gemini-3.9-hydrogen", "gemini-3.9-neon"]
     assert comparison.series_models["gemini-4.1-carbon"] == ["gemini-4-carbon"]
     assert comparison.series_models["gemini-4.1-hydrogen"] == ["gemini-4-hydrogen"]
+    assert comparison.series_models["gemini-4.1-neon"] == ["gemini-4-neon"]
     assert comparison.other_ids == []
