@@ -394,6 +394,7 @@ def _deferred_clock_now() -> datetime:
 # on `import meiva` — an import that never asks for a namespace has not started working.
 def bind_sdk_identity(home: Path) -> bool:
     from base import telemetry
+    from base.native_process.loaded_commit import LoadedCommit
 
     # meiva:note
     # The process clock this binding establishes: `_deferred_clock_now` states how to read it
@@ -401,7 +402,10 @@ def bind_sdk_identity(home: Path) -> bool:
     # it has one. An event whose producer passed no `ts` is stamped with that clock rather than
     # with a second time source read behind the caller's back.
     return telemetry.bind_identity_if_unbound(
-        process=SDK_PROCESS, home=home, now=_deferred_clock_now
+        process=SDK_PROCESS,
+        home=home,
+        now=_deferred_clock_now,
+        deployed_sha=LoadedCommit.capture().sha,
     )
 
 

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
+from base.native_process.loaded_commit import LoadedCommit
 from base.paths.home import home_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands.cluster._provider_guard import provider_guard_config
@@ -102,6 +103,7 @@ def run_health_probe(
         process="cli-health-probe",
         pipeline=producer(),
         machine_reader=command.machine.name,
+        deployed_sha=LoadedCommit.capture(command.checkout).sha,
     )
     readings = read_health(options, database_factory=database_factory, command=command)
     unhealthy_checks = 0

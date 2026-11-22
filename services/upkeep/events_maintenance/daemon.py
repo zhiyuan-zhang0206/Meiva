@@ -1,56 +1,11 @@
-"""Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
-
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Resident
-loops under one `TaskGroup` (one that raises ends the process):
-
-- Hourly loop (`MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): replay the JSONL mirror
-  into `telemetry_events` (`services.upkeep.events_maintenance.telemetry_replay`), recompute the
-  day-grain rollup tables of the last closed days (`services.upkeep.events_maintenance.rollup`),
-  run the incremental blob VACUUM (`services.upkeep.events_maintenance.blob_vacuum`), and the hourly
-  checkpoint size/row-count telemetry sample.
-- Resolution loop (`MEIVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
-  refresh immutable-event class-resolution state and gauges from `telemetry_events`.
-- Registry-gauge loop (every 60s): sample `max(agents.id)` and emit the
-  `agent_registry` event the growth dashboard reads
-  (`services.upkeep.events_maintenance.registry_gauge`).
-- Alert-reconciliation loop (every 5m, only on a unit holding
-  `GRAFANA_ADMIN_PASSWORD`): resolve stored Grafana alert rows the embedded
-  Alertmanager no longer reports firing, for webhooks whose RESOLVE was lost
-  (`services.upkeep.events_maintenance.alert_reconciler`).
-
-Each loop reports independent progress, success, and errors in `/healthz`.
-Only completed bounded work or sleeps beat; exceeding a hard deadline fails
-healthz until the watchdog replaces the process and its orphaned worker thread.
-The service's TaskGroup retains every pass proxy, including expired passes; a
-late worker failure is reported with its original traceback without restoring
-health. Stop cancels those proxies and the existing hard exit skips thread joins.
-The same trackers are projected as unified envelope components, so the legacy
-per-loop snapshots and the component degradation reasons describe one state.
-
-The checkpoint size sample and blob vacuum remain active independently of the
-events pipeline; neither deletes live checkpoint history.
-
-The rollup only covers whole days up to yesterday (UTC); today is served live by
-the readers. The upsert is a full-day overwrite recompute keyed on the PK, so
-re-running is idempotent — a restart or a fast interval never double-counts.
-An indexed slice with zero aggregate rows is warned and skipped rather than
-treated as an empty day, leaving that day's existing ledger rows intact.
-
-Usage:
-    .venv/bin/python -m services.upkeep.events_maintenance.daemon
-
-Kept alive by the root supervisor's health monitor through the roster's
-`/healthz` identity probe, so the schema-drift exit in
-`dispatch_loop` is revived on the next round instead of staying dead. Each loop
-logs an unexpected failed pass and waits out its interval; after five failures in a
-row (`base.daemon.round_loop.RoundFailureBudget`) it raises and the process exits for
-the supervisor. A pass skipped because the database is unreachable does not count.
-
-Health reports progress independently for the rollup and resolution loops.
-The endpoint takes the worst state: only a completed bounded unit refreshes
-a loop's success timestamp, and a worker running beyond its hard
-deadline makes `/healthz` return 503 for watchdog recovery.
-"""
+# meiva:note
+# Gateway-owned events-maintenance daemon. Resident loops under one `TaskGroup`:
+# - Hourly dispatch (`telemetry_replay`, day-grain `rollup`, `blob_vacuum`, checkpoint size sample)
+# - 60s `registry_gauge` (`max(agents.id)` -> `agent_registry`)
+# - Alert escalation (`escalation`) and 5m Grafana `alert_reconciliation` (when credentialed)
+# Each loop tracks independent progress and hard deadlines for `/healthz`; exceeding a deadline
+# fails healthz until the watchdog restarts the process.
+# meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.md
 
 import asyncio
 import os

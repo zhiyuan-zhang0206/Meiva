@@ -26,20 +26,14 @@ per-plugin rows the 2026-08-23 merge had collapsed into `Plugin quality`,
 restored by task #3689). All sections are **expanded by default**
 (`collapsed: false`, 2026-08-23 #382):
 
-1. **`core`** — the user's daily first screen: twelve stat tiles cover the
-   entire Status popover (LLM calls / Warning / Error / Unresolved Warning /
-   Unresolved Error / Live agents / LLM cost /
+1. **`core`** — the user's daily first screen: ten stat tiles cover the
+   core counters (LLM calls / Warning / Error / Live agents / LLM cost /
    Tokens / LLM input tokens / LLM output tokens / Cache hit / Avg turn
    duration). It then shows Event health,
    Event rate, Token usage — Input, Token usage — Output + Reasoning, Cache
    hit, Turn success rate, and the three full-width **Events** panels:
    business/anomaly logs, the event-type table, and the parse-clean
-   raw stream for debugging. The four resolution tiles read the
-   events-maintenance daemon's fixed-six-hour Prometheus gauges: Warning /
-   Error (Loki `$__range` totals) sit beside Dismissed Warning / Dismissed
-   Error and Unresolved Warning / Unresolved Error, so the user-visible trio
-   (total / resolved / net) sums by construction at the default six-hour
-   window (task #1935).
+   raw stream for debugging.
 2. **`LLM`** — throughput tokens/s, the three TPS series, calls/bucket,
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
@@ -129,14 +123,13 @@ summaries cover the same information.
 Datasources (provisioned in `../datasources/datasources.yml`): **Loki**
 (fixed uid `loki`) for event panels; **Postgres** (uid `ops`) for the `Live
 agents` stat (`agents_meta` is not in Loki); **Prometheus** (uid `prometheus`)
-for the four resolution tiles, the fixed gauges published by the gateway and
+for the fixed gauges published by the gateway and
 the PR-flow export job (Fleet growth task #2010, PR flow task #2139),
 turn-duration percentile alerting, and the
 host & data-plane panels
 (per-machine OTel Collector sidecar scrapes, `job="meiva-infra"` + `host` (OS
 hostname) and `machine_name` (Meiva roster name) labels; panels group by
-`machine_name`). The unresolved tiles read the daemon's absolute
-resolution gauges, not raw event lines.
+`machine_name`).
 
 ## Core metrics (registered, not hand-written)
 
@@ -149,7 +142,7 @@ event-stream panels: the Events trio and the gateway sample count) and
 `base/telemetry/metrics/core/host.py` (the `Host & data plane` section), plus the
 smaller registration modules beside them (`cost` and
 `frontend` — the line budget splits of the first two, task
-#3697 — and `dismissed`, `fleet`,
+#3697 — and `fleet`,
 `pr_flow`). Each returns its specs from `core_metrics()`; `collect_core_metrics()` in
 `base/telemetry/metrics/core/catalog.py` runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
@@ -166,7 +159,7 @@ registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
 (Grafana query template — LogQL over the Loki event stream,
 `query_type="logql"`, for event-stream metrics; `query_type="promql"` for the
-Prometheus-gauge tiles (resolution, Fleet growth, memory search, PR flow);
+Prometheus-gauge tiles (Fleet growth, memory search, PR flow);
 the one SQL holdout is the core `Live
 agents` stat over `agents_meta`), plus the Task #882 fields:
 

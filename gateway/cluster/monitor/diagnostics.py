@@ -235,12 +235,27 @@ def get_diagnostics(
         raise HTTPException(status_code=503, detail="diagnostics read timed out; retry") from exc
     if not include_archived:
         classes = [row for row in classes if row.archived_by is None]
+        if current_sha:
+            classes.sort(
+                key=lambda row: (
+                    -row.current_sha_count,
+                    row.event_name,
+                    row.source,
+                    row.process,
+                    row.level,
+                )
+            )
+            total_events = sum(row.current_sha_count for row in classes)
+        else:
+            total_events = sum(row.count for row in classes)
+    else:
+        total_events = sum(row.count for row in classes)
     return DiagnosticsResponse(
         window_hours=hours,
         deployed_sha=current_sha,
         classes=classes[: config.diagnostics_limit],
         total_classes=len(classes),
-        total_events=sum(row.count for row in classes),
+        total_events=total_events,
         as_of=gateway_clock(request).now(),
     )
 

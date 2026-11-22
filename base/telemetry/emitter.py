@@ -184,10 +184,16 @@ def bind_identity(
 # Returns True when this call is what named the process, False when it already had a name; one of
 # the bounded values is `sdk`, bound where the plugin surface loads (`meiva/boot.py`) and never at
 # `import meiva`.
-def bind_identity_if_unbound(*, process: str, home: Path, now: Callable[[], datetime]) -> bool:
+def bind_identity_if_unbound(
+    *,
+    process: str,
+    home: Path,
+    now: Callable[[], datetime],
+    deployed_sha: str | None = None,
+) -> bool:
     if process_state["process"] != UNKNOWN_PROCESS:
         return False
-    bind_identity(process=process, home=home, now=now)
+    bind_identity(process=process, home=home, now=now, deployed_sha=deployed_sha)
     return True
 
 

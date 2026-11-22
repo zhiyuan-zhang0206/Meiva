@@ -204,3 +204,62 @@ def test_retired_event_resolutions_and_alert_classes_routes_are_removed(
     assert client.get("/api/event-resolutions").status_code == 404
     assert client.post("/api/event-resolutions", json={}).status_code == 404
     assert client.get("/api/stats/alert-classes").status_code == 404
+
+
+def _seed_bulk_events(
+    db: psycopg.Connection,
+    event_name: str,
+    *,
+    count: int,
+    deployed_sha: str,
+    minutes_ago: float = 1,
+) -> None:
+    now = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    cluster = cluster_label(meiva_home())
+    with db.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, "
+            "event_name, level, source, attributes, deployed_sha) "
+            "VALUES (%s, %s, 'm1', %s, 'gateway', 'telemetry', %s, 'error', 'svc', '{}'::jsonb, %s)",
+            [
+                (uuid.uuid4().int % (1 << 62), now, cluster, event_name, deployed_sha)
+                for _ in range(count)
+            ],
+        )
+
+
+def test_active_view_sorts_and_totals_by_current_sha_count_matching_dashboard(
+    db_conn: psycopg.Connection, client: GatewayTestClient
+) -> None:
+    _seed_bulk_events(db_conn, "old_regressed", count=500, deployed_sha=_OLD_SHA, minutes_ago=30)
+    _seed_bulk_events(db_conn, "old_regressed", count=1, deployed_sha=_CURRENT_SHA, minutes_ago=1)
+    _seed_bulk_events(db_conn, "new_spike", count=10, deployed_sha=_CURRENT_SHA, minutes_ago=1)
+    db_conn.commit()
+
+    active = client.get("/api/stats/diagnostics").json()
+    dashboard = client.get("/api/stats/dashboard").json()
+    with_archived = client.get("/api/stats/diagnostics", params={"include_archived": True}).json()
+
+    assert [r["event_name"] for r in active["classes"]] == ["new_spike", "old_regressed"]
+    assert active["total_classes"] == 2
+    assert active["total_events"] == 11
+    assert active["total_events"] == dashboard["diagnostics"]["active_events"]
+
+    assert [r["event_name"] for r in with_archived["classes"]] == ["old_regressed", "new_spike"]
+    assert with_archived["total_classes"] == 2
+    assert with_archived["total_events"] == 511
+
+
+@pytest.mark.parametrize("client_config", [{"diagnostics_limit": 1}])
+def test_active_view_truncates_after_current_sha_sort(
+    db_conn: psycopg.Connection, client: GatewayTestClient
+) -> None:
+    _seed_bulk_events(db_conn, "old_regressed", count=500, deployed_sha=_OLD_SHA, minutes_ago=30)
+    _seed_bulk_events(db_conn, "old_regressed", count=1, deployed_sha=_CURRENT_SHA, minutes_ago=1)
+    _seed_bulk_events(db_conn, "new_spike", count=10, deployed_sha=_CURRENT_SHA, minutes_ago=1)
+    db_conn.commit()
+
+    active = client.get("/api/stats/diagnostics").json()
+    assert [r["event_name"] for r in active["classes"]] == ["new_spike"]
+    assert active["total_classes"] == 2
+    assert active["total_events"] == 11

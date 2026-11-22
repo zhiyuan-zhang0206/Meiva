@@ -243,10 +243,15 @@ class OperatorEventPipeline:
         self.log_sinks.append(name)
         if not self._attach_process_logging or self._close_logging is not None:
             return
+        from base.native_process.loaded_commit import LoadedCommit
         from base.telemetry.process_logging import init_cli_process
 
         self._close_logging = init_cli_process(
-            name=name, producer=self, machine_reader=self._machine.name, home=self._home
+            name=name,
+            producer=self,
+            machine_reader=self._machine.name,
+            home=self._home,
+            deployed_sha=LoadedCommit.capture().sha,
         )
 
     def close_command(self, *, primary: BaseException | None) -> None:

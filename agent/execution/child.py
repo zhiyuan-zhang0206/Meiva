@@ -194,6 +194,7 @@ def init_logger(
     machine_reader: Callable[[], str],
     environ: Mapping[str, str],
     home: Path,
+    deployed_sha: str | None = None,
 ) -> None:
     if agent_id is None:
         return
@@ -209,6 +210,7 @@ def init_logger(
             producer=clients.event_pipeline,
             machine_reader=machine_reader,
             home=home,
+            deployed_sha=deployed_sha,
         )
     except Exception:
         logger.warning(
@@ -492,15 +494,18 @@ def run_child(
 
     if not isinstance(config, ConfigBoot):
         raise TypeError("run_child needs the child's booted ConfigBoot")
+    from base.native_process.loaded_commit import LoadedCommit
     from base.paths.home import resolve_meiva_home
 
     home = resolve_meiva_home()
+    deployed_sha = LoadedCommit.capture().sha
     init_logger(
         _agent_id_of(os.environ),
         clients=context.clients,
         machine_reader=context.require_machine().name,
         environ=os.environ,
         home=home,
+        deployed_sha=deployed_sha,
     )
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
@@ -521,6 +526,7 @@ def run_child(
         machine_reader=context.require_machine().name,
         environ=os.environ,
         home=home,
+        deployed_sha=deployed_sha,
     )
     from meiva.boot import initialize_context
 

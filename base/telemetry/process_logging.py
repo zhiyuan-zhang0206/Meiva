@@ -409,6 +409,7 @@ def init_cli_process(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     home: Path,
+    deployed_sha: str | None = None,
 ) -> Callable[[], None] | None:
     return start_process_logging(
         name,
@@ -418,6 +419,7 @@ def init_cli_process(
             producer=producer,
             machine_reader=machine_reader,
             home=home,
+            deployed_sha=deployed_sha,
         ),
         home=home,
     )
