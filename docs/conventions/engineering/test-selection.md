@@ -388,23 +388,35 @@ input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.
 
-## Test result cache (shadow)
+## Test result cache
 
 Selection is driven by a diff: it answers "what did this pull request change", so a test whose inputs
 did not change since it last passed still runs again after a rebase, a revert or a re-push. The test
 result cache answers the other question, by content: a test file whose inputs have the same content as
 when it last passed can reuse that pass. `meizel test-cache` (see the checker's
 [test result cache](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/meizel.md#test-result-cache))
-holds the key, the store and the report; this repository supplies the closures.
+holds the key, the store and the report; this repository supplies the closures and the CI routing helper
+([scripts/ci/pull_requests/test_cache.py](../../../scripts/ci/pull_requests/test_cache.py)).
 
-**It only reports.** Two non-required jobs of `ci.yml`, `test-cache-plan` and `test-cache-report`, run
-the static lane through the cache without changing which tests run or what gates. The plan job
-(beside the tests) keys every static-lane test of the run and asks which keys a recorded pass covers;
-the report job (after the static tests) sets that plan against the junit reports and writes
-`would_skip`, `would_skip_passed`, `would_skip_but_failed`, the seconds saved by `.test_durations` and
-the uncacheable counts to the job summary and to the `test-cache-report` artifact. **`would_skip_but_failed`
-must stay empty**: a test the cache would have skipped that failed when it ran is a missed input, and
-the job fails (it still does not gate) with an error naming the tests.
+**Active PR skipping (`TEST_CACHE_MODE`).** `TEST_CACHE_MODE` under top-level `env:` in
+[ci.yml](../../../.github/workflows/ci.yml) is the single revert switch (default `"enforce"`):
+
+- **`enforce`**: `classify` probes the PR's isolated cache prefix with `lookup-only: true` and runs
+  `scripts/ci/pull_requests/test_cache.py decide`. Active skipping (`test_cache_skip == 'true'`) engages on a pull
+  request only when all of the following hold:
+  - `backend == 'true'` and `TEST_CACHE_MODE == 'enforce'`;
+  - the PR already has a PR-scoped cache entry (push #2+, so 1st pushes skip `test-cache-plan` and
+    incur zero critical-path delay while `test-cache-report` records their passing static tests);
+  - `decision != 'SELECTED'` or `selected_count >= 150` (small `SELECTED` PRs run directly without
+    waiting on `test-cache-plan`);
+  - the run is not in the deterministic **5% full-run canary** (`sha256(f"{run_id}:{run_attempt}") % 100 < 5`).
+  When `test_cache_skip == 'true'`, `test-cache-plan` computes `plan.json` and `backend-static-tests`
+  executes only `plan.run ∩ static` partitioned via `scripts/ci/pull_requests/test_cache.py shard-targets` (failing
+  open to the full static lane with a warning if `plan.json` is absent). Coverage combination and full
+  shard-count aggregation stand down on skipped runs, and continue running on `main`, 1st pushes, and
+  the 5% canary.
+- **`shadow`** (1-line revert): set `TEST_CACHE_MODE: "shadow"` in `ci.yml` to disable skipping
+  everywhere while keeping `test-cache-report` shadow reporting and baseline recording active.
 
 **The closure of a test is the inverse of this selector.** `scripts/audit/input_closures.py` computes, for
 every file of the tree, the tests `select_tests` picks when that file is the only change, with the
@@ -422,17 +434,24 @@ miss; the key does not depend on the file list only through content.
 
 **What is never cached.** A native-lane test, a `flaky` test and a failure; a pass expires after 14
 days. What a key does not cover (environment variables, the clock, the network, state shared between
-test files) is the cache's residual risk; the shadow report is how it is measured, and a test that
-needs one is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`.
+test files) is the cache's residual risk; the 5% full-run canary and 1st-push shadow checks measure it
+continuously, and **`would_skip_failed` must stay empty** (`test-cache-report` emits an error
+annotation naming the tests if any skippable test fails when run). A test that depends on an unkeyed
+input is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`.
 
-**Where the passes live.** An `actions/cache` entry (`test-pass-main-<run id>-<attempt>`, one JSON line per
-pass) restored by prefix `test-pass-main-`. Only `refs/heads/main` writes this cache:
-`cache-warm.yml` incrementally seeds missing static-lane passes on pushes to `main` (and
-manual dispatch), while the nightly full run of `ci.yml` on `main` records a fresh baseline without
-importing stale entries. Pull requests read `main`'s cache without saving PR-scoped entries, so a
-PR's older run can never shadow a newer `main` seed and no pull request can record a pass. Before
-the cache decides anything the shadow must show no `would_skip_but_failed` over enough runs;
-flipping it from a report to a skip is a separate decision.
+**Dual-prefix cache isolation.** Passes live in two strictly separated `actions/cache` prefixes:
+
+- **`main` prefix (`test-pass-main-<run_id>-<attempt>`, path `tmp/test-cache/passes.jsonl`)**:
+  written **exclusively** by `refs/heads/main` (`cache-warm.yml` incrementally seeds missing static
+  passes on pushes to `main`, and the nightly / `workflow_dispatch` full run of `ci.yml` writes a
+  fresh baseline after clearing meizel's local SQLite cache without importing stale entries). Pull
+  requests never write `test-pass-main-*`.
+- **PR-isolated prefix (`test-pass-pr-<pr>-<run_id>-<attempt>`, path `tmp/test-cache/pr-passes.jsonl`)**:
+  written **exclusively** by pull requests, physically scoped by GitHub Actions to `refs/pull/<pr>/merge`.
+  Planning imports both `main` and PR passes; recording clears meizel's local SQLite cache, carries
+  forward only that PR's prior `pr-passes.jsonl` (never `main`'s), records newly passed static tests
+  (including partial runs where another test failed), and saves a new PR cache entry only when
+  `recorded > 0`.
 
 ## Skipping e2e for changes outside the e2e inputs
 

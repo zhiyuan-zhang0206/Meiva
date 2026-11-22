@@ -349,6 +349,7 @@ def test_a_module_named_test_outside_a_tests_directory_is_not_a_repo_test() -> N
     )
     assert outside == [
         "base/db/test_db_guard.py",
+        "scripts/ci/pull_requests/test_cache.py",
         "scripts/ci/test_impact.py",
         "scripts/ci/test_selector.py",
     ]
