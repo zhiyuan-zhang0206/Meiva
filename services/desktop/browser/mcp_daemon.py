@@ -30,17 +30,11 @@ from mcp import ClientSession, types
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import GatewayAccess
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig, db_config_from_boot
-from base.host.exit_codes import hard_exit
 from base.log import logger
-from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import chrome_mcp_socket, meiva_home
 from base.telemetry import build_pipeline
@@ -683,24 +677,10 @@ class BrowserMcpEntryWiring:
     image: LoadedCommit
     process_home: Path
     machine: ConfiguredMachineIdentity
-    gate: ProcessDbGate
     browser_cdp_port: int
     default_ttl_seconds: float
     clock: Clock
     gateway_access: GatewayAccess
-
-    def db_config(self) -> DbConfig:
-        return db_config_from_boot(self.config)
-
-    def direct_url(self) -> ClusterDirectUrl:
-        return ClusterDirectUrl(self.machine.host, home=self.process_home)
-
-    def database(self) -> Database:
-        return Database(
-            self.db_config(),
-            gate=self.gate,
-            direct_url=self.direct_url(),
-        )
 
     def connect_timeout_seconds(self) -> float:
         return self.config.view.sandbox.mcp_connect_timeout_seconds
@@ -708,21 +688,18 @@ class BrowserMcpEntryWiring:
 
 # meiva:note
 # Assemble the process-entry collaborators from a booted ConfigBoot and captured LoadedCommit
-# so `main()` wires telemetry, database gate, and daemon runtime parameters from one owner.
+# so `main()` wires telemetry and daemon runtime parameters from one owner.
 def build_entry_wiring(
     *, config: ConfigBoot, image: LoadedCommit, home: Path
 ) -> BrowserMcpEntryWiring:
     machine = ConfiguredMachineIdentity(config)
     process_home = home.resolve()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="browser-mcp", end_process=hard_exit)
     return BrowserMcpEntryWiring(
         process_name="browser-mcp",
         config=config,
         image=image,
         process_home=process_home,
         machine=machine,
-        gate=gate,
         browser_cdp_port=config.view.services.browser_cdp_port,
         default_ttl_seconds=float(config.view.daemon.chrome_page_default_ttl_seconds),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
@@ -741,10 +718,10 @@ def main() -> None:
     config.boot()
     wiring = build_entry_wiring(config=config, image=image, home=meiva_home())
     pipeline = build_pipeline(
-        now=Clock(clock_config_from_boot(wiring.config), timers=SYSTEM_TIMERS).now,
+        now=wiring.clock.now,
         otlp_enabled=lambda: wiring.config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: wiring.config.view.observability.telemetry_otlp_endpoint,
-        database=wiring.database,
+        database=None,
         machine=wiring.machine,
         home=wiring.process_home,
         rng=random.SystemRandom(),
@@ -760,7 +737,7 @@ def main() -> None:
         run(
             home=wiring.process_home,
             browser_cdp_port=wiring.browser_cdp_port,
-            connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+            connect_timeout_reader=wiring.connect_timeout_seconds,
             clock=wiring.clock,
             gateway_access=wiring.gateway_access,
             default_ttl_seconds=wiring.default_ttl_seconds,

@@ -27,7 +27,7 @@ from base.telemetry.delivery.state import process_state
 def write_batch(
     events: list[Event],
     *,
-    database: Callable[[], object],
+    database: Callable[[], object] | None,
     export: Callable[[list[Event]], None],
     target_dir: Path,
     now: datetime,
@@ -35,6 +35,7 @@ def write_batch(
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
 
+    A process without database authority passes None and keeps the mirror and OTLP sinks.
     Persistence and exporter transport failures retain their sink isolation.
     Required identity defects propagate to the writer's failure receipt. The
     projection cannot turn an observation into a billing proof.
@@ -42,6 +43,12 @@ def write_batch(
     if not events:
         return
     append_jsonl(events, target_dir=target_dir, now=now)
+    if database is not None:
+        _write_database_sinks(events, database)
+    export(events)
+
+
+def _write_database_sinks(events: list[Event], database: Callable[[], object]) -> None:
     # meiva:note
     # The factory is typed `object`: naming `Database` at module level would load the settings stack
     # with `base.telemetry`, which every cold process imports. The check is made here, where the
@@ -70,11 +77,10 @@ def write_batch(
             )
     except Exception as exc:
         report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
-    export(events)
 
 
 # meiva:note
-# Own the writer and lazy exporter with the root's database and machine.
+# Own the writer and lazy exporter with the root's optional database and machine.
 #
 # `flush_interval_s` is how long the drain thread holds a partial batch before it writes it. The
 # mirror and the exporter's loss reports land under `home`, so `home` must be absolute: a relative
@@ -87,7 +93,7 @@ def write_batch(
 # and a module below this one never reaches for the host clock.
 def build_pipeline(
     *,
-    database: Callable[[], object],
+    database: Callable[[], object] | None,
     machine: MachineIdentityReader,
     home: Path,
     now: Callable[[], datetime],
