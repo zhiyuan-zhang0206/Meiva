@@ -306,22 +306,38 @@ def cancel_prompt(transcript: Path, request: int) -> None:
     result(request, "cancelled", usage=False)
 
 
-def late_foreground_with_usage_collision(transcript: Path, request: int, timing: str) -> None:
+def ambiguous_foreground(transcript: Path, request: int, *, foreground_first: bool) -> None:
     record_native_tool(transcript)
-    record(transcript, planner_row("LATE NATIVE REPLY"))
-    if timing == "usage-collision-early":
+    texts = ("OK", "LATE NATIVE REPLY")
+    for text in texts if foreground_first else reversed(texts):
+        record(transcript, planner_row(text))
+    message("O")
+    message("LATE NATIVE REPLY")
+    message("K")
+    result(request)
+
+
+def reply_with_delayed_planner(transcript: Path, request: int, timing: str) -> None:
+    if timing.startswith("usage-tie-"):
+        ambiguous_foreground(
+            transcript, request, foreground_first=timing.endswith("-foreground-first")
+        )
+        return
+    record_native_tool(transcript)
+    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+    if timing == "delayed-planner-early":
         message("LATE NATIVE REPLY")
     message("O")
-    if timing == "usage-collision-interleaved":
+    if timing == "delayed-planner-interleaved":
         message("LATE NATIVE REPLY")
     message("K")
-    if timing == "usage-collision-trailing":
+    if timing == "delayed-planner-trailing":
         message("LATE NATIVE REPLY")
     result(request)
     frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
 
     def write_foreground() -> None:
-        if timing == "usage-collision":
+        if timing == "delayed-planner":
             message("LATE NATIVE REPLY")
         record(transcript, planner_row("OK"))
         update("usage_update", used=2, size=10)
@@ -374,8 +390,8 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command == "foreground-preamble":
         foreground_with_preamble(transcript, request)
         return
-    if command.startswith("usage-collision"):
-        late_foreground_with_usage_collision(transcript, request, command)
+    if command.startswith(("delayed-planner", "usage-tie-")):
+        reply_with_delayed_planner(transcript, request, command)
         return
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"

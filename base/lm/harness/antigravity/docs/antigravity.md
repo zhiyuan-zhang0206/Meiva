@@ -103,14 +103,14 @@ earlier steps could belong to that reply. Otherwise the notice stays
 provisional across markers until a verified detached terminal precedes the
 marker. A new input with one terminal can confirm the unique ordered subset
 that matches its ACP receipt when every provisional row comes from a carried
-notice. A carried terminal requires corroboration from the unassigned ACP
-assistant chunks received before the prompt result when it is the only
-available terminal or receipts leave tied carried candidates. The reader
-matches the candidate span's text in order using the same interleaved chunk
-matcher as live projection. Other planner rows before the candidate terminal
-must account for all skipped text, including detached frames received after
-foreground text. Above the subset limit, only the whole span is tested. The
-notice remains pending for a separate native reply. Missing input evidence retains
+notice. Receipt matches must identify exactly one foreground span before text
+can corroborate a carried terminal. Equal-usage candidates remain unresolved
+regardless of ACP chunk order or planner order. The reader matches text using
+the same interleaved chunk matcher as live projection. A sole terminal must
+account for all remaining text with its own span. When independent terminals
+exist, other planner rows can account for skipped chunks in either order.
+Above the subset limit, only the whole span is tested. The notice remains
+pending for a separate native reply. Missing input evidence retains
 the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments

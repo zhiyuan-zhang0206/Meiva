@@ -326,10 +326,10 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
         ("unresolved-attribution", "", True, 6, 6, "before-marker"),
         ("unresolved-attribution", "", True, 6, 6, "before-marker-with-tool"),
         ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
-        ("unresolved-attribution", "", True, 6, 6, "usage-collision"),
-        ("unresolved-attribution", "", True, 6, 6, "usage-collision-early"),
-        ("unresolved-attribution", "", True, 6, 6, "usage-collision-interleaved"),
-        ("unresolved-attribution", "", True, 6, 6, "usage-collision-trailing"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-early"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-interleaved"),
+        ("unresolved-attribution", "", True, 6, 6, "delayed-planner-trailing"),
         ("unresolved-attribution", "", True, 6, 6, "foreground-preamble"),
     ],
 )
@@ -376,10 +376,10 @@ async def _assert_reused_prompt(
     followup = {
         "after-marker": "late-native",
         "tool-after-marker": "tool-then-foreground",
-        "usage-collision": "usage-collision",
-        "usage-collision-early": "usage-collision-early",
-        "usage-collision-interleaved": "usage-collision-interleaved",
-        "usage-collision-trailing": "usage-collision-trailing",
+        "delayed-planner": "delayed-planner",
+        "delayed-planner-early": "delayed-planner-early",
+        "delayed-planner-interleaved": "delayed-planner-interleaved",
+        "delayed-planner-trailing": "delayed-planner-trailing",
         "foreground-preamble": "foreground-preamble",
     }.get(native_timing, "next")
     await harness.session.deliver([HarnessInput.of("second", followup)])
@@ -390,7 +390,7 @@ async def _assert_reused_prompt(
             and event.turn_id != first_turn_id
         )
     )
-    if native_timing.startswith("usage-collision"):
+    if native_timing.startswith("delayed-planner"):
         await harness.wait_for_marker("collision-receipt-read")
         harness.release("release-foreground")
     again = await harness.wait_for(
@@ -424,3 +424,29 @@ async def _assert_native_reply(harness: Harness, *, with_tool: bool) -> None:
         assert completed.steps == (Usage(155, 3, 0, 30), Usage(267, 3, 0, 30))
         assert completed.num_turns == 2 and completed.usage == Usage(422, 6, 0, 60)
         assert completed.usage_uncertain
+
+
+@pytest.mark.parametrize("order", ["native-first", "foreground-first"])
+async def test_equal_usage_leaves_both_replies_unassigned(tmp_path: Path, order: str) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append, reply_seconds=0.2)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        first = await harness.wait_for_type(TurnCompleted)
+        assert first.text == "" and first.usage_uncertain
+        pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("second", f"usage-tie-{order}")])
+        second = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != first.turn_id
+        )
+        assert second.text == "" and second.usage_uncertain
+        assert second.stop_reason == "end_turn" and not second.is_error
+        assert [e.origin for e in harness.events if isinstance(e, TurnStarted)] == [
+            TurnOrigin.INPUT,
+            TurnOrigin.INPUT,
+        ]
+        assert not any(isinstance(e, AssistantText) for e in harness.events)
+        assert sink == [] and harness.session.cli_pid == pid
+    finally:
+        await harness.stop()

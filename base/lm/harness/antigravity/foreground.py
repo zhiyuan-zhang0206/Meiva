@@ -217,12 +217,14 @@ class _StopText:
         foreground = tuple(
             text for step, text in _planner_text(span) if step.index not in self.seen
         )
-        detached = tuple(
-            text
-            for step, text in _planner_text(scope)
-            if step.index < terminal.index
-            and step.index not in selected
-            and step.index not in self.seen
+        detached = (
+            tuple(
+                text
+                for step, text in _planner_text(scope)
+                if step.index not in selected and step.index not in self.seen
+            )
+            if sum(step.terminal for step in scope) > 1
+            else ()
         )
         return corroborates_assistant_chunks(self.chunks, foreground, detached)
 
@@ -232,39 +234,14 @@ def _witnesses(
     possible: tuple[PlannerRow, ...],
     reports: Sequence[PromptUsage],
     keys: Sequence[str],
-    scope: Sequence[PlannerRow],
-    stop_text: _StopText,
 ) -> Iterator[tuple[PlannerRow, ...]]:
     if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
     sole_carried_terminal = _has_sole_carried_terminal(known, possible)
     for extra in _receipt_candidates(possible, sole_carried_terminal=sole_carried_terminal):
         span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-        if not _matches_reports(span, reports, keys):
-            continue
-        if (
-            sole_carried_terminal
-            and span[-1].carries_notice
-            and not stop_text.corroborates(span, scope)
-        ):
-            continue
-        yield span
-
-
-def _unique_receipt_span(
-    witnesses: Iterator[tuple[PlannerRow, ...]], scope: Sequence[PlannerRow], stop_text: _StopText
-) -> tuple[PlannerRow, ...] | None:
-    first = next(witnesses, None)
-    if first is None:
-        return None
-    second = next(witnesses, None)
-    if second is None:
-        return first
-    tied = (first, second, *witnesses)
-    if not all(span[-1].carries_notice for span in tied):
-        return None
-    matched = [span for span in tied if stop_text.corroborates(span, scope)]
-    return matched[0] if len(matched) == 1 else None
+        if _matches_reports(span, reports, keys):
+            yield span
 
 
 def _receipt_candidates(
@@ -426,13 +403,30 @@ class PromptTurn:
             and (not reports or (projection.fences_replay and not possible))
         ):
             return known, tuple(step for step in possible if step.index > known[-1].index)
-        scope = tuple(sorted((*known, *possible), key=lambda step: step.index))
-        witnesses = _witnesses(known, possible, reports, self.keys, scope, self._stop_text)
-        span = _unique_receipt_span(witnesses, scope, self._stop_text)
+        span = self._receipt_span(known, possible, reports)
         if span is None:
             return None
         chosen = {step.index for step in span}
         return span, tuple(step for step in possible if step.index not in chosen)
+
+    def _receipt_span(
+        self,
+        known: tuple[PlannerRow, ...],
+        possible: tuple[PlannerRow, ...],
+        reports: Sequence[PromptUsage],
+    ) -> tuple[PlannerRow, ...] | None:
+        witnesses = _witnesses(known, possible, reports, self.keys)
+        span = next(witnesses, None)
+        if span is None or next(witnesses, None) is not None:
+            return None
+        scope = tuple(sorted((*known, *possible), key=lambda step: step.index))
+        if (
+            span[-1].carries_notice
+            and span[-1] not in known
+            and not self._stop_text.corroborates(span, scope)
+        ):
+            return None
+        return span
 
     def _proves_end(self, step: PlannerRow) -> bool:
         report = self.reports.get(self.latest)
@@ -494,7 +488,8 @@ class PromptTurn:
             return None
         scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
         owned = tuple(step for step in scope if projection.owns(step))
-        self._apply_projection(projection, owned, (), scope_size=len(scope))
+        if owned:
+            self._apply_projection(projection, owned, (), scope_size=len(scope))
         self._projection_degraded = True
         logger.warning(
             "Settling completed agy ACP prompt with only attributed output",
