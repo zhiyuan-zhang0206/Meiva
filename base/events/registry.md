@@ -238,6 +238,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
 | `harness_close_failures` | external harness session closes raised while the agent host was running; host-level, no agent_id: one count over every hosted agent's closes | anomaly | — | — | events | — |
 | `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
+| `harness_usage_uncertain` | an external harness reported incomplete or ambiguous usage, so the turn carries observed counters without an exact accounting row | anomaly | — | — | events | — |
 | `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events | — |
 | `harness_control_not_shown` | a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place on that timeline and is logged instead | anomaly | — | — | events | — |
 | `harness_live_timeline_failed` | the live read of a harness's CLI record for the running turn failed; the next read tries again | anomaly | — | — | events | — |

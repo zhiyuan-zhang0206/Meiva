@@ -20,6 +20,19 @@ def resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
 
 def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
     usage = turn.usage
+    if turn.usage_uncertain:
+        logger.warning(
+            "Incomplete provider usage for agent {agent_id}'s {source} turn {turn_id}",
+            event="harness_usage_uncertain",
+            agent_id=agent_id,
+            source=ctx.harness.value,
+            turn_id=turn.turn_id,
+            tok_in=usage.input_tokens,
+            tok_out=usage.output_tokens,
+            tok_cached=usage.cache_read_input_tokens,
+            cache_write=usage.cache_creation_input_tokens,
+        )
+        return
     if usage.input_tokens == 0 and usage.output_tokens == 0:
         return
     catalog = ctx.require_catalog()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Coroutine, Iterable, Mapping
 from typing import Protocol
@@ -269,6 +270,74 @@ class CloseResidueError(RuntimeError):
             for pid, started in self.remaining.items()
             if self._probe.is_alive(pid) and self._probe.started_at(pid) == started
         )
+
+
+class ProcessFamily:
+    def __init__(self, root_pid: int, probe: ChildProbe) -> None:
+        self._root = root_pid
+        self._probe = probe
+        self._started = probe.started_at(root_pid)
+        self._known = {root_pid: self._started}
+
+    def observe(self) -> None:
+        if self._same_root():
+            self._capture(self._probe.descendants(self._root))
+
+    def observe_session(self) -> None:
+        self.observe()
+        current = self._probe.started_at(self._root)
+        if self._started is None or (current is not None and not self._same_root()):
+            return
+        self._capture(
+            process.pid
+            for process in psutil.process_iter()
+            if _session_id(process.pid) == self._root
+        )
+
+    def _same_root(self) -> bool:
+        return self._started is not None and self._probe.started_at(self._root) == self._started
+
+    def _capture(self, pids: Iterable[int]) -> None:
+        for pid in pids:
+            started = self._probe.started_at(pid)
+            if self._started is not None and started is not None and started >= self._started:
+                self._known[pid] = started
+
+    def kill(self) -> None:
+        for pid in self._known:
+            if pid != self._root and self._is_member(pid):
+                with contextlib.suppress(PermissionError):
+                    self._probe.kill(pid, SIGKILL)
+
+    def _is_member(self, pid: int) -> bool:
+        return self._probe.is_alive(pid) and self._probe.started_at(pid) == self._known[pid]
+
+    async def settle(
+        self,
+        *,
+        harness: str,
+        agent_id: int | None,
+        timeout: float,
+        clock: WaitClock,
+        poll_seconds: float,
+    ) -> None:
+        deadline = clock.monotonic() + timeout
+        remaining = self._remaining()
+        while remaining and clock.monotonic() < deadline:
+            await clock.asleep(poll_seconds)
+            remaining = self._remaining()
+        if remaining:
+            raise CloseResidueError(harness, agent_id, remaining, self._probe)
+
+    def _remaining(self) -> dict[int, float | None]:
+        return {pid: started for pid, started in self._known.items() if self._is_member(pid)}
+
+
+def _session_id(pid: int) -> int | None:
+    try:
+        return os.getsid(pid)
+    except OSError:
+        return None
 
 
 # meiva:note

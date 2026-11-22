@@ -256,6 +256,12 @@ EVENTS: dict[str, EventSpec] = {
         "agent row keeps what it had and NULL still means never observed",
         tier="anomaly",
     ),
+    "harness_usage_uncertain": telemetry_event(
+        "harness_usage_uncertain",
+        "an external harness reported incomplete or ambiguous usage, so the turn carries "
+        "observed counters without an exact accounting row",
+        tier="anomaly",
+    ),
     "harness_usage_log_failed": telemetry_event(
         "harness_usage_log_failed",
         "an external harness turn finished but its usage could not be priced; the reply stands "

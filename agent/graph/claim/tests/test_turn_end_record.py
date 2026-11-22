@@ -8,10 +8,13 @@ from __future__ import annotations
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
+from agent.graph.claim.harness_activity import log_turn_usage
+from agent.graph.claim.tests.harness_support import runtime, silent_engine
 from agent.graph.claim.turn_end import settle_turn_end
 from agent.nodes import BEFORE_TURN, END
 from agent.state import AgentState
 from base.agents.tests.langgraph_views import command_update
+from base.lm.harness import HarnessTurn, Usage
 from base.log.tests.log_records import LogRecords
 
 
@@ -112,3 +115,21 @@ def test_nothing_held_and_nothing_declared_costs_one_read(loguru_records: LogRec
 
     assert settle_turn_end(_state(), command, agent_id=7) is command
     assert _records(loguru_records) == []
+
+
+def test_incomplete_harness_usage_is_reported_without_pricing(loguru_records: LogRecords) -> None:
+    ctx = runtime(silent_engine()).context
+    turn = HarnessTurn(
+        turn_id="t1",
+        text="done",
+        usage=Usage(17_349, 106, 0, 15_032),
+        cost_usd=None,
+        subtype="success",
+        is_error=False,
+        interrupted=False,
+        usage_uncertain=True,
+    )
+    log_turn_usage(ctx, 7684, "gemini-4-hydrogen", turn)
+    [row] = loguru_records.events("harness_usage_uncertain")
+    assert row["extra"]["tok_in"] == 17_349 and row["extra"]["tok_out"] == 106
+    assert not loguru_records.events("llm_usage")

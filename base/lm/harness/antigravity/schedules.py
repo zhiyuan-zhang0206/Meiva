@@ -44,6 +44,8 @@ class _DetachedTimer:
     tool_id: str
     due: float
     work: BackgroundItem
+    prompt: str
+    task_id: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +54,7 @@ class Schedules:
     items: tuple[BackgroundItem, ...] = ()
     timers: tuple[ActiveTimer, ...] = ()
     background_timers: tuple[_DetachedTimer, ...] = ()
-    replies: tuple[BackgroundItem, ...] = ()
+    replies: tuple[_DetachedTimer, ...] = ()
     reply_wait_seconds: float = BACKGROUND_REPLY_SECONDS
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
@@ -134,7 +136,7 @@ class Schedules:
         if is_error or len(pending) == len(self.background_timers):
             return replace(self, background_timers=pending)
         replies = (
-            replace(timer.work, until=now + self.reply_wait_seconds)
+            replace(timer, work=replace(timer.work, until=now + self.reply_wait_seconds))
             for timer in self.background_timers
             if timer.tool_id == tool_id
         )
@@ -194,15 +196,29 @@ class Schedules:
         work = BackgroundItem(
             BackgroundKind.SCHEDULE, _schedule_label(params), until=due + self.reply_wait_seconds
         )
-        return _DetachedTimer(timer.tool_use_id, due, work)
+        prompt = next((value for key, value in params.items() if key.lower() == "prompt"), None)
+        return _DetachedTimer(
+            timer.tool_use_id,
+            due,
+            work,
+            prompt.strip() if isinstance(prompt, str) else "",
+            timer.task_id,
+        )
+
+    @property
+    def has_detached(self) -> bool:
+        return bool(self.background_timers or self.replies)
 
     def reply_deadline(self, now: float) -> float | None:
         due = tuple(timer.work.until for timer in self.background_timers if timer.due <= now)
-        deadlines = (*due, *(reply.until for reply in self.replies))
+        deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
-    def reply_finished(self) -> Schedules:
-        return replace(self, replies=self.replies[1:])
+    def reply_finished(self, sender: str, prompt: str) -> Schedules:
+        for index, reply in enumerate(self.replies):
+            if reply.task_id == sender or (reply.task_id is None and reply.prompt == prompt):
+                return replace(self, replies=(*self.replies[:index], *self.replies[index + 1 :]))
+        return self
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
         if not turn_ids or not self.timers:
@@ -216,7 +232,7 @@ class Schedules:
         return min(floors)
 
     def pending_at(self, now: float) -> tuple[BackgroundItem, ...]:
-        items = (*self.items, *self.replies, *(timer.work for timer in self.background_timers))
+        items = (*self.items, *(timer.work for timer in (*self.replies, *self.background_timers)))
         return tuple(item for item in items if item.pending_at(now))
 
     def has_active_wait(self, turn_id: str, *, now: float, monotonic_now: float) -> bool:

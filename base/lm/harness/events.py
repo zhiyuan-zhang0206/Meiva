@@ -162,6 +162,7 @@ class TurnCompleted:
     # `authentication_failed` frame) when the trailing result carries `errors=[]` and
     # `subtype="success"`.
     error_code: str | None = None
+    usage_uncertain: bool = False
 
 
 @dataclass(frozen=True, slots=True)

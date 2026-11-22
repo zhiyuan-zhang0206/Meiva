@@ -25,7 +25,10 @@ delivery. The latest non-cancelled prompt result also confirms that prompt.
 The timeline removes the comment from the displayed input. Recovery reads the
 transcript with the shared JSONL reader and can still consult the private
 message queue for inputs written before this migration. An input absent from
-both records has an unknown outcome.
+both records has an unknown outcome if a write may have started. A failed
+dispatch that never reached the write hands its specific input keys back to the
+inbox for requeueing. An earlier, potentially written prompt in the same batch
+still goes through reconciliation.
 
 ## Interrupt and permission handling
 
@@ -34,10 +37,13 @@ interrupt, closes outstanding foreground tool entries, and keeps the process
 available for the next prompt. The adapter reports whether observed tool
 processes settle. Prompt writes have a deadline, and cancel can proceed while
 stdin is backpressured. A write failure or unconfirmed cancel retires the
-process generation. The delivery ledger leaves possibly written inputs
-unsettled for transcript reconciliation. Closing a session
-remains a process shutdown and uses the shared process-tree cleanup. Losing the
-process requires a new ACP handshake and `session/load` before another prompt.
+process generation. Closing the transport aborts stdin, closes stdout and
+stderr, and joins the reader tasks. The process-tree cleanup checks process
+identity and covers observed descendants and members of the CLI's private
+POSIX session, including children that inherit its pipes. A residue fence
+prevents reopening while an observed process still holds the generation.
+Losing the process requires a new ACP handshake and `session/load` before
+another prompt.
 
 The client rejects `session/request_permission` with the offered rejection
 option, or cancels the permission request when no such option is available.
@@ -48,12 +54,16 @@ The explicit `skip_permissions` setting asks the CLI to auto-approve.
 
 The stdio reader runs for the whole session. In-flight tool results keep the
 ownership of the original call even when they arrive after the prompt ends.
-ACP v1 update frames carry a session ID. For detached timers, the adapter
-uses the terminal tool update followed by a text batch and its usage update
-as the background reply boundary. It joins that text and sends it through
-`UnsolicitedOutput` to the bridge's wake sink. A due or triggered timer keeps
-the process alive and holds new dispatch through the reply boundary. A missed
-boundary within the reply budget retires the process generation. Cron-like
+ACP v1 update frames carry a session ID. While a detached timer can produce
+output, the adapter buffers unkeyed assistant and new tool frames until the
+corresponding completed planner rows identify the owner. Foreground planner
+rows follow the input marker. A timer's planner rows follow the task's Hub
+message, and the complete text of a terminal planner row settles the reply.
+The adapter sends that reply through `UnsolicitedOutput` to the bridge wake
+sink. ACP usage updates can trigger a transcript read and have no role in
+deciding ownership or completeness. A future timer still allows foreground
+input. A due or triggered timer holds new dispatch and keeps the process alive,
+and an unverified reply at its deadline retires the generation. Cron-like
 calls retain the existing one-day bound. Timers also supply the foreground
 watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
@@ -71,14 +81,14 @@ The ACP result reports uncached input, cache read and write, visible output,
 and thought tokens. Meiva combines the input counters and bills thought as
 output. A result can omit usage on cancel or steer, while a later result may
 cover several planner steps. A single prompt's usage is authoritative. For a
-steered turn, the adapter confirms cumulative or disjoint receipts using
-planner rows bounded by the turn's own input markers and final streamed answer.
-A foreign input, background notification or missing tail invalidates the span.
-When the evidence cannot resolve overlap, the adapter retains the latest
-available receipt and reports the uncertainty. If a terminal receipt is
-missing, a verified span can supply visible counters, with thought and cache
-write counters recovered from uniquely matched receipts. The CLI supplies no
-price.
+steered turn, the adapter checks ordered receipt spans against planner rows
+bounded by its input markers and final streamed answer. A disjoint set of
+receipts must cover the owned rows in sequence. A cumulative final receipt
+must cover the span, and each earlier receipt must match a proper prefix.
+Planner rows attributed to a detached task are excluded. With incomplete
+evidence, the completion carries available counters and a usage uncertainty
+flag. The graph logs `harness_usage_uncertain` and skips the exact cost row.
+The CLI supplies no price.
 
 ## Bounds
 

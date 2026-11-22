@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -104,15 +105,22 @@ def finish_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
-def finish_background() -> None:
+def finish_background(transcript: Path) -> None:
+    record(
+        transcript,
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": f"[Message] sender={SID}/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
+        },
+    )
+    record(transcript, planner_row("BACKGROUND"))
     message("BACK")
     message("GROUND")
-    update("usage_update", used=50, size=1000)
 
 
-def trigger_background() -> None:
+def trigger_background(transcript: Path) -> None:
     update("tool_call_update", toolCallId="timer", status="completed")
-    after_release(Path("release"), finish_background)
+    after_release(Path("release"), lambda: finish_background(transcript))
 
 
 def beginning_of_tool() -> None:
@@ -132,14 +140,39 @@ def foreground_after_cancel(request: int) -> None:
     result(request)
 
 
+def foreground_first(transcript: Path, request: int) -> None:
+    hold_prompt(transcript, "hold")
+    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    record(transcript, planner_row("FOREGROUND"))
+    message("FOREGROUND")
+    update("usage_update", used=50, size=1000)
+    after_release(Path("release-front-result"), lambda: result(request))
+
+
 def hold_prompt(transcript: Path, command: str) -> None:
-    record(transcript, planner_row(None))
+    if "--test-child" in sys.argv:
+        child = subprocess.Popen(("/bin/sleep", "120"), start_new_session=True)
+        _ = Path("child.pid").write_text(str(child.pid))
+    record(
+        transcript,
+        {
+            **planner_row(None),
+            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 8"}}],
+        },
+    )
     beginning_of_tool()
     if command == "reactive":
         message("Parked until the tool completes")
         update("usage_update", used=50, size=1000)
     if command == "hold-no-stdin":
         threading.Event().wait()
+
+
+def exit_peer() -> None:
+    if "--test-child" in sys.argv:
+        child = subprocess.Popen(("/bin/sleep", "120"))
+        _ = Path("child.pid").write_text(str(child.pid))
+    sys.exit(0)
 
 
 def handle_prompt(
@@ -151,18 +184,18 @@ def handle_prompt(
     permission_prompt = None
     text = data["params"]["prompt"][0]["text"]
     marker, _, command = text.partition("\n")
+    record(
+        transcript,
+        {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
+    )
     if command == "steer":
         assert original is not None
         result(original)
         original = None
         gate = "release-steer" if "--test-overlap" in sys.argv else "release"
         after_release(Path(gate), lambda: finish_steer(request, transcript))
-    record(
-        transcript,
-        {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
-    )
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
-    if command in {"hold", "reactive", "background", "permission"}:
+    if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
     if command == "steer":
         return original, permission_prompt
@@ -175,11 +208,13 @@ def handle_prompt(
             toolCallId="timer",
             name="schedule",
             status="in_progress",
-            rawInput={"DurationSeconds": 5},
+            rawInput={"DurationSeconds": 5, "Prompt": "timer prompt"},
         )
         message("TIMER_SET")
         result(request)
-        after_release(Path("release-tool"), trigger_background)
+        after_release(Path("release-tool"), lambda: trigger_background(transcript))
+    elif command == "overlap-first":
+        after_release(Path("release-foreground"), lambda: foreground_first(transcript, request))
     elif command == "permission":
         permission_prompt = request
         update("tool_call", toolCallId="denied", name="run_command", status="pending")
@@ -197,7 +232,7 @@ def handle_prompt(
     elif command == "after-cancel":
         foreground_after_cancel(request)
     elif command == "eof":
-        sys.exit(0)
+        exit_peer()
     elif command == "noisy-usage":
         record(transcript, {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1"})
         record(transcript, planner_row("unrelated background", tokens=2000))
@@ -207,6 +242,7 @@ def handle_prompt(
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
+        record(transcript, planner_row("OK"))
         message("OK")
         result(request)
     return original, permission_prompt

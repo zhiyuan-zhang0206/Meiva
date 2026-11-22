@@ -43,7 +43,7 @@ def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> N
     work = Schedules(reply_wait_seconds=30).tool_used(
         "timer",
         "schedule",
-        {"DurationSeconds": 5},
+        {"DurationSeconds": 5, "Prompt": "ping"},
         turn_id="turn",
         monotonic_now=100,
     )
@@ -55,7 +55,8 @@ def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> N
     work = work.tool_returned("timer", is_error=False, now=NOW + 8)
     assert work.pending_at(NOW + 14)
     assert work.reply_deadline(NOW + 14) == NOW + 38
-    work = work.reply_finished()
+    assert work.reply_finished("session/task-1", "unrelated") is work
+    work = work.reply_finished("session/task-2", "ping")
     assert not work.pending_at(NOW + 14)
     assert work.reply_deadline(NOW + 14) is None
 

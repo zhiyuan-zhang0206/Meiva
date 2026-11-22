@@ -35,6 +35,7 @@ class HarnessTurn:
     api_error_status: int | None = None
     errors: tuple[str, ...] = ()
     error_code: str | None = None
+    usage_uncertain: bool = False
 
 
 def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
@@ -52,6 +53,7 @@ def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
         api_error_status=event.api_error_status,
         errors=event.errors,
         error_code=event.error_code,
+        usage_uncertain=event.usage_uncertain,
     )
 
 

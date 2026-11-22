@@ -20,6 +20,7 @@ from base.lm.harness.session.background import (
 from base.lm.harness.session.turn import SessionTotals
 from base.lm.harness.session.vocabulary import (
     EVENT_STREAM_END,
+    InputsNotWrittenError,
     SessionClock,
     SessionClosedError,
     SessionConfig,
@@ -31,6 +32,7 @@ __all__ = [
     "BackgroundKind",
     "BackgroundWork",
     "BackgroundWorkReporting",
+    "InputsNotWrittenError",
     "LostBackgroundReporting",
     "SessionClock",
     "SessionClosedError",

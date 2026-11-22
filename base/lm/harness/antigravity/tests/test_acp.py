@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness.antigravity.acp import input_marker
+from base.lm.harness.antigravity.foreground import PromptUsage, planner_usage, turn_usage
 from base.lm.harness.antigravity.tests.support import start
 from base.lm.harness.antigravity.timing_store import timing_path
-from base.lm.harness.antigravity.usage import PromptUsage, planner_usage, turn_usage
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
 from base.lm.harness.events import (
     AssistantText,
@@ -27,7 +27,8 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
-from base.lm.harness.session import SessionClosedError
+from base.lm.harness.process import PsutilChildProbe
+from base.lm.harness.session import InputsNotWrittenError, SessionClosedError
 
 
 async def test_one_prompt_preserves_ordered_text_and_images_and_recovers_its_receipt(
@@ -201,7 +202,40 @@ async def test_detached_timer_reply_stays_out_of_an_already_active_turn(tmp_path
             lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
         )
         assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
-        assert done.usage == Usage(40, 5, 0, 30)
+        assert done.usage == Usage(80, 10, 0, 60) and not done.usage_uncertain
+    finally:
+        await harness.stop()
+
+
+async def test_foreground_tool_and_usage_precede_the_detached_reply(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        await harness.session.deliver([HarnessInput.of("first", "overlap-first")])
+        await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "first")
+        assert len(harness.prompts()) == 2
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+        harness.release("release-foreground")
+        assistant = await harness.wait_for(
+            lambda e: isinstance(e, AssistantText) and e.text == "FOREGROUND"
+        )
+        assert assistant.turn_id == harness.session.active_turn_id
+        assert ToolResult(assistant.turn_id, "tool-1", False, "WORK_DONE") in harness.events
+        assert any(isinstance(e, ToolUse) and e.tool_use_id == "tool-1" for e in harness.events)
+        assert not any(isinstance(e, UnsolicitedOutput) for e in harness.events)
+        assert harness.session.background_work().items
+        harness.release()
+        assert (
+            await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        ).text == "BACKGROUND"
+        harness.release("release-front-result")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+        )
+        assert done.text == "FOREGROUND"
+        assert not harness.session.background_work().items
     finally:
         await harness.stop()
 
@@ -216,9 +250,12 @@ async def test_stuck_background_reply_retires_before_sending_the_waiting_input(
         harness.release("release-tool")
         await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
         async with asyncio.timeout(2):
-            with pytest.raises(SessionClosedError, match="background reply"):
+            with pytest.raises(InputsNotWrittenError, match="background reply") as failure:
                 await harness.session.deliver([HarnessInput.of("next", "next")])
+        assert failure.value.keys == {"next"}
         await harness.wait_for(lambda e: isinstance(e, SessionFailed))
+        await harness.wait_for(lambda e: isinstance(e, InputRejected) and e.key == "next")
+        assert await harness.session.reconcile(["next"]) == {"next": Reconciliation.NOT_FOUND}
         assert len(harness.prompts()) == 1
     finally:
         await harness.stop()
@@ -298,15 +335,25 @@ async def test_large_steer_to_peer_that_stops_reading_retires_the_generation(
         tmp_path,
         cancel_seconds=0.1,
         write_seconds=3.0 if cancel_while_blocked else 0.1,
+        extra_args=("--test-child",),
     )
     try:
         await harness.session.deliver([HarnessInput.of("first", "hold-no-stdin")])
         tool = await harness.wait_for(lambda e: isinstance(e, ToolUse))
         image = ImageBlock("image/png", base64.b64encode(b"x" * (2 * 1024**2)).decode())
         async with asyncio.timeout(2), asyncio.TaskGroup() as tasks:
-            sending = tasks.create_task(
-                harness.session.deliver([HarnessInput.of("large", "steer", [image])])
-            )
+
+            async def send_batch() -> None:
+                with pytest.raises(InputsNotWrittenError) as failure:
+                    await harness.session.deliver(
+                        [
+                            HarnessInput.of("large", "steer", [image]),
+                            HarnessInput.of("tail", "never written"),
+                        ]
+                    )
+                assert failure.value.keys == {"tail"}
+
+            sending = tasks.create_task(send_batch())
             await harness.wait_for(lambda e: isinstance(e, InputReceived) and e.key == "large")
             assert not sending.done()
             if cancel_while_blocked:
@@ -319,22 +366,41 @@ async def test_large_steer_to_peer_that_stops_reading_retires_the_generation(
         assert not any(
             isinstance(e, (InputRejected, InputLost)) and e.key == "large" for e in harness.events
         )
+        await harness.wait_for(lambda e: isinstance(e, InputRejected) and e.key == "tail")
+        await harness.stop()
+        assert not PsutilChildProbe().is_alive(int((tmp_path / "child.pid").read_text()))
     finally:
         await harness.stop()
 
 
 async def test_cancel_timeout_with_responsive_stdin_retires_the_generation(tmp_path: Path) -> None:
-    harness = await start(tmp_path, cancel_seconds=0.1, extra_args=("--test-ignore-cancel",))
+    harness = await start(
+        tmp_path, cancel_seconds=0.1, extra_args=("--test-ignore-cancel", "--test-child")
+    )
     try:
         await harness.session.deliver([HarnessInput.of("first", "hold")])
         tool = await harness.wait_for(lambda e: isinstance(e, ToolUse))
         report = await harness.session.interrupt(turn_id=tool.turn_id)
         assert report.cli_alive is False and report.settled is None
         assert harness.session.active_turn_id is None
+        assert not PsutilChildProbe().is_alive(int((tmp_path / "child.pid").read_text()))
         await harness.wait_for_method("session/cancel")
         await harness.session.deliver([HarnessInput.of("next", "next")])
         reply = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
         assert reply.text == "OK" and reply.generation == 2
+    finally:
+        await harness.stop()
+
+
+async def test_root_exit_with_inherited_stdout_does_not_strand_the_reader(tmp_path: Path) -> None:
+    harness = await start(tmp_path, cancel_seconds=0.2, extra_args=("--test-child",))
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "eof")])
+        await harness.wait_for(lambda e: isinstance(e, SessionFailed))
+        await harness.session.deliver([HarnessInput.of("next", "next")])
+        done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert done.text == "OK" and done.generation == 2
+        assert not PsutilChildProbe().is_alive(int((tmp_path / "child.pid").read_text()))
     finally:
         await harness.stop()
 
@@ -408,4 +474,36 @@ def test_planner_span_requires_own_inputs_and_final_row_without_background() -> 
         "type": "SYSTEM_MESSAGE",
         "content": "[Message] sender=conv/task-12 content=timer",
     }
-    assert planner_usage([*rows[:2], notice, *rows[2:]], keys, "FINAL") == ()
+    background = {**rows[-1], "content": "BACKGROUND", "input_tokens": 999}
+    overlapping = [*rows[:2], notice, background, *rows[2:]]
+    assert planner_usage(overlapping, keys, "FINAL") == (Usage(40, 3), Usage(65, 9))
+
+
+def test_disjoint_steer_usage_survives_background_overlap_and_requires_first_planner() -> None:
+    reports = (PromptUsage(2346, 89, 14735, 0, 36), PromptUsage(2317, 59, 15032, 0, 47))
+
+    def planner(usage: PromptUsage, text: str) -> dict[str, object]:
+        return {
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "input_tokens": usage.input,
+            "cache_read_tokens": usage.cached_read,
+            "output_tokens": usage.output,
+            "content": text,
+        }
+
+    first, final = planner(reports[0], "FIRST"), planner(reports[1], "FINAL")
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker("one")},
+        first,
+        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-12"},
+        {**final, "content": "TIMER", "input_tokens": 20_000},
+        {"type": "USER_INPUT", "content": input_marker("two")},
+        final,
+    ]
+    steps = planner_usage(rows, ("one", "two"), "FINAL")
+    bill = turn_usage(reports, steps, request_count=2, terminal_reported=True)
+    assert bill.usage == Usage(34_430, 231, 0, 29_767) and not bill.uncertain
+    partial = planner_usage([rows[0], *rows[2:]], ("one", "two"), "FINAL")
+    bill = turn_usage(reports, partial, request_count=2, terminal_reported=True)
+    assert bill.usage == Usage(17_349, 106, 0, 15_032) and bill.uncertain

@@ -1,0 +1,259 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+
+from base.host.boundary.json_values import is_object_dict
+from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
+from base.lm.harness.antigravity.mapping import planner_rows
+from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
+from base.lm.harness.base_session import ActiveTurn
+from base.lm.harness.events import ToolResult, ToolUse, TurnCompleted, Usage
+
+
+def _tokens(value: object) -> int:
+    return value if type(value) is int and value >= 0 else 0
+
+
+@dataclass(frozen=True, slots=True)
+class PromptUsage:
+    input: int
+    output: int
+    cached_read: int
+    cached_write: int
+    thought: int
+
+    @classmethod
+    def from_result(cls, usage: object) -> PromptUsage | None:
+        if not is_object_dict(usage) or not all(
+            type(usage.get(name)) is int for name in ("inputTokens", "outputTokens")
+        ):
+            return None
+        return cls(
+            _tokens(usage.get("inputTokens")),
+            _tokens(usage.get("outputTokens")),
+            _tokens(usage.get("cachedReadTokens")),
+            _tokens(usage.get("cachedWriteTokens")),
+            _tokens(usage.get("thoughtTokens")),
+        )
+
+    def billed(self) -> Usage:
+        return Usage(
+            self.input + self.cached_read + self.cached_write,
+            self.output + self.thought,
+            self.cached_write,
+            self.cached_read,
+        )
+
+
+def planner_usage(
+    rows: Sequence[dict[str, object]], keys: Sequence[str], final_text: str
+) -> tuple[Usage, ...]:
+    marks = {input_marker(key) for key in keys}
+    if received_markers(rows) & marks != marks:
+        return ()
+    planner = [step.row for step in planner_rows(rows, keys) if step.input_key is not None]
+    if not planner or not final_text:
+        return ()
+    last_text = planner[-1].get("content")
+    if not isinstance(last_text, str) or last_text.strip() != final_text.strip():
+        return ()
+    if not all(type(row.get("input_tokens")) is int for row in planner):
+        return ()
+    return tuple(_planner_tokens(row) for row in planner)
+
+
+def _planner_tokens(row: dict[str, object]) -> Usage:
+    cached = _tokens(row.get("cache_read_tokens"))
+    return Usage(
+        _tokens(row.get("input_tokens")) + cached,
+        _tokens(row.get("output_tokens")),
+        cache_read_input_tokens=cached,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TurnBilling:
+    usage: Usage
+    uncertain: bool = False
+    steps: tuple[Usage, ...] = ()
+
+
+def turn_usage(
+    reports: Sequence[PromptUsage],
+    steps: Sequence[Usage],
+    *,
+    request_count: int,
+    terminal_reported: bool,
+) -> TurnBilling:
+    if request_count == 1 and reports:
+        return TurnBilling(reports[-1].billed())
+    recorded = sum(steps, Usage())
+    if steps and len(reports) == request_count and terminal_reported:
+        if _covers_cumulative(reports, steps, recorded):
+            return TurnBilling(reports[-1].billed())
+        if _covers_disjoint(reports, steps):
+            return TurnBilling(sum((report.billed() for report in reports), Usage()))
+    if terminal_reported or not steps:
+        return TurnBilling(reports[-1].billed() if reports else Usage(), uncertain=True)
+    return TurnBilling(recorded + _matched_extras(reports, steps), uncertain=True)
+
+
+def _covers_cumulative(
+    reports: Sequence[PromptUsage], steps: Sequence[Usage], recorded: Usage
+) -> bool:
+    return _visible(reports[-1]) == recorded and all(
+        _end_of_span(_visible(report), steps[:-1], 0) is not None for report in reports[:-1]
+    )
+
+
+def _covers_disjoint(reports: Sequence[PromptUsage], steps: Sequence[Usage]) -> bool:
+    cursor = 0
+    for report in reports:
+        end = _end_of_span(_visible(report), steps, cursor)
+        if end is None:
+            return False
+        cursor = end
+    return cursor == len(steps)
+
+
+def _end_of_span(target: Usage, steps: Sequence[Usage], start: int) -> int | None:
+    running = Usage()
+    for index in range(start, len(steps)):
+        running += steps[index]
+        if running == target:
+            return index + 1
+    return None
+
+
+def _visible(report: PromptUsage) -> Usage:
+    return Usage(
+        report.input + report.cached_read, report.output, cache_read_input_tokens=report.cached_read
+    )
+
+
+def _matched_extras(reports: Sequence[PromptUsage], steps: Sequence[Usage]) -> Usage:
+    cursor = 0
+    extras = Usage()
+    for report in reports:
+        match = _match_usage(_visible(report), steps, cursor)
+        if match is not None:
+            cursor = match
+            extras += Usage(report.cached_write, report.thought, report.cached_write)
+    return extras
+
+
+def _match_usage(target: Usage, steps: Sequence[Usage], cursor: int) -> int | None:
+    for start in range(cursor, len(steps)):
+        running = Usage()
+        for end in range(start, len(steps)):
+            running += steps[end]
+            if running == target:
+                return end + 1
+            if running.input_tokens > target.input_tokens:
+                break
+    return None
+
+
+def bill_prompt(
+    rows: Sequence[dict[str, object]],
+    keys: Sequence[str],
+    final_text: str,
+    reports: Mapping[int, PromptUsage],
+    latest: int,
+) -> TurnBilling:
+    steps = planner_usage(rows, keys, final_text)
+    bill = turn_usage(
+        [reports[request] for request in sorted(reports)],
+        steps,
+        request_count=len(keys),
+        terminal_reported=latest in reports,
+    )
+    return (
+        replace(bill, steps=steps)
+        if not bill.uncertain and sum(steps, Usage()) == bill.usage
+        else bill
+    )
+
+
+@dataclass(slots=True)
+class PromptTurn:
+    ticket: ActiveTurn
+    transcript_offset: int
+    stop_reason: str | None = None
+    stop_deadline: float = 0.0
+    keys: list[str] = field(default_factory=list[str])
+    requests: dict[int, str] = field(default_factory=dict[int, str])
+    latest: int = 0
+    reports: dict[int, PromptUsage] = field(default_factory=dict[int, PromptUsage])
+    finished: asyncio.Event = field(default_factory=asyncio.Event)
+    interrupted: bool = False
+
+    def complete(
+        self,
+        rows: list[dict[str, object]],
+        reason: str,
+        session_id: str | None,
+        monotonic_now: float,
+        generation: int,
+    ) -> TurnCompleted:
+        ticket = self.ticket
+        final = ticket.parts[-1] if ticket.parts else ""
+        bill = bill_prompt(
+            rows[self.transcript_offset :], self.keys, final, self.reports, self.latest
+        )
+        interrupted = reason == "cancelled"
+        subtype = "interrupted" if interrupted else "denied" if ticket.denials else "success"
+        return TurnCompleted(
+            turn_id=ticket.turn_id,
+            session_id=session_id,
+            text="\n".join(ticket.parts),
+            subtype=subtype,
+            is_error=reason != "end_turn" or bool(ticket.denials),
+            interrupted=interrupted,
+            stop_reason=reason,
+            num_turns=max(len(bill.steps), 1),
+            duration_ms=int((monotonic_now - (ticket.started_at or 0)) * 1000),
+            usage=bill.usage,
+            usage_uncertain=bill.uncertain,
+            cost_usd=None,
+            cumulative_cost_usd=None,
+            permission_denials=tuple(ticket.denials),
+            steps=bill.steps,
+            generation=generation,
+        )
+
+
+@dataclass(slots=True)
+class ToolUpdates:
+    calls: dict[str, ToolCall] = field(default_factory=dict[str, ToolCall])
+
+    def __contains__(self, tool_id: str) -> bool:
+        return tool_id in self.calls
+
+    def clear(self) -> None:
+        self.calls.clear()
+
+    def update(
+        self, frame: dict[str, object], turn_id: str | None
+    ) -> Iterator[ToolUse | ToolResult]:
+        tool_id = frame.get("toolCallId")
+        if not isinstance(tool_id, str) or frame.get("name") == INVOKE_SUBAGENT:
+            return
+        call = self.calls.get(tool_id)
+        if call is None:
+            if turn_id is None or frame.get("sessionUpdate") != "tool_call":
+                return
+            call = ToolCall.from_update(frame, turn_id=turn_id, tool_id=tool_id)
+            self.calls[tool_id] = call
+            yield call.use
+        if (result := call.result(frame)) is not None:
+            del self.calls[tool_id]
+            yield result
+
+    def cancel(self, turn_id: str) -> Iterator[ToolResult]:
+        for tool_id, call in tuple(self.calls.items()):
+            if call.use.turn_id == turn_id:
+                del self.calls[tool_id]
+                yield ToolResult(turn_id, tool_id, is_error=True, content="Cancelled")

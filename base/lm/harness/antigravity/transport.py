@@ -7,11 +7,13 @@ import json
 import re
 import signal
 from collections import deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
+from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import MINIMUM_ACP_VERSION, AntigravityConfig
 from base.lm.harness.antigravity.rpc import (
     LIVE_SUBMIT_TIMEOUT_SECONDS,
@@ -22,7 +24,7 @@ from base.lm.harness.antigravity.rpc import (
 from base.lm.harness.antigravity.timing_store import store_timings
 from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.antigravity.transcript.window import session_file
-from base.lm.harness.process import WaitClock
+from base.lm.harness.process import ProcessFamily, PsutilChildProbe, WaitClock
 from base.log import logger
 
 READ_CHUNK_BYTES = 65536
@@ -120,6 +122,8 @@ class AgyTransport:
         if self._environ is not None:
             self._environ["ANTIGRAVITY_SERVER_CSRF_TOKEN"] = self._csrf_token
         self._process: asyncio.subprocess.Process | None = None
+        self._stdio: asyncio.SubprocessTransport | None = None
+        self._family: ProcessFamily | None = None
         self._returncode: int | None = None
         self._queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
         self._tasks = asyncio.TaskGroup()
@@ -134,6 +138,16 @@ class AgyTransport:
         self._session_ready = False
         self._stream_closed = False
         self._rpc_server: AntigravityServer | None = None
+
+    @classmethod
+    def create(
+        cls, config: AntigravityConfig, *, environ: Mapping[str, str] | None, clock: WaitClock
+    ) -> AgyTransport:
+        resolved = resolve_harness_binary(
+            config.executable[0], path_env=(environ or {}).get("PATH")
+        )
+        config = replace(config, executable=(resolved, *config.executable[1:]))
+        return cls(config, environ=environ, clock=clock)
 
     @property
     def pid(self) -> int | None:
@@ -163,17 +177,22 @@ class AgyTransport:
         if self._process is not None:
             raise RuntimeError("transport already started")
         argv = self._config.command()
-        process = await asyncio.create_subprocess_exec(
+        loop = asyncio.get_running_loop()
+        protocol = asyncio.subprocess.SubprocessStreamProtocol(limit=READ_CHUNK_BYTES, loop=loop)
+        io, _ = await loop.subprocess_exec(
+            lambda: protocol,
             *argv,
             cwd=str(self._config.cwd),
             env=self._environ,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=READ_CHUNK_BYTES,
             start_new_session=True,
         )
+        process = asyncio.subprocess.Process(io, protocol, loop)
         self._process = process
+        self._stdio = io
+        self._family = ProcessFamily(process.pid, PsutilChildProbe())
         if process.stdout is None or process.stderr is None:
             raise RuntimeError("agy stdio pipes are not available")
         if not self._tasks_entered:
@@ -257,13 +276,16 @@ class AgyTransport:
         self._request_id += 1
         return self._request_id
 
-    def prompt(self, request_id: int, blocks: list[dict[str, str]]) -> None:
+    def prompt(
+        self, request_id: int, blocks: list[dict[str, str]], *, before_write: Callable[[], None]
+    ) -> None:
         self._write(
             {
                 "id": request_id,
                 "method": "session/prompt",
                 "params": {"sessionId": self._conversation_id, "prompt": blocks},
-            }
+            },
+            before_write=before_write,
         )
 
     def cancel(self) -> None:
@@ -275,11 +297,16 @@ class AgyTransport:
     def respond_error(self, request_id: int | str) -> None:
         self._write({"id": request_id, "error": {"code": -32601, "message": "Method not found"}})
 
-    def _write(self, payload: dict[str, object]) -> None:
+    def _write(
+        self, payload: dict[str, object], *, before_write: Callable[[], None] | None = None
+    ) -> None:
         stream = self._require_process().stdin
         if stream is None or not self.alive or self._stream_closed:
             raise TransportClosedError("agy ACP stream is closed")
-        stream.write((json.dumps({"jsonrpc": "2.0", **payload}) + "\n").encode())
+        data = (json.dumps({"jsonrpc": "2.0", **payload}) + "\n").encode()
+        if before_write is not None:
+            before_write()
+        stream.write(data)
 
     async def flush(self) -> None:
         stream = self._require_process().stdin
@@ -362,45 +389,69 @@ class AgyTransport:
                 raise last_error
             await asyncio.sleep(CANCEL_POLL_SECONDS)
 
-    async def close(self, *, broken: bool = False) -> None:
-        if broken:
-            self._abort()
+    def observe_children(self) -> None:
+        if self._family is not None:
+            self._family.observe()
+
+    async def close(self, *, broken: bool = False, agent_id: int | None = None) -> None:
         async with self._close_lock:
-            await self._close_process()
+            await self._close_process(broken=broken, agent_id=agent_id)
 
-    def _abort(self) -> None:
-        process = self._process
-        if process is None:
-            return
-        if process.stdin is not None and not process.stdin.is_closing():
-            process.stdin.transport.abort()
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
+    async def _close_process(self, *, broken: bool, agent_id: int | None) -> None:
+        process, io, family = self._process, self._stdio, self._family
+        try:
+            if process is not None and io is not None:
+                try:
+                    if family is not None:
+                        family.observe_session()
+                    if not broken:
+                        await self._request_exit(process)
+                finally:
+                    stdin = io.get_pipe_transport(0)
+                    if isinstance(stdin, asyncio.WriteTransport) and not stdin.is_closing():
+                        stdin.abort()
+                    io.close()
+                    try:
+                        if family is not None:
+                            family.observe_session()
+                            family.kill()
+                    finally:
+                        await self._close_streams(process)
+        finally:
+            if family is not None:
+                await family.settle(
+                    harness="antigravity",
+                    agent_id=agent_id,
+                    timeout=self._config.cancel_settle_seconds,
+                    clock=self._clock,
+                    poll_seconds=CANCEL_POLL_SECONDS,
+                )
+                self._family = None
 
-    async def _close_process(self) -> None:
-        process = self._process
-        if process is None:
-            return
+    async def _request_exit(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 process.send_signal(signal.SIGINT)
-            await self._settle_process(process)
-        if process.stdin is not None:
-            if not process.stdin.is_closing():
-                process.stdin.transport.abort()
-            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-                await process.stdin.wait_closed()
-        for pump in self._pumps:
-            pump.cancel()
-        self._pumps = []
-        if self._tasks_entered:
-            self._tasks_entered = False
-            with contextlib.suppress(ExceptionGroup):
-                await self._tasks.__aexit__(None, None, None)
-        self._returncode = process.returncode
-        self._process = None
-        self._rpc_server = None
-        await self._queue.put(None)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
+
+    async def _close_streams(self, process: asyncio.subprocess.Process) -> None:
+        try:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
+        finally:
+            for pump in self._pumps:
+                pump.cancel()
+            self._pumps = []
+            if self._tasks_entered:
+                self._tasks_entered = False
+                with contextlib.suppress(ExceptionGroup):
+                    await self._tasks.__aexit__(None, None, None)
+            self._returncode = process.returncode
+            self._process = None
+            self._stdio = None
+            self._rpc_server = None
+            self._queue.put_nowait(None)
 
     async def events(self) -> AsyncIterator[dict[str, object]]:
         while True:
@@ -408,19 +459,6 @@ class AgyTransport:
             if item is None:
                 return
             yield item
-
-    async def _settle_process(self, process: asyncio.subprocess.Process) -> None:
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
-            return
-        with contextlib.suppress(ProcessLookupError):
-            process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-            await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
 
     async def _pump_stdout(self, stream: asyncio.StreamReader) -> None:
         try:

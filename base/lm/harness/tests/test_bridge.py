@@ -21,6 +21,7 @@ from base.lm.harness import (
     Handoff,
     HarnessBridge,
     HarnessClosedError,
+    HarnessNotDeliveredError,
     HarnessRegistration,
     HarnessSetupError,
     HarnessTurnFaultedError,
@@ -39,6 +40,7 @@ from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.delivery import HarnessInput, Reconciliation
 from base.lm.harness.registration import SecureRandom
+from base.lm.harness.session import InputsNotWrittenError
 from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
@@ -153,7 +155,11 @@ class FakeSession:
 
 
 class RefusingSession(FakeSession):
+    unwritten: frozenset[str] | None = None
+
     def accept(self, text: str, *, key: str | None = None) -> None:
+        if self.unwritten is not None:
+            raise InputsNotWrittenError("session closed before writing input", self.unwritten)
         raise RuntimeError("queue is full")
 
 
@@ -385,6 +391,20 @@ async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> 
         await run_turn(bridge, "hello", key="inbound-1")
 
     assert session.closed, "a session that refused a submission is not reused"
+
+
+async def test_delivery_reports_only_keys_known_not_to_have_reached_stdio() -> None:
+    session = RefusingSession()
+    session.unwritten = frozenset({"inbound-2"})
+    bridge = make_bridge(session)
+    try:
+        with pytest.raises(HarnessNotDeliveredError) as failure:
+            await bridge.deliver(
+                [HarnessInput.of("inbound-1", "attempted"), HarnessInput.of("inbound-2", "waiting")]
+            )
+        assert failure.value.keys == {"inbound-2"}
+    finally:
+        await bridge.close()
 
 
 async def test_close_closes_the_session_and_refuses_later_turns() -> None:
