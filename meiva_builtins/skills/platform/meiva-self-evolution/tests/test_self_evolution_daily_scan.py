@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -24,26 +23,16 @@ NOW = world.ts_after(3600)
 
 @pytest.fixture()
 def daily_scan() -> Any:
-    """Load independently of collection imports and restore sibling-import paths."""
-    before = sys.path[:]
-    try:
-        return cast(
-            Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "daily_scan.py")
-        )
-    finally:
-        sys.path[:] = before
+    return cast(
+        Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "daily_scan.py")
+    )
 
 
 @pytest.fixture()
 def report() -> Any:
-    """The report and verdict module, loaded by path."""
-    before = sys.path[:]
-    try:
-        return cast(
-            Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "scan_report.py")
-        )
-    finally:
-        sys.path[:] = before
+    return cast(
+        Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "scan_report.py")
+    )
 
 
 def _view(
