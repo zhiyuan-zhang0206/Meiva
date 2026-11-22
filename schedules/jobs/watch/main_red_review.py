@@ -57,13 +57,13 @@ def review_run(
             review_outcome=observation.outcome,
             review_detail=observation.detail,
         )
-        if old.task_id is not None and observation.outcome == CaseOutcome.PASSED:
+        if old.issue_number is not None and observation.outcome == CaseOutcome.PASSED:
             close_card(
-                old.task_id,
+                old.issue_number,
                 f"case passed on {run.head_sha}, run {run.run_id}: {observation.detail}",
             )
             del entries[name]
-            notes.append(f"closed card {old.task_id}: exact case passed in run {run.run_id}")
+            notes.append(f"closed issue #{old.issue_number}: exact case passed in run {run.run_id}")
             continue
         if observation.outcome == CaseOutcome.FAILED:
             updated = replace(
@@ -74,8 +74,8 @@ def review_run(
                 last_red_at=run.created_at,
                 run_id=run.run_id,
             )
-            if old.task_id is None:
-                task_id = open_card(
+            if old.issue_number is None:
+                issue_number = open_card(
                     Card(
                         name,
                         card_title(updated),
@@ -88,13 +88,15 @@ def review_run(
                         old.first_seen_at.isoformat(),
                     )
                 )
-                updated = replace(updated, task_id=task_id)
+                updated = replace(updated, issue_number=issue_number)
             entries[name] = updated
             continue
-        if old.task_id is None:
-            task_id = open_card(_review_card(updated, observation, run))
-            updated = replace(updated, task_id=task_id)
-            notes.append(f"opened re-check card {task_id} for {name}: {observation.outcome.value}")
+        if old.issue_number is None:
+            issue_number = open_card(_review_card(updated, observation, run))
+            updated = replace(updated, issue_number=issue_number)
+            notes.append(
+                f"opened re-check issue #{issue_number} for {name}: {observation.outcome.value}"
+            )
         entries[name] = updated
 
 
@@ -121,7 +123,7 @@ def suspect_rows(
             if entry.review_outcome
             else "no-opportunity",
             "review_detail": entry.review_detail,
-            "task_id": entry.task_id,
+            "issue_number": entry.issue_number,
         }
         for entry in entries.values()
         if entry.state == STATE_SUSPECTED
@@ -244,8 +246,11 @@ def _unreadable_backlog(
         if current is None or current.review_run_id:
             continue
         observation = CaseObservation(CaseOutcome.UNREADABLE, reason)
-        task_id = current.task_id or open_card(_review_card(current, observation, None))
+        issue_number = current.issue_number or open_card(_review_card(current, observation, None))
         entries[name] = replace(
-            current, task_id=task_id, review_outcome=observation.outcome, review_detail=reason
+            current,
+            issue_number=issue_number,
+            review_outcome=observation.outcome,
+            review_detail=reason,
         )
-        notes.append(f"suspect re-check card {task_id}: {reason}")
+        notes.append(f"suspect re-check issue #{issue_number}: {reason}")

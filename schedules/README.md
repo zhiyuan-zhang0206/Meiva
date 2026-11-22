@@ -52,7 +52,8 @@ the nightly verdict and that nightly full run are the only evidence, and on
 2026-11-01 two scheduled gate runs went red on `main` with nobody watching. The
 full run's own listing is narrowed to `main`: `ci.yml` also runs on every pull
 request, and a red branch there is that pull request's business. Every thirty
-minutes it reads their newest runs and opens **one** task for the P0 lead per red
+minutes it reads their newest runs and tracks each confirmed red via **one**
+deduplicated GitHub Issue (label `main-red`, notifying the P0 lead with the Issue link on creation and auto-closing on recovery)
 that no green run of the same commit explains: a first named red with no later completed run of its workflow records
 "no re-check opportunity" and opens no card. The first later opportunity opens
 one review card with the exact JUnit result: passed, skipped, absent from the

@@ -53,7 +53,7 @@ _MAX_ERROR_CHARS = 160
 @dataclass(frozen=True)
 class BlindLedger:
     since: str | None = None
-    task_id: int | None = None
+    issue_number: int | None = None
     rounds: int = 0
     streams: Mapping[str, str] = field(default_factory=dict[str, str])
     streaks: Mapping[str, int] = field(default_factory=dict[str, int])
@@ -62,9 +62,10 @@ class BlindLedger:
 
 
 # meiva:note
-# The ledger is a boundary read: the file may predate it, or carry a value a hand edit broke. Each
-# map is accepted only in its own shape, so a malformed ledger costs one round's memory of the
-# window rather than the whole state file.
+# The ledger is a boundary read: the file may predate it, carry a legacy `task_id` from before
+# the GitHub Issues migration, or hold a value a hand edit broke. Legacy `task_id` values are
+# ignored rather than copied into `issue_number`, and each map is accepted only in its own shape,
+# so a malformed ledger costs one round's memory of the window rather than the whole state file.
 def _text_map(raw: object) -> dict[str, str]:
     if not is_object_dict(raw):
         return {}
@@ -91,11 +92,17 @@ def load_blind(raw: object) -> BlindLedger:
     if not is_object_dict(raw):
         return BlindLedger()
     since = raw.get("since")
-    task_id = raw.get("task_id")
+    issue_number = raw.get("issue_number")
     rounds = raw.get("rounds")
     return BlindLedger(
         since=since if isinstance(since, str) else None,
-        task_id=task_id if isinstance(task_id, int) and not isinstance(task_id, bool) else None,
+        issue_number=(
+            issue_number
+            if isinstance(issue_number, int)
+            and not isinstance(issue_number, bool)
+            and issue_number > 0
+            else None
+        ),
         rounds=rounds
         if isinstance(rounds, int) and not isinstance(rounds, bool) and rounds > 0
         else 0,
@@ -109,7 +116,7 @@ def load_blind(raw: object) -> BlindLedger:
 def save_blind(ledger: BlindLedger) -> dict[str, object]:
     return {
         "since": ledger.since,
-        "task_id": ledger.task_id,
+        "issue_number": ledger.issue_number,
         "rounds": ledger.rounds,
         "streams": dict(ledger.streams),
         "streaks": dict(ledger.streaks),
@@ -179,10 +186,10 @@ def advance_blindness(
             f"the interval it missed was {'covered' if covered else 'NOT covered'}"
         )
     if not unreadable:
-        if ledger.task_id is None:
+        if ledger.issue_number is None:
             return BlindLedger(backfilled=backfilled), tuple(notes)
         close_card(
-            ledger.task_id,
+            ledger.issue_number,
             blind_close_line(
                 datetime.fromisoformat(ledger.since or now.isoformat()),
                 now,
@@ -196,8 +203,8 @@ def advance_blindness(
         )
         return BlindLedger(backfilled=backfilled), tuple(notes)
     since = ledger.since or now.isoformat()
-    task_id = ledger.task_id
-    if task_id is None:
+    issue_number = ledger.issue_number
+    if issue_number is None:
         due = blind_due(
             tuple(unreadable),
             streaks,
@@ -213,13 +220,13 @@ def advance_blindness(
                 total_streams=len(workflows),
                 reason=due,
             )
-            task_id = open_card(blind_card(window))
+            issue_number = open_card(blind_card(window))
             notes.append(f"blind: {due} -- the watch opened one card for the window")
     return (
         replace(
             ledger,
             since=since,
-            task_id=task_id,
+            issue_number=issue_number,
             rounds=ledger.rounds + 1 if ledger.since is not None else 1,
             streams={**ledger.streams, **unreadable},
             streaks=streaks,

@@ -4,7 +4,7 @@
 # round, so a round that stops arriving is reported even while the loop that should run it stays up.
 #
 # Kept out of the hyphenated entry script so the behaviour is importable and testable; the entry
-# only wires the clock and the task API.
+# only wires the clock and the GitHub Issues tracker.
 # meiva:link schedules/README.md
 
 from __future__ import annotations
@@ -56,6 +56,6 @@ def liveness_once(
         seen = last.isoformat() if last is not None else "none on record"
         print(f"[{slot.isoformat()}] watch alive: newest round {seen}", flush=True)
         return None
-    task_id = open_card(card)
-    print(f"[{slot.isoformat()}] watch STALE: opened card #{task_id}", flush=True)
-    return task_id
+    issue_number = open_card(card)
+    print(f"[{slot.isoformat()}] watch STALE: opened issue #{issue_number}", flush=True)
+    return issue_number

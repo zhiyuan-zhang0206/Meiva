@@ -50,7 +50,7 @@ def _round(
         fetch=fetch,
         last_start=lambda _workflow: now - timedelta(hours=1),
         open_card=lambda card: opened.append(card) or (900 + len(opened)),
-        close_card=lambda task_id, reason: closed.append((task_id, reason)),
+        close_card=lambda issue_number, reason: closed.append((issue_number, reason)),
         emit=lambda payload: heartbeats.append(dict(payload)),
         workflows=workflows,
         liveness=(),
@@ -105,7 +105,7 @@ def test_two_unreadable_streams_open_one_card_and_the_next_readable_round_closes
     )
 
     assert len(opened) == 1
-    assert [task_id for task_id, _reason in closed] == [901]
+    assert [issue_number for issue_number, _reason in closed] == [901]
     reason = closed[0][1]
     assert reason.startswith("blind window 2026-11-08T05:00:00+00:00 -> 2026-11-08T05:30:00+00:00")
     assert "1 round(s)" in reason
@@ -133,7 +133,7 @@ def test_one_unreadable_stream_opens_no_card(tmp_path: Path) -> None:
     assert opened == []
     assert "stream main-push.yml unreadable" in line
     assert heartbeats[0]["unreadable"] == 1
-    assert load_state(tmp_path / STATE_FILE).blind.task_id is None
+    assert load_state(tmp_path / STATE_FILE).blind.issue_number is None
 
 
 # meiva:note
@@ -272,13 +272,13 @@ def test_a_round_that_could_read_nothing_names_all_four_streams(tmp_path: Path) 
     ]
     stored = load_state(tmp_path / STATE_FILE)
     assert stored.blind.since == _START.isoformat()
-    assert stored.blind.task_id == 901
+    assert stored.blind.issue_number == 901
 
 
 # meiva:note
 # The bug the split exposed: `watch_once` rebuilt the state from the maps it happened to name, so
-# every watch round reset the slot ledger, and the slot card met a `task_id` of None on the round
-# that should have closed it. A watch round must leave a ledger it does not own untouched.
+# every watch round reset the slot ledger, and the slot card met an `issue_number` of None on the
+# round that should have closed it. A watch round must leave a ledger it does not own untouched.
 def test_a_watch_round_keeps_the_slot_ledger(tmp_path: Path) -> None:
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
@@ -291,7 +291,7 @@ def test_a_watch_round_keeps_the_slot_ledger(tmp_path: Path) -> None:
         last_red_sha="sha1",
         last_red_at=_START,
         red_count=2,
-        task_id=899,
+        issue_number=899,
         kind="fail",
         job="job",
         run_id=702,
@@ -304,7 +304,7 @@ def test_a_watch_round_keeps_the_slot_ledger(tmp_path: Path) -> None:
             entries={entry.fingerprint: entry},
             watermarks={},
             first_seen={},
-            slot=SlotLedger(gap_id="gap-1", task_id=799, unreadable_rounds=2),
+            slot=SlotLedger(gap_id="gap-1", issue_number=799, unreadable_rounds=2),
         ),
     )
 
@@ -317,7 +317,7 @@ def test_a_watch_round_keeps_the_slot_ledger(tmp_path: Path) -> None:
         heartbeats=heartbeats,
     )
 
-    assert load_state(tmp_path / STATE_FILE).slot.task_id == 799
+    assert load_state(tmp_path / STATE_FILE).slot.issue_number == 799
 
 
 # meiva:note
