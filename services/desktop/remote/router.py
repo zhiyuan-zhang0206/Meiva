@@ -15,6 +15,7 @@ from base.host.remote_hosts import (
     ResolvedTarget,
     TargetResolutionError,
     load_remote_hosts,
+    parse_target_selector,
     read_bearer_token,
     resolve_target,
 )
@@ -86,21 +87,14 @@ class RemoteTransportRouter[HelperT]:
             return []
 
     def resolve(self, raw_host: object) -> ResolvedTarget:
-        if raw_host is None:
+        kind, _ = parse_target_selector(raw_host)
+        if kind == "local":
             return ResolvedTarget(kind="local", name="local", canonical_uri="local")
-        if not isinstance(raw_host, str):
-            raise TargetResolutionError(
-                f"host must be a string, got {type(raw_host).__name__}; "
-                "run `meiva computer list` to view registered targets."
-            )
-        stripped = raw_host.strip()
-        if not stripped or stripped.lower() in {"local", "local://"}:
-            return ResolvedTarget(kind="local", name="local", canonical_uri="local")
-        ssh_hosts = load_remote_hosts(home=self._home)
+        ssh_hosts = load_remote_hosts(home=self._home) if kind != "meiva" else {}
         return resolve_target(
-            stripped,
+            raw_host,
             ssh_aliases=ssh_hosts.keys(),
-            cluster_machines=self._cluster_machine_names(),
+            cluster_machines=self._cluster_machine_names() if kind != "ssh" else (),
             local_machine=self._local_machine,
         )
 

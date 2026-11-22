@@ -113,7 +113,9 @@ class ParsedToolPayload:
     error_message: str | None = None
 
 
-def ssh_tunnel_argv(ssh_host: str, *, local_port: int, remote_port: int) -> list[str]:
+def ssh_tunnel_argv(
+    ssh_host: str, *, local_port: int, remote_port: int, owned: bool = False
+) -> list[str]:
     return [
         "ssh",
         "-N",
@@ -126,6 +128,11 @@ def ssh_tunnel_argv(ssh_host: str, *, local_port: int, remote_port: int) -> list
         "ServerAliveInterval=15",
         "-o",
         "ServerAliveCountMax=3",
+        *(
+            ["-S", "none", "-o", "ForkAfterAuthentication=no", "-o", "StrictHostKeyChecking=yes"]
+            if owned
+            else []
+        ),
         "-L",
         f"127.0.0.1:{local_port}:127.0.0.1:{remote_port}",
         "--",

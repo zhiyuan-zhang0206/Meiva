@@ -31,7 +31,7 @@ from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.net.resilience import retry_asleep
 from base.paths import computer_mcp_socket, meiva_home
-from services.desktop.browser.mcp_socket_bridge import (
+from services.desktop.browser.routing.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
     dial_unix_socket,

@@ -90,6 +90,34 @@ configured in `$MEIVA_HOME/remote_hosts.toml` (`ssh://<alias>`).
    `meiva.mcps.computer_use.release_control(host="<target>")` when done (or
    `meiva computer release --host <target>` as an operator kick).
 
+## Cross-Machine Chrome
+
+Use `meiva computer list --json` to discover registered targets. `browser_status`
+reports the local or peer browser service's readiness. SSH rows report
+`unprobed (SSH)` because discovery does not open tunnels.
+
+```python
+target = "meiva://macmini"  # or "ssh://zzyasus"
+meiva.mcps.chrome.new_page(url="https://example.com", host=target)
+meiva.mcps.chrome.take_snapshot(host=target, filePath="snapshot.txt")
+```
+
+Omit `host` for local Chrome. Pass the same target to each remote call and
+open a tab before acting on it. The target runner retains an agent's Tab
+selection and TTL for cluster calls. SSH scopes Tab IDs to the client
+connection. If the SSH connection is rebuilt, open a new page.
+
+Configure `ssh_host`, `os`, and optionally `browser_port` in the host entry
+under `[hosts.<alias>]` in `$MEIVA_HOME/remote_hosts.toml`. Chrome must already
+listen on the target's loopback interface (port 9222 by default). SSH uses the
+configured login and host key. Run Chrome under that login for file uploads.
+
+For an upload or a tool output such as a screenshot, use a path inside the
+calling agent's workspace. A call transfers up to 8 MiB of files. Submit an
+attached file within ten minutes on a cluster target or before the SSH client
+connection ends. See the [Chrome MCP reference](../../../../mcps/docs/chrome/chrome.md)
+for the supported file tools.
+
 ## When to Fix Behavior in a Wrapper Instead
 
 If a first-party MCP server (one Meiva ships with) has a behavior bug, the fix is

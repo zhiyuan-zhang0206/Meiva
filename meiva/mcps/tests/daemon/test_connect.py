@@ -14,7 +14,7 @@ from typing import Any
 import psutil
 import pytest
 from mcp.shared.auth import OAuthToken
-from mcp.types import TextContent
+from mcp.types import CallToolResult, ListToolsResult, TextContent
 
 import meiva.mcps._browser as browser_mod
 import meiva.mcps._computer as computer_mod
@@ -23,6 +23,7 @@ from base.paths import chrome_mcp_socket, computer_mcp_socket
 from meiva.mcps._oauth import FileTokenStorage
 from meiva.mcps._policy import DaemonConfig
 from meiva.mcps.config import MCPError
+from meiva.mcps.daemon_entry import BrowserRequest
 from meiva.mcps.tests.daemon.daemon_support import (
     CDP_PORT,
     IDLE_PROCESS,
@@ -416,6 +417,46 @@ async def test_a_browser_server_is_dialed_directly(unit_home: Path, short_dir: P
         server.close()
         await server.wait_closed()
     assert [request["method"] for request in received] == ["list_tools"]
+
+
+async def test_headless_daemon_can_mount_injected_browser_without_local_socket(
+    unit_home: Path, short_dir: Path
+) -> None:
+    config = replace(daemon_config(short_dir), display_available=False)
+    write_servers(
+        unit_home,
+        {
+            "chrome": {
+                "command": "must-not-run",
+                "shared": "browser",
+                "requires": {"display": True},
+            },
+        },
+    )
+
+    class Browser:
+        client_agent_id: int | None = None
+
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+        async def list_tools(self) -> ListToolsResult:
+            return ListToolsResult(tools=[])
+
+        async def call_tool(self, name: str, args: dict[str, object]) -> CallToolResult:
+            return CallToolResult(content=[TextContent(type="text", text=str(args["host"]))])
+
+    def factory(_: BrowserRequest) -> Browser:
+        return Browser()
+
+    session, stack = await daemon_mod.connect_server("chrome", config, {}, browser_factory=factory)
+    async with stack:
+        assert isinstance(session, Browser)
+        result = await session.call_tool("list_pages", {"host": "meiva://macmini"})
+        assert result.content == [TextContent(type="text", text="meiva://macmini")]
 
 
 async def test_a_computer_server_is_dialed_directly(unit_home: Path, short_dir: Path) -> None:

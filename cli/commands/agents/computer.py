@@ -19,7 +19,6 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from base.host.boundary.json_values import is_object_dict
 from base.host.remote_hosts import RemoteHostConfigError, load_remote_hosts
 from base.paths import computer_mcp_socket
 from cli.boundary.json_body import loads
@@ -35,6 +34,7 @@ class ComputerTargetRow:
     status: str
     held_by: str
     notes: str
+    browser_status: str = "unknown"
 
     def as_dict(self) -> dict[str, str | None]:
         return {
@@ -43,6 +43,7 @@ class ComputerTargetRow:
             "status": self.status,
             "held_by": None if self.held_by == "-" else self.held_by,
             "notes": self.notes,
+            "browser_status": self.browser_status,
         }
 
 
@@ -55,8 +56,8 @@ def _format_holder(raw: object) -> str:
 
 
 def format_computer_table(rows: Sequence[ComputerTargetRow]) -> str:
-    headers = ("TARGET", "OS", "STATUS", "HELD_BY", "NOTES / CAPABILITIES")
-    matrix = [(r.target, r.os, r.status, r.held_by, r.notes) for r in rows]
+    headers = ("TARGET", "OS", "STATUS", "HELD_BY", "CHROME", "NOTES / CAPABILITIES")
+    matrix = [(r.target, r.os, r.status, r.held_by, r.browser_status, r.notes) for r in rows]
     widths = [
         max([len(headers[col]), *(len(row[col]) for row in matrix)]) for col in range(len(headers))
     ]
@@ -98,9 +99,12 @@ def _collect_local_rows(
     platform_system: str,
     local_machine: str | None,
     local_description: str | None,
+    *,
+    browser_available: bool | None,
 ) -> list[ComputerTargetRow]:
     local_os = "macos" if platform_system == "darwin" else platform_system
     local_status = _probe_local_daemon_status(home)
+    chrome = _browser_status(available=browser_available)
     if local_status is not None and bool(local_status.get("local_available", False)):
         return [
             ComputerTargetRow(
@@ -108,20 +112,28 @@ def _collect_local_rows(
                 os=local_os,
                 status="online",
                 held_by=_format_holder(local_status.get("holder")),
+                browser_status=chrome,
                 notes=(local_description or f"local desktop ({local_machine or local_os})").strip(),
             )
         ]
-    if local_status is None and platform_system == "darwin":
+    if (local_status is None and platform_system == "darwin") or browser_available is True:
         return [
             ComputerTargetRow(
                 target="local",
                 os=local_os,
                 status="offline",
                 held_by="-",
+                browser_status=chrome,
                 notes=(local_description or "local desktop (computer-mcp not running)").strip(),
             )
         ]
     return []
+
+
+def _browser_status(*, available: bool | None) -> str:
+    if available is None:
+        return "unknown"
+    return "online" if available else "offline"
 
 
 def _probe_cluster_row(
@@ -129,14 +141,16 @@ def _probe_cluster_row(
     ops_url: str | None,
     desc: str | None,
     cluster_status_probe: Callable[[str], dict[str, object]] | None,
+    browser_status_probe: Callable[[str], bool | None] | None,
 ) -> ComputerTargetRow | None:
     note = (desc or "").strip()
-    if not ops_url or cluster_status_probe is None:
-        return ComputerTargetRow(f"meiva://{machine_name}", "unknown", "offline", "-", note)
-    probed = cluster_status_probe(ops_url)
-    if not is_object_dict(probed):
-        return ComputerTargetRow(f"meiva://{machine_name}", "unknown", "offline", "-", note)
-    if probed.get("ok") is True and probed.get("available") is False:
+    browser_available = browser_status_probe(ops_url) if ops_url and browser_status_probe else None
+    probed = cluster_status_probe(ops_url) if ops_url and cluster_status_probe else {}
+    if (
+        probed.get("ok") is True
+        and probed.get("available") is False
+        and browser_available is not True
+    ):
         return None
     peer_os = str(probed.get("os") or "unknown")
     online = probed.get("ok") is True and probed.get("available") is True
@@ -146,6 +160,7 @@ def _probe_cluster_row(
         status="online" if online else "offline",
         held_by=_format_holder(probed.get("holder")),
         notes=note,
+        browser_status=_browser_status(available=browser_available),
     )
 
 
@@ -170,7 +185,9 @@ def _collect_ssh_rows(
             else:
                 status_label = "offline"
         rows.append(
-            ComputerTargetRow(cfg.target_uri, cfg.os, status_label, held_by, cfg.summary_notes)
+            ComputerTargetRow(
+                cfg.target_uri, cfg.os, status_label, held_by, cfg.summary_notes, "unprobed (SSH)"
+            )
         )
     return rows
 
@@ -183,14 +200,24 @@ def cmd_computer_list(
     local_description: str | None = None,
     cluster_machines: Sequence[tuple[str, str | None, str | None]] = (),
     cluster_status_probe: Callable[[str], dict[str, object]] | None = None,
+    browser_status_probe: Callable[[str], bool | None] | None = None,
+    local_browser_available: bool | None = None,
     ssh_health_probe: Callable[[str], dict[str, object] | None] = probe_win_bridge_health,
     json_output: bool = False,
 ) -> int:
-    rows = _collect_local_rows(home, platform_system, local_machine, local_description)
+    rows = _collect_local_rows(
+        home,
+        platform_system,
+        local_machine,
+        local_description,
+        browser_available=local_browser_available,
+    )
     for machine_name, ops_url, desc in cluster_machines:
         if local_machine is not None and machine_name == local_machine:
             continue
-        row = _probe_cluster_row(machine_name, ops_url, desc, cluster_status_probe)
+        row = _probe_cluster_row(
+            machine_name, ops_url, desc, cluster_status_probe, browser_status_probe
+        )
         if row is not None:
             rows.append(row)
     try:

@@ -1,0 +1,9 @@
+exports = ["boot.py", "mcp_socket_bridge.py", "remote_files.py", "remote_pages.py", "remote_rpc.py", "session.py", "wire_server.py"]
+
+[uses]
+"boot.py" = ["session.py"]
+"remote_rpc.py" = ["mcp_socket_bridge.py"]
+"session.py" = ["remote_files.py", "remote_rpc.py", "ssh_browser.py"]
+"ssh_browser.py" = ["remote_files.py", "remote_pages.py", "remote_rpc.py", "ssh_upload.py"]
+"ssh_upload.py" = ["remote_files.py"]
+"tests" = ["remote_files.py", "session.py"]

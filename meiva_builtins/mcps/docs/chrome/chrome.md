@@ -5,18 +5,51 @@
 
 ## Two and a Half Layers
 ```
-agent's shared MCP daemon (meiva.mcps._daemon, in-daemon BrowserLineSession)
+agent's shared MCP daemon (services.entrypoints.mcp_daemon)
       ←Unix socket→ mcp_daemon (per-machine shared, browser-mcp session)
       ←→ chrome-devtools-mcp upstream ←CDP→ shared headed Chrome
 ```
 
 - **chrome-devtools-mcp upstream** (Chrome DevTools MCP): the npm package that actually speaks CDP to drive Chrome. Its collector subscribes to targets across the **entire browser**, so each upstream buffers network/console traffic for all tabs.
 - **mcp_daemon** (`services.desktop.browser.mcp_daemon`, ServiceSpec session `browser-mcp`): a per-machine **single** upstream, shared across all agents via a Unix socket. Replaces the old per-agent upstream — N browser agents used to each spawn an upstream, each buffering all browser traffic, making it the #1 memory hog on agent-runner; sharing to 1 means each tab's traffic is received only once.
-- **in-daemon line client** (`meiva/mcps/_browser.py:connect_browser_direct`, wired via `"shared": "browser"` in `mcps/chrome/.mcp.json`): the agent's shared MCP daemon dials the browser-mcp service's line protocol directly, **no child process at all**. This replaced the per-agent `services.desktop.browser.mcp_wrapper` stdio bridge (~63MB RSS per agent). Each agent connection keeps its own socket, so the daemon's per-connection page affinity still isolates agents; tool lists pass through verbatim, so upstream upgrades (new/renamed tools) are automatically reflected (the one exception is `renew_page`, a daemon-owned tool appended after the passthrough — see "Page Lifetime (TTL)"). The client self-heals a desynced stream (a response id that does not match the request, or a corrupt line): it rebuilds the socket and restarts the id counter, so a lost response line fails one call but never bricks the connection. The wrapper remains in the tree only as the declared command for hosts running older daemons.
+- **in-daemon line client** (`meiva/mcps/_browser.py:connect_browser_direct`, wired via `"shared": "browser"` in `mcps/chrome/.mcp.json`): the agent's shared MCP daemon dials the browser-mcp service's line protocol directly, **no child process at all**. This replaced the per-agent `services.desktop.browser.mcp_wrapper` stdio bridge (~63MB RSS per agent). Each agent connection keeps its own socket, so the daemon's per-connection page affinity still isolates agents; the catalog adds the optional `host` argument to each upstream tool (the one exception is `renew_page`, a daemon-owned tool appended after the passthrough — see "Page Lifetime (TTL)"). The client self-heals a desynced stream (a response id that does not match the request, or a corrupt line): it rebuilds the socket and restarts the id counter, so a lost response line fails one call but never bricks the connection. The stdio wrapper uses the same routing session.
 
 ## Two Invariants (daemon side, to make a single upstream safe for multiple clients)
 - **Serial lock**: machine-wide one-at-a-time browser operations, multi-step sequences do not interleave (operator chose serial over parallel).
 - **Per-connection page affinity**: chrome-devtools-mcp has only one global "current page", but each client has its own tab; the daemon re-selects the connection's page before forwarding page-scoped calls, so A's `click` won't land on B's tab; connections without a page are not forwarded to the global selected page (could be someone else's tab), instead they cold-start (navigate → new_page) or return a no-page error.
+
+## Remote Targets
+
+`host="meiva://<machine>"` routes through the registered runner's authenticated
+`/browser/rpc` endpoint, which forwards to its private browser-mcp Unix socket.
+The target daemon validates the calling agent's Tab ownership, including explicit
+`pageId` arguments. The local Chrome service and its Tab registry remain the
+owners of the existing page selection and TTL.
+
+`host="ssh://<alias>"` uses a configured SSH target in `$MEIVA_HOME/remote_hosts.toml`:
+
+```toml
+[hosts.zzyasus]
+os = "windows"
+ssh_host = "zzyasus"
+browser_port = 9222
+```
+
+Chrome listens on the target's loopback interface. An on-demand SSH tunnel
+binds a random local loopback port, and the local Chrome DevTools MCP process
+connects through the tunnel. It may address Tabs created by its own connection.
+An SSH connection recovery starts with a fresh Tab scope.
+
+Remote file transfer uses paths inside the agent's workspace, with an 8 MiB
+combined artifact limit per call. Supported file arguments cover `upload_file`,
+`take_screenshot`, `take_snapshot`, `evaluate_script`, `get_network_request`,
+performance trace start/stop, `take_heapsnapshot`, and `lighthouse_audit`.
+Uploads stage on the target so Chrome can open them. Submit the file within
+ten minutes on a cluster target, or before the SSH connection ends. Output
+files are returned to the workspace and per-call staging is removed. The pinned
+upstream has no tool for browser-managed downloads or PDF export. Remote tool
+calls reject extension management, service-worker evaluation, screencasts,
+and file-based heap analysis. Use HTTP(S) or `about:blank` for remote navigation.
 
 ## Page Lifetime (TTL)
 Every page this stack **creates** — an explicit `new_page`, or the auto-created page on a page-less first navigate — carries a hard TTL deadline (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default), kept in `<home>/run/browser-pages.json` (one record per CDP target id, wall-clock epoch seconds) and enforced by the expiry sweep (`services/desktop/browser/page_lifecycle.py:reap_expired_pages`), the only safety net behind the deterministic release on agent exit. Activity never extends it; a page in use across days is bounded by its TTL (reclaimed within a sweep interval). An agent that dies without reaching its exit hook (SIGKILL, OOM, force-terminate), or a dev server that dies under a live agent, leaves its tab in the shared Chrome until that deadline (24h by default).
@@ -33,8 +66,8 @@ chrome is the **builtin (native) layer** in the four-layer MCP config merge (bui
 Launch is **relative path direct launch** for the declared command, never `uv run` (the latter is a persistent wrapper process, pure overhead under per-agent spawn): command writes a relative interpreter `.venv/bin/python`, and `meiva/mcps/config.py:server_cwd()` determines the spawn cwd per effective layer — built-in **pins to repo root**, so relative paths resolve to the repo venv. Since `"shared": "browser"` the daemon never spawns this command at all — it dials the browser-mcp service socket directly; the command line is retained for compatibility and as documentation of the underlying bridge.
 
 ## Gating / Lifecycle
-- Gated together with the browser service (`MEIVA_BROWSER_ENABLED` + display / Chrome / npx capability) — see [Browser service](../../../../services/docs/agent_runner_side/browser/browser/browser.md).
-- The `.mcp.json` declares `requires: {display}`; the daemon's own gate (`services/supervision/roster/spec.py:gate_reason` → `browser_incapability()`) is the same as the browser service's.
+- The local browser service is gated by `MEIVA_BROWSER_ENABLED`, the display, and Chrome and npx availability — see [Browser service](../../../../services/docs/agent_runner_side/browser/browser/browser.md).
+- Headless runners can mount Chrome through the cluster or an SSH registry. Chrome catalog discovery falls back from the local socket to a reachable runner or registered SSH target.
 - The browser-mcp daemon establishes one upstream per process. Upstream death logs an error and exits after cleanup; there is no internal reconnect loop. The root retains its bounded process restart policy. Reattachment can lose page affinity; continuity is not guaranteed.
 
 ## Key Dependencies

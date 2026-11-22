@@ -6,6 +6,7 @@ exports = ["__init__.py", "cluster_rpc.py", "errors.py", "router.py", "ssh_tunne
 "errors.py" = ["plan.py"]
 "router.py" = ["cluster_rpc.py", "ssh_tunnel.py", "win_bridge.py"]
 "ssh_tunnel.py" = ["plan.py"]
+"tests" = ["ssh_tunnel.py"]
 "win_bridge.py" = ["errors.py", "plan.py", "uia_map.py"]
 
 [purity]

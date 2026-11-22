@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from services.desktop.browser.profile_paths import daily_profile_path
+from services.desktop.browser.profile import daily_profile_path
 
 
 @pytest.mark.parametrize(

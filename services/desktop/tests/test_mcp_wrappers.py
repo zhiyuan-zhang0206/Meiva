@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
-from services.desktop.browser import mcp_socket_bridge
 from services.desktop.browser import mcp_wrapper as browser_wrapper
-from services.desktop.browser.mcp_socket_bridge import NotDeliveredError
 from services.desktop.browser.mcp_wrapper import Link, ReconnectingSocketLink
+from services.desktop.browser.routing import mcp_socket_bridge
+from services.desktop.browser.routing.mcp_socket_bridge import NotDeliveredError
 from services.desktop.computer import mcp_wrapper as computer_wrapper
 
 

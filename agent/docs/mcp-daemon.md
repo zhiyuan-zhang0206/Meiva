@@ -1,7 +1,7 @@
 # MCP Daemon
 
 ## What it is
-MCP (Model Context Protocol) server manager. A single per-machine daemon process (`python -m meiva.mcps._daemon`, ops roster session **mcp-daemon**, watchdog-managed like browser-mcp) owns the lifecycle of all MCP server sessions on the host and serves every agent over one Unix socket (`$MEIVA_HOME/run/mcp_daemon.sock`).
+MCP (Model Context Protocol) server manager. A single per-machine daemon process (`python -m services.entrypoints.mcp_daemon`, ops roster session **mcp-daemon**, watchdog-managed like browser-mcp) owns the lifecycle of all MCP server sessions on the host and serves every agent over one Unix socket (`$MEIVA_HOME/run/mcp_daemon.sock`).
 
 This replaced the previous design where each agent spawned its own ~12MB daemon child (15 agents = 15 processes). Sharing the process shares no state: **session isolation is per client connection** — each agent's connection gets its own session cache, and when a connection closes its MCP server subprocesses are released.
 

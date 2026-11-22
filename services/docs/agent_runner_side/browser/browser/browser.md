@@ -27,7 +27,7 @@ See [Browser Service Gating](gating.md). Per-agent tab groups: [tab-groups](tab-
 - `services/desktop/browser/daemon.py` — Chrome launch (`MEIVA_BROWSER_ENABLED` **defaults to True**; `browser_incapability()` auto-gates machines lacking display/Chrome/npx)
 - `services/desktop/browser/mcp_daemon.py` — shared MCP upstream
 - `services/desktop/browser/mcp_wrapper.py` — per-agent MCP bridge
-- `services/desktop/browser/mcp_socket_bridge.py` — socket client shared by browser and computer wrappers
+- `services/desktop/browser/routing/mcp_socket_bridge.py` — socket client shared by browser and computer wrappers
 - `services/desktop/browser/protocol.py` — line-protocol types shared by three processes
 - `services/desktop/browser/orphan.py` — identify + reap a Chrome on this cluster's profile that left the session tree (called from `_do_stop(keep_browser=False)`)
 - `services/desktop/browser/probe.py` — is the Chrome on this cluster's CDP port OURS (`DaemonProbe` verdict); the roster's `ServiceSpec.identity_probe` and `healthchecks/browser.py` both run it

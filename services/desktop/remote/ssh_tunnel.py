@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeGuard
 
@@ -49,71 +50,83 @@ def _port_accepting(port: int) -> bool:
         return False
 
 
+def _launch_ssh(argv: list[str]) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(  # noqa: S603
+        argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )
+
+
 class SshTunnelManager:
     def __init__(
         self,
         *,
         timers: Timers,
         startup_timeout_s: float = _TUNNEL_STARTUP_TIMEOUT_S,
+        launch: Callable[[list[str]], subprocess.Popen[bytes]] = _launch_ssh,
+        port_accepting: Callable[[int], bool] = _port_accepting,
     ) -> None:
         self._timers = timers
         self._startup_timeout_s = startup_timeout_s
+        self._launch = launch
+        self._port_accepting = port_accepting
         self._lock = threading.Lock()
-        self._tunnels: dict[str, _ManagedTunnel] = {}
+        self._tunnels: dict[tuple[str, bool], _ManagedTunnel] = {}
         self._stop_event = threading.Event()
 
-    def endpoint_for(self, config: RemoteHostConfig) -> str:
-        if config.local_port is not None:
+    def endpoint_for(self, config: RemoteHostConfig, *, browser: bool = False) -> str:
+        if config.local_port is not None and not browser:
             return f"http://127.0.0.1:{config.local_port}"
+        key = (config.alias, browser)
+        remote_port = config.browser_port if browser else config.helper_port
         with self._lock:
-            existing = self._tunnels.get(config.alias)
+            if self._stop_event.is_set():
+                raise PermissionsHelperError("SSH tunnel manager is closed")
+            existing = self._tunnels.get(key)
             if (
                 existing is not None
                 and existing.proc.poll() is None
                 and existing.ssh_host == config.ssh_host
-                and existing.helper_port == config.helper_port
+                and existing.helper_port == remote_port
             ):
                 return f"http://127.0.0.1:{existing.local_port}"
             if existing is not None:
                 self._stop_tunnel(existing)
-                self._tunnels.pop(config.alias, None)
-            tunnel = self._start_tunnel(config)
-            self._tunnels[config.alias] = tunnel
+                self._tunnels.pop(key, None)
+            tunnel = self._start_tunnel(config, remote_port=remote_port, owned=browser)
+            self._tunnels[key] = tunnel
             return f"http://127.0.0.1:{tunnel.local_port}"
 
-    def _start_tunnel(self, config: RemoteHostConfig) -> _ManagedTunnel:
+    def _start_tunnel(
+        self, config: RemoteHostConfig, *, remote_port: int, owned: bool
+    ) -> _ManagedTunnel:
         local_port = _pick_free_loopback_port()
         argv = ssh_tunnel_argv(
-            config.ssh_host, local_port=local_port, remote_port=config.helper_port
+            config.ssh_host, local_port=local_port, remote_port=remote_port, owned=owned
         )
         try:
-            proc = subprocess.Popen(  # noqa: S603
-                argv,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
+            proc = self._launch(argv)
         except OSError as exc:
             raise PermissionsHelperError(
                 f"failed to start ssh tunnel for {config.target_uri}: {exc}"
             ) from exc
 
         deadline = self._timers.monotonic() + self._startup_timeout_s
-        while self._timers.monotonic() < deadline:
+        while self._timers.monotonic() < deadline and not self._stop_event.is_set():
             if proc.poll() is not None:
                 stderr = (
                     (proc.stderr.read() if proc.stderr else b"")
                     .decode("utf-8", errors="replace")
                     .strip()
                 )
+                self._close_stderr(proc)
                 raise PermissionsHelperError(
                     f"ssh tunnel for {config.target_uri} exited immediately "
                     f"(code={proc.returncode}): {stderr or 'no stderr'}"
                 )
-            if _port_accepting(local_port):
+            if self._port_accepting(local_port) and proc.poll() is None:
                 return _ManagedTunnel(
                     local_port=local_port,
-                    helper_port=config.helper_port,
+                    helper_port=remote_port,
                     ssh_host=config.ssh_host,
                     proc=proc,
                 )
@@ -123,7 +136,7 @@ class SshTunnelManager:
         self._stop_tunnel(
             _ManagedTunnel(
                 local_port=local_port,
-                helper_port=config.helper_port,
+                helper_port=remote_port,
                 ssh_host=config.ssh_host,
                 proc=proc,
             )
@@ -141,8 +154,12 @@ class SshTunnelManager:
             except subprocess.TimeoutExpired:
                 tunnel.proc.kill()
                 tunnel.proc.wait(timeout=2.0)
-        if tunnel.proc.stderr is not None:
-            tunnel.proc.stderr.close()
+        self._close_stderr(tunnel.proc)
+
+    @staticmethod
+    def _close_stderr(proc: subprocess.Popen[bytes]) -> None:
+        if proc.stderr is not None:
+            proc.stderr.close()
 
     def close_all(self) -> None:
         self._stop_event.set()

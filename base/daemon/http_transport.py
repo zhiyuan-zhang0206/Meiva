@@ -81,23 +81,14 @@ async def _routed_response(
     routes: Mapping[tuple[str, str], ServedRoute],
     health_response: Callable[[], tuple[int, bytes]],
     auth_digests: frozenset[str] | None,
+    body_limits: Mapping[tuple[str, str], int],
 ) -> bytes:
     """Read the capped POST body and answer the request from health, the routes, or 404."""
-    content_length = _content_length(header_lines)
-    if content_length > _MAX_BODY_BYTES:
-        return _build_response(
-            400,
-            json.dumps({"error": f"body too large: {content_length} > {_MAX_BODY_BYTES}"}).encode(),
-            "application/json",
-        )
-    body_bytes = b""
-    if content_length > 0:
-        body_bytes = await asyncio.wait_for(reader.readexactly(content_length), timeout=10.0)
-
-    if method == "GET" and path == "/healthz":
+    route = (method, path)
+    if route == ("GET", "/healthz"):
         status, healthz_body = health_response()
         return _build_response(status, healthz_body, "application/json")
-    if (method, path) not in routes:
+    if route not in routes:
         return _build_response(404, b"", "text/plain")
     if auth_digests is not None and not verify_bearer_digest(
         _header_value(header_lines, b"authorization"), auth_digests
@@ -105,8 +96,20 @@ async def _routed_response(
         return _build_response(
             401, json.dumps({"error": "unauthorized"}).encode(), "application/json"
         )
+    content_length = _content_length(header_lines)
+    limit = body_limits.get(route, _MAX_BODY_BYTES)
+    if content_length > limit:
+        return _build_response(
+            400,
+            json.dumps({"error": f"body too large: {content_length} > {limit}"}).encode(),
+            "application/json",
+        )
+    body_bytes = b""
+    if content_length > 0:
+        body_bytes = await asyncio.wait_for(reader.readexactly(content_length), timeout=10.0)
+
     try:
-        answer = await routes[(method, path)](body_bytes)
+        answer = await routes[route](body_bytes)
         if len(answer) == 4:
             return _build_response(answer[0], answer[1], answer[2], answer[3])
         return _build_response(answer[0], answer[1], answer[2])
@@ -124,9 +127,11 @@ async def start_daemon_http(
     health_response: Callable[[], tuple[int, bytes]],
     extra_routes: Mapping[tuple[str, str], ServedRoute] | None = None,
     auth_digests: frozenset[str] | None = None,
+    body_limits: Mapping[tuple[str, str], int] | None = None,
 ) -> asyncio.Server:
     """Bind only the explicitly supplied routes and health response."""
     routes = dict(extra_routes) if extra_routes else {}
+    limits = dict(body_limits or {})
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -153,6 +158,7 @@ async def start_daemon_http(
                     routes=routes,
                     health_response=health_response,
                     auth_digests=auth_digests,
+                    body_limits=limits,
                 )
                 writer.write(response)
                 await writer.drain()

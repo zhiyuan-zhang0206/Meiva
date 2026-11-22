@@ -74,11 +74,12 @@ from meiva.mcps.config import (
     validate_requirements,
 )
 
-from ._browser import BrowserLineSession, connect_browser_direct
+from ._browser import BrowserLineSession, connect_browser_direct, connect_routed_browser
+from ._browser_port import BrowserFactory, BrowserSession
 from ._computer import ComputerLineSession, connect_computer_direct
 from ._oauth import OAUTH_FLOW_TIMEOUT_S
 
-type DirectSession = ClientSession | BrowserLineSession | ComputerLineSession
+type DirectSession = ClientSession | BrowserLineSession | BrowserSession | ComputerLineSession
 type ManagedSession = DirectSession | SerialSession
 
 # ─── server subprocess sharing ─────────────────────────────────────────────
@@ -149,6 +150,7 @@ class Scope:
     shared: Buckets
     oauth_locks: dict[str, asyncio.Lock]
     config: DaemonConfig
+    browser_factory: BrowserFactory | None = None
 
     def buckets_for(self, shared: object) -> Buckets:
         """Which buckets a server's sessions live in, from its `shared` declaration."""
@@ -160,6 +162,7 @@ class DaemonWide:
     """The state every connection of one daemon shares; `run_daemon` builds it once."""
 
     config: DaemonConfig
+    browser_factory: BrowserFactory | None = None
     shared: Buckets = field(default_factory=Buckets)
     oauth_locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
 
@@ -220,11 +223,18 @@ async def invalidate_session(
 # meiva:note
 # Start MCP server `server` and return (session, AsyncExitStack); the caller owns the stack. The entry decides the transport (`plan_connect`): a `url` entry is dialed over Streamable HTTP, `"shared": "browser"` and `"shared": "computer_use"` dial the per-machine service with no child, and everything else spawns a stdio child. A server whose `requires` this host cannot meet raises before anything starts.
 async def connect_server(
-    server: str, config: DaemonConfig, oauth_locks: dict[str, asyncio.Lock]
+    server: str,
+    config: DaemonConfig,
+    oauth_locks: dict[str, asyncio.Lock],
+    *,
+    browser_factory: BrowserFactory | None = None,
 ) -> tuple[DirectSession, AsyncExitStack]:
     spec = load_mcp_config(home=config.home)[server]
-    remote_desktop_available = spec.get("shared") == "computer_use" and (
-        has_remote_hosts(home=config.home) or computer_mcp_socket(config.home).exists()
+    shared = spec.get("shared")
+    remote_desktop_available = shared in ("browser", "computer_use") and (
+        has_remote_hosts(home=config.home)
+        or computer_mcp_socket(config.home).exists()
+        or (shared == "browser" and browser_factory is not None)
     )
     unmet = unmet_requirement(
         validate_requirements(spec),
@@ -239,6 +249,10 @@ async def connect_server(
     if isinstance(plan, StdioConnect):
         return await connect_stdio(server, plan, config.connect_timeout_seconds, home=config.home)
     if plan.service == "browser":
+        if browser_factory is not None:
+            return await connect_routed_browser(
+                config.home, config.browser_cdp_port, browser_factory
+            )
         return await connect_browser_direct(config.home, config.browser_cdp_port)
     return await connect_computer_direct(str(computer_mcp_socket(config.home)))
 
@@ -336,7 +350,7 @@ async def _handle_call_tool(
     # meiva:note
     # The direct-dial sessions carry the calling agent's identity to their
     # respective daemons (page affinity + governance/audit).
-    if isinstance(session, (BrowserLineSession, ComputerLineSession)):
+    if not isinstance(session, (ClientSession, SerialSession)):
         session.client_agent_id = typed_optional_int_field(req, "agent_id")
     try:
         result = await session.call_tool(tool, args)
@@ -458,7 +472,9 @@ async def get_session(server: str, scope: Scope) -> ManagedSession:
             cached_locked: ManagedSession = buckets.sessions[server]
             return cached_locked
 
-        raw_session, stack = await connect_server(server, scope.config, scope.oauth_locks)
+        raw_session, stack = await connect_server(
+            server, scope.config, scope.oauth_locks, browser_factory=scope.browser_factory
+        )
         session: ManagedSession = (
             SerialSession(raw_session, lock) if shared is True else raw_session
         )
@@ -485,6 +501,7 @@ async def handle_connection(
         shared=daemon.shared,
         oauth_locks=daemon.oauth_locks,
         config=daemon.config,
+        browser_factory=daemon.browser_factory,
     )
     try:
         await handle_client(reader, writer, scope)
@@ -501,7 +518,9 @@ def _prepare_socket(socket_path: str, config: DaemonConfig) -> None:
         Path(socket_path).unlink()
 
 
-async def run_daemon(socket_path: str, config: DaemonConfig) -> None:
+async def run_daemon(
+    socket_path: str, config: DaemonConfig, *, browser_factory: BrowserFactory | None = None
+) -> None:
     """Start the shared MCP daemon, listening on one Unix socket.
 
     A single per-machine process (ops roster session "mcp-daemon") serves every
@@ -513,7 +532,7 @@ async def run_daemon(socket_path: str, config: DaemonConfig) -> None:
     # `socket_path` here is a dead file, safe to clear.
     _prepare_socket(socket_path, config)
 
-    daemon = DaemonWide(config=config)
+    daemon = DaemonWide(config=config, browser_factory=browser_factory)
 
     async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await handle_connection(reader, writer, daemon)
@@ -570,7 +589,7 @@ def daemon_config_from_process() -> DaemonConfig:
 
 # meiva:note
 # Entry point: python -m meiva.mcps._daemon [socket_path]. No argument binds the shared per-machine socket (normal operation, run as the "mcp-daemon" ops service); one argument binds that path (tests, migration); two or more fail fast. It refuses to start over a LIVE socket, since unlinking and rebinding is what turns the serving daemon into a ghost when a respawn storm races the previous instance's exit (Task #1142): the healthcheck's probe answers a ping, so an alive daemon keeps the watchdog from respawning over it, and a stray launch exits cleanly instead of stealing the socket.
-def main() -> None:
+def main(*, browser_factory: BrowserFactory | None = None) -> None:
     config = daemon_config_from_process()
     socket_path = socket_for_args(sys.argv[1:], str(mcp_daemon_shared_socket(config.home)))
     if socket_path is None:
@@ -584,7 +603,7 @@ def main() -> None:
     if refusal is not None:
         logger.error(refusal)
         sys.exit(1)
-    asyncio.run(run_daemon(socket_path, config))
+    asyncio.run(run_daemon(socket_path, config, browser_factory=browser_factory))
 
 
 if __name__ == "__main__":

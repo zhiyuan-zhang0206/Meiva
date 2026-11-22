@@ -87,6 +87,7 @@ def test_computer_list_json_output_schema(
         local_machine="ubuntu",
         cluster_machines=_CLUSTER_MACHINES,
         cluster_status_probe=_fake_cluster_probe,
+        browser_status_probe=lambda url: "10.20.30.41" in url,
         ssh_health_probe=_fake_ssh_probe,
         json_output=True,
     )
@@ -101,6 +102,7 @@ def test_computer_list_json_output_schema(
         "status": "online",
         "held_by": "agent:405",
         "notes": "Home Mac mini",
+        "browser_status": "online",
     }
     assert by_target["ssh://zzyasus"] == {
         "target": "ssh://zzyasus",
@@ -108,6 +110,7 @@ def test_computer_list_json_output_schema(
         "status": "online",
         "held_by": "meiva-agent-7507",
         "notes": "Win11 · RTX 2060 · CC4 / Headshot",
+        "browser_status": "unprobed (SSH)",
     }
     assert by_target["ssh://winlab"]["held_by"] is None
     assert by_target["meiva://company-mini"]["status"] == "offline"

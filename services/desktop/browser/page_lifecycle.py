@@ -176,7 +176,7 @@ class _TabGroups(Protocol):
     async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool: ...
 
 
-class _PageDaemon(Protocol):
+class PageDaemon(Protocol):
     """The slice of ``ChromeMcpDaemon`` the page-lifecycle helpers use.
 
     A structural protocol keeps this module free of a circular import with the
@@ -202,7 +202,7 @@ def text_of(result: types.CallToolResult) -> str:
 
 
 async def forward_legacy_call(
-    daemon: _PageDaemon,
+    daemon: PageDaemon,
     tool: str,
     args: dict[str, object],
     conn_page: int | None,
@@ -218,7 +218,7 @@ async def forward_legacy_call(
 # Read Chrome's tabs, reconcile the records with them and persist the result.
 # Callers hold the daemon's serial lock. None when Chrome's tabs cannot be read:
 # the caller then closes nothing (a WARNING names the failure).
-async def _reconciled(daemon: _PageDaemon) -> tuple[Reconciled, TabState] | None:
+async def _reconciled(daemon: PageDaemon) -> tuple[Reconciled, TabState] | None:
     try:
         tabs = await daemon.tab_groups.tab_state()
     except Exception as e:
@@ -293,7 +293,7 @@ class _ChromeUnreadableError(Exception):
 # counts only when the target is gone, else the record stays and the next pass tries
 # again; repeated failures of one target are logged on the first and then every sixth
 # time, without a traceback. Callers hold the serial lock.
-async def _close(daemon: _PageDaemon, page: ExpiredPage) -> bool:
+async def _close(daemon: PageDaemon, page: ExpiredPage) -> bool:
     record = daemon.pages.records.get(page.target_id)
     if record is None:
         return False
@@ -348,7 +348,7 @@ async def _close(daemon: _PageDaemon, page: ExpiredPage) -> bool:
 # daemon restart. The returned id is the closed current page (or the last closed page
 # this process knew the id of), or None. When Chrome's tabs cannot be read nothing is
 # closed and the affinity stays; the expiry sweep owns what is left.
-async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
+async def release_agent_page(daemon: PageDaemon, agent_id: int) -> int | None:
     async with daemon._lock:
         current_id = daemon.pages.get_agent_page(agent_id)
         refreshed = await _reconciled(daemon)
@@ -370,7 +370,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
 
 
 async def handle_release_agent_page(
-    daemon: _PageDaemon, req: WireRequest, req_id: int | None
+    daemon: PageDaemon, req: WireRequest, req_id: int | None
 ) -> Response:
     """Release affinity, closing created pages, on a ``release_agent_page`` request.
 
@@ -397,7 +397,7 @@ async def handle_release_agent_page(
 # the new upstream's listing, and re-selected only when both name exactly one tab with that
 # URL. Anything else (the tab is gone, an ambiguous URL, a listing that cannot be read)
 # drops the selection and the agent starts page-less, as before. Callers hold the serial lock.
-async def restored_page(daemon: _PageDaemon, agent_id: int) -> int | None:
+async def restored_page(daemon: PageDaemon, agent_id: int) -> int | None:
     pages = daemon.pages
     if agent_id in pages.affinity:
         return pages.affinity[agent_id]
@@ -410,7 +410,7 @@ async def restored_page(daemon: _PageDaemon, agent_id: int) -> int | None:
 # meiva:note
 # Chrome's page targets with their URLs, or None when its tabs cannot be read (a WARNING says
 # so): the saved selection is a convenience and never worth failing a call for.
-async def _chrome_urls(daemon: _PageDaemon, what: str) -> dict[str, str] | None:
+async def _chrome_urls(daemon: PageDaemon, what: str) -> dict[str, str] | None:
     try:
         return dict((await daemon.tab_groups.tab_state()).pages)
     except Exception as e:
@@ -418,7 +418,7 @@ async def _chrome_urls(daemon: _PageDaemon, what: str) -> dict[str, str] | None:
         return None
 
 
-async def _restore_selection(daemon: _PageDaemon, agent_id: int, target_id: str) -> int | None:
+async def _restore_selection(daemon: PageDaemon, agent_id: int, target_id: str) -> int | None:
     listing = await daemon._call("list_pages", {})
     urls = await _chrome_urls(daemon, f"restore agent {agent_id}'s selected page")
     page_id = (
@@ -444,7 +444,7 @@ async def _restore_selection(daemon: _PageDaemon, agent_id: int, target_id: str)
 # Chrome's tabs, ``result``'s listing first. A page that cannot be identified leaves
 # nothing saved: no stale target outlives its page. Never fails the call it follows.
 async def remember_selection(
-    daemon: _PageDaemon, agent_id: int, page_id: int | None, result: types.CallToolResult
+    daemon: PageDaemon, agent_id: int, page_id: int | None, result: types.CallToolResult
 ) -> None:
     if page_id is None:
         return
@@ -498,7 +498,7 @@ def _tool_error(text: str) -> types.CallToolResult:
 # A page this process created or already matched is known. After a daemon
 # restart the upstream's page numbers are new: the page is then matched by URL
 # against the agent's own recorded pages, and only an unambiguous match counts.
-async def _target_of_page(daemon: _PageDaemon, agent_id: int, page_id: int) -> str | None:
+async def _target_of_page(daemon: PageDaemon, agent_id: int, page_id: int) -> str | None:
     known = daemon.pages.page_targets.get(page_id)
     if known is not None:
         return known
@@ -534,7 +534,7 @@ async def _target_of_page(daemon: _PageDaemon, agent_id: int, page_id: int) -> s
 # Runs under the serial lock, so a renewal and the expiry sweep can never
 # interleave — a successful renewal proves the deadline had not passed.
 async def renew_agent_page(
-    daemon: _PageDaemon, agent_id: int, args: dict[str, object]
+    daemon: PageDaemon, agent_id: int, args: dict[str, object]
 ) -> types.CallToolResult:
     unknown = set(args) - {"ttl"}
     if unknown:
@@ -601,7 +601,7 @@ async def renew_agent_page(
 # lock, so it cannot interleave with a renewal or a release. Expiry is surfaced to
 # the agent only by the page being gone: the next page-scoped call hits the daemon's
 # existing no-page path. Returns the number of pages closed.
-async def reap_expired_pages(daemon: _PageDaemon) -> int:
+async def reap_expired_pages(daemon: PageDaemon) -> int:
     async with daemon._lock:
         refreshed = await _reconciled(daemon)
         if refreshed is None:
@@ -648,7 +648,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
 # one interval of lag on a deadline). Runs for the daemon's upstream connection
 # like its watchdog.
 async def expired_page_reaper(
-    daemon: _PageDaemon,
+    daemon: PageDaemon,
     stop: asyncio.Event,
     *,
     sweep_interval_s: float = PAGE_SWEEP_INTERVAL_S,
