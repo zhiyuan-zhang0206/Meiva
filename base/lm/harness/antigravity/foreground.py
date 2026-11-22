@@ -225,7 +225,7 @@ def _witnesses(
 def _matches_reports(
     span: Sequence[PlannerRow], reports: Sequence[PromptUsage], keys: Sequence[str]
 ) -> bool:
-    if not span[-1].final or span[-1].input_key != keys[-1]:
+    if not span[-1].terminal or span[-1].input_key != keys[-1]:
         return False
     steps = tuple(planner_tokens(step.row) for step in span)
     cumulative = _covers_cumulative(reports, steps, sum(steps, Usage()))
@@ -256,6 +256,7 @@ class PromptTurn:
     text: list[str] = field(default_factory=list[str])
     verified_steps: tuple[Usage, ...] | None = None
     _verified_text: tuple[str, ...] = ()
+    _verified_usage_partial: bool = False
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
         yield from self._flush_thoughts()
@@ -287,6 +288,7 @@ class PromptTurn:
         self.stop_reason = None
         self.verified_steps = None
         self._verified_text = ()
+        self._verified_usage_partial = False
 
     def require_projection(self, *, required: bool) -> OutputProjection | None:
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
@@ -299,25 +301,60 @@ class PromptTurn:
         scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
         known = tuple(step for step in scope if projection.owns(step))
         possible = tuple(step for step in scope if not projection.owns(step))
-        span = self._confirmed_projection(known, possible, projection)
-        if span is not None:
-            projection.confirm_span(span, possible)
-            self.verified_steps = planner_step_usage([step.row for step in span])
-            self._verified_text = tuple(text for _, text in _planner_text(span))
+        proof = self._confirmed_projection(known, possible, projection)
+        if proof is None:
+            return
+        span, excluded = proof
+        self._apply_projection(projection, span, excluded, scope_size=len(scope))
+
+    def _apply_projection(
+        self,
+        projection: OutputProjection,
+        span: tuple[PlannerRow, ...],
+        excluded: tuple[PlannerRow, ...],
+        *,
+        scope_size: int,
+    ) -> None:
+        projection.confirm_span(span, excluded)
+        self.verified_steps = tuple(planner_tokens(step.row) for step in span)
+        self._verified_text = tuple(text for _, text in _planner_text(span))
+        self._verified_usage_partial = len(span) + len(excluded) < scope_size or not all(
+            has_planner_tokens(step.row) for step in span
+        )
 
     def _confirmed_projection(
         self,
         known: tuple[PlannerRow, ...],
         possible: tuple[PlannerRow, ...],
         projection: OutputProjection,
-    ) -> tuple[PlannerRow, ...] | None:
-        if projection.fences_replay and not possible and known:
-            last = known[-1]
-            if last.final and last.input_key == self.keys[-1]:
-                return known
-        witnesses = _witnesses(known, possible, self._projection_reports(), self.keys)
+    ) -> tuple[tuple[PlannerRow, ...], tuple[PlannerRow, ...]] | None:
+        if self.stop_reason == "cancelled":
+            return known, ()
+        reports = self._projection_reports()
+        if (
+            known
+            and self._proves_end(known[-1])
+            and (not reports or (projection.fences_replay and not possible))
+        ):
+            return known, tuple(step for step in possible if step.index > known[-1].index)
+        witnesses = _witnesses(known, possible, reports, self.keys)
         span = next(witnesses, None)
-        return span if span is not None and next(witnesses, None) is None else None
+        if span is None or next(witnesses, None) is not None:
+            return None
+        chosen = {step.index for step in span}
+        return span, tuple(step for step in possible if step.index not in chosen)
+
+    def _proves_end(self, step: PlannerRow) -> bool:
+        report = self.reports.get(self.latest)
+        return step.input_key == self.keys[-1] and (
+            step.terminal
+            or (
+                self.stop_reason == "end_turn"
+                and step.blank_reply
+                and report is not None
+                and report.output == 0
+            )
+        )
 
     def _projection_reports(self) -> tuple[PromptUsage, ...]:
         if self.latest not in self.reports:
@@ -343,6 +380,7 @@ class PromptTurn:
         )
 
     def close_projection(self, projection: OutputProjection, row_count: int) -> None:
+        projection.pending.clear()
         projection.close_foreground(
             self.keys,
             row_count,
@@ -398,7 +436,8 @@ class PromptTurn:
             num_turns=bill.calls,
             duration_ms=int((monotonic_now - (ticket.started_at or 0)) * 1000),
             usage=bill.usage,
-            usage_uncertain=bill.uncertain,
+            usage_uncertain=bill.uncertain
+            or (self._verified_usage_partial and self.latest not in self.reports),
             cost_usd=None,
             cumulative_cost_usd=None,
             permission_denials=tuple(ticket.denials),

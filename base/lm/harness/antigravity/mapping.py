@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -92,6 +92,18 @@ class PlannerRow:
         text = self.row.get("content")
         return isinstance(text, str) and bool(text.strip()) and not self.row.get("tool_calls")
 
+    @property
+    def blank_reply(self) -> bool:
+        text = self.row.get("content")
+        return not self.row.get("tool_calls") and (
+            text is None or (isinstance(text, str) and not text.strip())
+        )
+
+    @property
+    def terminal(self) -> bool:
+        tokens = self.row.get("output_tokens")
+        return self.final or (self.blank_reply and type(tokens) is int and tokens == 0)
+
 
 def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iterator[PlannerRow]:
     marks = {input_marker(key): key for key in keys}
@@ -147,7 +159,6 @@ class ProjectedFrame:
     notice: BackgroundNotice | None
     reply: str = ""
     text_finished: bool = False
-    reply_index: int | None = None
 
     def native_notice(
         self, session_id: str | None, subagents: ChildLookup | None = None
@@ -221,27 +232,32 @@ class OutputProjection:
             return notice
         return notice if boundary is not None and boundary.excludes(step, notice) else None
 
-    def take_background_reply(
-        self,
-        transcript: TranscriptSnapshot,
-        item: ProjectedFrame,
-        session_id: str | None,
-        subagents: ChildLookup,
-    ) -> NativeReply | None:
-        notice, final = item.native_notice(session_id, subagents), item.reply_index
-        if notice is None or final is None:
-            return None
-        if notice.index in self._answered_notices:
-            return None
-        steps = tuple(
+    def background_replies(
+        self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
+    ) -> Iterator[NativeReply]:
+        steps = (
             step
             for step in self.steps(transcript.rows)
-            if notice.index < step.index <= final and self._route(step) == notice
+            if isinstance(self._route(step), BackgroundNotice)
         )
-        if not steps:
-            return None
-        self._answered_notices.add(notice.index)
-        return NativeReply(notice, transcript, self.offset, steps)
+        yield from native_replies(
+            transcript, self.offset, steps, session_id, subagents, self._answered_notices
+        )
+
+    def has_pending_reply(
+        self, rows: Sequence[Frame], session_id: str | None, subagents: ChildLookup
+    ) -> bool:
+        for index in range(len(rows) - 1, self.offset - 1, -1):
+            row = rows[index]
+            if row.get("type") == "USER_INPUT":
+                return False
+            if row.get("type") == "SYSTEM_MESSAGE" and (
+                notice := _background_notice(row, index - self.offset)
+            ):
+                return notice.index not in self._answered_notices and notice.belongs_to(
+                    session_id, subagents
+                )
+        return False
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -304,9 +320,7 @@ class OutputProjection:
             return ProjectedFrame(frame, owner, None, text_finished=text_finished)
         if owner is not None:
             reply = content_text(frame.get("content")) if text_finished and step.final else ""
-            return ProjectedFrame(
-                frame, None, owner, reply, text_finished, step.index if reply else None
-            )
+            return ProjectedFrame(frame, None, owner, reply, text_finished)
         return None
 
     def _take_tool(
@@ -439,7 +453,8 @@ class NativeReply:
         self, turn_id: str, session_id: str | None, generation: int
     ) -> tuple[TurnStarted, AssistantText, TurnCompleted]:
         text = content_text({"type": "text", "text": self.steps[-1].row["content"]}).strip()
-        steps = planner_step_usage([step.row for step in self.steps])
+        steps = tuple(planner_tokens(step.row) for step in self.steps)
+        complete_usage = all(has_planner_tokens(step.row) for step in self.steps)
         return (
             TurnStarted(
                 turn_id,
@@ -468,7 +483,7 @@ class NativeReply:
                 permission_denials=(),
                 steps=steps,
                 generation=generation,
-                usage_uncertain=not steps,
+                usage_uncertain=not complete_usage,
             ),
         )
 
@@ -483,35 +498,55 @@ class IdleReplies:
         if not self.offset:
             self.offset = len(TranscriptSnapshot.for_session(session_id, home=home).rows)
 
-    def read(
-        self, session_id: str | None, *, subagents: ChildLookup, home: Path | None
-    ) -> Iterator[NativeReply]:
-        if not self.pending or session_id is None:
-            return
+    def changed(
+        self, session_id: str | None, *, home: Path | None, projecting: bool
+    ) -> TranscriptSnapshot | None:
+        if not (self.pending or projecting) or session_id is None:
+            return None
         path = transcript_path(session_id, home=home)
         if path is None:
-            return
+            return None
         signature = RecordFile(path).watch_signature()
         if signature is None or signature == self._signature:
-            return
+            return None
         self._signature = signature
-        yield from self._take(TranscriptSnapshot.read(path), session_id, subagents)
+        return TranscriptSnapshot.read(path)
 
-    def _take(
-        self, transcript: TranscriptSnapshot, session_id: str, subagents: ChildLookup
+    def replies(
+        self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
     ) -> Iterator[NativeReply]:
-        offset = self.offset
-        pending: list[PlannerRow] = []
-        for step in planner_rows(transcript.rows[offset:], ()):
-            notice = step.notice
-            if notice is None or not notice.belongs_to(session_id, subagents):
-                continue
-            if pending and pending[-1].notice != notice:
-                pending.clear()
-            if offset + notice.index < self.offset:
-                continue
-            pending.append(step)
-            if step.final:
-                self.offset = offset + step.index + 1
-                yield NativeReply(notice, transcript, offset, tuple(pending))
-                pending.clear()
+        for reply in native_replies(
+            transcript,
+            self.offset,
+            planner_rows(transcript.rows[self.offset :], ()),
+            session_id,
+            subagents,
+            set(),
+        ):
+            self.offset = reply.offset + reply.steps[-1].index + 1
+            yield reply
+
+
+def native_replies(
+    transcript: TranscriptSnapshot,
+    offset: int,
+    steps: Iterable[PlannerRow],
+    session_id: str | None,
+    subagents: ChildLookup,
+    answered: set[int],
+) -> Iterator[NativeReply]:
+    pending: dict[BackgroundNotice, list[PlannerRow]] = {}
+    for step in steps:
+        notice = step.notice
+        if (
+            notice is None
+            or notice.index in answered
+            or not notice.belongs_to(session_id, subagents)
+        ):
+            continue
+        span = pending.setdefault(notice, [])
+        span.append(step)
+        if step.final:
+            answered.add(notice.index)
+            yield NativeReply(notice, transcript, offset, tuple(span))
+            del pending[notice]

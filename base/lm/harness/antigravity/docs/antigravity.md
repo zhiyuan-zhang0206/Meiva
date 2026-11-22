@@ -79,6 +79,16 @@ terminal planner row added after the cancellation boundary. A planner row
 already present at cancellation cannot acquire timer ownership by reaching
 DONE afterward.
 
+A completed planner reply whose native ownership is proven can be delivered
+before its ACP text arrives. Its notice row identifies the reply for delivery
+within the generation. An unresolved native notice stays in the projection
+across foreground settlement. When a prompt omits ACP usage, a terminal
+planner row belonging to its input can still close the prompt before a later
+native notice. Available planner usage stays on its own turn, and incomplete
+counts are marked uncertain. A current textless terminal row can close a
+prompt despite unmatched replay. Cancellation settles proved foreground
+evidence immediately, preserving recorded text and usage.
+
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
 that owner's earliest unused row. After terminal ACP and a verified planner

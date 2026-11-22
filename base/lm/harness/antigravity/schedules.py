@@ -217,9 +217,15 @@ class Schedules:
     def reply_finished(self, sender: str, prompt: str | None) -> Schedules:
         if prompt is None:
             return self
-        for index, reply in enumerate(self.replies):
+        for reply in (*self.replies, *self.background_timers):
             if reply.task_id == sender or (reply.task_id is None and reply.prompt == prompt):
-                return replace(self, replies=(*self.replies[:index], *self.replies[index + 1 :]))
+                return replace(
+                    self,
+                    replies=tuple(timer for timer in self.replies if timer is not reply),
+                    background_timers=tuple(
+                        timer for timer in self.background_timers if timer is not reply
+                    ),
+                )
         return self
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:

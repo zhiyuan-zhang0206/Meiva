@@ -163,21 +163,68 @@ def resumed_prompt(transcript: Path, request: int) -> None:
     result(request, usage=False)
 
 
-def child_overlap(transcript: Path, request: int) -> None:
-    record(transcript, planner_row("FOREGROUND"))
+def child_overlap(transcript: Path, request: int, command: str) -> None:
+    foreground = planner_row("FOREGROUND")
+    if command == "child-no-usage-incomplete":
+        del foreground["output_tokens"]
+    record(transcript, foreground)
     background_notice(transcript)
-    record(transcript, planner_row("CHILD CALLBACK", tokens=237))
-    message("CHILD CALLBACK")
+    deferred = command == "child-deferred"
+    if not deferred:
+        record(transcript, planner_row("CHILD CALLBACK", tokens=237))
     message("FOREGROUND")
-    result(request)
+    if command in {"child-late", "child-deferred"}:
+        result(request)
+
+        def deliver_child() -> None:
+            if deferred:
+                record(transcript, planner_row("CHILD CALLBACK", tokens=237))
+            message("CHILD CALLBACK")
+            update("usage_update", used=2, size=10)
+            Path("child-frame-sent").touch()
+
+        after_release(Path("release"), deliver_child)
+        return
+    message("CHILD CALLBACK")
+    result(request, usage=not command.startswith("child-no-usage"))
+
+
+def textless_prompt(transcript: Path, request: int, command: str) -> None:
+    message("REPLAYED_OLD_TEXT")
+    planner = planner_row("")
+    if command == "textless-no-planner-usage":
+        del planner["output_tokens"]
+    else:
+        planner["output_tokens"] = 0
+    record(transcript, planner)
+    frame(
+        {
+            "id": request,
+            "result": {
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 0},
+            },
+        }
+    )
+
+
+def cancel_prompt(transcript: Path, request: int) -> None:
+    if "--test-cancel-partial" in sys.argv:
+        message("REPLAYED_OLD_TEXT")
+        record(transcript, planner_row("VISIBLE PARTIAL"))
+        message("VISIBLE PARTIAL")
+    result(request, "cancelled", usage=False)
 
 
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command == "resumed":
         resumed_prompt(transcript, request)
         return
-    if command == "child-overlap":
-        child_overlap(transcript, request)
+    if command.startswith("child-") and command != "child-seed":
+        child_overlap(transcript, request, command)
+        return
+    if command.startswith("textless"):
+        textless_prompt(transcript, request, command)
         return
     if command == "child-seed":
         _ = declare_child(transcript)
@@ -430,7 +477,7 @@ def main() -> None:
             frame({"id": request, "result": {}})
         elif method == "session/cancel":
             if original is not None and "--test-ignore-cancel" not in sys.argv:
-                result(original, "cancelled", usage=False)
+                cancel_prompt(transcript, original)
                 original = None
         elif method == "session/prompt":
             original, permission_prompt = handle_prompt(transcript, data, original)
