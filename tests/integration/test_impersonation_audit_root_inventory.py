@@ -14,6 +14,7 @@ _INVENTORY: dict[str, str] = {
     "agent/graph/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
+    "agent/ownership/hosted.py::_apply_terminate_command": "local",
     "meiva/self/__init__.py::compact": "local",
     "meiva/skills/__init__.py::_record_skill_invoked": "local",
     "meiva_builtins/plugins/meiva_fleet/_task_update.py::_log_task_update": "local",
