@@ -209,24 +209,41 @@ def _witnesses(
     reports: Sequence[PromptUsage],
     keys: Sequence[str],
 ) -> Iterator[tuple[PlannerRow, ...]]:
-    if not reports or len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
+    if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
+        return
+    if (span := _sole_carried_span(known, possible, reports, keys)) is not None:
+        yield span
+        return
+    if len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
         return
     terminals = {step.index for step in possible if step.final}
-    if not all(has_planner_tokens(step.row) for step in (*known, *possible)):
-        return
     for count in range(len(possible) + 1):
         for extra in combinations(possible, count):
             if extra and not terminals.difference(step.index for step in extra):
                 continue
             span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-            if span and _matches_reports(span, reports, keys):
+            if _matches_reports(span, reports, keys):
                 yield span
+
+
+def _sole_carried_span(
+    known: tuple[PlannerRow, ...],
+    possible: tuple[PlannerRow, ...],
+    reports: Sequence[PromptUsage],
+    keys: Sequence[str],
+) -> tuple[PlannerRow, ...] | None:
+    if not possible or not all(step.carries_notice for step in possible):
+        return None
+    span = tuple(sorted((*known, *possible), key=lambda step: step.index))
+    if sum(step.terminal for step in span) == 1 and _matches_reports(span, reports, keys):
+        return span
+    return None
 
 
 def _matches_reports(
     span: Sequence[PlannerRow], reports: Sequence[PromptUsage], keys: Sequence[str]
 ) -> bool:
-    if not span[-1].terminal or span[-1].input_key != keys[-1]:
+    if not span or not span[-1].terminal or span[-1].input_key != keys[-1]:
         return False
     steps = tuple(planner_tokens(step.row) for step in span)
     cumulative = _covers_cumulative(reports, steps, sum(steps, Usage()))

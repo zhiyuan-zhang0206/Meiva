@@ -224,6 +224,16 @@ def resumed_command_completion(transcript: Path, request: int, command: str) -> 
     }
     frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
 
+    if unresolved:
+        after_release(Path("release-native"), lambda: send_late_native(transcript))
+
+
+def send_late_native(transcript: Path) -> None:
+    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+    message("LATE NATIVE REPLY")
+    update("usage_update", used=2, size=10)
+    Path("native-written").touch()
+
 
 def child_overlap(transcript: Path, request: int, command: str) -> None:
     foreground = planner_row("FOREGROUND")
@@ -294,9 +304,7 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command == "child-seed":
         _ = declare_child(transcript)
     if command == "late-native":
-        record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
-        message("LATE NATIVE REPLY")
-        update("usage_update", used=2, size=10)
+        send_late_native(transcript)
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))

@@ -311,7 +311,7 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    ("command", "text", "uncertain", "tool_count", "steps"),
+    ("command", "text", "uncertain", "tool_count", "steps", "native_timing"),
     [
         (
             "resumed-command-completion",
@@ -319,12 +319,21 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
             False,
             10,
             11,
+            "none",
         ),
-        ("unresolved-attribution", "", True, 6, 6),
+        ("unresolved-attribution", "", True, 6, 6, "after-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "none"),
+        ("unresolved-attribution", "", True, 6, 6, "before-marker"),
     ],
 )
 async def test_resumed_multi_step_command_completion(
-    tmp_path: Path, command: str, text: str, uncertain: bool, tool_count: int, steps: int
+    tmp_path: Path,
+    command: str,
+    text: str,
+    uncertain: bool,
+    tool_count: int,
+    steps: int,
+    native_timing: str,
 ) -> None:
     seed_replay_history(tmp_path)
     sink: list[UnsolicitedOutput] = []
@@ -342,15 +351,20 @@ async def test_resumed_multi_step_command_completion(
         )
         assert sum(isinstance(e, ToolUse) for e in harness.events) == tool_count
 
-        await _assert_reused_prompt(harness, done.turn_id, late_native=uncertain)
+        await _assert_reused_prompt(harness, done.turn_id, native_timing=native_timing)
         assert sink == []
     finally:
         await harness.stop()
 
 
-async def _assert_reused_prompt(harness: Harness, first_turn_id: str, *, late_native: bool) -> None:
+async def _assert_reused_prompt(
+    harness: Harness, first_turn_id: str, *, native_timing: str
+) -> None:
     pid = harness.session.cli_pid
-    followup = "late-native" if late_native else "next"
+    if native_timing == "before-marker":
+        harness.release("release-native")
+        await harness.wait_for_marker("native-written")
+    followup = "late-native" if native_timing == "after-marker" else "next"
     await harness.session.deliver([HarnessInput.of("second", followup)])
     second = await harness.wait_for(
         lambda event: (
@@ -364,7 +378,7 @@ async def _assert_reused_prompt(harness: Harness, first_turn_id: str, *, late_na
     )
     assert again.text == "OK" and not again.usage_uncertain and harness.session.cli_pid == pid
     assert _assistant_texts(harness, second.turn_id) == ["OK"]
-    if late_native:
+    if native_timing != "none":
         native = await harness.wait_for(
             lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
         )

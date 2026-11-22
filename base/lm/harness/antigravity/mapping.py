@@ -86,6 +86,11 @@ class PlannerRow:
     row: dict[str, object]
     input_key: str | None
     notice: BackgroundNotice | None
+    input_index: int
+
+    @property
+    def carries_notice(self) -> bool:
+        return self.notice is not None and self.notice.index < self.input_index
 
     @property
     def final(self) -> bool:
@@ -145,6 +150,7 @@ def _attribution_events(
 ) -> Iterator[PlannerRow | BackgroundNotice | None]:
     marks = {input_marker(key): key for key in keys}
     foreground: str | None = None
+    input_index = -1
     background: BackgroundNotice | None = None
     notice_boundary: ForegroundBoundary | None = None
     boundary: ForegroundBoundary | None = None
@@ -152,6 +158,7 @@ def _attribution_events(
     for index, row in enumerate(rows):
         kind = row.get("type")
         if kind == "USER_INPUT":
+            input_index = index
             marker = next(iter(received_markers((row,))), "")
             foreground = marks.get(marker)
             boundary = boundaries.get(foreground or "")
@@ -166,7 +173,7 @@ def _attribution_events(
                 notice_boundary = boundary
                 yield notice
         elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
-            step = PlannerRow(index, row, foreground, background)
+            step = PlannerRow(index, row, foreground, background, input_index)
             if step.terminal:
                 commands = None
             yield step
@@ -263,7 +270,7 @@ class ForegroundBoundary:
             return True
         if step.index < self.next_row:
             return False
-        if self.cancelled:
+        if self.cancelled or self.degraded:
             return step.final
         return self.accounted and type(tokens) is int and tokens > 0
 
