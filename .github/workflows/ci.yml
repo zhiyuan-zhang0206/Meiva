@@ -61,6 +61,13 @@ env:
   # the subset plus its comparison report run informational beside it.
   # See docs/conventions/engineering/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
+  # Static test result cache mode for PR CI — the single revert switch for active
+  # skipping. enforce (default): PR push #2+ skips static tests covered by
+  # main/PR recorded passes (except 5% deterministic full-run canaries and small
+  # SELECTED subsets). shadow: disables skipping everywhere while keeping shadow
+  # reporting and baseline recording active.
+  # See docs/conventions/engineering/test-selection.md.
+  TEST_CACHE_MODE: "enforce"
   # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
   UV_FROZEN: "1"
 
@@ -103,6 +110,8 @@ jobs:
       run_pgvector_smoke: ${{ steps.lanes.outputs.run_pgvector_smoke }}
       run_helper_smoke: ${{ steps.lanes.outputs.run_helper_smoke }}
       run_host_marks: ${{ steps.lanes.outputs.run_host_marks }}
+      test_cache_skip: ${{ steps.test_cache.outputs.skip_enabled }}
+      test_cache_canary: ${{ steps.test_cache.outputs.canary }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -366,6 +375,39 @@ jobs:
             --event pull_request \
             --mode "$effective_mode" \
             --decision "$effective_decision" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Probe PR test cache
+        id: pr_cache
+        if: ${{ github.event_name == 'pull_request' && steps.decide.outputs.backend == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/pr-passes.jsonl
+          key: test-pass-pr-${{ github.event.pull_request.number }}-none-${{ github.run_id }}
+          restore-keys: test-pass-pr-${{ github.event.pull_request.number }}-
+          lookup-only: true
+
+      - name: Decide static test cache mode
+        id: test_cache
+        env:
+          EVENT: ${{ github.event_name }}
+          BACKEND: ${{ steps.decide.outputs.backend }}
+          DECISION: ${{ steps.selector.outputs.decision }}
+          SELECTED_COUNT: ${{ steps.selector.outputs.count }}
+          PR_CACHE_HIT: ${{ steps.pr_cache.outputs.cache-matched-key != '' }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 scripts/ci/pull_requests/test_cache.py decide \
+            --event "$EVENT" \
+            --backend "$BACKEND" \
+            --mode "$TEST_CACHE_MODE" \
+            --decision "$DECISION" \
+            --selected-count "$SELECTED_COUNT" \
+            --pr-cache-hit "$PR_CACHE_HIT" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" \
+            --github-output "$GITHUB_OUTPUT"
 
   repo-language:
     name: repo language (no raw CJK)
@@ -916,8 +958,8 @@ jobs:
       run:
         shell: bash
     timeout-minutes: 25
-    needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    needs: [classify, test-cache-plan]
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-cache-plan.result == 'success' || needs.test-cache-plan.result == 'skipped' || needs.test-cache-plan.result == 'failure') }}
     strategy:
       fail-fast: false
       matrix:
@@ -962,11 +1004,20 @@ jobs:
           name: selected-tests
           path: tmp/selected
 
+      - name: Download the test cache plan
+        if: ${{ needs.classify.outputs.test_cache_skip == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-cache-plan
+          path: tmp/test-cache
+
       - name: Run static pytest contracts
         id: pytest-static
         if: needs.classify.outputs.backend == 'true'
         env:
           IS_PR_SELECTED: ${{ github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED' }}
+          TEST_CACHE_SKIP: ${{ needs.classify.outputs.test_cache_skip }}
         run: |
           set -euo pipefail
           mkdir -p tmp
@@ -978,39 +1029,50 @@ jobs:
             --junit-xml=tmp/junit-backend-static-${{ matrix.group }}.xml
             -o junit_family=xunit1
           )
-          if [[ "$IS_PR_SELECTED" == "true" ]]; then
-            mkdir -p tmp/selected
-            uv run python - <<'PY'
-          from pathlib import Path
-          from meizel.api import lanes_at
-
-          static_set = lanes_at(Path(".").resolve()).static
-          selected = [
-              line.strip()
-              for line in Path("tmp/selected/tests.txt").read_text(encoding="utf-8").splitlines()
-              if line.strip() in static_set
-          ]
-          Path("tmp/selected/static-tests.txt").write_text(
-              "".join(f"{path}\n" for path in selected), encoding="utf-8"
-          )
-          print(f"static-selected: {len(selected)} static test file(s) from selected subset")
-          PY
-            mapfile -t static_targets < tmp/selected/static-tests.txt
-            if [[ "${#static_targets[@]}" -eq 0 ]]; then
-              echo "No static tests in selected subset; writing empty JUnit report."
+          if [[ "$TEST_CACHE_SKIP" == "true" && -s tmp/test-cache/plan.json ]]; then
+            total_groups=8
+            if [[ "$IS_PR_SELECTED" == "true" ]]; then
+              total_groups=1
+            fi
+            uv run python scripts/ci/pull_requests/test_cache.py shard-targets \
+              --plan tmp/test-cache/plan.json \
+              --durations tmp/test-cache/durations.json \
+              --group "${{ matrix.group }}" \
+              --groups "$total_groups" \
+              --out tmp/test-cache/shard-targets.txt
+            mapfile -t shard_targets < tmp/test-cache/shard-targets.txt
+            if [[ "${#shard_targets[@]}" -eq 0 ]]; then
+              echo "test-cache: 0 static tests to run on shard ${{ matrix.group }}/${total_groups} (all cached)"
               printf '<testsuites><testsuite name="pytest" tests="0" errors="0" failures="0" skipped="0"/></testsuites>\n' > "$junit_out"
               exit 0
             fi
-            uv run pytest "${base_args[@]}" "${static_targets[@]}"
+            uv run pytest "${base_args[@]}" "${shard_targets[@]}"
           else
-            uv run pytest "${base_args[@]}" \
-              --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration \
-              --cov=agent --cov=meiva --cov=cli --cov=gateway --cov=base --cov=ui \
-              --cov=ops --cov=services --cov=meiva_builtins
+            if [[ "$TEST_CACHE_SKIP" == "true" ]]; then
+              echo "::warning title=test cache fail-open::test-cache-plan did not produce plan.json; running full static lane"
+            fi
+            if [[ "$IS_PR_SELECTED" == "true" ]]; then
+              mkdir -p tmp/selected
+              uv run python scripts/ci/pull_requests/test_cache.py filter-static \
+                --in tmp/selected/tests.txt \
+                --out tmp/selected/static-tests.txt
+              mapfile -t static_targets < tmp/selected/static-tests.txt
+              if [[ "${#static_targets[@]}" -eq 0 ]]; then
+                echo "No static tests in selected subset; writing empty JUnit report."
+                printf '<testsuites><testsuite name="pytest" tests="0" errors="0" failures="0" skipped="0"/></testsuites>\n' > "$junit_out"
+                exit 0
+              fi
+              uv run pytest "${base_args[@]}" "${static_targets[@]}"
+            else
+              uv run pytest "${base_args[@]}" \
+                --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration \
+                --cov=agent --cov=meiva --cov=cli --cov=gateway --cov=base --cov=ui \
+                --cov=ops --cov=services --cov=meiva_builtins
+            fi
           fi
 
       - name: Report executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED') }}
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && (needs.classify.outputs.decision == 'SELECTED' || needs.classify.outputs.test_cache_skip == 'true')) }}
         run: >
           python3 scripts/ci/shard_counts.py shard --group static-${{ matrix.group }}
           --junit tmp/junit-backend-static-${{ matrix.group }}.xml
@@ -1018,7 +1080,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
 
       - name: Upload executed test counts
-        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED') }}
+        if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && (needs.classify.outputs.decision == 'SELECTED' || needs.classify.outputs.test_cache_skip == 'true')) }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -1032,7 +1094,7 @@ jobs:
         with:
           test-outcome: ${{ steps.pytest-static.outcome }}
           junit-patterns: '["tmp/junit-backend-static-${{ matrix.group }}.xml"]'
-          min-tests: ${{ (github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED') && '0' || '1' }}
+          min-tests: ${{ (github.event_name == 'pull_request' && (needs.classify.outputs.decision == 'SELECTED' || needs.classify.outputs.test_cache_skip == 'true')) && '0' || '1' }}
 
       - name: Upload static test reports
         if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' }}
@@ -1045,7 +1107,7 @@ jobs:
 
       - name: Upload coverage data
         id: coverage-upload
-        if: ${{ needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED') }}
+        if: ${{ needs.classify.outputs.backend == 'true' && !(github.event_name == 'pull_request' && (needs.classify.outputs.decision == 'SELECTED' || needs.classify.outputs.test_cache_skip == 'true')) }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -2043,7 +2105,7 @@ jobs:
           merge-multiple: true
 
       - name: Combine coverage + gate
-        if: ${{ !(env.TEST_SELECTION_MODE == 'enforce' && needs.classify.outputs.decision == 'SELECTED') }}
+        if: ${{ !(env.TEST_SELECTION_MODE == 'enforce' && needs.classify.outputs.decision == 'SELECTED') && needs.classify.outputs.test_cache_skip != 'true' }}
         env:
           BACKEND_COVERAGE_THRESHOLD: "85"
         run: |
@@ -2081,7 +2143,7 @@ jobs:
     timeout-minutes: 5
     continue-on-error: true
     needs: [classify, backend-static-tests, backend-shard, backend-serial]
-    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.classify.outputs.mode != 'enforce' || needs.classify.outputs.decision != 'SELECTED') }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.classify.outputs.mode != 'enforce' || needs.classify.outputs.decision != 'SELECTED') && needs.classify.outputs.test_cache_skip != 'true' }}
     permissions:
       contents: read
       actions: read
@@ -2229,16 +2291,18 @@ jobs:
           path: tmp/test-selection-shadow-report.json
           if-no-files-found: ignore
 
-  # The test result cache, in shadow: nothing below changes which tests run or what gates. The plan
-  # job keys every static-lane test by the content of the files it reads and asks which keys a
-  # recorded `main` pass covers; the report job, after the static tests, sets that plan against how
-  # the tests ended (`would_skip_but_failed` must stay empty). Only `refs/heads/main` runs save
-  # `test-pass-main-*` (nightly full runs write a fresh baseline without importing stale entries;
-  # incremental seeding on push lives in `cache-warm.yml`); pull requests read `main`'s cache
-  # without writing PR-scoped entries that would shadow newer `main` seeds.
+  # Static test result cache with strict dual-prefix isolation:
+  # - `test-pass-main-*` is written ONLY by `refs/heads/main` (`cache-warm.yml` incremental seeding
+  #   and nightly/`workflow_dispatch` fresh baseline in `ci.yml`).
+  # - `test-pass-pr-<pr>-*` is written ONLY by pull requests, scoped by GitHub Actions to that PR's
+  #   ref, and carries forward only that PR's own passes (never `main`'s).
+  # - `test-cache-plan` runs only when `test_cache_skip == 'true'` (PR push #2+, enforce mode,
+  #   non-canary, non-small SELECTED), so 1st pushes and small PRs incur 0s critical-path delay.
+  # - `test-cache-report` runs off the critical path inside the exact same `meiva-ci-runner` image,
+  #   validates 5% canaries / shadow runs, and records newly passed static tests.
   # See docs/conventions/engineering/test-selection.md.
   test-cache-plan:
-    name: test cache plan (shadow)
+    name: test cache plan
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -2249,7 +2313,7 @@ jobs:
     timeout-minutes: 10
     continue-on-error: true
     needs: [classify]
-    if: ${{ needs.classify.outputs.backend == 'true' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.classify.outputs.test_cache_skip == 'true' }}
     env:
       DECISION: ${{ needs.classify.outputs.decision }}
     steps:
@@ -2275,13 +2339,33 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/uv-sync
 
-      - name: Restore the recorded passes
+      - name: Cache frontend node_modules
+        continue-on-error: true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/pnpm-install
+
+      - name: Restore main recorded passes
         continue-on-error: true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tmp/test-cache/passes.jsonl
           key: test-pass-main-none-${{ github.run_id }}
           restore-keys: test-pass-main-
+
+      - name: Restore PR recorded passes
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/pr-passes.jsonl
+          key: test-pass-pr-${{ github.event.pull_request.number }}-none-${{ github.run_id }}
+          restore-keys: test-pass-pr-${{ github.event.pull_request.number }}-
 
       - name: Download the selected test list
         if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED' }}
@@ -2296,28 +2380,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p tmp/test-cache
-          # A pull request that selected a subset plans that subset; every other run plans the lane.
           tests_args=()
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${DECISION}" == "SELECTED" ]]; then
             if [[ ! -s tmp/selected/tests.txt ]]; then
               echo "::warning title=test cache::no selected test list; no plan this run"
               exit 0
             fi
-            tests_args=(--tests-file tmp/selected/tests.txt)
+            uv run python scripts/ci/pull_requests/test_cache.py filter-static \
+              --in tmp/selected/tests.txt \
+              --out tmp/test-cache/static-selected.txt
+            tests_args=(--tests-file tmp/test-cache/static-selected.txt)
           fi
           [[ -f tmp/test-cache/passes.jsonl ]] || : > tmp/test-cache/passes.jsonl
+          [[ -f tmp/test-cache/pr-passes.jsonl ]] || : > tmp/test-cache/pr-passes.jsonl
           uv run python -m meizel test-cache import tmp/test-cache/passes.jsonl
+          uv run python -m meizel test-cache import tmp/test-cache/pr-passes.jsonl
           uv run python -m scripts.audit.input_closures closures --out tmp/test-cache/closures.json
           uv run python -m scripts.audit.input_closures durations --out tmp/test-cache/durations.json
-          # The arguments and the image are part of every key: they are the static job's.
+          # The arguments and the image are part of every key: they must match cache-warm.yml and test-cache-report.
           uv run python -m meizel test-cache plan --lane static "${tests_args[@]}" \
             --closures-file tmp/test-cache/closures.json \
             --pytest-arg=--test-environment=static \
             --pytest-arg=-W --pytest-arg=error::pytest.PytestUnhandledThreadExceptionWarning \
             --env "image=$(grep -o 'meiva-ci-runner@sha256:[0-9a-f]*' .github/workflows/ci.yml | head -1)" \
             > tmp/test-cache/plan.json
-          uv run python -m meizel test-cache export > tmp/test-cache/passes.jsonl
-          python3 -c "import json; p = json.load(open('tmp/test-cache/plan.json')); print('test-cache plan: planned=%d skippable=%d uncacheable=%d unbounded=%d' % (len(p['keys']) + len(p['uncacheable']), len(p['skippable']), len(p['uncacheable']), len(p['unbounded'])))"
+          python3 -c "import json; p = json.load(open('tmp/test-cache/plan.json')); print('test-cache plan: planned=%d skippable=%d run=%d uncacheable=%d unbounded=%d' % (len(p['keys']) + len(p['uncacheable']), len(p['skippable']), len(p['run']), len(p['uncacheable']), len(p['unbounded'])))"
 
       - name: Upload the plan
         if: ${{ !cancelled() }}
@@ -2327,27 +2414,94 @@ jobs:
           name: test-cache-plan
           path: |
             tmp/test-cache/plan.json
-            tmp/test-cache/passes.jsonl
+            tmp/test-cache/pr-passes.jsonl
             tmp/test-cache/durations.json
           if-no-files-found: ignore
 
   test-cache-report:
-    name: test cache report (shadow)
+    name: test cache report
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 10
     continue-on-error: true
     needs: [classify, test-cache-plan, backend-static-tests]
-    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && needs.test-cache-plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.backend-static-tests.result == 'success' || needs.backend-static-tests.result == 'failure') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         continue-on-error: true
 
-      - name: Download the plan
+      - name: Restore the test durations
+        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
+        continue-on-error: true
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.classify.outputs.durations_key }}
+
+      - name: Cache uv wheels
+        continue-on-error: true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install Python deps
+        continue-on-error: true
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
+        continue-on-error: true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/pnpm-install
+
+      - name: Download the test cache plan
+        if: ${{ needs.classify.outputs.test_cache_skip == 'true' }}
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: test-cache-plan
           path: tmp/test-cache
+
+      - name: Download the selected test list
+        if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED' && needs.classify.outputs.test_cache_skip != 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: selected-tests
+          path: tmp/selected
+
+      - name: Restore main recorded passes
+        if: ${{ needs.classify.outputs.test_cache_skip != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/passes.jsonl
+          key: test-pass-main-none-${{ github.run_id }}
+          restore-keys: test-pass-main-
+
+      - name: Restore PR recorded passes
+        if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.test_cache_skip != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/pr-passes.jsonl
+          key: test-pass-pr-${{ github.event.pull_request.number }}-none-${{ github.run_id }}
+          restore-keys: test-pass-pr-${{ github.event.pull_request.number }}-
 
       - name: Download the static test reports
         continue-on-error: true
@@ -2357,61 +2511,143 @@ jobs:
           path: tmp/junit
           merge-multiple: true
 
-      - name: Report what the cache would have skipped, and record the passes
+      - name: Report cache outcome and record passes
         continue-on-error: true
         id: report
         env:
           RUN_ID: ${{ github.run_id }}
+          DECISION: ${{ needs.classify.outputs.decision }}
+          TEST_CACHE_SKIP: ${{ needs.classify.outputs.test_cache_skip }}
+          TEST_CACHE_CANARY: ${{ needs.classify.outputs.test_cache_canary }}
         run: |
           set -euo pipefail
-          [[ -s tmp/test-cache/plan.json ]] || { echo "no plan this run"; exit 0; }
-          python3 -m venv tmp/meizel-venv
-          # The pin of the checker is the one `pyproject.toml` names.
-          pin="$(grep -o 'meizel @ git+[^"]*' pyproject.toml | head -1)"
-          tmp/meizel-venv/bin/pip install --quiet "$pin"
-          meizel=(tmp/meizel-venv/bin/python -m meizel --repo .)
+          mkdir -p tmp/test-cache
+          shopt -s nullglob
           reports=()
           for report in tmp/junit/*.xml; do reports+=(--junit "$report"); done
           [[ "${#reports[@]}" -gt 0 ]] || { echo "no static test reports this run"; exit 0; }
+
+          if [[ "${TEST_CACHE_SKIP}" != "true" ]]; then
+            tests_args=()
+            if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${DECISION}" == "SELECTED" ]]; then
+              if [[ ! -s tmp/selected/tests.txt ]]; then
+                echo "::warning title=test cache::no selected test list; no plan this run"
+                exit 0
+              fi
+              uv run python scripts/ci/pull_requests/test_cache.py filter-static \
+                --in tmp/selected/tests.txt \
+                --out tmp/test-cache/static-selected.txt
+              tests_args=(--tests-file tmp/test-cache/static-selected.txt)
+            fi
+            [[ -f tmp/test-cache/passes.jsonl ]] || : > tmp/test-cache/passes.jsonl
+            uv run python -m meizel test-cache import tmp/test-cache/passes.jsonl
+            if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+              [[ -f tmp/test-cache/pr-passes.jsonl ]] || : > tmp/test-cache/pr-passes.jsonl
+              uv run python -m meizel test-cache import tmp/test-cache/pr-passes.jsonl
+            fi
+            uv run python -m scripts.audit.input_closures closures --out tmp/test-cache/closures.json
+            uv run python -m scripts.audit.input_closures durations --out tmp/test-cache/durations.json
+            uv run python -m meizel test-cache plan --lane static "${tests_args[@]}" \
+              --closures-file tmp/test-cache/closures.json \
+              --pytest-arg=--test-environment=static \
+              --pytest-arg=-W --pytest-arg=error::pytest.PytestUnhandledThreadExceptionWarning \
+              --env "image=$(grep -o 'meiva-ci-runner@sha256:[0-9a-f]*' .github/workflows/ci.yml | head -1)" \
+              > tmp/test-cache/plan.json
+          fi
+
+          [[ -s tmp/test-cache/plan.json ]] || { echo "no plan this run"; exit 0; }
           status=0
-          "${meizel[@]}" test-cache report --plan tmp/test-cache/plan.json "${reports[@]}" \
+          uv run python -m meizel test-cache report --plan tmp/test-cache/plan.json "${reports[@]}" \
             --durations tmp/test-cache/durations.json > tmp/test-cache/report.json || status=$?
+
+          # Clear meizel's local SQLite cache before recording/exporting so imported `main`
+          # passes never leak into a fresh `main` baseline or into a PR-scoped cache save.
+          git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+          rm -f "${git_common_dir}"/meizel-scan-cache-*.sqlite3*
+
+          recorded_count=0
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            # Full runs on `main` write a fresh baseline without importing stale entries.
-            "${meizel[@]}" test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID"
-            "${meizel[@]}" test-cache export > tmp/test-cache/passes.jsonl
+            record_out="$(uv run python -m meizel test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID")"
+            echo "$record_out"
+            recorded_count="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["recorded"])' "$record_out")"
+            uv run python -m meizel test-cache export > tmp/test-cache/passes.jsonl.new
+            mv tmp/test-cache/passes.jsonl.new tmp/test-cache/passes.jsonl
             if [[ ! -s tmp/test-cache/passes.jsonl ]]; then
               rm -f tmp/test-cache/passes.jsonl
             fi
-          else
+            rm -f tmp/test-cache/pr-passes.jsonl
+            echo "recorded_new=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            if [[ -s tmp/test-cache/pr-passes.jsonl ]]; then
+              uv run python -m meizel test-cache import tmp/test-cache/pr-passes.jsonl
+            fi
+            record_out="$(uv run python -m meizel test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID")"
+            echo "$record_out"
+            recorded_count="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["recorded"])' "$record_out")"
+            if [[ "$recorded_count" -gt 0 ]]; then
+              uv run python -m meizel test-cache export > tmp/test-cache/pr-passes.jsonl.new
+              mv tmp/test-cache/pr-passes.jsonl.new tmp/test-cache/pr-passes.jsonl
+              if [[ -s tmp/test-cache/pr-passes.jsonl ]]; then
+                echo "recorded_new=true" >> "$GITHUB_OUTPUT"
+              else
+                rm -f tmp/test-cache/pr-passes.jsonl
+                echo "recorded_new=false" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              rm -f tmp/test-cache/pr-passes.jsonl
+              echo "recorded_new=false" >> "$GITHUB_OUTPUT"
+            fi
             rm -f tmp/test-cache/passes.jsonl
+          else
+            rm -f tmp/test-cache/passes.jsonl tmp/test-cache/pr-passes.jsonl
+            echo "recorded_new=false" >> "$GITHUB_OUTPUT"
           fi
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
 
-          report = json.load(open("tmp/test-cache/report.json"))
-          print("### Test result cache (shadow)")
-          print(f"- would skip: {report['would_skip']} ({report['would_skip_passed']} passed when run)")
-          print(f"- would skip but failed: {len(report['would_skip_failed'])} {report['would_skip_failed']}")
-          print(f"- would skip, not run: {len(report['would_skip_not_run'])}")
-          print(f"- seconds saved (by `.test_durations`): {report['saved_seconds']:.0f}")
-          print(f"- uncacheable: {report['uncacheable']}; keyed by the whole tree: {report['unbounded']}")
-          PY
+          summary_label="shadow"
+          if [[ "${TEST_CACHE_SKIP}" == "true" ]]; then
+            summary_label="active skip"
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            summary_label="main baseline"
+          elif [[ "${TEST_CACHE_CANARY}" == "true" ]]; then
+            summary_label="canary"
+          elif [[ "${TEST_CACHE_MODE}" == "enforce" ]]; then
+            summary_label="1st push / uncached"
+          fi
+          uv run python scripts/ci/pull_requests/test_cache.py summarize \
+            --plan tmp/test-cache/plan.json \
+            --report tmp/test-cache/report.json \
+            --durations tmp/test-cache/durations.json \
+            --skip-enabled "${TEST_CACHE_SKIP}" \
+            --canary "${TEST_CACHE_CANARY}" \
+            --recorded "${recorded_count}" \
+            --label "${summary_label}" \
+            --out "$GITHUB_STEP_SUMMARY"
+
           # Like `test-selection-shadow-report`: a problem is an annotation and a summary line, never
           # a failed check run, because `merge_gate.py` reads every check run.
-          failed="$(python3 -c "import json; print(len(json.load(open('tmp/test-cache/report.json'))['would_skip_failed']))")"
-          if [[ "$failed" -ne 0 || "$status" -ne 0 ]]; then
-            echo "::error title=test cache::a test the cache would have skipped failed ($failed); see test-cache-report"
+          if [[ "${TEST_CACHE_SKIP}" != "true" ]]; then
+            failed="$(python3 -c "import json; print(len(json.load(open('tmp/test-cache/report.json'))['would_skip_failed']))")"
+            if [[ "$failed" -ne 0 || "$status" -ne 0 ]]; then
+              echo "::error title=test cache canary::a test the cache would have skipped failed ($failed); see test-cache-report"
+            fi
           fi
           exit 0
 
-      - name: Save the recorded passes
+      - name: Save main recorded passes
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' && hashFiles('tmp/test-cache/passes.jsonl') != '' }}
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tmp/test-cache/passes.jsonl
           key: test-pass-main-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save PR recorded passes
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.report.outputs.recorded_new == 'true' && hashFiles('tmp/test-cache/pr-passes.jsonl') != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/pr-passes.jsonl
+          key: test-pass-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the report
         if: ${{ always() }}
