@@ -9,17 +9,9 @@ from dataclasses import dataclass, replace
 from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 
 # meiva:note
-# What the stdout step stream lets this adapter know about the `schedule` tool (cron jobs and
-# timers) and `manage_task` cancellations. Recorded on agy 1.5.5: a timer call
-# (`{DurationSeconds, Prompt}`) blocked inside the tool call until it fired. Recorded on agy
-# 1.5.14: a timer call returns immediately as a background task handle (`task id: ...`) while
-# holding the outer turn open and silent until the timer fires or is cancelled early by
-# `TimerCondition` / `manage_task(Action="kill")`. Both forms keep their work inside the open
-# turn (so `pending_at` adds no post-turn item for timed calls), while `timers` tracks the
-# per-turn monotonic silence floor so the foreground stall watchdog does not kill a turn
-# legitimately waiting on a declared timer. A cron call (no duration) shows neither its firing
-# nor a cancellation, so a successful one counts as pending for a day (`UNBOUNDED_SCHEDULE_SECONDS`),
-# which the host's cache bound still caps.
+# ACP reports timers that outlive their foreground prompt as still-running schedule calls.
+# Active timers supply the foreground watchdog's silence floor. Once their turn ends, the
+# unresolved calls count as background work up to their declared deadline.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 SCHEDULE_TOOL = "schedule"
 MANAGE_TASK_TOOL = "manage_task"
@@ -51,6 +43,7 @@ class Schedules:
     calls: tuple[tuple[str, Mapping[str, object]], ...] = ()
     items: tuple[BackgroundItem, ...] = ()
     timers: tuple[ActiveTimer, ...] = ()
+    background_timers: tuple[tuple[str, BackgroundItem], ...] = ()
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
 
@@ -104,27 +97,32 @@ class Schedules:
         )
         if kill is not None:
             return self._finish_kill(kill, is_error=is_error)
-        call = next((entry for entry in self.calls if entry[0] == tool_use_id), None)
-        if call is None:
+        calls = dict(self.calls)
+        params = calls.pop(tool_use_id, None)
+        if params is None:
             return self
-        rest = tuple(entry for entry in self.calls if entry[0] != tool_use_id)
+        remaining = replace(
+            self,
+            calls=tuple(calls.items()),
+            background_timers=tuple(
+                entry for entry in self.background_timers if entry[0] != tool_use_id
+            ),
+        )
         if is_error:
-            timers = tuple(t for t in self.timers if t.tool_use_id != tool_use_id)
-            return replace(self, calls=rest, timers=timers)
-        params = call[1]
-        wait = _duration(params)
-        if wait is not None:
+            return replace(
+                remaining, timers=tuple(t for t in self.timers if t.tool_use_id != tool_use_id)
+            )
+        if _duration(params) is not None:
             timers = _arm_timer(
                 self.timers,
                 tool_use_id=tool_use_id,
                 task_id=_extract_task_id(content),
                 monotonic_now=monotonic_now,
             )
-            return replace(self, calls=rest, timers=timers)
+            return replace(remaining, timers=timers)
         until = now + self.max_timer_seconds
-        label = describe(json.dumps(dict(params), sort_keys=True, default=str), limit=_LIMIT)
-        item = BackgroundItem(BackgroundKind.SCHEDULE, f"schedule {label}", until=until)
-        return replace(self, calls=rest, items=(*self.items, item))
+        item = BackgroundItem(BackgroundKind.SCHEDULE, _schedule_label(params), until=until)
+        return replace(remaining, items=(*self.items, item))
 
     def on_assistant_text(self, turn_id: str, *, monotonic_now: float) -> Schedules:
         if not self.timers:
@@ -151,12 +149,28 @@ class Schedules:
             turn_id, monotonic_now=monotonic_now, drop_any_conditional=True
         )
 
-    def clear_turn(self, turn_id: str) -> Schedules:
-        timers = tuple(t for t in self.timers if t.turn_id != turn_id)
-        kills = tuple(k for k in self.pending_kills if k.turn_id != turn_id)
-        if timers == self.timers and kills == self.pending_kills:
-            return self
-        return replace(self, timers=timers, pending_kills=kills)
+    def finish_turn(self, turn_id: str, *, now: float, monotonic_now: float) -> Schedules:
+        calls = dict(self.calls)
+        background = tuple(
+            (
+                timer.tool_use_id,
+                BackgroundItem(
+                    BackgroundKind.SCHEDULE,
+                    _schedule_label(calls[timer.tool_use_id]),
+                    until=now + timer.due_monotonic - monotonic_now,
+                ),
+            )
+            for timer in self.timers
+            if timer.turn_id == turn_id
+            and timer.tool_use_id in calls
+            and timer.due_monotonic > monotonic_now
+        )
+        return replace(
+            self,
+            timers=tuple(t for t in self.timers if t.turn_id != turn_id),
+            background_timers=(*self.background_timers, *background),
+            pending_kills=tuple(k for k in self.pending_kills if k.turn_id != turn_id),
+        )
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
         if not turn_ids or not self.timers:
@@ -170,7 +184,8 @@ class Schedules:
         return min(floors)
 
     def pending_at(self, now: float) -> tuple[BackgroundItem, ...]:
-        return tuple(item for item in self.items if item.pending_at(now))
+        items = (*self.items, *(item for _, item in self.background_timers))
+        return tuple(item for item in items if item.pending_at(now))
 
     def has_active_wait(self, turn_id: str, *, now: float, monotonic_now: float) -> bool:
         return any(
@@ -209,6 +224,11 @@ class Schedules:
         if len(kept) == len(self.timers):
             return self
         return replace(self, timers=tuple(kept))
+
+
+def _schedule_label(params: Mapping[str, object]) -> str:
+    label = describe(json.dumps(dict(params), sort_keys=True, default=str), limit=_LIMIT)
+    return f"schedule {label}"
 
 
 def _arm_timer(

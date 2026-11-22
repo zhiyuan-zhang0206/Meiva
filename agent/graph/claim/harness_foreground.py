@@ -324,6 +324,7 @@ def plan_wake(
     images: Mapping[str, tuple[ImageBlock, ...]],
     *,
     hook_notes_key: str,
+    inline_image_text: Mapping[str, str] = MappingProxyType({}),
 ) -> WakePlan:
     parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
     settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
@@ -334,7 +335,7 @@ def plan_wake(
     if not ordered:
         return WakePlan((), (), settled_now, None, held=held)
     wake = merge_handed([(entry, passive) for entry, _, passive in ordered])
-    wake_input = _wake_input(wake, ordered, images, hook_notes_key)
+    wake_input = _wake_input(wake, ordered, images, hook_notes_key, inline_image_text)
     if not parts:
         return WakePlan(
             (wake,),
@@ -375,14 +376,19 @@ def _wake_input(
     parts: Sequence[tuple[Handed, str, bool]],
     images: Mapping[str, tuple[ImageBlock, ...]],
     hook_notes_key: str,
+    inline_image_text: Mapping[str, str],
 ) -> HarnessInput:
     kept, skipped = fit_input_images([images.get(entry.key, ()) for entry, _, _ in parts])
     blocks: list[InputBlock] = []
     notes_from = len(parts) - sum(e.key.startswith(hook_notes_key) for e, _, _ in parts)
-    for index, ((_, text, _), fits) in enumerate(zip(parts, kept, strict=True)):
+    for index, ((entry, text, _), fits) in enumerate(zip(parts, kept, strict=True)):
         if skipped and index == notes_from:
             blocks.append(TextBlock(skipped_images_note(skipped)))
-        blocks.extend((TextBlock(text), *fits))
+        complete = len(fits) == len(images.get(entry.key, ()))
+        rendered = inline_image_text.get(entry.key, text) if complete else text
+        if rendered.strip():
+            blocks.append(TextBlock(rendered))
+        blocks.extend(fits)
     if skipped and notes_from == len(parts):
         blocks.append(TextBlock(skipped_images_note(skipped)))
     return HarnessInput(wake.key, tuple(blocks))

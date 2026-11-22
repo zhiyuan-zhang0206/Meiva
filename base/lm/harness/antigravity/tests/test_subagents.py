@@ -12,8 +12,8 @@ from base.lm.harness.antigravity.subagents import (
     find_spawn,
     parse_child,
 )
-from base.lm.harness.antigravity.tests.support import say, start
-from base.lm.harness.delivery.tests.sent import send
+from base.lm.harness.antigravity.tests.support import start
+from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import SubagentText, ToolResult, ToolUse, TurnCompleted
 
 FIXTURE = Path(__file__).with_name("fixtures") / "subagent_conversation.json"
@@ -135,25 +135,24 @@ def test_an_unreadable_descriptor_is_left_out_and_does_not_stop_the_others(tmp_p
 
 
 async def test_a_turn_shows_what_its_subagent_wrote(tmp_path: Path) -> None:
-    harness = await start(tmp_path, turns=[say("DONE")])
+    harness = await start(tmp_path)
     try:
-        place(tmp_path / "home", "conv-fake")
-        turn = await send(harness, "delegate")
-        await turn.outcome()
-        completed = harness.of(TurnCompleted)[0]
-        texts = harness.of(SubagentText)
+        place(harness.home, "conv-acp")
+        await harness.session.deliver([HarnessInput.of("delegate", "delegate")])
+        completed = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        texts = [e for e in harness.events if isinstance(e, SubagentText)]
         assert [(e.tool_use_id, e.agent, e.turn_id) for e in texts] == [
-            (CHILD, "Task Runner", turn.turn_id)
+            (CHILD, "Task Runner", completed.turn_id)
         ]
-        names = [(e.name, e.parent_tool_use_id) for e in harness.of(ToolUse)]
+        names = [(e.name, e.parent_tool_use_id) for e in harness.events if isinstance(e, ToolUse)]
         assert names == [
             ("invoke_subagent", None),
             ("run_command", CHILD),
             ("send_message", CHILD),
         ]
-        order: list[type] = [type(e) for e in harness.events]
+        order = [type(e) for e in harness.events]
         assert order.index(SubagentText) < order.index(TurnCompleted)
-        assert completed.text == "DONE", "the sub-agent's words are not the turn's reply"
+        assert completed.text == "OK"
     finally:
         await harness.stop()
 

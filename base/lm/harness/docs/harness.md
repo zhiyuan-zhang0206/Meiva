@@ -61,7 +61,7 @@ command of an earlier turn is already in the baseline).
 |---|---|
 | Claude Code | the CLI ends it; the adapter waits for it to be gone. A background command (`run_in_background`) the CLI announced with `TaskStarted` is claimed when announced and left out |
 | Codex | the adapter ends it: SIGTERM, then SIGKILL after `cancel_settle_seconds`; `killed` names what needed SIGKILL. The protocol has no request for it: `command/exec/terminate` answers only for a `command/exec` the client started, and a `commandExecution` item's `processId` is the app-server's own id, not an OS pid (observed on 0.166). A command the turn started and yielded while the turn still ran cannot be told from a foreground one (the item stays `inProgress` either way), so an interrupt ends it; only a command left over from an earlier turn is background |
-| Antigravity | the adapter ends the observed tree after SIGINT (`killed`); see [interrupt](../antigravity/docs/interrupt.md) |
+| Antigravity | the CLI receives `session/cancel` and stays alive. The adapter reports whether observed foreground tools settle |
 
 Adapters: [Claude harness adapter](../claude/docs/claude.md), [Codex app-server session bridge](../codex/docs/codex.md),
 [Antigravity (agy) session bridge](../antigravity/docs/antigravity.md). Contract, provider differences

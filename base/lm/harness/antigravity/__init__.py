@@ -6,14 +6,12 @@ from base.lm.harness.antigravity.config import (
     resolve_antigravity_cli_model,
 )
 from base.lm.harness.antigravity.handoff_rules import SHELL_SEMANTICS, build_handoff
-from base.lm.harness.antigravity.mapping import ResultFields, parse_result
 from base.lm.harness.antigravity.rpc import (
     AntigravityServer,
     antigravity_rpc,
     antigravity_server_from_environment,
     discover_antigravity_server,
     discover_process_antigravity_server,
-    send_user_cascade_message,
 )
 from base.lm.harness.antigravity.session import (
     AgySession,
@@ -31,7 +29,6 @@ __all__ = [
     "AntigravityConfig",
     "AntigravityServer",
     "CancelReport",
-    "ResultFields",
     "SessionClosedError",
     "SessionTotals",
     "TransportClosedError",
@@ -40,7 +37,5 @@ __all__ = [
     "build_handoff",
     "discover_antigravity_server",
     "discover_process_antigravity_server",
-    "parse_result",
     "resolve_antigravity_cli_model",
-    "send_user_cascade_message",
 ]

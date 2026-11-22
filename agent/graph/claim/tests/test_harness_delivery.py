@@ -668,7 +668,8 @@ async def test_a_message_with_an_image_hands_the_harness_the_image_itself(
     [[sent]] = engine.delivered
     assert [image.mime_type for image in sent.images] == ["image/png"]
     assert base64.b64decode(sent.images[0].data_base64) == png
-    assert "what is this" in sent.text and str(path) in sent.text, "the path stays listed"
+    assert "what is this" in sent.text and str(path) not in sent.text
+    assert "Attached images:" not in sent.text
     assert row_status(db_conn, row) == "done"
 
 

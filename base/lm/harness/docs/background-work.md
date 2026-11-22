@@ -10,7 +10,7 @@ closed the CLI is a Meiva bug
 
 The CLI process is the owner of the work. Close it and the work goes: Claude's `CronCreate`
 and `ScheduleWakeup` timers live in the process (they do not survive a resume), Codex's
-`unified_exec` commands die with the app-server, and an Antigravity interrupt kills `agy`. An interrupt
+`unified_exec` commands die with the app-server, and Antigravity timers live in the ACP process. An interrupt
 of a turn does not touch background work, but it does end the foreground commands the turn started
 ([what an interrupt stops](harness.md#what-an-interrupt-stops)).
 
@@ -25,7 +25,6 @@ of a turn does not touch background work, but it does end the foreground command
 | Host shutdown, `meiva restart`, `meiva update` | `AgentHost._close_runtimes` |
 | A turn faults or the stream ends | `HarnessBridge._retire` |
 | Harness switch | a new runtime is built for the new harness; the old record stays on disk |
-| Antigravity interrupt | `AgySession._ensure_transport` respawns `agy` |
 
 Every close ends in `HarnessSessions._close` → `HarnessBridge.close`. The adapter reads
 its CLI's stream in its own read loop for as long as the session lives, idle or not; what
@@ -55,7 +54,7 @@ No new configuration: the existing cache size is the ceiling.
 |---|---|---|
 | Claude | background commands (a `Monitor` is one: `task_type=local_bash`) and sub-agents (`TaskStarted` / `TaskUpdated` / `TaskNotification`); `CronCreate`, `CronDelete`, `CronList`, `ScheduleWakeup` calls and results; a turn the CLI began itself and is still running | no event or echo says a timer fired: one-shot timers end by clock (a cron's due time comes from the result, else from its own expression, read in the zone the CLI process runs in (its `TZ`, else the host's local zone, handed to the session as `cron_timezone`); an expression that cannot be read keeps the seven-day bound), or earlier when a turn begins with no echo and no task notification after they came due (that turn is classified `SCHEDULED_WAKE`); a recurring cron ends at `CronDelete` or the CLI's seven-day expiry |
 | Codex | `commandExecution` items (`agent`, `unifiedExecStartup`) started and not completed, only while the app-server has a descendant it did not start with; a `spawnAgent` child thread that is working, for at most `CHILD_SILENCE_SECONDS` (two hours) after its last frame ([Codex bridge](../codex/docs/codex.md#sub-agent-threads)); nothing once the app-server is gone; a turn the server began itself | the process-tree check guards against an item whose `item/completed` never arrives (the app-server does send it when a background command ends); no cron-like tool exists |
-| Antigravity | successful `schedule` calls without a duration (cron-like), held for one day; a timer with `DurationSeconds` blocks inside its turn, so the turn is the work | a cron-like job's firing and cancellation are not visible; background shell commands are killed with the turn. When it cannot tell, it keeps the session (bounded by the day and by the cache size) |
+| Antigravity | successful cron-like `schedule` calls, held for one day, and unresolved timed `schedule` calls that outlive their prompt until completion or their declared deadline | a cron-like job's firing and cancellation are not visible; the timed background bookkeeping follows ACP tool updates |
 
 ## Telling the agent what was lost
 

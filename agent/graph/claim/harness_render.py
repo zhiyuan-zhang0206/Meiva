@@ -26,8 +26,10 @@ def pending_messages(
     return [message for message in messages if not isinstance(message, (AIMessage, ToolMessage))]
 
 
-def render_messages(messages: Sequence[BaseMessage]) -> str:
-    return "\n\n".join(render_message(message) for message in messages).strip()
+def render_messages(messages: Sequence[BaseMessage], *, inline_images: bool = False) -> str:
+    return "\n\n".join(
+        render_message(message, inline_images=inline_images) for message in messages
+    ).strip()
 
 
 def _format_bytes(size: int) -> str:
@@ -71,35 +73,41 @@ def _strip_image_placeholder(text: str, *, body_start: int | None) -> str:
     return text
 
 
-def render_message(message: BaseMessage) -> str:
-    content = message_content(message)
-    kwargs = read_meiva_kwargs(message)
-    image_note = _format_image_uploads_note(kwargs.get("meiva_image_uploads"))
-    body_start = kwargs.get("meiva_inbound_body_start")
+def _render_content(
+    content: str | list[str | dict[str, object]], *, omit_images: bool
+) -> tuple[str, int]:
     if isinstance(content, str):
-        if image_note is None:
-            return content
-        cleaned = _strip_image_placeholder(
-            content, body_start=body_start if isinstance(body_start, int) else None
-        )
-        return f"{cleaned}\n\n{image_note}" if cleaned.strip() else image_note
+        return content, 0
     parts: list[str] = []
+    native_count = 0
     for block in content:
         if isinstance(block, str):
             parts.append(block)
         elif block.get("type") == "text" and isinstance(block.get("text"), str):
             parts.append(str(block["text"]))
-        elif block.get("type") == "image_url" and image_note is not None:
-            continue
+        elif block.get("type") == "image_url" and omit_images:
+            native_count += 1
         else:
             parts.append(f"[{block.get('type', 'attachment')}]")
-    text = "\n".join(parts)
-    if image_note is None:
+    return "\n".join(parts), native_count
+
+
+def render_message(message: BaseMessage, *, inline_images: bool = False) -> str:
+    kwargs = read_meiva_kwargs(message)
+    uploads = kwargs.get("meiva_image_uploads")
+    image_note = _format_image_uploads_note(uploads)
+    text, native_count = _render_content(
+        message_content(message), omit_images=inline_images or image_note is not None
+    )
+    if image_note is None and native_count == 0:
         return text
+    if inline_images and is_object_list(uploads) and native_count == len(uploads):
+        image_note = None
+    body_start = kwargs.get("meiva_inbound_body_start")
     cleaned = _strip_image_placeholder(
         text, body_start=body_start if isinstance(body_start, int) else None
     )
-    return f"{cleaned}\n\n{image_note}" if cleaned.strip() else image_note
+    return "\n\n".join(part for part in (cleaned, image_note) if part)
 
 
 # meiva:note

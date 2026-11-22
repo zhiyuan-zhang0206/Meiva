@@ -134,6 +134,7 @@ class ForegroundRun:
         self._prompts: dict[str, str] = {}
         self._folded: dict[str, tuple[tuple[Handed, str], ...]] = {}
         self._images: dict[str, tuple[ImageBlock, ...]] = {}
+        self._inline_image_text: dict[str, str] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
             if not prompt.strip():
@@ -649,6 +650,9 @@ class ForegroundRun:
             row_input_key(item.id, item.payload), item.id, human=is_human_wake_item(item)
         )
         self._images[entry.key] = images
+        self._inline_image_text.pop(entry.key, None)
+        if images and not skipped:
+            self._inline_image_text[entry.key] = render_messages(messages, inline_images=True)
         return entry, text
 
     async def _render(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
@@ -695,6 +699,7 @@ class ForegroundRun:
                 for row, (entry, text) in zip(rows, rendered, strict=True)
             ],
             self._images,
+            inline_image_text=self._inline_image_text,
             hook_notes_key=HOOK_NOTES_KEY,
         )
         handed, inputs, settled_now, group = (

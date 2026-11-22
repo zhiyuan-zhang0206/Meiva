@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from base.lm.harness.antigravity.acp import without_input_marker
+
 # meiva:note
 # AGY does not escape request tags inside user text. Only remove the outside
 # frame; interior tags (including queued request separators) must remain intact
@@ -22,7 +24,7 @@ def user_text(content: str) -> str:
     body, closing, footer = text[len(_REQUEST_OPEN) :].rpartition(_REQUEST_CLOSE)
     if not closing or _REQUEST_FOOTER.fullmatch(footer) is None:
         return text
-    return body.strip()
+    return without_input_marker(body.strip())
 
 
 # meiva:note

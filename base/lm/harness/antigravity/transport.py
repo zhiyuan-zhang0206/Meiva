@@ -4,34 +4,25 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import re
 import signal
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 
-import psutil
-
-from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
-from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.config import MINIMUM_ACP_VERSION, AntigravityConfig
 from base.lm.harness.antigravity.rpc import (
     LIVE_SUBMIT_TIMEOUT_SECONDS,
     AntigravityServer,
     discover_process_antigravity_server,
     get_cascade_trajectory,
-    send_user_cascade_message,
 )
 from base.lm.harness.antigravity.timing_store import store_timings
 from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.antigravity.transcript.window import session_file
-from base.lm.harness.cancel import (
-    CancelReport,
-    Sweep,
-    observed_cancel,
-    spawned_since,
-    unobserved_cancel,
-)
-from base.lm.harness.process import ChildProbe, PsutilChildProbe, WaitClock, snapshot, wait_gone
+from base.lm.harness.process import WaitClock
 from base.log import logger
 
 READ_CHUNK_BYTES = 65536
@@ -83,66 +74,40 @@ async def _iter_lines(
             buffer.extend(tail)
 
 
+async def _drain_pipe(stream: asyncio.StreamReader) -> None:
+    """Release pipe backpressure while the owner closes an invalid stream."""
+    while await stream.read(READ_CHUNK_BYTES):
+        pass
+
+
+def _permission_outcome(params: dict[str, object]) -> dict[str, object]:
+    options = params.get("options")
+    if is_object_list(options):
+        for kind in ("reject_once", "reject_always"):
+            for option in options:
+                if is_object_dict(option) and option.get("kind") == kind:
+                    option_id = option.get("optionId")
+                    if isinstance(option_id, str):
+                        return {"outcome": {"outcome": "selected", "optionId": option_id}}
+    return {"outcome": {"outcome": "cancelled"}}
+
+
 class TransportClosedError(RuntimeError):
     pass
 
 
-Reaper = Callable[[Mapping[int, str], "Iterable[int]"], "tuple[int, ...]"]
-
-
-# meiva:note
-# The CLI exits on SIGINT but its tool tree does not: `run_command` children are
-# orphaned, and nobody outside this call knows their pids. The adapter therefore
-# reaps what it observed — SIGKILLing the observed pids and skipping any whose
-# command line no longer matches, so a reused pid is not killed by mistake — and
-# still reports honestly: `settled` is true only when every observed pid is
-# gone, so a process that survives SIGKILL shows up in `remaining` instead of
-# being rounded up to a clean cancel.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.md
-def kill_orphans(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int, ...]:
-    killed: list[int] = []
-    for pid in pids:
-        if pid <= 1:
-            continue
-        try:
-            process = psutil.Process(pid)
-            command = " ".join(process.cmdline())[:200]
-        except psutil.Error:
-            continue
-        if observed.get(pid) and command != observed[pid]:
-            continue
-        try:
-            process.kill()
-        except psutil.Error:
-            continue
-        killed.append(pid)
-    return tuple(killed)
-
-
-# meiva:note
-# `agy --input-format stream-json` keeps one process for the whole session: stdin
-# carries `{"event":"user","message":{"content":…}}` lines, stdout carries
-# `init` / `step_update` / `result`. It is not JSON-RPC — no ids, no methods — so
-# a cancel cannot be a request: SIGINT is the only interrupt, and the CLI answers
-# it by emitting a final `result` and exiting 1. `interrupt()` therefore also
-# ends the process, and the session must respawn with `--conversation` to keep
-# serving turns.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgyTransport:
     def __init__(
         self,
         config: AntigravityConfig,
         *,
         environ: Mapping[str, str] | None = None,
-        probe: ChildProbe | None = None,
-        reap: Reaper | None = None,
         clock: WaitClock,
         max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
         self._config = config
         self._clock = clock
         self._max_frame_bytes = max_frame_bytes
-        self._reap: Reaper = reap or kill_orphans
         self._environ = dict(environ) if environ else None
         csrf_seed = (
             (self._environ.get("MEIVA_HARNESS_HANDLE") or "") if self._environ is not None else ""
@@ -154,7 +119,6 @@ class AgyTransport:
         ) or hashlib.sha256(csrf_seed.encode("utf-8")).hexdigest()[:32]
         if self._environ is not None:
             self._environ["ANTIGRAVITY_SERVER_CSRF_TOKEN"] = self._csrf_token
-        self._probe: ChildProbe = probe or PsutilChildProbe()
         self._process: asyncio.subprocess.Process | None = None
         self._returncode: int | None = None
         self._queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
@@ -163,7 +127,11 @@ class AgyTransport:
         self._pumps: list[asyncio.Task[None]] = []
         self._stderr: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self._conversation_id: str | None = None
-        self._init_ready = asyncio.Event()
+        self._request_id = 0
+        self._setup: dict[int, asyncio.Future[dict[str, object]]] = {}
+        self._ready_request: int | None = None
+        self._session_ready = False
+        self._stream_closed = False
         self._rpc_server: AntigravityServer | None = None
 
     @property
@@ -190,13 +158,10 @@ class AgyTransport:
     def stderr_tail(self) -> tuple[str, ...]:
         return tuple(self._stderr)
 
-    async def start(self, *, resume: str | None) -> None:
+    async def start(self) -> None:
         if self._process is not None:
             raise RuntimeError("transport already started")
-        if resume:
-            self._conversation_id = resume
-            self._init_ready.set()
-        argv = self._config.command(resume=resume)
+        argv = self._config.command()
         process = await asyncio.create_subprocess_exec(
             *argv,
             cwd=str(self._config.cwd),
@@ -218,45 +183,92 @@ class AgyTransport:
             self._tasks.create_task(self._pump_stderr(process.stderr)),
         ]
 
-    async def send(self, text: str) -> None:
-        process = self._require_process()
-        if process.stdin is None or process.returncode is not None:
-            raise TransportClosedError("agy is not running")
-        line = json.dumps({"event": "user", "message": {"content": text}}) + "\n"
-        try:
-            process.stdin.write(line.encode("utf-8"))
-            await process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise TransportClosedError(f"agy stdin closed: {exc}") from exc
-
-    # meiva:note
-    # `agy` printmode blocks stdin while `pollResponse` waits on the outer turn, including its
-    # reactive-IDLE wait for a live background step, so mid-turn input cannot ride on stdin. `agy`
-    # starts its in-process Connect JSON-RPC
-    # `LanguageServerService` on localhost and reads `ANTIGRAVITY_SERVER_CSRF_TOKEN` at startup;
-    # `SendUserCascadeMessage` queues a `CORTEX_STEP_TYPE_USER_INPUT` step into the running executor
-    # loop. The call carries our `clientMessageId` (and `media` for images); its HTTP 200 is only a
-    # weak receipt and is also returned for a fully idle conversation (see `trajectory`). Live agy
-    # 1.5.9 establishes that it wakes reactive-IDLE when a child step is still live. The RPC interface
-    # is not public; descriptor premise: agy 1.5.5, reactive-IDLE premise: agy 1.5.9.
-    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
-    async def steer(
-        self,
-        text: str,
-        *,
-        client_message_id: str,
-        media: Sequence[Mapping[str, str]] = (),
-        conversation_id: str | None = None,
-    ) -> None:
-        server, target_conversation = await self._rpc_target(conversation_id)
-        _ = await asyncio.to_thread(
-            send_user_cascade_message,
-            target_conversation,
-            text,
-            client_message_id=client_message_id,
-            media=media,
-            server=server,
+    async def open_session(self, *, resume: str | None) -> str:
+        initialized = await self._request(
+            "initialize", {"protocolVersion": 1, "clientCapabilities": {}}
         )
+        self._require_acp_version(initialized)
+        params: dict[str, object] = {"cwd": str(self._config.cwd), "mcpServers": []}
+        if resume is not None:
+            params["sessionId"] = resume
+        result = await self._request("session/load" if resume else "session/new", params)
+        # session/load can omit sessionId and sends historical updates before the response.
+        session_id = result.get("sessionId", resume)
+        if not isinstance(session_id, str) or not session_id or (resume and session_id != resume):
+            raise RuntimeError("agy returned an unexpected ACP session id")
+        self._conversation_id = session_id
+        _ = await self._request(
+            "session/set_model", {"sessionId": session_id, "modelId": self._config.model}
+        )
+        return session_id
+
+    def _require_acp_version(self, initialized: dict[str, object]) -> None:
+        if initialized.get("protocolVersion") != 1:
+            raise RuntimeError("agy does not support ACP protocol version 1")
+        info = initialized.get("agentInfo")
+        version = info.get("version") if is_object_dict(info) else None
+        match = (
+            re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:\+.+)?", version)
+            if isinstance(version, str)
+            else None
+        )
+        if match is None or tuple(map(int, match.groups())) < MINIMUM_ACP_VERSION:
+            minimum = ".".join(map(str, MINIMUM_ACP_VERSION))
+            raise RuntimeError(
+                f"lossless ACP steering requires agy {minimum} or later, got {version!r}"
+            )
+
+    async def _request(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        request_id = self.next_request_id()
+        future: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
+        self._setup[request_id] = future
+        if method == "session/set_model":
+            self._ready_request = request_id
+        try:
+            async with asyncio.timeout(self._config.startup_request_seconds):
+                self._write({"id": request_id, "method": method, "params": params})
+                await self.flush()
+                response = await future
+        finally:
+            del self._setup[request_id]
+        result = response.get("result")
+        if not is_object_dict(result):
+            raise RuntimeError(f"agy ACP {method} failed: {response.get('error')!r}")
+        return result
+
+    def next_request_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
+
+    def prompt(self, request_id: int, blocks: list[dict[str, str]]) -> None:
+        self._write(
+            {
+                "id": request_id,
+                "method": "session/prompt",
+                "params": {"sessionId": self._conversation_id, "prompt": blocks},
+            }
+        )
+
+    def cancel(self) -> None:
+        self._write({"method": "session/cancel", "params": {"sessionId": self._conversation_id}})
+
+    def reject_permission(self, request_id: int | str, params: dict[str, object]) -> None:
+        self._write({"id": request_id, "result": _permission_outcome(params)})
+
+    def respond_error(self, request_id: int | str) -> None:
+        self._write({"id": request_id, "error": {"code": -32601, "message": "Method not found"}})
+
+    def _write(self, payload: dict[str, object]) -> None:
+        stream = self._require_process().stdin
+        if stream is None or not self.alive or self._stream_closed:
+            raise TransportClosedError("agy ACP stream is closed")
+        stream.write((json.dumps({"jsonrpc": "2.0", **payload}) + "\n").encode())
+
+    async def flush(self) -> None:
+        stream = self._require_process().stdin
+        if stream is None:
+            raise TransportClosedError("agy stdin is missing")
+        await stream.drain()
 
     def _timing_record(self, conversation_id: str | None = None) -> Path | None:
         target = conversation_id or self._conversation_id
@@ -295,12 +307,6 @@ class AgyTransport:
         if process.returncode is not None:
             raise TransportClosedError("agy is not running")
         target_conversation = conversation_id or self._conversation_id
-        if not target_conversation:
-            try:
-                await asyncio.wait_for(self._init_ready.wait(), timeout=LIVE_SUBMIT_TIMEOUT_SECONDS)
-            except TimeoutError as exc:
-                raise TransportClosedError("agy conversation id was not initialized") from exc
-            target_conversation = conversation_id or self._conversation_id
         if process.returncode is not None or not target_conversation:
             raise TransportClosedError("agy is not running")
         server = self._rpc_server
@@ -325,62 +331,16 @@ class AgyTransport:
                 raise last_error
             await asyncio.sleep(CANCEL_POLL_SECONDS)
 
-    async def interrupt(
-        self,
-        *,
-        turn_id: str | None = None,
-        baseline: Mapping[int, str] | None = None,
-    ) -> CancelReport:
-        process = self._process
-        if process is None or process.returncode is not None:
-            return unobserved_cancel(turn_id=turn_id)
-        pid = process.pid
-        observed = snapshot(self._probe, pid)
-        spawned = spawned_since(observed, {} if baseline is None else baseline)
-        started = self._clock.monotonic()
-        process.send_signal(signal.SIGINT)
-        await self._settle_process(process)
-        interrupt_ms = (self._clock.monotonic() - started) * 1000.0
-        gone, waited_ms = await wait_gone(
-            self._probe,
-            spawned,
-            timeout_seconds=self._config.cancel_settle_seconds,
-            poll_seconds=CANCEL_POLL_SECONDS,
-            clock=self._clock,
-        )
-        killed: tuple[int, ...] = ()
-        if not gone:
-            alive = tuple(child for child in spawned if self._probe.is_alive(child))
-            killed = self._reap(observed, alive)
-            if killed:
-                reaped, extra_ms = await wait_gone(
-                    self._probe,
-                    killed,
-                    timeout_seconds=self._config.cancel_settle_seconds,
-                    poll_seconds=CANCEL_POLL_SECONDS,
-                    clock=self._clock,
-                )
-                waited_ms += extra_ms
-                gone = reaped
-        return observed_cancel(
-            turn_id=turn_id,
-            interrupt_ms=interrupt_ms,
-            pid=pid,
-            cli_alive=self._probe.is_alive(pid),
-            sweep=Sweep(
-                observed=observed,
-                spawned=spawned,
-                gone=gone,
-                waited_ms=waited_ms,
-                alive=() if gone else [child for child in spawned if self._probe.is_alive(child)],
-            ),
-            killed=killed,
-        )
-
     async def close(self) -> None:
         process = self._process
         if process is not None and process.returncode is None:
-            await self.interrupt()
+            with contextlib.suppress(ProcessLookupError):
+                process.send_signal(signal.SIGINT)
+            await self._settle_process(process)
+        if process is not None and process.stdin is not None:
+            process.stdin.close()
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                await process.stdin.wait_closed()
         for pump in self._pumps:
             pump.cancel()
         self._pumps = []
@@ -392,7 +352,6 @@ class AgyTransport:
             self._returncode = process.returncode
         self._process = None
         self._rpc_server = None
-        self._init_ready.set()
         await self._queue.put(None)
 
     async def events(self) -> AsyncIterator[dict[str, object]]:
@@ -415,29 +374,38 @@ class AgyTransport:
 
     async def _pump_stdout(self, stream: asyncio.StreamReader) -> None:
         try:
-            try:
-                async for line in _iter_lines(stream, max_frame_bytes=self._max_frame_bytes):
-                    text = line.decode("utf-8", "replace").strip()
-                    if not text:
-                        continue
-                    try:
-                        event = object_of(json.loads, text)
-                    except json.JSONDecodeError:
-                        self._stderr.append(f"unparsed stdout: {text[:200]}")
-                        continue
-                    if not is_object_dict(event):
-                        continue
-                    if event.get("event") == "init":
-                        session_id = event.get("conversation_id")
-                        if isinstance(session_id, str) and session_id:
-                            self._conversation_id = session_id
-                            self._init_ready.set()
-                    await self._queue.put(event)
-            except ValueError:
-                self._stderr.append("stdout line exceeded the reader limit")
+            async for line in _iter_lines(stream, max_frame_bytes=self._max_frame_bytes):
+                if not line.strip():
+                    continue
+                event = object_of(json.loads, line)
+                self._route(event)
+        except (ValueError, TransportClosedError, OSError) as exc:
+            self._stderr.append(f"invalid ACP frame: {exc}")
         finally:
-            self._init_ready.set()
-            await self._queue.put(None)
+            self._stream_closed = True
+            for future in self._setup.values():
+                if not future.done():
+                    future.set_exception(TransportClosedError("agy ACP stream ended"))
+            self._queue.put_nowait(None)
+        await _drain_pipe(stream)
+
+    def _route(self, event: object) -> None:
+        if not is_object_dict(event) or event.get("jsonrpc") != "2.0":
+            raise ValueError("agy stdout contains a frame outside JSON-RPC 2.0")
+        request_id = event.get("id")
+        method = event.get("method")
+        if method is None and type(request_id) is int:
+            setup = self._setup.get(request_id)
+            if setup is not None:
+                if not setup.done():
+                    if request_id == self._ready_request and "result" in event:
+                        self._session_ready = True
+                    setup.set_result(event)
+                return
+        if self._session_ready:
+            self._queue.put_nowait(event)
+        elif method is not None and isinstance(request_id, (int, str)):
+            self.respond_error(request_id)
 
     async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:
         with contextlib.suppress(ValueError):
@@ -445,6 +413,7 @@ class AgyTransport:
                 text = line.decode("utf-8", "replace").rstrip()
                 if text:
                     self._stderr.append(text)
+        await _drain_pipe(stream)
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:

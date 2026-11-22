@@ -367,6 +367,9 @@ def test_user_image_uploads_inbound_renders_multimodal_message_and_harness_promp
     assert "Look at this screenshot" in prompt
     assert f"Attached images:\n- screen.png (image/png, {len(png_bytes)} B): {img_path}" in prompt
     assert "[image_url]" not in prompt
+    inline = render_message(msg, inline_images=True)
+    assert "Look at this screenshot" in inline
+    assert "Attached images:" not in inline and str(img_path) not in inline
     items, _ = build_timeline_items([msg], inputs=_ENVELOPE_INPUTS)
     assert len(items) == 1
     assert items[0].kind == "inbound_chat"

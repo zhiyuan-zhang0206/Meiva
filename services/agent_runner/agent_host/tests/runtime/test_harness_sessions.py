@@ -396,7 +396,7 @@ async def test_a_real_child_exit_status_reaches_the_recorder(
     owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder, clock=system_clock())
     await owner.start()
     try:
-        await transport.start(resume=None)
+        await transport.start()
         async with asyncio.timeout(3):
             if stdout_eof_before_exit:
                 assert [event async for event in transport.events()] == []

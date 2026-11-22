@@ -452,13 +452,21 @@ def test_plan_wake_bounds_the_images_of_the_merged_input_not_of_each_row() -> No
 
     data = base64.b64encode(b"x" * MAX_IMAGE_BYTES).decode("ascii")
     block = ImageBlock(mime_type="image/png", data_base64=data)
-    rows = [(Handed(f"inbound-{i}", i), f"message {i}", False) for i in range(1, 5)]
+    rows = [
+        (Handed(f"inbound-{i}", i), f"message {i}\nAttached images: /files/image{i}.png", False)
+        for i in range(1, 5)
+    ]
+    inline = {f"inbound-{i}": f"message {i}" for i in range(1, 5)}
     images = {f"inbound-{i}": (block,) for i in range(1, 5)}
 
-    [wake] = plan_wake([], rows, images, hook_notes_key="hook-notes-").inputs
+    [wake] = plan_wake(
+        [], rows, images, hook_notes_key="hook-notes-", inline_image_text=inline
+    ).inputs
 
     assert len(wake.images) == 3, "four 5 MB images in one input: the fourth is left out"
     assert "1 attached image was not sent inline" in wake.text
+    assert "/files/image4.png" in wake.text
+    assert "/files/image1.png" not in wake.text
 
 
 def test_plan_wake_makes_a_block_per_message_with_its_images_behind_it() -> None:

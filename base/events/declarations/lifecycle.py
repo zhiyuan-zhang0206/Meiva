@@ -356,13 +356,6 @@ EVENTS: dict[str, EventSpec] = {
         "carries a note naming what was lost",
         tier="anomaly",
     ),
-    "harness_image_not_delivered": telemetry_event(
-        "harness_image_not_delivered",
-        "an image of a message could not be given to an external harness (an Antigravity turn that "
-        "ended or never ran before the image could be steered in, or a refused steer); the text of "
-        "the message was delivered and names the image, whose path is in the message",
-        tier="anomaly",
-    ),
     "agy_subagent_descriptor_unreadable": telemetry_event(
         "agy_subagent_descriptor_unreadable",
         "an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's "
