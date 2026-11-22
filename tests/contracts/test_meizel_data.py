@@ -134,7 +134,7 @@ def test_repo_policy_allowance_counts_are_pinned() -> None:
 # moves both; a ledger that drops without a line saying why is what this file refuses.
 DOCUMENTED = {
     "ui/web/src/app/page-test-mock.tsx": 105,
-    "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 134,
+    "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 132,
     "ui/web/src/components/inspector/inspector-test-mock.tsx": 4,
 }
 PRODUCTION = {

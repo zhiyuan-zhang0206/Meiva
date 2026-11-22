@@ -28,10 +28,6 @@
   "openaiCost": "OpenAI API",
   "anthropicCost": "Anthropic API",
   "googleCost": "Google API",
-  "liveAlerts": "告警",
-  "liveAlertsAllClear": "当前无活跃 Grafana 告警",
-  "liveAlertsDetail": "{unresolved} 条未解决（{critical} 严重，{error} 错误，{warning} 警告）",
-  "diagnostics": "诊断",
   "switchFlat": "切换为平铺列表",
   "switchTree": "切换为树状视图",
   "tree": "树状",
@@ -61,7 +57,6 @@
   "anthropicCostTitleDetail": "过去 {win} 的 Anthropic API 按量计费花费（不含订阅渠道）：${amount}",
   "googleCostTitle": "过去 {win} 的 Google API 按量计费花费（不含订阅渠道）",
   "googleCostTitleDetail": "过去 {win} 的 Google API 按量计费花费（不含订阅渠道）：${amount}",
-  "diagnosticsTitle": "过去 {win} 活跃的错误 / 异常诊断类",
   "noMatch": "没有匹配“{query}”的 agent",
   "searchAgent": "搜索 agent",
   "archive": "Agent 历史",
@@ -81,9 +76,5 @@
   "themeLight": "亮色",
   "themeDark": "暗色",
   "display": "显示",
-  "emptyAgents": "还没有 agent。",
-  "diagnosticsTitleDetail": "当前版本 {sha} 活跃 {classes} 类（{events} 条），已归档 {archived} 类",
-  "diagnosticsTitleDetailNoSha": "活跃 {classes} 类（{events} 条），已归档 {archived} 类",
-  "diagnosticsAllClear": "当前版本无活跃诊断问题",
-  "diagnosticsAllClearArchived": "当前版本无活跃诊断问题（已归档 {archived} 类）"
+  "emptyAgents": "还没有 agent。"
 }

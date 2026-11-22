@@ -4327,7 +4327,7 @@
   "ui/web/src/components/agent-sidebar/archive.tsx": 1,
   "ui/web/src/components/agent-sidebar/body.tsx": 11,
   "ui/web/src/components/agent-sidebar/footer.test.tsx": 5,
-  "ui/web/src/components/agent-sidebar/footer.tsx": 10,
+  "ui/web/src/components/agent-sidebar/footer.tsx": 8,
   "ui/web/src/components/agent-sidebar/header.tsx": 1,
   "ui/web/src/components/agent-sidebar/icon-button.tsx": 1,
   "ui/web/src/components/agent-sidebar/index.tsx": 12,

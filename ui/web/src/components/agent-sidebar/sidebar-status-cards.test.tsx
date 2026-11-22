@@ -48,14 +48,14 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     openStatus();
     expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
     // meiva:note
-    // Ten placeholder cells (live agents + live alerts + eight windowed cards) each show a
+    // Eight placeholder cells (live agents + seven windowed usage cards) each show a
     // spinner; none of them keeps a placeholder bar shaped like a value.
     expect(document.querySelectorAll(".animate-pulse")).toHaveLength(0);
-    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(10);
+    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(8);
     expect(screen.queryByText("—")).toBeNull();
   });
 
-  it("stats has data → live agents, live alerts and 8 windowed cards show real numbers", async () => {
+  it("stats has data → live agents and 7 windowed usage cards show real numbers without alerts or diagnostics", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = makeStats({
       alerts: { unresolved: 3, critical: 1, error: 1, warning: 1 },
@@ -72,10 +72,6 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
-    const alertsLink = screen.getByTestId("status-live-alerts");
-    expect(alertsLink.getAttribute("href")).toBe("/insights#alerts");
-    expect(alertsLink.textContent).toContain("3");
-    expect(alertsLink.getAttribute("title")).toBe("3 unresolved (1 critical, 1 error, 1 warning)");
     expect(await screen.findByText("19.1k")).toBeTruthy();
     expect(await screen.findByText("80.00%")).toBeTruthy();
     expect(await screen.findByText("$25.40")).toBeTruthy();
@@ -86,10 +82,12 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(googleCard?.getAttribute("title")).toBe(
       "Metered Google API spend over the past 24h (excludes subscription harnesses): $1.15",
     );
-    const diagCard = screen.getByTestId("status-diagnostics-card");
-    expect(diagCard.textContent).toContain("2 (41)");
-    expect(diagCard.getAttribute("title")).toBe("2 active (41 events) on abc1234; 5 archived");
+    expect(screen.queryByTestId("status-live-alerts")).toBeNull();
+    expect(screen.queryByTestId("status-diagnostics-card")).toBeNull();
+    expect(screen.queryByText("Alerts")).toBeNull();
+    expect(screen.queryByText("Diagnostics")).toBeNull();
     expect(screen.queryByText("Warnings / errors")).toBeNull();
+    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
   });
 
   it("unmetered cache shows N/A while tokens and cost remain visible", async () => {
@@ -110,36 +108,12 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(screen.queryByText("0.00%")).toBeNull();
   });
 
-  it("all-clear alerts and diagnostics render muted zeros with clear tooltips", async () => {
-    state.agents = [makeAgent({ agent_id: 1 })];
-    state.stats = makeStats({
-      alerts: ZERO_ALERTS,
-      diagnostics: {
-        ...ZERO_DIAGNOSTICS,
-        archived_classes: 12,
-        archived_events: 400,
-        deployed_sha: "def5678901234",
-      },
-    });
-    wrap(<AgentSidebar {...handlers} />);
-    openStatus();
-    const diagCard = await screen.findByTitle(
-      "No active diagnostic issues on this release (12 archived)",
-    );
-    expect(diagCard.getAttribute("data-testid")).toBe("status-diagnostics-card");
-    expect(diagCard.textContent).toContain("0");
-    const alertsLink = screen.getByTestId("status-live-alerts");
-    expect(alertsLink.getAttribute("title")).toBe("No active Grafana alerts");
-    expect(alertsLink.textContent).toContain("0");
-    expect(screen.queryByRole("button", { name: /dismiss/i })).toBeNull();
-  });
-
   it("error without data shows retry and clicking it refetches", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsError = new Error("stats endpoint 500");
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
-    expect((await screen.findAllByText("!")).length).toBeGreaterThanOrEqual(8);
+    expect((await screen.findAllByText("!")).length).toBe(8);
     expect(document.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(retry.getAttribute("title")).toBe("stats endpoint 500");
@@ -366,7 +340,7 @@ describe("plugin status cards", () => {
 });
 
 describe("StatusCards window selector", () => {
-  it("hides stale windowed values while retaining live agents, live alerts and plugin cards", async () => {
+  it("hides stale windowed values while retaining live agents and plugin cards", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     state.pluginStatDeclarations = [{ plugin: "deepseek_balance", id: "bal", label: "DeepSeek" }];
@@ -392,10 +366,9 @@ describe("StatusCards window selector", () => {
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
-    expect(screen.getByTestId("status-live-alerts").textContent).toContain("2");
     expect(await screen.findByText("$42.80")).toBeTruthy();
-    expect(await screen.findAllByText("…")).toHaveLength(8);
-    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(8);
+    expect(await screen.findAllByText("…")).toHaveLength(7);
+    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(7);
   });
 
   it("renders all seven window options including 30d with the persisted value selected", async () => {
@@ -467,17 +440,14 @@ describe("StatusCards window selector", () => {
     expect(subCard?.getAttribute("title")).toContain(`: ${sub}`);
   });
 
-  it("separates Live agents and Alerts above Usage and renders Diagnostics inside Usage", async () => {
+  it("keeps Live agents above Usage and renders only the 7 Usage cards", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     const live = await screen.findByText("Live agents");
-    const alerts = await screen.findByTestId("status-live-alerts");
     const usage = await screen.findByText("Usage");
     expect(live.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(alerts.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(await screen.findByText("Diagnostics")).toBeTruthy();
     expect(await screen.findByText("Tokens")).toBeTruthy();
     expect(await screen.findByText("Cache hit")).toBeTruthy();
     expect(await screen.findByText("Cost (API)")).toBeTruthy();
@@ -485,6 +455,10 @@ describe("StatusCards window selector", () => {
     expect(await screen.findByText("OpenAI API")).toBeTruthy();
     expect(await screen.findByText("Anthropic API")).toBeTruthy();
     expect(await screen.findByText("Google API")).toBeTruthy();
+    expect(screen.queryByTestId("status-live-alerts")).toBeNull();
+    expect(screen.queryByTestId("status-diagnostics-card")).toBeNull();
+    expect(screen.queryByText("Alerts")).toBeNull();
+    expect(screen.queryByText("Diagnostics")).toBeNull();
     expect(screen.queryByText("Warnings / errors")).toBeNull();
   });
 });

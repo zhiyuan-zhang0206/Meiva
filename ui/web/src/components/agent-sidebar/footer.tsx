@@ -93,17 +93,14 @@ export function StatusCards({
       : null;
   const windowedPlaceholder = windowMismatch ? "…" : placeholder;
   const windowedTitle = windowMismatch ? t("statusPanelUpdatingFor", { win }) : null;
-  const windowedCards: (
-    | { kind?: undefined; label: string; value: string; title?: string }
-    | { kind: "diagnostics"; title?: string }
-  )[] = [
+  const coreCards: { label: string; value: string; title?: string }[] = [
     {
       label: t("tokens"),
       value: windowMismatch
         ? windowedPlaceholder
         : stats
-        ? formatTokensCompact(stats.tokens.input + stats.tokens.output)
-        : placeholder,
+          ? formatTokensCompact(stats.tokens.input + stats.tokens.output)
+          : placeholder,
       title:
         windowedTitle ??
         errMsg ??
@@ -154,54 +151,63 @@ export function StatusCards({
           ? t("costSubscriptionTitleDetail", { win, amount: stats.subscription_cost_usd.toFixed(2) })
           : t("costSubscriptionTitle", { win })),
     },
-    {
-      kind: "diagnostics",
-      title: windowedTitle ?? errMsg ?? t("diagnosticsTitle", { win }),
-    },
-    ...[
-      {
-        label: t("openaiCost"),
-        cost: stats?.openai_cost_usd,
-        title: t("openaiCostTitle", { win }),
-        detail:
-          stats?.openai_cost_usd != null
-            ? t("openaiCostTitleDetail", { win, amount: stats.openai_cost_usd.toFixed(2) })
-            : undefined,
-      },
-      {
-        label: t("anthropicCost"),
-        cost: stats?.anthropic_cost_usd,
-        title: t("anthropicCostTitle", { win }),
-        detail:
-          stats?.anthropic_cost_usd != null
-            ? t("anthropicCostTitleDetail", { win, amount: stats.anthropic_cost_usd.toFixed(2) })
-            : undefined,
-      },
-      {
-        label: t("googleCost"),
-        cost: stats?.google_cost_usd,
-        title: t("googleCostTitle", { win }),
-        detail:
-          stats?.google_cost_usd != null
-            ? t("googleCostTitleDetail", { win, amount: stats.google_cost_usd.toFixed(2) })
-            : undefined,
-      },
-    ].map(({ label, cost, title, detail }) => ({
-      label,
-      value: windowMismatch
-        ? windowedPlaceholder
-        : cost != null
-          ? `$${cost.toFixed(2)}`
-          : placeholder,
-      title: windowedTitle ?? errMsg ?? detail ?? title,
-    })),
   ];
+  const providerCards: { label: string; value: string; title?: string }[] = [
+    {
+      label: t("openaiCost"),
+      cost: stats?.openai_cost_usd,
+      title: t("openaiCostTitle", { win }),
+      detail:
+        stats?.openai_cost_usd != null
+          ? t("openaiCostTitleDetail", { win, amount: stats.openai_cost_usd.toFixed(2) })
+          : undefined,
+    },
+    {
+      label: t("anthropicCost"),
+      cost: stats?.anthropic_cost_usd,
+      title: t("anthropicCostTitle", { win }),
+      detail:
+        stats?.anthropic_cost_usd != null
+          ? t("anthropicCostTitleDetail", { win, amount: stats.anthropic_cost_usd.toFixed(2) })
+          : undefined,
+    },
+    {
+      label: t("googleCost"),
+      cost: stats?.google_cost_usd,
+      title: t("googleCostTitle", { win }),
+      detail:
+        stats?.google_cost_usd != null
+          ? t("googleCostTitleDetail", { win, amount: stats.google_cost_usd.toFixed(2) })
+          : undefined,
+    },
+  ].map(({ label, cost, title, detail }) => ({
+    label,
+    value: windowMismatch
+      ? windowedPlaceholder
+      : cost != null
+        ? `$${cost.toFixed(2)}`
+        : placeholder,
+    title: windowedTitle ?? errMsg ?? detail ?? title,
+  }));
   const valueClass = failedWithoutData
     ? "font-mono tabular-nums text-sm text-destructive"
     : "font-mono tabular-nums text-sm";
-  const placeholderClass = failedWithoutData
-    ? "font-mono tabular-nums text-sm text-destructive"
-    : "font-mono tabular-nums text-sm";
+  const renderUsageCard = (card: { label: string; value: string; title?: string }) => (
+    <div
+      key={card.label}
+      title={card.title}
+      className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", MIN_W_0, FLEX, FLEX_COL)}
+    >
+      <span className="truncate text-[10px] tracking-wide text-muted-foreground">
+        {card.label}
+      </span>
+      {firstLoad ? (
+        <Spinner className="size-3" />
+      ) : (
+        <span className={cn(valueClass, "truncate")}>{card.value}</span>
+      )}
+    </div>
+  );
   return (
     <div className="text-xs">
       <div className={cn("items-center justify-between border-b border-border px-3 py-2", FLEX)}>
@@ -243,13 +249,6 @@ export function StatusCards({
             <span className={valueClass}>{stats ? String(stats.live_count) : placeholder}</span>
           )}
         </div>
-        <LiveAlertsRow
-          stats={stats}
-          errMsg={errMsg}
-          firstLoad={firstLoad}
-          placeholder={placeholder}
-          valueClass={valueClass}
-        />
         {pluginCards.length > 0 ? (
           <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
             {pluginCards.map((card) => (
@@ -285,35 +284,13 @@ export function StatusCards({
             className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
           />
         </div>
-        <div className="grid grid-cols-2 gap-1 px-3 pb-2.5">
-          {windowedCards.map((card) =>
-            card.kind === "diagnostics" ? (
-              <DiagnosticsCard
-                key="diagnostics"
-                stats={windowMismatch ? undefined : stats}
-                placeholder={windowedPlaceholder}
-                placeholderClass={placeholderClass}
-                valueClass={valueClass}
-                firstLoad={firstLoad}
-                title={card.title}
-              />
-            ) : (
-              <div
-                key={card.label}
-                title={card.title}
-                className={cn("gap-0.5 px-2 py-1.5 rounded bg-sidebar-accent/40", FLEX, FLEX_COL)}
-              >
-                <span className="text-[10px] tracking-wide text-muted-foreground">
-                  {card.label}
-                </span>
-                {firstLoad ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <span className={valueClass}>{card.value}</span>
-                )}
-              </div>
-            ),
-          )}
+        <div className="space-y-1 px-3 pb-2.5">
+          <div className="grid grid-cols-2 gap-1">
+            {coreCards.map(renderUsageCard)}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {providerCards.map(renderUsageCard)}
+          </div>
         </div>
       </div>
     </div>
@@ -491,128 +468,5 @@ function SidebarNavButton({
     >
       {children}
     </SidebarIconButton>
-  );
-}
-
-// meiva:note
-// Point-in-time unresolved Grafana alerts from `/api/stats/dashboard`, backed by the same `alerts`
-// table predicate as the header badge and `/insights#alerts`. Links directly to the alerts list.
-function LiveAlertsRow({
-  stats,
-  errMsg,
-  firstLoad,
-  placeholder,
-  valueClass,
-}: {
-  stats: StatsDashboard | undefined;
-  errMsg: string | null;
-  firstLoad: boolean;
-  placeholder: string;
-  valueClass: string;
-}) {
-  const t = useTranslations("sidebar");
-  const alerts = stats?.alerts;
-  const unresolved = alerts?.unresolved ?? 0;
-  const title =
-    errMsg ??
-    (alerts === undefined
-      ? t("liveAlertsAllClear")
-      : unresolved === 0
-        ? t("liveAlertsAllClear")
-        : t("liveAlertsDetail", {
-            unresolved,
-            critical: alerts.critical,
-            error: alerts.error,
-            warning: alerts.warning,
-          }));
-  return (
-    <Link
-      href="/insights#alerts"
-      data-testid="status-live-alerts"
-      title={title}
-      className={cn(
-        "items-center justify-between rounded bg-sidebar-accent/40 px-2.5 py-1.5 transition-colors hover:bg-sidebar-accent/70",
-        FLEX,
-      )}
-    >
-      <span className="text-[10px] tracking-wide text-muted-foreground">{t("liveAlerts")}</span>
-      {firstLoad ? (
-        <Spinner className="size-3" />
-      ) : alerts === undefined ? (
-        <span className={valueClass}>{placeholder}</span>
-      ) : (
-        <span
-          className={cn(
-            valueClass,
-            unresolved > 0 ? "font-semibold text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {String(unresolved)}
-        </span>
-      )}
-    </Link>
-  );
-}
-
-// meiva:note
-// Windowed Sentry-style error diagnostics for the current release, separate from live Grafana
-// alerts. Classes from prior releases or silent past `diagnostic_quiet_seconds` auto-archive and
-// never feed alert badges; no manual dismiss action exists.
-// meiva:link ui/web/src/docs/frontend-components/alert-classes.md
-function DiagnosticsCard({
-  stats,
-  placeholder,
-  placeholderClass,
-  valueClass,
-  firstLoad,
-  title,
-}: {
-  stats: StatsDashboard | undefined;
-  placeholder: string;
-  placeholderClass: string;
-  valueClass: string;
-  firstLoad: boolean;
-  title: string | undefined;
-}) {
-  const t = useTranslations("sidebar");
-  const diag = stats?.diagnostics;
-  const allClear = diag?.active_classes === 0;
-  const shortSha = diag?.deployed_sha ? diag.deployed_sha.slice(0, 7) : null;
-  const shownTitle =
-    diag === undefined
-      ? title
-      : allClear
-        ? diag.archived_classes > 0
-          ? t("diagnosticsAllClearArchived", { archived: diag.archived_classes })
-          : t("diagnosticsAllClear")
-        : shortSha
-          ? t("diagnosticsTitleDetail", {
-              classes: diag.active_classes,
-              events: diag.active_events.toLocaleString("en-US"),
-              sha: shortSha,
-              archived: diag.archived_classes,
-            })
-          : t("diagnosticsTitleDetailNoSha", {
-              classes: diag.active_classes,
-              events: diag.active_events.toLocaleString("en-US"),
-              archived: diag.archived_classes,
-            });
-  return (
-    <div
-      data-testid="status-diagnostics-card"
-      title={shownTitle}
-      className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
-    >
-      <span className="text-[10px] tracking-wide text-muted-foreground">{t("diagnostics")}</span>
-      {firstLoad ? (
-        <Spinner className="size-3" />
-      ) : diag === undefined ? (
-        <span className={placeholderClass}>{placeholder}</span>
-      ) : (
-        <span className={cn(valueClass, allClear && "text-muted-foreground")}>
-          {allClear ? "0" : `${diag.active_classes} (${diag.active_events})`}
-        </span>
-      )}
-    </div>
   );
 }
