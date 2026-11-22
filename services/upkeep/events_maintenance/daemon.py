@@ -14,7 +14,7 @@ import signal
 import socket
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
@@ -134,10 +134,11 @@ def run_maintenance(
         events_maintenance_log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
     prices = load_price_book()
+    today_utc = now.astimezone(UTC).date()
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now, prices=prices)
-        backfill = run_unpriced_backfill(conn, today=now.date(), prices=prices, dry_run=False)
-        folded = fold_totals(conn, today=now.date())
+        backfill = run_unpriced_backfill(conn, today=today_utc, prices=prices, dry_run=False)
+        folded = fold_totals(conn, today=today_utc)
     progress.beat()
     if backfill.observations_priced or backfill.ledger_calls_priced or backfill.totals_rebuilt:
         events_maintenance_log.info(

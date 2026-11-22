@@ -168,6 +168,8 @@ def _h_metrics_agents(args: argparse.Namespace) -> int:
 
 
 def _h_metrics_backfill_unpriced(args: argparse.Namespace) -> int:
+    from datetime import UTC
+
     from cli.commands.management.metrics_backfill import cmd_metrics_backfill_unpriced
     from cli.database import database_factory_of
     from cli.database.runtime import runtime_of
@@ -175,7 +177,7 @@ def _h_metrics_backfill_unpriced(args: argparse.Namespace) -> int:
     opts = options(args, _MetricsBackfillUnpricedOptions)
     return cmd_metrics_backfill_unpriced(
         database_factory_of(args),
-        today=runtime_of(args).clock.now().date(),
+        today=runtime_of(args).clock.now().astimezone(UTC).date(),
         apply=opts.apply,
         as_json=opts.json,
     )

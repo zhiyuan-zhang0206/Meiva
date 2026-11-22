@@ -271,7 +271,9 @@ def main(argv: list[str]) -> int:
     with events_maintenance_db(
         config, gate=gate, local_host=machine.host, home=meiva_home()
     ).connect() as conn:
-        report = roll_range(conn, first, last, today=clock.now().date(), prices=load_price_book())
+        report = roll_range(
+            conn, first, last, today=clock.now().astimezone(UTC).date(), prices=load_price_book()
+        )
     if report.rebuilt:
         sys.stdout.write("rebuilt agent_model_tokens_total\n")
     sys.stdout.write(
