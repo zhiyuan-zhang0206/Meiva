@@ -517,10 +517,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 self._project_update(turn, item.frame, finished=item.text_finished)
         for reply in projection.background_replies(transcript, self._session_id, self._subagents):
             self._finish_background_reply(reply)
-        if turn is not None and turn.stop_reason and turn.projection_ready(projection, rows):
+        if turn and (reason := turn.settle_projection(projection, rows, self._monotonic)):
             for text in turn.restore_verified_text(projection, rows):
                 self._project_update(turn, text_update(text), finished=True)
-            self._finish_turn(turn, turn.stop_reason, rows)
+            self._finish_turn(turn, reason, rows)
 
     def _finish_background_reply(self, reply: NativeReply) -> None:
         begun, text, completed = reply.events(
@@ -684,13 +684,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     def _watch_output(self, transport: AgyTransport) -> str | None:
         if not transport.alive:
             return "agy ACP stream ended"
-        projection, turn = self._projection, self._prompt_turn
+        projection, turn, mono = self._projection, self._prompt_turn, self._monotonic()
         if turn is None:
             self._replay_idle()
         elif projection is not None and (projection.pending or turn.stop_reason):
             self._replay(projection, self._transcript())
             turn = self._prompt_turn
-        if turn is not None and turn.stop_reason and self._monotonic() >= turn.stop_deadline:
+        if turn is not None and turn.stop_reason and mono >= turn.stop_deadline:
             return "agy ACP output attribution timed out"
         now = self._clock.now().timestamp()
         deadline = self._schedules.reply_deadline(now)

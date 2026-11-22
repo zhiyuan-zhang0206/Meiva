@@ -163,6 +163,68 @@ def resumed_prompt(transcript: Path, request: int) -> None:
     result(request, usage=False)
 
 
+def resumed_command_completion(transcript: Path, request: int, command: str) -> None:
+    message("REPLAYED_OLD_TEXT")
+    message("MEIVA_DISPLAY_TO_USER\nOld native reply")
+    task_id = SID + "/task-2893"
+    counts = (
+        (7115, 308503, 1657),
+        (4306, 315151, 1076),
+        (2953, 319455, 495),
+        (2334, 322406, 614),
+        (2319, 324738, 373),
+        (3395, 325008, 850),
+        (5674, 328401, 600),
+        (3715, 334073, 947),
+        (2213, 337786, 292),
+        (3479, 337950, 4220),
+        (4675, 341427, 679),
+    )
+    unresolved = command == "unresolved-attribution"
+    reply = "MEIVA_DISPLAY_TO_USER\nFresh multi-step reply"
+    for index, (uncached, cached, output) in enumerate(counts):
+        if index == 1 and not unresolved:
+            record(
+                transcript,
+                {
+                    "step_index": 2893,
+                    "source": "MODEL",
+                    "type": "GENERIC",
+                    "status": "RUNNING",
+                    "content": f"Created At: {STAMP}\nTool is running as a background task with task id: {task_id}\nTask Description: sanitized",
+                },
+            )
+        if index == 6:
+            record(
+                transcript,
+                {
+                    "type": "SYSTEM_MESSAGE",
+                    "content": f'[Message] timestamp={STAMP} sender={task_id} priority=MESSAGE_PRIORITY_HIGH content=Task id "{task_id}" finished with result:\nCommand exited with code 0.',
+                },
+            )
+        final = index == len(counts) - 1
+        if final and unresolved:
+            reply = "AMBIGUOUS REPLY"
+        row = {
+            **planner_row(reply if final else None, tokens=uncached),
+            "cache_read_tokens": cached,
+            "output_tokens": output,
+        }
+        if not final:
+            args = {"CommandLine": f"echo step-{index}"}
+            row["tool_calls"] = [{"name": "run_command", "args": args}]
+            update("tool_call", toolCallId=f"step-{index}", name="run_command", rawInput=args)
+            update("tool_call_update", toolCallId=f"step-{index}", status="completed")
+        record(transcript, row)
+    message(reply)
+    usage = {
+        "inputTokens": sum(row[0] for row in counts),
+        "cachedReadTokens": sum(row[1] for row in counts),
+        "outputTokens": sum(row[2] for row in counts),
+    }
+    frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
+
+
 def child_overlap(transcript: Path, request: int, command: str) -> None:
     foreground = planner_row("FOREGROUND")
     if command == "child-no-usage-incomplete":
@@ -217,6 +279,9 @@ def cancel_prompt(transcript: Path, request: int) -> None:
 
 
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    if command in {"resumed-command-completion", "unresolved-attribution"}:
+        resumed_command_completion(transcript, request, command)
+        return
     if command == "resumed":
         resumed_prompt(transcript, request)
         return

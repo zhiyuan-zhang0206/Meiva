@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 
@@ -27,6 +27,7 @@ from base.lm.harness.events import (
     TurnCompleted,
     Usage,
 )
+from base.log import logger
 
 
 def _tokens(value: object) -> int:
@@ -257,6 +258,7 @@ class PromptTurn:
     verified_steps: tuple[Usage, ...] | None = None
     _verified_text: tuple[str, ...] = ()
     _verified_usage_partial: bool = False
+    _projection_degraded: bool = False
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
         yield from self._flush_thoughts()
@@ -289,6 +291,7 @@ class PromptTurn:
         self.verified_steps = None
         self._verified_text = ()
         self._verified_usage_partial = False
+        self._projection_degraded = False
 
     def require_projection(self, *, required: bool) -> OutputProjection | None:
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
@@ -366,6 +369,13 @@ class PromptTurn:
     ) -> bool:
         if self.verified_steps is not None:
             return True
+        if self.stop_reason == "end_turn" and not self._latest_marker_recorded(rows):
+            return False
+        return self._projection_frames_ready(projection, rows)
+
+    def _projection_frames_ready(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> bool:
         scope = [step for step in projection.steps(rows) if step.input_key in self.keys]
         if any(not projection.owns(step) for step in scope):
             return False
@@ -379,12 +389,41 @@ class PromptTurn:
             bool(scope) or not any(report.output for report in self._projection_reports())
         )
 
+    def _latest_marker_recorded(self, rows: Sequence[dict[str, object]]) -> bool:
+        return input_marker(self.keys[-1]) in received_markers(rows[self.transcript_offset :])
+
+    def settle_projection(
+        self,
+        projection: OutputProjection,
+        rows: Sequence[dict[str, object]],
+        monotonic: Callable[[], float],
+    ) -> str | None:
+        reason = self.stop_reason
+        if reason is None or self.projection_ready(projection, rows):
+            return reason
+        if reason != "end_turn" or monotonic() < self.stop_deadline:
+            return None
+        if not self._latest_marker_recorded(rows):
+            return None
+        scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
+        owned = tuple(step for step in scope if projection.owns(step))
+        self._apply_projection(projection, owned, (), scope_size=len(scope))
+        self._projection_degraded = True
+        logger.warning(
+            "Settling completed agy ACP prompt with only attributed output",
+            event="agy_acp_attribution_degraded",
+            turn_id=self.ticket.turn_id,
+            unresolved_rows=len(scope) - len(owned),
+            pending_frames=len(projection.pending),
+        )
+        return reason
+
     def close_projection(self, projection: OutputProjection, row_count: int) -> None:
         projection.pending.clear()
         projection.close_foreground(
             self.keys,
             row_count,
-            accounted=self.verified_steps is not None,
+            accounted=self.verified_steps is not None and not self._projection_degraded,
             cancelled=self.interrupted,
         )
 
@@ -437,6 +476,7 @@ class PromptTurn:
             duration_ms=int((monotonic_now - (ticket.started_at or 0)) * 1000),
             usage=bill.usage,
             usage_uncertain=bill.uncertain
+            or self._projection_degraded
             or (self._verified_usage_partial and self.latest not in self.reports),
             cost_usd=None,
             cumulative_cost_usd=None,

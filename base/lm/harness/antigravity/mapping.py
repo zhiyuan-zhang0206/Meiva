@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -105,21 +105,73 @@ class PlannerRow:
         return self.final or (self.blank_reply and type(tokens) is int and tokens == 0)
 
 
-def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iterator[PlannerRow]:
+def _launched_command(row: Frame) -> str | None:
+    content, step = row.get("content"), row.get("step_index")
+    if row.get("source") != "MODEL" or row.get("status") != "RUNNING":
+        return None
+    if not isinstance(content, str) or type(step) is not int:
+        return None
+    header, _, body = content.partition("\n")
+    line = body.partition("\n")[0]
+    prefix = "Tool is running as a background task with task id: "
+    task = line.removeprefix(prefix)
+    if (
+        header.startswith("Created At: ")
+        and line.startswith(prefix)
+        and task.endswith(f"/task-{step}")
+        and len(task.split()) == 1
+    ):
+        return task
+    return None
+
+
+def planner_rows(
+    rows: Sequence[Frame],
+    keys: Sequence[str],
+    *,
+    boundaries: Mapping[str, ForegroundBoundary] | None = None,
+) -> Iterator[PlannerRow]:
+    for event in _attribution_events(rows, keys, boundaries):
+        if isinstance(event, PlannerRow):
+            yield event
+
+
+def _attribution_events(
+    rows: Sequence[Frame],
+    keys: Sequence[str],
+    boundaries: Mapping[str, ForegroundBoundary] | None,
+) -> Iterator[PlannerRow | BackgroundNotice | None]:
     marks = {input_marker(key): key for key in keys}
+    limits = boundaries or {}
     foreground: str | None = None
     background: BackgroundNotice | None = None
+    boundary: ForegroundBoundary | None = None
+    commands: set[str] | None = None
     for index, row in enumerate(rows):
         kind = row.get("type")
         if kind == "USER_INPUT":
-            foreground = next(
-                (marks[mark] for mark in received_markers((row,)) if mark in marks), None
-            )
+            marker = next(iter(received_markers((row,))), "")
+            foreground = marks.get(marker)
+            boundary = limits.get(foreground or "")
+            commands = set() if foreground is not None else None
             background = None
+            yield None
+        elif kind == "GENERIC":
+            _remember_launched_command(row, commands)
         elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row, index)) is not None:
-            background = notice
+            if not notice.completes_command(commands, boundary):
+                background = notice
+                yield notice
         elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
-            yield PlannerRow(index, row, foreground, background)
+            step = PlannerRow(index, row, foreground, background)
+            if step.terminal:
+                commands = None
+            yield step
+
+
+def _remember_launched_command(row: Frame, commands: set[str] | None) -> None:
+    if commands is not None and (task := _launched_command(row)) is not None:
+        commands.add(task)
 
 
 class ChildLookup(Protocol):
@@ -132,6 +184,16 @@ class BackgroundNotice:
     prompt: str
     index: int
     cause: HarnessCause
+
+    def completes_command(
+        self, commands: set[str] | None, boundary: ForegroundBoundary | None
+    ) -> bool:
+        return (
+            commands is not None
+            and self.sender in commands
+            and (boundary is None or self.index < boundary.next_row)
+            and self.prompt.startswith(f'Task id "{self.sender}" finished with result:')
+        )
 
     def belongs_to(self, session_id: str | None, subagents: ChildLookup | None = None) -> bool:
         if session_id is None:
@@ -208,7 +270,7 @@ class OutputProjection:
         return step.input_key is not None and (step.notice is None or step.index in self.confirmed)
 
     def steps(self, rows: Sequence[Frame]) -> tuple[PlannerRow, ...]:
-        return tuple(planner_rows(rows[self.offset :], self.keys))
+        return tuple(planner_rows(rows[self.offset :], self.keys, boundaries=self._boundaries))
 
     def confirm_span(self, span: Sequence[PlannerRow], candidates: Sequence[PlannerRow]) -> None:
         selected = {step.index for step in span}
@@ -247,17 +309,15 @@ class OutputProjection:
     def has_pending_reply(
         self, rows: Sequence[Frame], session_id: str | None, subagents: ChildLookup
     ) -> bool:
-        for index in range(len(rows) - 1, self.offset - 1, -1):
-            row = rows[index]
-            if row.get("type") == "USER_INPUT":
-                return False
-            if row.get("type") == "SYSTEM_MESSAGE" and (
-                notice := _background_notice(row, index - self.offset)
-            ):
-                return notice.index not in self._answered_notices and notice.belongs_to(
-                    session_id, subagents
-                )
-        return False
+        notice = None
+        for event in _attribution_events(rows[self.offset :], self.keys, self._boundaries):
+            if event is None or isinstance(event, BackgroundNotice):
+                notice = event
+        return (
+            notice is not None
+            and notice.index not in self._answered_notices
+            and notice.belongs_to(session_id, subagents)
+        )
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (

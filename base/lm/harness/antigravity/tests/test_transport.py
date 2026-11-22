@@ -16,6 +16,7 @@ from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
+    SessionFailed,
     ToolUse,
     TurnCompleted,
     TurnOrigin,
@@ -296,6 +297,53 @@ async def test_resumed_cancel_keeps_proven_partial_text_and_usage(tmp_path: Path
             lambda event: isinstance(event, TurnCompleted) and event.turn_id != done.turn_id
         )
         assert again.text == "OK" and harness.session.cli_pid == pid
+        assert sink == []
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize(
+    ("command", "text", "uncertain", "tool_count", "steps"),
+    [
+        (
+            "resumed-command-completion",
+            "MEIVA_DISPLAY_TO_USER\nFresh multi-step reply",
+            False,
+            10,
+            11,
+        ),
+        ("unresolved-attribution", "", True, 6, 6),
+    ],
+)
+async def test_resumed_multi_step_command_completion(
+    tmp_path: Path, command: str, text: str, uncertain: bool, tool_count: int, steps: int
+) -> None:
+    seed_replay_history(tmp_path)
+    sink: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append, reply_seconds=0.2)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", command)])
+        done = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted | SessionFailed)
+        )
+        assert isinstance(done, TurnCompleted), done
+        assert not done.is_error and done.stop_reason == "end_turn"
+        assert done.text == text and done.usage_uncertain == uncertain and done.num_turns == steps
+        assert [e.text for e in harness.events if isinstance(e, AssistantText)] == (
+            [text] if text else []
+        )
+        assert sum(isinstance(e, ToolUse) for e in harness.events) == tool_count
+
+        pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("second", "next")])
+        again = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != done.turn_id
+        )
+        assert again.text == "OK" and harness.session.cli_pid == pid
+        assert [event.origin for event in harness.events if isinstance(event, TurnStarted)] == [
+            TurnOrigin.INPUT,
+            TurnOrigin.INPUT,
+        ]
         assert sink == []
     finally:
         await harness.stop()
