@@ -17,7 +17,7 @@ exports = ["mapping.py", "rpc.py", "session.py", "tests", "timing_store.py", "tr
 "timing.py" = []
 "timing_store.py" = ["timing.py", "trajectory.py"]
 "transport.py" = ["config.py", "rpc.py", "trajectory.py", "timing_store.py", "transcript"]
-"tests" = ["usage.py", "acp.py", "config.py", "mapping.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "timing.py", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
+"tests" = ["usage.py", "acp.py", "config.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "timing.py", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
 
 [purity]
 "acp.py" = "strict"

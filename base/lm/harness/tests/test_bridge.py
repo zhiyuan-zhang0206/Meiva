@@ -405,7 +405,7 @@ async def test_close_closes_the_session_and_refuses_later_turns() -> None:
     [
         (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
         (Harness.CODEX, "gpt-6.1-sol", "xhigh"),
-        (Harness.ANTIGRAVITY, "gemini-4-argon-low", "low"),
+        (Harness.ANTIGRAVITY, "gemini-4-argon-high", "low"),
     ],
 )
 def test_execution_selection_reaches_the_adapter(
@@ -435,11 +435,11 @@ def test_execution_selection_reaches_the_adapter(
     assert isinstance(session, (ClaudeSession, CodexSession, AgySession))
     session._unsolicited(UnsolicitedOutput(source="probe", text="hello"))
     assert received == [UnsolicitedOutput(source="probe", text="hello")]
-    assert session.config.model == model
     if isinstance(session, AgySession):
-        command = session.config.command(resume=None)
-        assert command[command.index("--model") + 1] == model
+        assert session.config.model == "gemini-4-argon-low"
+        assert session.config.command()[:2] == ("agy", "acp")
     else:
+        assert session.config.model == model
         assert session.config.reasoning_effort == effort
 
 
