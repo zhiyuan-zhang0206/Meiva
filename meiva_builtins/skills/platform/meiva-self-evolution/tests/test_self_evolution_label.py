@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from typing import Any, cast
 
 import pytest
@@ -9,11 +8,7 @@ from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 
 def _load(script: str) -> Any:
-    before = sys.path[:]
-    try:
-        return cast(Any, load_skill_script("platform", "meiva-self-evolution", "scripts", script))
-    finally:
-        sys.path[:] = before
+    return cast(Any, load_skill_script("platform", "meiva-self-evolution", "scripts", script))
 
 
 @pytest.fixture()

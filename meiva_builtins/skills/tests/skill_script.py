@@ -16,5 +16,13 @@ def load_skill_script(*parts: str, name: str | None = None) -> ModuleType:
         raise ImportError(f"cannot load spec for {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    original_path = sys.path
+    saved = list(original_path)
+    original_path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        original_path[:] = saved
+        if sys.path is not original_path:
+            sys.path[:] = saved
     return module

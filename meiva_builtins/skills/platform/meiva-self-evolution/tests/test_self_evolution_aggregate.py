@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -15,15 +14,9 @@ _NOW = datetime(2026, 10, 24, 9, 30, tzinfo=UTC)
 
 @pytest.fixture()
 def aggregate_mod() -> Any:
-    scripts = Path(__file__).resolve().parents[1] / "scripts"
-    before = sys.path[:]
-    sys.path.insert(0, str(scripts))
-    try:
-        yield cast(
-            Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "aggregate.py")
-        )
-    finally:
-        sys.path[:] = before
+    return cast(
+        Any, load_skill_script("platform", "meiva-self-evolution", "scripts", "aggregate.py")
+    )
 
 
 def _gather(
