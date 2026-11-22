@@ -123,8 +123,9 @@ def _ensure_index_present() -> None:
 # declarations, never from the environment.
 from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
+_scratch_home: Path | None = None
 if __name__ == "__main__":
-    _SCRATCH_HOME = enter_scratch_home()
+    _scratch_home = enter_scratch_home()
 # meiva:note
 # A hook runs this file, and the scratch-home rule keeps every `base.*` import below `enter_scratch_home()`: this one is only needed by `_ensure_index_present`, which runs next.
 from base.host.boundary.untyped import object_of  # noqa: E402
@@ -477,6 +478,6 @@ def main(*, home: Path, check: bool = False, out: str | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and _scratch_home is not None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    sys.exit(main(home=_SCRATCH_HOME, check="--check" in sys.argv, out=args[0] if args else None))
+    sys.exit(main(home=_scratch_home, check="--check" in sys.argv, out=args[0] if args else None))
