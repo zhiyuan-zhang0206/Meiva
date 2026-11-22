@@ -933,7 +933,7 @@
   "base/lm/harness/antigravity/reconciliation/tests/test_reconcile.py": 1,
   "base/lm/harness/antigravity/rpc.py": 5,
   "base/lm/harness/antigravity/schedules.py": 1,
-  "base/lm/harness/antigravity/session.py": 4,
+  "base/lm/harness/antigravity/session.py": 2,
   "base/lm/harness/antigravity/subagent_files.py": 2,
   "base/lm/harness/antigravity/subagents.py": 4,
   "base/lm/harness/antigravity/tests/fake_agy.py": 2,

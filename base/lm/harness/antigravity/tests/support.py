@@ -42,8 +42,13 @@ class Harness:
     def prompts(self) -> list[dict[str, Any]]:
         return [frame for frame in self.frames() if frame.get("method") == "session/prompt"]
 
-    def release(self) -> None:
-        (self.cwd / "release").touch()
+    def release(self, name: str = "release") -> None:
+        (self.cwd / name).touch()
+
+    async def wait_for_method(self, method: str) -> None:
+        async with asyncio.timeout(5):
+            while not any(frame.get("method") == method for frame in self.frames()):
+                await asyncio.sleep(0.005)
 
     async def stop(self) -> None:
         await self.session.close(reason="test done")
@@ -55,6 +60,10 @@ async def start(
     *,
     resume: str | None = None,
     unsolicited: UnsolicitedSink | None = None,
+    extra_args: tuple[str, ...] = (),
+    cancel_seconds: float = 1.0,
+    write_seconds: float = 1.0,
+    reply_seconds: float = 30.0,
 ) -> Harness:
     env = {"HOME": str(tmp_path / "home")}
     session = AgySession(
@@ -62,7 +71,10 @@ async def start(
             cwd=tmp_path,
             model="gemini-4-hydrogen-low",
             executable=(sys.executable, str(FAKE_CLI)),
-            cancel_settle_seconds=1,
+            extra_args=extra_args,
+            cancel_settle_seconds=cancel_seconds,
+            prompt_write_seconds=write_seconds,
+            background_reply_seconds=reply_seconds,
         ),
         environ=env,
         binding=SessionBinding(unsolicited=unsolicited),

@@ -129,7 +129,8 @@ class AgyTransport:
         self._conversation_id: str | None = None
         self._request_id = 0
         self._setup: dict[int, asyncio.Future[dict[str, object]]] = {}
-        self._ready_request: int | None = None
+        self._live_request: int | None = None
+        self._close_lock = asyncio.Lock()
         self._session_ready = False
         self._stream_closed = False
         self._rpc_server: AntigravityServer | None = None
@@ -184,9 +185,12 @@ class AgyTransport:
         ]
 
     async def open_session(self, *, resume: str | None) -> str:
-        initialized = await self._request(
-            "initialize", {"protocolVersion": 1, "clientCapabilities": {}}
-        )
+        try:
+            initialized = await self._request(
+                "initialize", {"protocolVersion": 1, "clientCapabilities": {}}
+            )
+        except (TransportClosedError, OSError) as exc:
+            raise await self._startup_error(exc) from exc
         self._require_acp_version(initialized)
         params: dict[str, object] = {"cwd": str(self._config.cwd), "mcpServers": []}
         if resume is not None:
@@ -201,6 +205,19 @@ class AgyTransport:
             "session/set_model", {"sessionId": session_id, "modelId": self._config.model}
         )
         return session_id
+
+    async def _startup_error(self, error: BaseException) -> TransportClosedError:
+        process = self._require_process()
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(self._config.cancel_settle_seconds):
+                await process.wait()
+                _ = await asyncio.wait(self._pumps)
+        minimum = ".".join(map(str, MINIMUM_ACP_VERSION))
+        stderr = "\n".join(self.stderr_tail)
+        return TransportClosedError(
+            f"agy ACP startup failed (requires agy {minimum} or later, exit={process.returncode}): "
+            f"{error}\n{stderr}"
+        )
 
     def _require_acp_version(self, initialized: dict[str, object]) -> None:
         if initialized.get("protocolVersion") != 1:
@@ -222,8 +239,8 @@ class AgyTransport:
         request_id = self.next_request_id()
         future: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
         self._setup[request_id] = future
-        if method == "session/set_model":
-            self._ready_request = request_id
+        if method in ("session/load", "session/new"):
+            self._live_request = request_id
         try:
             async with asyncio.timeout(self._config.startup_request_seconds):
                 self._write({"id": request_id, "method": method, "params": params})
@@ -269,6 +286,20 @@ class AgyTransport:
         if stream is None:
             raise TransportClosedError("agy stdin is missing")
         await stream.drain()
+
+    async def flush_prompt(self) -> None:
+        async with asyncio.timeout(self._config.prompt_write_seconds):
+            await self.flush()
+
+    def buffered_events(self) -> tuple[dict[str, object], ...]:
+        frames: list[dict[str, object]] = []
+        while not self._queue.empty():
+            frame = self._queue.get_nowait()
+            if frame is None:
+                self._queue.put_nowait(None)
+                break
+            frames.append(frame)
+        return tuple(frames)
 
     def _timing_record(self, conversation_id: str | None = None) -> Path | None:
         target = conversation_id or self._conversation_id
@@ -331,14 +362,32 @@ class AgyTransport:
                 raise last_error
             await asyncio.sleep(CANCEL_POLL_SECONDS)
 
-    async def close(self) -> None:
+    async def close(self, *, broken: bool = False) -> None:
+        if broken:
+            self._abort()
+        async with self._close_lock:
+            await self._close_process()
+
+    def _abort(self) -> None:
         process = self._process
-        if process is not None and process.returncode is None:
+        if process is None:
+            return
+        if process.stdin is not None and not process.stdin.is_closing():
+            process.stdin.transport.abort()
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+
+    async def _close_process(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 process.send_signal(signal.SIGINT)
             await self._settle_process(process)
-        if process is not None and process.stdin is not None:
-            process.stdin.close()
+        if process.stdin is not None:
+            if not process.stdin.is_closing():
+                process.stdin.transport.abort()
             with contextlib.suppress(BrokenPipeError, ConnectionResetError):
                 await process.stdin.wait_closed()
         for pump in self._pumps:
@@ -348,8 +397,7 @@ class AgyTransport:
             self._tasks_entered = False
             with contextlib.suppress(ExceptionGroup):
                 await self._tasks.__aexit__(None, None, None)
-        if process is not None:
-            self._returncode = process.returncode
+        self._returncode = process.returncode
         self._process = None
         self._rpc_server = None
         await self._queue.put(None)
@@ -365,12 +413,14 @@ class AgyTransport:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
             return
-        process.terminate()
+        with contextlib.suppress(ProcessLookupError):
+            process.terminate()
         try:
             await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
         except TimeoutError:
-            process.kill()
-            await process.wait()
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await asyncio.wait_for(process.wait(), timeout=self._config.cancel_settle_seconds)
 
     async def _pump_stdout(self, stream: asyncio.StreamReader) -> None:
         try:
@@ -398,7 +448,7 @@ class AgyTransport:
             setup = self._setup.get(request_id)
             if setup is not None:
                 if not setup.done():
-                    if request_id == self._ready_request and "result" in event:
+                    if request_id == self._live_request and "result" in event:
                         self._session_ready = True
                     setup.set_result(event)
                 return

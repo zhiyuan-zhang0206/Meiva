@@ -39,6 +39,27 @@ def test_a_timer_with_a_duration_adds_nothing_after_its_blocking_call_returns() 
         assert not work.pending_at(NOW)
 
 
+def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> None:
+    work = Schedules(reply_wait_seconds=30).tool_used(
+        "timer",
+        "schedule",
+        {"DurationSeconds": 5},
+        turn_id="turn",
+        monotonic_now=100,
+    )
+    work = work.finish_turn("turn", now=NOW, monotonic_now=100)
+    assert work.reply_deadline(NOW + 4) is None
+    assert work.reply_deadline(NOW + 5) == NOW + 35
+    assert work.pending_at(NOW + 6)
+
+    work = work.tool_returned("timer", is_error=False, now=NOW + 8)
+    assert work.pending_at(NOW + 14)
+    assert work.reply_deadline(NOW + 14) == NOW + 38
+    work = work.reply_finished()
+    assert not work.pending_at(NOW + 14)
+    assert work.reply_deadline(NOW + 14) is None
+
+
 def test_a_failed_or_other_tool_call_schedules_nothing() -> None:
     assert not _scheduled({"Prompt": "x"}, is_error=True).pending_at(NOW)
     other = Schedules().tool_used("t", "run_command", {"x": 1})

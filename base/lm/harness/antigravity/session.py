@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -21,6 +20,7 @@ from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, rec
 from base.lm.harness.antigravity.schedules import Schedules
 from base.lm.harness.antigravity.subagent_files import SubagentReader
 from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
+from base.lm.harness.antigravity.timing_refresh import TimingRefresh
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.antigravity.usage import PromptUsage, planner_usage, turn_usage
 from base.lm.harness.base_session import (
@@ -63,10 +63,11 @@ STOP_REASONS = frozenset({"end_turn", "max_tokens", "max_turn_requests", "refusa
 class _PromptTurn:
     ticket: ActiveTurn
     transcript_offset: int
+    background_overlap: bool = False
     keys: list[str] = field(default_factory=list[str])
     requests: dict[int, str] = field(default_factory=dict[int, str])
     latest: int = 0
-    reports: list[PromptUsage] = field(default_factory=list[PromptUsage])
+    reports: dict[int, PromptUsage] = field(default_factory=dict[int, PromptUsage])
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     interrupted: bool = False
 
@@ -108,18 +109,22 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._factory = transport_factory or self._default_transport
         self._transport: AgyTransport | None = None
         self._transport_failed = False
-        self._dispatch_lock = asyncio.Lock()
+        self._retirement: asyncio.Task[None] | None = None
+        self._retirement_error: Exception | None = None
+        self._background_changed = asyncio.Event()
         self._prompt_turn: _PromptTurn | None = None
         self._tools: dict[str, ToolCall] = {}
         self._text: list[str] = []
         self._idle_text: list[str] = []
         self._adopted: set[str] = set()
-        self._schedules = Schedules(max_timer_seconds=config.max_schedule_timer_seconds)
+        self._schedules = Schedules(
+            max_timer_seconds=config.max_schedule_timer_seconds,
+            reply_wait_seconds=config.background_reply_seconds,
+        )
         self._subagents = SubagentReader(self._home)
-        self._timing_refresh_interval = timing_refresh_interval
-        self._timing_refresh_task: asyncio.Task[None] | None = None
-        self._timing_refresh_pending = False
-        self._timing_refresh_last: float | None = None
+        self._timing_refresh = TimingRefresh(
+            clock, self._spawn, agent_id=self.agent_id, interval=timing_refresh_interval
+        )
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -158,11 +163,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             await transport.close()
             raise SessionClosedError("session is closed")
         self._transport_failed = False
+        self._retirement = None
         self._session_id = session_id
         self._model = self.config.model
         self._transport = transport
         self._emit(SessionStarted(session_id, self._model, str(self.config.cwd)))
         self._bind()
+        for frame in transport.buffered_events():
+            self._handle(transport, frame)
         self._reader = self._spawn(self._read_loop(transport, generation))
         _ = self._spawn(self._watch(transport, generation))
         return transport
@@ -171,19 +179,27 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             return
         self._closed = True
-        self._cancel_timing_refresh()
+        self._timing_refresh.cancel()
         if self._prompt_turn is not None:
             self._prompt_turn.finished.set()
+        if (ticket := self._active) is not None:
+            if ticket.started_at is None:
+                self._apply(self._ledger.rejected(ticket.input_key, reason))
+            ticket.interrupt_ready.set()
+        self._background_changed.set()
         self._active = self._prompt_turn = None
         transport, self._transport = self._transport, None
-        await self._close_tasks()
-        if transport is not None:
-            await self._close_transport(transport)
-        self._finish_close(reason)
+        try:
+            await self._await_retirement()
+            if transport is not None and self._retirement is None:
+                await self._close_transport(transport)
+        finally:
+            await self._close_tasks()
+            self._finish_close(reason)
 
-    async def _close_transport(self, transport: AgyTransport) -> None:
+    async def _close_transport(self, transport: AgyTransport, *, broken: bool = False) -> None:
         watched = watch_tree(self._probe, transport.pid)
-        await transport.close()
+        await transport.close(broken=broken)
         await settle_close(
             self._probe,
             watched,
@@ -209,50 +225,94 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
-        batch = validated_batch(inputs)
-        async with self._dispatch_lock:
+        for entry in validated_batch(inputs):
+            transport = await self._dispatch(entry)
+            if transport is not None:
+                await self._flush_prompt(transport)
             if self._closed:
                 raise SessionClosedError("session is closed")
-            for entry in batch:
-                await self._deliver_one(entry)
+            if self._transport_failed:
+                return
 
-    async def _deliver_one(self, entry: HarnessInput) -> None:
+    async def _dispatch(self, entry: HarnessInput) -> AgyTransport | None:
+        await self._await_background_reply()
         self._ledger = self._ledger.sent(entry.key)
         ticket = self._active
         if ticket is None:
             self._flush_idle_text()
             ticket = self._start_input_turn(entry)
             await ticket.interrupt_ready.wait()
-            return
+            return (
+                self._transport
+                if ticket.started_at is not None and not self._transport_failed
+                else None
+            )
         turn, transport = self._prompt_turn, self._transport
         if turn is None or transport is None or ticket.interrupt_requested:
             self._apply(self._ledger.rejected(entry.key, "agy is not accepting input"))
-            return
+            return None
         try:
             self._send_prompt(transport, turn, entry)
-            await transport.flush()
         except (TransportClosedError, OSError) as exc:
-            self._apply(self._ledger.rejected(entry.key, f"agy ACP write failed: {exc}"))
+            self._fail_transport(transport, exc)
+        return transport
+
+    async def _await_background_reply(self) -> None:
+        while not self._closed:
+            self._background_changed.clear()
+            deadline = self._schedules.reply_deadline(self._clock.now().timestamp())
+            if deadline is None:
+                return
+            try:
+                async with asyncio.timeout(max(0.0, deadline - self._clock.now().timestamp())):
+                    await self._background_changed.wait()
+                if self._transport_failed:
+                    raise SessionClosedError(
+                        "agy ACP session failed while waiting for a background reply"
+                    )
+            except TimeoutError as exc:
+                if self._transport is not None:
+                    self._fail_transport(
+                        self._transport, RuntimeError("agy ACP background reply timed out")
+                    )
+                raise SessionClosedError("agy ACP background reply timed out") from exc
+        raise SessionClosedError("session is closed")
+
+    async def _flush_prompt(self, transport: AgyTransport) -> None:
+        if self._transport is not transport or self._transport_failed or self._closed:
+            return
+        try:
+            await transport.flush_prompt()
+        except (TimeoutError, TransportClosedError, OSError) as exc:
+            self._fail_transport(
+                transport, RuntimeError(f"agy ACP prompt write failed: {exc or type(exc).__name__}")
+            )
 
     async def _begin(self, ticket: ActiveTurn) -> None:
-        ticket.started_at = self._monotonic()
-        key = ticket.input_key
+        transport = self._transport
         try:
-            transport = self._transport
             if transport is None or self._transport_failed:
-                if transport is not None:
-                    await self._close_transport(transport)
+                await self._await_retirement()
                 transport = await self._open_transport(self._session_id)
+            await self._await_background_reply()
             self._baseline = self._tool_processes(transport)
             turn = _PromptTurn(ticket, len(self._transcript()))
             self._prompt_turn = turn
-            self._send_prompt(transport, turn, HarnessInput(key, ticket.blocks), starts_turn=True)
-            ticket.interrupt_ready.set()
-            await transport.flush()
+            ticket.started_at = self._monotonic()
+            self._send_prompt(
+                transport, turn, HarnessInput(ticket.input_key, ticket.blocks), starts_turn=True
+            )
         except (OSError, RuntimeError, TimeoutError) as exc:
-            self._apply(self._ledger.rejected(key, f"agy ACP write failed: {exc}"))
             if self._active is ticket:
-                self._fail_prompt_turn(exc)
+                if transport is not None and self._prompt_turn is not None:
+                    self._fail_transport(transport, exc)
+                else:
+                    self._apply(
+                        self._ledger.rejected(ticket.input_key, f"agy ACP startup failed: {exc}")
+                    )
+                    self._fail_turn(ticket, exc)
+        finally:
+            ticket.interrupt_ready.set()
 
     def _send_prompt(
         self,
@@ -263,11 +323,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         starts_turn: bool = False,
     ) -> None:
         request = transport.next_request_id()
-        transport.prompt(request, prompt_blocks(entry.key, entry.blocks))
         turn.keys.append(entry.key)
         turn.requests[request] = entry.key
         turn.latest = request
         self._ledger = self._ledger.scoped(entry.key, turn.ticket.turn_id)
+        transport.prompt(request, prompt_blocks(entry.key, entry.blocks))
         if starts_turn:
             self._emit(
                 TurnStarted(turn.ticket.turn_id, TurnOrigin.INPUT, (entry.key,), self.generation)
@@ -279,28 +339,27 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         return self._probe.tool_processes(pid) if pid is not None else {}
 
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
-        async with self._dispatch_lock:
-            ticket = await self._interrupt_target(turn_id)
-            transport, turn = self._transport, self._prompt_turn
-            pid = transport.pid if transport is not None else None
-            if ticket is None or turn is None or transport is None or pid is None:
-                return unobserved_cancel(
-                    turn_id=turn_id, cli_pid=pid, cli_alive=transport.alive if transport else None
-                )
-            observed = self._tool_processes(transport)
-            spawned = {pid_: cmd for pid_, cmd in observed.items() if pid_ not in self._baseline}
-            started = self._monotonic()
-            try:
-                transport.cancel()
-            except TransportClosedError:
-                return unobserved_cancel(
-                    turn_id=ticket.turn_id, cli_pid=pid, cli_alive=transport.alive
-                )
-        # A late response still owns the foreground. A new prompt would replace that request.
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(turn.finished.wait(), timeout=self.config.cancel_settle_seconds)
+        ticket = await self._interrupt_target(turn_id)
+        transport, turn = self._transport, self._prompt_turn
+        pid = transport.pid if transport is not None else None
+        if ticket is None or turn is None or transport is None or pid is None:
+            return unobserved_cancel(
+                turn_id=turn_id, cli_pid=pid, cli_alive=transport.alive if transport else None
+            )
+        observed = self._tool_processes(transport)
+        spawned = {pid_: cmd for pid_, cmd in observed.items() if pid_ not in self._baseline}
+        started = self._monotonic()
+        try:
+            transport.cancel()
+            async with asyncio.timeout(self.config.cancel_settle_seconds):
+                await turn.finished.wait()
+        except (TimeoutError, OSError, TransportClosedError) as exc:
+            self._fail_transport(
+                transport, RuntimeError(f"agy ACP cancel unconfirmed: {exc or type(exc).__name__}")
+            )
         interrupt_ms = (self._monotonic() - started) * 1000
         if not turn.interrupted:
+            await self._await_retirement()
             return unobserved_cancel(
                 turn_id=ticket.turn_id,
                 cli_pid=pid,
@@ -332,21 +391,45 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         error: BaseException = SessionClosedError("agy ACP stream ended")
         try:
             async for payload in transport.events():
-                if self._transport is transport and self._ledger.accepts(generation):
+                if (
+                    self._transport is transport
+                    and not self._transport_failed
+                    and self._ledger.accepts(generation)
+                ):
                     self._handle(transport, payload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             error = exc
         finally:
-            if self._transport is transport:
-                self._flush_idle_text()
-                self._transport_failed = True
-                self._cancel_timing_refresh()
-                self._lose_schedules()
-                self._tools.clear()
-                self._emit(SessionFailed(error=str(error)))
-                self._fail_prompt_turn(error)
+            if not self._closed:
+                self._fail_transport(transport, error)
+
+    def _fail_transport(self, transport: AgyTransport, error: BaseException) -> None:
+        if self._transport is not transport or self._transport_failed or self._closed:
+            return
+        self._transport_failed = True
+        self._flush_idle_text()
+        self._timing_refresh.cancel()
+        self._lose_schedules()
+        self._background_changed.set()
+        self._tools.clear()
+        self._emit(SessionFailed(error=str(error)))
+        self._fail_prompt_turn(error)
+        self._retirement = self._spawn(self._retire_transport(transport))
+
+    async def _retire_transport(self, transport: AgyTransport) -> None:
+        try:
+            await self._close_transport(transport, broken=True)
+        except (RuntimeError, OSError, TimeoutError) as exc:
+            self._retirement_error = exc
+            self._emit(SessionFailed(error=str(exc)))
+
+    async def _await_retirement(self) -> None:
+        if self._retirement is not None:
+            await asyncio.shield(self._retirement)
+        if self._retirement_error is not None:
+            raise self._retirement_error
 
     def _handle(self, transport: AgyTransport, payload: dict[str, object]) -> None:
         method = payload.get("method")
@@ -379,30 +462,43 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _handle_update(self, update: dict[str, object]) -> None:
         turn = self._prompt_turn
+        background = bool(self._schedules.replies)
         kind = update.get("sessionUpdate")
         text = content_text(update.get("content"))
         if kind == "user_message_chunk" and text and turn is not None:
             self._ack_markers(turn, {text.split("\n", 1)[0]})
         elif kind == "agent_message_chunk" and text:
-            if turn is None:
-                self._idle_text.append(text)
-            else:
-                self._flush_thoughts(turn.ticket)
-                self._text.append(text)
-                self._emit(TextDelta(turn.ticket.turn_id, text))
-        elif kind == "agent_thought_chunk" and text and turn is not None:
-            if self._text:
-                self._flush_text(turn.ticket)
-            turn.ticket.thoughts.append(text)
-            self._emit(ReasoningDelta(turn.ticket.turn_id, text))
+            self._record_text(None if background else turn, text)
+        elif kind == "agent_thought_chunk" and text and turn is not None and not background:
+            self._record_thought(turn.ticket, text)
         elif kind in ("tool_call", "tool_call_update"):
-            self._tool_update(turn, update)
+            self._tool_update(None if background else turn, update)
         elif kind == "usage_update":
-            if turn is None:
-                self._flush_idle_text()
-            else:
-                self._flush_text(turn.ticket)
-            self.request_timing_refresh()
+            self._finish_output_batch(turn, background=background)
+
+    def _record_text(self, turn: _PromptTurn | None, text: str) -> None:
+        if turn is None:
+            self._idle_text.append(text)
+            return
+        self._flush_thoughts(turn.ticket)
+        self._text.append(text)
+        self._emit(TextDelta(turn.ticket.turn_id, text))
+
+    def _record_thought(self, ticket: ActiveTurn, text: str) -> None:
+        if self._text:
+            self._flush_text(ticket)
+        ticket.thoughts.append(text)
+        self._emit(ReasoningDelta(ticket.turn_id, text))
+
+    def _finish_output_batch(self, turn: _PromptTurn | None, *, background: bool) -> None:
+        if turn is not None and not background:
+            self._flush_text(turn.ticket)
+        elif self._idle_text:
+            self._flush_idle_text()
+            if background:
+                self._schedules = self._schedules.reply_finished()
+                self._schedule_changed()
+        self.request_timing_refresh()
 
     def _tool_update(self, turn: _PromptTurn | None, update: dict[str, object]) -> None:
         tool_id = update.get("toolCallId")
@@ -465,7 +561,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     self._fail_prompt_turn(RuntimeError(error))
             return
         if (usage := PromptUsage.from_result(result.get("usage"))) is not None:
-            turn.reports.append(usage)
+            turn.reports[request] = usage
         if request != turn.latest:
             return
         if reason != "cancelled":
@@ -496,10 +592,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._flush_text(ticket)
         self._show_subagents(ticket.turn_id)
         self._apply(self._ledger.lose_unsettled(ticket.turn_id))
-        steps = planner_usage(rows[turn.transcript_offset :])
-        usage = turn_usage(turn.reports, steps)
+        usage, steps = self._bill_turn(turn, rows)
         self._totals = self._totals.with_turn(usage, None)
         turn.interrupted = reason == "cancelled"
+        if turn.interrupted:
+            self._cancel_tools(ticket.turn_id)
         subtype = "interrupted" if turn.interrupted else "denied" if ticket.denials else "success"
         self._emit(
             TurnCompleted(
@@ -525,18 +622,47 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self.request_timing_refresh()
         now = self._clock.now().timestamp()
         self._schedules = self._schedules.finish_turn(
-            ticket.turn_id, now=now, monotonic_now=self._monotonic()
+            ticket.turn_id, now=now, monotonic_now=self._monotonic(), cancelled=turn.interrupted
         )
-        self._persist_background(self._schedules.pending_at(now))
+        self._schedule_changed()
         self._prompt_turn = None
         self._complete(ticket)
         turn.finished.set()
+
+    def _bill_turn(
+        self, turn: _PromptTurn, rows: list[dict[str, object]]
+    ) -> tuple[Usage, tuple[Usage, ...]]:
+        final = turn.ticket.parts[-1] if turn.ticket.parts else ""
+        steps = (
+            ()
+            if turn.background_overlap
+            else planner_usage(rows[turn.transcript_offset :], turn.keys, final)
+        )
+        bill = turn_usage(
+            [turn.reports[request] for request in sorted(turn.reports)],
+            steps,
+            request_count=len(turn.keys),
+            terminal_reported=turn.latest in turn.reports,
+        )
+        if bill.uncertain:
+            logger.warning(
+                "Antigravity ACP usage is incomplete or ambiguous for {turn_id}",
+                turn_id=turn.ticket.turn_id,
+            )
+        return bill.usage, steps
+
+    def _cancel_tools(self, turn_id: str) -> None:
+        for tool_id, call in tuple(self._tools.items()):
+            if call.use.turn_id == turn_id:
+                del self._tools[tool_id]
+                result = ToolResult(turn_id, tool_id, is_error=True, content="Cancelled")
+                self._emit(result)
+                self._track_schedule(result)
 
     def _fail_prompt_turn(self, exc: BaseException) -> None:
         turn, self._prompt_turn = self._prompt_turn, None
         self._text.clear()
         if turn is not None:
-            self._apply(self._ledger.lose_unsettled(turn.ticket.turn_id))
             turn.finished.set()
         self._fail_active(exc)
 
@@ -547,6 +673,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         while self._ledger.accepts(generation) and self._live_transport() is transport:
             await self._clock.asleep(TRANSCRIPT_POLL_SECONDS)
             if self._live_transport() is not transport:
+                return
+            now = self._clock.now().timestamp()
+            deadline = self._schedules.reply_deadline(now)
+            if deadline is not None and deadline <= now:
+                self._fail_transport(transport, RuntimeError("agy ACP background reply timed out"))
                 return
             turn = self._prompt_turn
             if turn is not None:
@@ -598,19 +729,29 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 content=event.content,
                 monotonic_now=mono,
             )
+        if len(self._schedules.replies) > len(before.replies) and self._prompt_turn is not None:
+            self._flush_text(self._prompt_turn.ticket)
+            self._prompt_turn.background_overlap = True
         if self._schedules is not before:
-            self._persist_background(self._schedules.pending_at(self._clock.now().timestamp()))
+            self._schedule_changed()
+
+    def _schedule_changed(self) -> None:
+        self._persist_background(self._schedules.pending_at(self._clock.now().timestamp()))
+        self._background_changed.set()
 
     def _lose_schedules(self) -> None:
         lost = self._schedules.pending_at(self._clock.now().timestamp())
-        self._schedules = Schedules(max_timer_seconds=self.config.max_schedule_timer_seconds)
+        self._schedules = Schedules(
+            max_timer_seconds=self.config.max_schedule_timer_seconds,
+            reply_wait_seconds=self.config.background_reply_seconds,
+        )
         self._lose_background(lost)
 
     def background_work(self) -> BackgroundWork:
         if self._closed:
             return BackgroundWork()
         now = self._clock.now().timestamp()
-        return BackgroundWork((*self._schedules.pending_at(now), *self._observed_turn_items()))
+        return BackgroundWork(self._schedules.pending_at(now))
 
     def _live_transport(self) -> AgyTransport | None:
         t = self._transport
@@ -646,77 +787,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             ticket.turn_id, now=self._clock.now().timestamp(), monotonic_now=self._monotonic()
         )
 
-    # meiva:note
-    # Single-flight, trailing-throttled background `GetCascadeTrajectory` collector for native
-    # reasoning timing. Triggered by ACP usage updates, turn completion, and newly persisted
-    # `PLANNER_RESPONSE` rows while reactive-IDLE
-    # so `meiva-thinking-timing.json` stays current without blocking live timeline delivery or
-    # piling up concurrent RPCs.
-    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
     def request_timing_refresh(self) -> None:
         transport = self._live_transport()
-        if transport is None or not transport.has_timing_record(conversation_id=self._session_id):
-            return
-        self._timing_refresh_pending = True
-        task = self._timing_refresh_task
-        if task is not None and not task.done():
-            return
-        self._timing_refresh_task = self._spawn(
-            self._run_timing_refresh(transport, self.generation)
-        )
-
-    def _cancel_timing_refresh(self) -> None:
-        self._timing_refresh_pending = False
-        task, self._timing_refresh_task = self._timing_refresh_task, None
-        if task is not None and not task.done() and task is not asyncio.current_task():
-            _ = task.cancel()
-
-    def _timing_refresh_wait_seconds(self) -> float:
-        last = self._timing_refresh_last
-        return (
-            0.0
-            if last is None
-            else max(0.0, self._timing_refresh_interval - (self._monotonic() - last))
-        )
-
-    def _timing_refresh_active(self, transport: AgyTransport, generation: int) -> bool:
-        return (
-            self._live_transport() is transport
-            and self._ledger.accepts(generation)
-            and self._session_id is not None
-        )
-
-    async def _run_timing_refresh(self, transport: AgyTransport, generation: int) -> None:
-        try:
-            while self._timing_refresh_pending and self._timing_refresh_active(
-                transport, generation
-            ):
-                wait = self._timing_refresh_wait_seconds()
-                if wait > 0.0:
-                    await self._clock.asleep(wait)
-                    if not self._timing_refresh_active(transport, generation):
-                        return
-                self._timing_refresh_pending = False
-                self._timing_refresh_last = self._monotonic()
-                try:
-                    _ = await transport.trajectory(conversation_id=self._session_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    if not self._timing_refresh_active(transport, generation):
-                        return
-                    logger.warning(
-                        "agent {agent_id}: background timing refresh failed ({error}); "
-                        "provider execution is unchanged",
-                        event="harness_timing_collection_failed",
-                        phase="refresh",
-                        agent_id=self.agent_id,
-                        error=type(exc).__name__,
-                    )
-                    return
-        finally:
-            if self._timing_refresh_task is asyncio.current_task():
-                self._timing_refresh_task = None
+        if transport is not None:
+            self._timing_refresh.request(transport, lambda: self._live_transport() is transport)
 
 
 __all__ = ["EVENT_STREAM_END", "ActiveTurn", "AgySession", "CancelReport", "SessionClosedError"]

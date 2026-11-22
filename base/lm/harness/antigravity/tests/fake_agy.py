@@ -85,7 +85,19 @@ class LocalRPC(BaseHTTPRequestHandler):
         pass
 
 
-def finish_steer(request: int) -> None:
+def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
+    return {
+        "type": "PLANNER_RESPONSE",
+        "status": "DONE",
+        "input_tokens": tokens,
+        "cache_read_tokens": 30,
+        "output_tokens": 3,
+        "content": text,
+    }
+
+
+def finish_steer(request: int, transcript: Path) -> None:
+    record(transcript, planner_row("ORIGINAL_DONE\nSTEER_DONE"))
     update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     message("ORIGINAL_DONE\n")
     message("STEER_DONE")
@@ -93,10 +105,41 @@ def finish_steer(request: int) -> None:
 
 
 def finish_background() -> None:
-    update("tool_call_update", toolCallId="timer", status="completed")
     message("BACK")
     message("GROUND")
     update("usage_update", used=50, size=1000)
+
+
+def trigger_background() -> None:
+    update("tool_call_update", toolCallId="timer", status="completed")
+    after_release(Path("release"), finish_background)
+
+
+def beginning_of_tool() -> None:
+    update(
+        "tool_call",
+        toolCallId="tool-1",
+        name="run_command",
+        status="in_progress",
+        rawInput={"CommandLine": "sleep 8"},
+    )
+
+
+def foreground_after_cancel(request: int) -> None:
+    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="STALE")
+    update("tool_call", toolCallId="tool-2", name="run_command", status="completed")
+    message("OK")
+    result(request)
+
+
+def hold_prompt(transcript: Path, command: str) -> None:
+    record(transcript, planner_row(None))
+    beginning_of_tool()
+    if command == "reactive":
+        message("Parked until the tool completes")
+        update("usage_update", used=50, size=1000)
+    if command == "hold-no-stdin":
+        threading.Event().wait()
 
 
 def handle_prompt(
@@ -112,7 +155,8 @@ def handle_prompt(
         assert original is not None
         result(original)
         original = None
-        after_release(Path("release"), lambda request=request: finish_steer(request))
+        gate = "release-steer" if "--test-overlap" in sys.argv else "release"
+        after_release(Path(gate), lambda: finish_steer(request, transcript))
     record(
         transcript,
         {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
@@ -120,20 +164,11 @@ def handle_prompt(
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
     if command in {"hold", "reactive", "background", "permission"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
-    if command in {"hold", "reactive", "steer"}:
-        if command != "steer":
-            original = request
-            update(
-                "tool_call",
-                toolCallId="tool-1",
-                name="run_command",
-                status="in_progress",
-                rawInput={"CommandLine": "sleep 8"},
-            )
-        if command == "reactive":
-            message("Parked until the tool completes")
-            update("usage_update", used=50, size=1000)
+    if command == "steer":
         return original, permission_prompt
+    if command in {"hold", "reactive", "hold-no-stdin"}:
+        hold_prompt(transcript, command)
+        return request, permission_prompt
     if command == "background":
         update(
             "tool_call",
@@ -144,7 +179,7 @@ def handle_prompt(
         )
         message("TIMER_SET")
         result(request)
-        after_release(Path("release"), finish_background)
+        after_release(Path("release-tool"), trigger_background)
     elif command == "permission":
         permission_prompt = request
         update("tool_call", toolCallId="denied", name="run_command", status="pending")
@@ -159,6 +194,16 @@ def handle_prompt(
                 },
             }
         )
+    elif command == "after-cancel":
+        foreground_after_cancel(request)
+    elif command == "eof":
+        sys.exit(0)
+    elif command == "noisy-usage":
+        record(transcript, {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1"})
+        record(transcript, planner_row("unrelated background", tokens=2000))
+        record(transcript, planner_row("incomplete foreground", tokens=1))
+        message("OK")
+        result(request)
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
@@ -184,6 +229,18 @@ def raw_peer(*, version: str, large_frames: bool) -> None:
         frame({"blob": "x" * (10 * 1024**2)})
         _ = sys.stdout.write(json.dumps({"jsonrpc": "2.0", "tail": "end"}))
         sys.stdout.flush()
+
+
+def setup_session(method: str, request: int) -> None:
+    if method == "session/load":
+        if "--test-stall-load" in sys.argv:
+            threading.Event().wait()
+        message("REPLAYED_OLD_TEXT")
+        update("usage_update", used=1, size=10)
+    frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
+    if method == "session/load" and "--test-live-load" in sys.argv:
+        message("LIVE_AFTER_LOAD")
+        update("usage_update", used=2, size=10)
 
 
 def main() -> None:
@@ -212,14 +269,11 @@ def main() -> None:
                 }
             )
         elif method in ("session/new", "session/load"):
-            if method == "session/load":
-                message("REPLAYED_OLD_TEXT")
-                update("usage_update", used=1, size=10)
-            frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
+            setup_session(method, request)
         elif method == "session/set_model":
             frame({"id": request, "result": {}})
         elif method == "session/cancel":
-            if original is not None:
+            if original is not None and "--test-ignore-cancel" not in sys.argv:
                 result(original, "cancelled", usage=False)
                 original = None
         elif method == "session/prompt":
@@ -232,7 +286,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if "--test-legacy" in sys.argv:
+    if "--test-no-acp" in sys.argv:
+        sys.stderr.write("unknown command acp\n")
+        sys.exit(2)
+    elif "--test-legacy" in sys.argv:
         raw_peer(version="1.5.6", large_frames=False)
     elif "--test-large-frames" in sys.argv:
         raw_peer(version="1.5.14", large_frames=True)

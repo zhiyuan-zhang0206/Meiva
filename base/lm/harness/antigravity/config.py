@@ -4,7 +4,10 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.lm.harness.antigravity.schedules import UNBOUNDED_SCHEDULE_SECONDS
+from base.lm.harness.antigravity.schedules import (
+    BACKGROUND_REPLY_SECONDS,
+    UNBOUNDED_SCHEDULE_SECONDS,
+)
 
 # meiva:note
 # The full model id from `agy models`, never an alias or a display name: the CLI
@@ -39,6 +42,8 @@ class AntigravityConfig:
     extra_args: tuple[str, ...] = ()
     cancel_settle_seconds: float = 5.0
     startup_request_seconds: float = 30.0
+    prompt_write_seconds: float = 5.0
+    background_reply_seconds: float = BACKGROUND_REPLY_SECONDS
     max_buffered_events: int = 256
     # meiva:note
     # Upper bound for extending the foreground stall-watchdog silence floor for one explicit timed

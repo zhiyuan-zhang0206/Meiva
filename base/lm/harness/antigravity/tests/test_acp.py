@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 from pathlib import Path
+
+import pytest
 
 from base.lm.harness.antigravity.acp import input_marker
 from base.lm.harness.antigravity.tests.support import start
 from base.lm.harness.antigravity.timing_store import timing_path
-from base.lm.harness.antigravity.usage import PromptUsage, turn_usage
+from base.lm.harness.antigravity.usage import PromptUsage, planner_usage, turn_usage
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
 from base.lm.harness.events import (
     AssistantText,
     InputInContext,
+    InputLost,
+    InputReceived,
+    InputRejected,
     InterruptConfirmed,
+    SessionFailed,
     ToolResult,
     ToolUse,
     TurnCompleted,
@@ -19,6 +27,7 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
+from base.lm.harness.session import SessionClosedError
 
 
 async def test_one_prompt_preserves_ordered_text_and_images_and_recovers_its_receipt(
@@ -74,9 +83,13 @@ async def test_superseded_result_leaves_same_turn_and_tool_running(tmp_path: Pat
 async def test_cancel_keeps_process_and_next_turn_works(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        timer_turn = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
         pid = harness.session.cli_pid
         await harness.session.deliver([HarnessInput.of("hold", "hold")])
-        tool = await harness.wait_for(lambda e: isinstance(e, ToolUse))
+        tool = await harness.wait_for(
+            lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
+        )
         report = await harness.session.interrupt(turn_id=tool.turn_id)
         assert report.cli_alive and report.cli_pid == pid and report.settled
         cancel = [frame for frame in harness.frames() if frame.get("method") == "session/cancel"]
@@ -84,18 +97,38 @@ async def test_cancel_keeps_process_and_next_turn_works(tmp_path: Path) -> None:
             {"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "conv-acp"}}
         ]
         await harness.wait_for(lambda e: isinstance(e, InterruptConfirmed))
-        await harness.session.deliver([HarnessInput.of("next", "next")])
+        assert harness.session.background_work().items
+        harness.release("release-tool")
+        timer = await harness.wait_for(
+            lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer"
+        )
+        assert timer.turn_id == timer_turn.turn_id and not timer.is_error
+        harness.release()
+        await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        await harness.session.deliver([HarnessInput.of("next", "after-cancel")])
         done = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id != tool.turn_id
+            lambda e: (
+                isinstance(e, TurnCompleted) and e.turn_id not in {tool.turn_id, timer_turn.turn_id}
+            )
         )
         assert done.text == "OK" and harness.session.cli_pid == pid
+        assert [
+            event
+            for event in harness.events
+            if isinstance(event, ToolResult) and event.tool_use_id != "timer"
+        ] == [
+            ToolResult(tool.turn_id, "tool-1", is_error=True, content="Cancelled"),
+            ToolResult(done.turn_id, "tool-2", is_error=False, content=""),
+        ]
     finally:
         await harness.stop()
 
 
 async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_path: Path) -> None:
     sink: list[UnsolicitedOutput] = []
-    harness = await start(tmp_path, resume="conv-acp", unsolicited=sink.append)
+    harness = await start(
+        tmp_path, resume="conv-acp", unsolicited=sink.append, extra_args=("--test-live-load",)
+    )
     try:
         await harness.session.deliver([HarnessInput.of("new", "new")])
         await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
@@ -107,7 +140,7 @@ async def test_load_discards_replay_and_sets_model_and_effort_before_prompt(tmp_
             "session/prompt",
         ]
         assert frames[2]["params"] == {"sessionId": "conv-acp", "modelId": "gemini-4-hydrogen-low"}
-        assert sink == []
+        assert [event.text for event in sink] == ["LIVE_AFTER_LOAD"]
     finally:
         await harness.stop()
 
@@ -120,11 +153,72 @@ async def test_background_completion_and_answer_arrive_while_idle(tmp_path: Path
         done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
         assert done.text == "TIMER_SET"
         assert harness.session.background_work().items
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+        assert harness.session.background_work().items
+        joined = asyncio.Event()
+
+        async def send() -> None:
+            joined.set()
+            await harness.session.deliver([HarnessInput.of("next", "next")])
+
+        async with asyncio.TaskGroup() as tasks:
+            delivery = tasks.create_task(send())
+            await joined.wait()
+            assert not delivery.done()
+            assert len(harness.prompts()) == 1
+            harness.release()
+        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        new = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id != done.turn_id
+        )
+        assert background.text == "BACKGROUND" and sink == [background]
+        assert new.text == "OK" and new.usage == Usage(40, 5, 0, 30)
+        assert not harness.session.background_work().items
+        assert len(harness.prompts()) == 2
+    finally:
+        await harness.stop()
+
+
+async def test_detached_timer_reply_stays_out_of_an_already_active_turn(tmp_path: Path) -> None:
+    harness = await start(tmp_path, extra_args=("--test-overlap",))
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        tool = await harness.wait_for(
+            lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
+        )
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
         harness.release()
         background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
-        assert background.text == "BACKGROUND" and sink == [background]
-        assert not harness.session.background_work().items
-        assert ToolResult(done.turn_id, "timer", False, "") in harness.events
+        assert background.text == "BACKGROUND"
+        assert harness.session.active_turn_id == tool.turn_id
+        await harness.session.deliver([HarnessInput.of("steer", "steer")])
+        harness.release("release-steer")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
+        )
+        assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
+        assert done.usage == Usage(40, 5, 0, 30)
+    finally:
+        await harness.stop()
+
+
+async def test_stuck_background_reply_retires_before_sending_the_waiting_input(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, reply_seconds=0.25)
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+        async with asyncio.timeout(2):
+            with pytest.raises(SessionClosedError, match="background reply"):
+                await harness.session.deliver([HarnessInput.of("next", "next")])
+        await harness.wait_for(lambda e: isinstance(e, SessionFailed))
         assert len(harness.prompts()) == 1
     finally:
         await harness.stop()
@@ -196,11 +290,122 @@ async def test_jsonrpc_error_faults_only_its_turn(tmp_path: Path) -> None:
         await harness.stop()
 
 
+@pytest.mark.parametrize("cancel_while_blocked", [False, True])
+async def test_large_steer_to_peer_that_stops_reading_retires_the_generation(
+    tmp_path: Path, cancel_while_blocked: bool
+) -> None:
+    harness = await start(
+        tmp_path,
+        cancel_seconds=0.1,
+        write_seconds=3.0 if cancel_while_blocked else 0.1,
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "hold-no-stdin")])
+        tool = await harness.wait_for(lambda e: isinstance(e, ToolUse))
+        image = ImageBlock("image/png", base64.b64encode(b"x" * (2 * 1024**2)).decode())
+        async with asyncio.timeout(2), asyncio.TaskGroup() as tasks:
+            sending = tasks.create_task(
+                harness.session.deliver([HarnessInput.of("large", "steer", [image])])
+            )
+            await harness.wait_for(lambda e: isinstance(e, InputReceived) and e.key == "large")
+            assert not sending.done()
+            if cancel_while_blocked:
+                report = await harness.session.interrupt(turn_id=tool.turn_id)
+                assert report.cli_alive is False and report.settled is None
+        failure = await harness.wait_for(lambda e: isinstance(e, SessionFailed))
+        assert (
+            "cancel unconfirmed" if cancel_while_blocked else "prompt write failed"
+        ) in failure.error
+        assert not any(
+            isinstance(e, (InputRejected, InputLost)) and e.key == "large" for e in harness.events
+        )
+    finally:
+        await harness.stop()
+
+
+async def test_cancel_timeout_with_responsive_stdin_retires_the_generation(tmp_path: Path) -> None:
+    harness = await start(tmp_path, cancel_seconds=0.1, extra_args=("--test-ignore-cancel",))
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        tool = await harness.wait_for(lambda e: isinstance(e, ToolUse))
+        report = await harness.session.interrupt(turn_id=tool.turn_id)
+        assert report.cli_alive is False and report.settled is None
+        assert harness.session.active_turn_id is None
+        await harness.wait_for_method("session/cancel")
+        await harness.session.deliver([HarnessInput.of("next", "next")])
+        reply = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert reply.text == "OK" and reply.generation == 2
+    finally:
+        await harness.stop()
+
+
+async def test_close_wakes_the_first_delivery_waiting_on_reopen(tmp_path: Path) -> None:
+    harness = await start(tmp_path, extra_args=("--test-stall-load",), cancel_seconds=0.1)
+    try:
+        await harness.session.deliver([HarnessInput.of("eof", "eof")])
+        await harness.wait_for(lambda e: isinstance(e, SessionFailed))
+        sending = asyncio.create_task(harness.session.deliver([HarnessInput.of("reopen", "next")]))
+        await harness.wait_for_method("session/load")
+        assert not sending.done()
+        await harness.stop()
+        with pytest.raises(SessionClosedError, match="session is closed"):
+            await asyncio.wait_for(sending, timeout=2)
+        await harness.wait_for(lambda e: isinstance(e, InputRejected) and e.key == "reopen")
+    finally:
+        await harness.stop()
+
+
+async def test_single_prompt_usage_wins_over_unrelated_and_incomplete_rows(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        await harness.session.deliver([HarnessInput.of("metered", "noisy-usage")])
+        done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert done.usage == Usage(40, 5, 0, 30) and done.steps == ()
+    finally:
+        await harness.stop()
+
+
 def test_usage_handles_cumulative_steer_and_missing_cancel_usage() -> None:
     steps = (Usage(40, 3, 0, 30), Usage(65, 9, 0, 50))
     early = PromptUsage(10, 3, 30, 0, 2)
     cumulative = PromptUsage(25, 12, 80, 0, 7)
-    assert turn_usage((early, cumulative), steps) == Usage(105, 19, 0, 80)
-    assert turn_usage((cumulative,), steps) == Usage(105, 19, 0, 80)
-    assert turn_usage((early,), steps) == Usage(105, 14, 0, 80)
-    assert turn_usage((), steps) == Usage(105, 12, 0, 80)
+    complete = turn_usage((early, cumulative), steps, request_count=2, terminal_reported=True)
+    assert complete.usage == Usage(105, 19, 0, 80) and not complete.uncertain
+    for partial in (steps[:1], ()):
+        incomplete = turn_usage(
+            (early, cumulative), partial, request_count=2, terminal_reported=True
+        )
+        assert incomplete.usage == cumulative.billed() and incomplete.uncertain
+    cancelled = turn_usage((early,), steps, request_count=2, terminal_reported=False)
+    assert cancelled.usage == Usage(105, 14, 0, 80) and cancelled.uncertain
+    single = turn_usage((cumulative,), steps[:1], request_count=1, terminal_reported=True)
+    assert single.usage == cumulative.billed() and not single.uncertain
+
+
+def test_planner_span_requires_own_inputs_and_final_row_without_background() -> None:
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker("one")},
+        {
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "input_tokens": 40,
+            "output_tokens": 3,
+            "content": "FIRST",
+        },
+        {"type": "USER_INPUT", "content": input_marker("two")},
+        {
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "input_tokens": 65,
+            "output_tokens": 9,
+            "content": "FINAL",
+        },
+    ]
+    keys = ["one", "two"]
+    assert planner_usage(rows, keys, "FINAL") == (Usage(40, 3), Usage(65, 9))
+    assert planner_usage(rows[:-1], keys, "FINAL") == ()
+    notice: dict[str, object] = {
+        "type": "SYSTEM_MESSAGE",
+        "content": "[Message] sender=conv/task-12 content=timer",
+    }
+    assert planner_usage([*rows[:2], notice, *rows[2:]], keys, "FINAL") == ()

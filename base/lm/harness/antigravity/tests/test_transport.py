@@ -39,6 +39,23 @@ async def test_startup_rejects_earlier_cli_that_preempts_steer(tmp_path: Path) -
         await transport.close()
 
 
+async def test_cli_that_cannot_start_acp_reports_version_exit_and_stderr(tmp_path: Path) -> None:
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=("--test-no-acp",),
+    )
+    transport = AgyTransport(config, clock=system_clock())
+    await transport.start()
+    try:
+        with pytest.raises(
+            RuntimeError, match=r"(?s)requires agy 1\.5\.14.*exit=2.*unknown command acp"
+        ):
+            _ = await transport.open_session(resume=None)
+    finally:
+        await transport.close()
+
+
 @pytest.mark.parametrize("overflow", [False, True])
 async def test_stdout_assembles_large_and_unterminated_frames(
     tmp_path: Path, overflow: bool

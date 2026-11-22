@@ -8,8 +8,7 @@ here to keep a running tool and both inputs through a mid-turn prompt.
 ## Conversation and delivery
 
 `agy acp` exchanges newline-delimited JSON-RPC over stdio. The adapter sends
-`initialize` and either `session/new` or `session/load`. During load it discards
-history playback. It always reapplies the configured model and reasoning effort
+`initialize` and either `session/new` or `session/load`. The load response ends history playback. Live frames arriving while the model is being selected are queued. It always reapplies the configured model and reasoning effort
 with the combined model ID in `session/set_model`.
 
 Each input is one `session/prompt` with ordered text and base64 image blocks.
@@ -31,8 +30,12 @@ both records has an unknown outcome.
 ## Interrupt and permission handling
 
 `session/cancel` is a notification. The matching `cancelled` result confirms the
-interrupt, and the process remains available for the next prompt. The adapter
-reports whether observed foreground tool processes settle. Closing a session
+interrupt, closes outstanding foreground tool entries, and keeps the process
+available for the next prompt. The adapter reports whether observed tool
+processes settle. Prompt writes have a deadline, and cancel can proceed while
+stdin is backpressured. A write failure or unconfirmed cancel retires the
+process generation. The delivery ledger leaves possibly written inputs
+unsettled for transcript reconciliation. Closing a session
 remains a process shutdown and uses the shared process-tree cleanup. Losing the
 process requires a new ACP handshake and `session/load` before another prompt.
 
@@ -45,14 +48,13 @@ The explicit `skip_permissions` setting asks the CLI to auto-approve.
 
 The stdio reader runs for the whole session. In-flight tool results keep the
 ownership of the original call even when they arrive after the prompt ends.
-The idle answer chunks are joined at the following `usage_update` and sent
-through `UnsolicitedOutput` to the bridge's wake sink. ACP v1 update frames
-carry a session ID. They lack a prompt ID, so overlapping text from the
-provider's own work and an active prompt shares the prompt's stream.
-
-Unresolved timed `schedule` calls that survive their prompt are represented as
-background work until completion or the declared deadline. Cron-like calls
-are kept for the existing one-day bound. Timers also supply the foreground
+ACP v1 update frames carry a session ID. For detached timers, the adapter
+uses the terminal tool update followed by a text batch and its usage update
+as the background reply boundary. It joins that text and sends it through
+`UnsolicitedOutput` to the bridge's wake sink. A due or triggered timer keeps
+the process alive and holds new dispatch through the reply boundary. A missed
+boundary within the reply budget retires the process generation. Cron-like
+calls retain the existing one-day bound. Timers also supply the foreground
 watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
 
@@ -68,17 +70,23 @@ continues to come from descriptors and child transcript files because ACP
 The ACP result reports uncached input, cache read and write, visible output,
 and thought tokens. Meiva combines the input counters and bills thought as
 output. A result can omit usage on cancel or steer, while a later result may
-cover several planner steps. The adapter compares reply totals with the
-disjoint planner rows appended during the turn. When counters overlap or are
-missing, the transcript supplies the shared counters, and matching ACP spans
-supply any additional thought and cache-write counts. Those two counts are
-unknown for spans without a matching report. The CLI supplies no price.
+cover several planner steps. A single prompt's usage is authoritative. For a
+steered turn, the adapter confirms cumulative or disjoint receipts using
+planner rows bounded by the turn's own input markers and final streamed answer.
+A foreign input, background notification or missing tail invalidates the span.
+When the evidence cannot resolve overlap, the adapter retains the latest
+available receipt and reports the uncertainty. If a terminal receipt is
+missing, a verified span can supply visible counters, with thought and cache
+write counters recovered from uniquely matched receipts. The CLI supplies no
+price.
 
 ## Bounds
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `startup_request_seconds` | 30 s | Bounds each initialization, session setup and model selection request, which otherwise could leave the host waiting on a dead stdio peer. |
+| `prompt_write_seconds` | 5 s | Bounds stdout-independent stdin backpressure for prompt delivery. |
+| `background_reply_seconds` | 30 s | Covers provider generation after a detached timer fires. In the measured trace the delay was 5.65 s. |
 | `cancel_settle_seconds` | 5 s | Bounds the wait for a cancel confirmation and the following wait for tracked tools, and bounds each close escalation interval. |
 | `max_buffered_events` | 256 | Allows dropping deltas when readers lag while retaining control events. |
 | `max_schedule_timer_seconds` | 86400 s | Caps the wait declared by any one schedule so malformed durations cannot disable stall detection indefinitely. |
