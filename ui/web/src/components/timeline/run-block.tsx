@@ -45,9 +45,21 @@ interface TurnBlockProps {
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
   // meiva:note
-  // Page-clock fallback when a running work block has no timestamped items yet (0 = unknown).
+  // Page-clock fallback when a running work block's live segment has no timestamped items yet (0 = unknown).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
+}
+
+function computeLiveDurationMs(
+  summary: TurnSummary,
+  liveAnchor: number | null,
+  liveNow: number,
+): number | null {
+  if (summary.priorActiveMs === null) return null;
+  if (liveAnchor !== null) {
+    return summary.priorActiveMs + Math.max(liveNow - liveAnchor, 0);
+  }
+  return summary.priorActiveMs > 0 ? summary.priorActiveMs : null;
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -98,26 +110,28 @@ export const TurnBlock = memo(function TurnBlock({
   const t = useTranslations("timeline");
   const titleRef = useSyncedShimmer(Boolean(turnActive));
   // meiva:note
-  // Work-block wall-clock span (user ruling 2026-11-21): Working = now - start of the first item
-  // in this work block; Worked = end of the last item - start of the first item. Falls back to
-  // `lastEventAt` while active only if no item in the block carries a start timestamp yet.
+  // Active-segment work duration (user ruling 2026-11-22): Working = prior completed active
+  // segments + (now - live segment start), excluding inter-turn idle gaps; Worked = sum of
+  // active segments containing agent output. Falls back to `lastEventAt` while active only if
+  // the live segment has no start timestamp yet (or keeps `priorActiveMs` when > 0 and no anchor).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   const liveAnchor = turnActive
-    ? (summary.startedAtMs ?? (lastEventAt > 0 ? lastEventAt : null))
+    ? (summary.liveSegmentStartMs ?? (lastEventAt > 0 ? lastEventAt : null))
     : null;
-  const liveNow = useNow(Boolean(turnActive) && liveAnchor !== null);
+  const liveNow = useNow(
+    Boolean(turnActive) && liveAnchor !== null && summary.priorActiveMs !== null,
+  );
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
+  const liveDurationMs = turnActive
+    ? computeLiveDurationMs(summary, liveAnchor, liveNow)
+    : null;
   const liveDuration =
-    turnActive && liveAnchor !== null
-      ? formatWholeSecondsDuration(Math.max(liveNow - liveAnchor, 0))
-      : null;
-  const settledSpanMs =
-    !turnActive && hasWork && summary.startedAtMs !== null && summary.endedAtMs !== null
-      ? Math.max(summary.endedAtMs - summary.startedAtMs, 0)
-      : null;
+    liveDurationMs !== null ? formatWholeSecondsDuration(liveDurationMs) : null;
   const settledDuration =
-    settledSpanMs !== null ? formatWholeSecondsDuration(settledSpanMs) : null;
+    !turnActive && hasWork && summary.settledActiveMs !== null
+      ? formatWholeSecondsDuration(summary.settledActiveMs)
+      : null;
   const workedLabel = turnActive
     ? liveDuration !== null
       ? t("workingFor", { duration: liveDuration })

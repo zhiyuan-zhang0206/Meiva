@@ -18,8 +18,9 @@ const baseSummary: TurnSummary = {
   memories: 0,
   agentMessages: 0,
   systemNotes: 0,
-  startedAtMs: 1_700_000_000_000,
-  endedAtMs: 1_700_000_006_000,
+  settledActiveMs: 6_000,
+  priorActiveMs: 0,
+  liveSegmentStartMs: 1_700_000_000_000,
   sdkCalls: [],
 };
 
@@ -71,30 +72,39 @@ describe("TurnBlock expanded body", () => {
   });
 });
 
-describe("TurnBlock missing timing", () => {
-  it.each([
-    { startedAtMs: null, endedAtMs: null },
-    { startedAtMs: null, endedAtMs: 1_700_000_006_000 },
-    { startedAtMs: 1_700_000_000_000, endedAtMs: null },
-  ])("shows plain Worked without a warning icon when start or end is missing ($startedAtMs -> $endedAtMs)", ({ startedAtMs, endedAtMs }) => {
+describe("TurnBlock missing timing and active-segment display", () => {
+  it("shows plain Worked without a warning icon when settledActiveMs is null", () => {
     render(<TurnBlock id="partial" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      summary={{ ...baseSummary, startedAtMs, endedAtMs }} />);
+      summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: null, liveSegmentStartMs: null }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked");
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByTestId("turn-toggle").querySelector("[title], [aria-label]")).toBeNull();
   });
 
-  it("keeps a live block with missing timestamps plain Working without a warning icon", () => {
-    render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      turnActive summary={{ ...baseSummary, startedAtMs: null, endedAtMs: null }} />);
+  it("keeps a live block with missing priorActiveMs or missing anchor plain Working without a warning icon", () => {
+    const { rerender } = render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: 0, liveSegmentStartMs: null }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
+    expect(screen.queryByRole("img")).toBeNull();
+
+    rerender(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive lastEventAt={1_700_000_005_000}
+      summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: null, liveSegmentStartMs: 1_700_000_000_000 }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it.each([0, 400, 6000])("formats complete wall-clock span %ims", (spanMs) => {
+  it("holds priorActiveMs when a live block has closed its prior segment and has no live anchor yet", () => {
+    render(<TurnBlock id="live-hold" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive lastEventAt={0}
+      summary={{ ...baseSummary, settledActiveMs: 600_000, priorActiveMs: 600_000, liveSegmentStartMs: null }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working for 10m");
+  });
+
+  it.each([0, 400, 6000])("formats complete active duration %ims", (activeMs) => {
     render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      summary={{ ...baseSummary, startedAtMs: 1_700_000_000_000, endedAtMs: 1_700_000_000_000 + spanMs }} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe(spanMs < 1000 ? "Worked for 1s" : "Worked for 6s");
+      summary={{ ...baseSummary, settledActiveMs: activeMs }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe(activeMs < 1000 ? "Worked for 1s" : "Worked for 6s");
     expect(screen.queryByRole("img")).toBeNull();
   });
 });

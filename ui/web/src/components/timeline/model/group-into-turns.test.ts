@@ -233,8 +233,9 @@ describe("groupIntoTurns", () => {
       { ...item("code_output"), item_id: "9.0", payload: "usage", created_at: "2026-11-21T10:00:03.000Z", exec_ms: 12 },
     ];
     const summary = summarizeTurn(items);
-    expect(summary.startedAtMs).toBe(Date.parse("2026-11-21T10:00:00.000Z"));
-    expect(summary.endedAtMs).toBe(Date.parse("2026-11-21T10:00:03.000Z"));
+    expect(summary.settledActiveMs).toBe(3_000);
+    expect(summary.priorActiveMs).toBe(0);
+    expect(summary.liveSegmentStartMs).toBe(Date.parse("2026-11-21T10:00:00.000Z"));
   });
 
   it("skips ephemeral machinery markers and [files] companions without splitting turns", () => {

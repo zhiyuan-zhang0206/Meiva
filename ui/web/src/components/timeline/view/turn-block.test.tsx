@@ -5,6 +5,7 @@ import { render } from "@/lib/transport/tests/wall-clock-render";
 import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
 import { summarizeTurn, type TurnSummary } from "../model/runs";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
 afterEach(cleanup);
 
@@ -21,8 +22,9 @@ const sampleSummary: TurnSummary = {
   memories: 0,
   agentMessages: 0,
   systemNotes: 0,
-  startedAtMs: SAMPLE_START,
-  endedAtMs: SAMPLE_START + 12_000,
+  settledActiveMs: 12_000,
+  priorActiveMs: 0,
+  liveSegmentStartMs: SAMPLE_START,
   sdkCalls: [{ method: "files.read", count: 2 }],
 };
 
@@ -167,16 +169,22 @@ describe("TurnBlock component", () => {
     rerender(block(["1.0", "1.1"], makeSummary()));
     expect(renders).toBe(1);
 
-    rerender(block(["1.0", "1.1"], makeSummary({ endedAtMs: SAMPLE_START + 13_000 })));
+    rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000 })));
     expect(renders).toBe(2);
     expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 13s");
+
+    rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000, priorActiveMs: 5_000 })));
+    expect(renders).toBe(3);
+
+    rerender(block(["1.0", "1.1"], makeSummary({ settledActiveMs: 13_000, priorActiveMs: 5_000, liveSegmentStartMs: SAMPLE_START + 1_000 })));
+    expect(renders).toBe(4);
   });
 
   it("ticks the live clock only while its turn is active", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(SAMPLE_START + 14_000);
-      const live = { ...sampleSummary, startedAtMs: SAMPLE_START, endedAtMs: SAMPLE_START + 12_000 };
+      const live = { ...sampleSummary, settledActiveMs: 12_000, priorActiveMs: 0, liveSegmentStartMs: SAMPLE_START };
       const { rerender } = render(
         <TurnBlock id="turn-1" memberIds={["1.0"]} summary={live} expanded={false} turnActive onToggle={vi.fn()} />,
       );
@@ -194,14 +202,15 @@ describe("TurnBlock component", () => {
     }
   });
 
-  it("keeps ticking between blocks from the work block's first item start", () => {
+  it("keeps ticking between blocks from the live segment start", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(SAMPLE_START + 64_000);
       const betweenBlocks: TurnSummary = {
         ...sampleSummary,
-        startedAtMs: SAMPLE_START,
-        endedAtMs: SAMPLE_START + 62_000,
+        settledActiveMs: 62_000,
+        priorActiveMs: 0,
+        liveSegmentStartMs: SAMPLE_START,
       };
       render(
         <TurnBlock id="turn-gap" memberIds={["1.0"]} summary={betweenBlocks} expanded={false} turnActive lastEventAt={SAMPLE_START + 62_000} onToggle={vi.fn()} />,
@@ -216,14 +225,15 @@ describe("TurnBlock component", () => {
     }
   });
 
-  it("stops the live clock on settle and reports the block's wall-clock span", () => {
+  it("stops the live clock on settle and reports the block's settled active duration", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(SAMPLE_START + 64_000);
       const betweenBlocks: TurnSummary = {
         ...sampleSummary,
-        startedAtMs: SAMPLE_START,
-        endedAtMs: SAMPLE_START + 62_000,
+        settledActiveMs: 62_000,
+        priorActiveMs: 0,
+        liveSegmentStartMs: SAMPLE_START,
       };
       const { rerender } = render(
         <TurnBlock id="turn-settle" memberIds={["1.0"]} summary={betweenBlocks} expanded={false} turnActive onToggle={vi.fn()} />,
@@ -245,8 +255,9 @@ describe("TurnBlock component", () => {
       vi.setSystemTime(SAMPLE_START + 4_000);
       const harnessLive: TurnSummary = {
         ...sampleSummary,
-        startedAtMs: SAMPLE_START,
-        endedAtMs: SAMPLE_START + 3_000,
+        settledActiveMs: 3_000,
+        priorActiveMs: 0,
+        liveSegmentStartMs: SAMPLE_START,
       };
       render(
         <TurnBlock id="turn-harness" memberIds={["1.0"]} summary={harnessLive} expanded={false} turnActive onToggle={vi.fn()} />,
@@ -271,8 +282,9 @@ describe("TurnBlock component", () => {
         output: 0,
         turns: 0,
         systemNotes: 1,
-        startedAtMs: null,
-        endedAtMs: null,
+        settledActiveMs: null,
+        priorActiveMs: 0,
+        liveSegmentStartMs: null,
         sdkCalls: [],
       };
       const { rerender } = render(
@@ -342,110 +354,96 @@ function blockItem(
   };
 }
 
-describe("Work block wall-clock span semantics (#7509)", () => {
+describe("Work block active-segment duration semantics (#7533)", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
   });
 
   // meiva:note
-  // User's verbatim example (2026-11-21): several turns ended without display to user,
-  // then a new working turn begins in the same work block. Working = now - first item's
-  // start (including intervening wall-clock time), and Worked = last item's end - first
-  // item's start — identical live, on settle, across reload and across bridge restarts.
+  // User ruling (2026-11-22): 10m work -> 1h idle -> new wake -> 10m work must show
+  // 20m (not 1h 20m). Live Working = prior completed active segments + (now - live
+  // segment start); settled Worked = sum of active segments with agent output, identical
+  // across live, settle, and reload.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-  it("counts Working from the first item's start across earlier hidden turns and settles to last end minus first start", () => {
+  it("excludes 1h inter-turn idle across peer inbound_chat in both live Working (13m ticking) and settled Worked (20m)", () => {
     vi.useFakeTimers();
-    const t0 = Date.parse("2026-11-21T10:00:00.000Z");
-    vi.setSystemTime(t0 + 135_000);
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
 
-    const priorHiddenTurns = [
+    const seg1 = [
       blockItem("agent_reasoning", "h10.0", {
-        created_at: new Date(t0 + 5_000).toISOString(),
-        reasoning_ms: 5_000,
+        created_at: new Date(t0 + 4 * MIN).toISOString(),
+        reasoning_ms: 4 * MIN,
       }),
       blockItem("agent_code", "h20.0", {
-        created_at: new Date(t0 + 6_000).toISOString(),
+        created_at: new Date(t0 + 5 * MIN).toISOString(),
       }),
       blockItem("code_output", "h30.0", {
-        created_at: new Date(t0 + 20_000).toISOString(),
-        exec_ms: 14_000,
-      }),
-      blockItem("agent_chat", "h40.0", {
-        user_facing: false,
-        created_at: new Date(t0 + 25_000).toISOString(),
-      }),
-      blockItem("inbound_chat", "h50.0", {
-        source: "agent:228",
-        created_at: new Date(t0 + 120_000).toISOString(),
-      }),
-      blockItem("agent_code", "h60.0", {
-        created_at: new Date(t0 + 125_000).toISOString(),
-      }),
-      blockItem("code_output", "h70.0", {
-        created_at: new Date(t0 + 135_000).toISOString(),
-        exec_ms: 10_000,
+        created_at: new Date(t0 + 10 * MIN).toISOString(),
+        exec_ms: 5 * MIN,
       }),
     ];
 
-    const { rerender } = render(
-      <TurnBlock
-        id="h10.0"
-        memberIds={priorHiddenTurns.map((it) => it.item_id)}
-        summary={summarizeTurn(priorHiddenTurns)}
-        expanded={false}
-        onToggle={vi.fn()}
-        turnActive={false}
-      />,
-    );
-    expect(screen.getByText("Worked for 2m 15s")).toBeTruthy();
-
-    vi.setSystemTime(t0 + 310_000);
-    rerender(
-      <TurnBlock
-        id="h10.0"
-        memberIds={priorHiddenTurns.map((it) => it.item_id)}
-        summary={summarizeTurn(priorHiddenTurns)}
-        expanded={false}
-        onToggle={vi.fn()}
-        turnActive={true}
-      />,
-    );
-    expect(screen.getByText("Working for 5m 10s")).toBeTruthy();
-
-    const withTurn3Live = [
-      ...priorHiddenTurns,
-      blockItem("agent_code", "h80.0", {
-        created_at: new Date(t0 + 312_000).toISOString(),
+    const seg2Live = [
+      ...seg1,
+      blockItem("inbound_chat", "h40.0", {
+        source: "agent:228",
+        created_at: new Date(t0 + 70 * MIN).toISOString(),
+      }),
+      blockItem("agent_code", "h50.0", {
+        created_at: new Date(t0 + 71 * MIN).toISOString(),
         activity_pending: true,
       }),
     ];
-    act(() => {
-      vi.advanceTimersByTime(5_000);
-    });
-    rerender(
+
+    vi.setSystemTime(t0 + 73 * MIN);
+    const { unmount } = render(
       <TurnBlock
         id="h10.0"
-        memberIds={withTurn3Live.map((it) => it.item_id)}
-        summary={summarizeTurn(withTurn3Live)}
+        memberIds={seg2Live.map((it) => it.item_id)}
+        summary={summarizeTurn(seg2Live)}
         expanded={false}
         onToggle={vi.fn()}
         turnActive={true}
       />,
     );
-    expect(screen.getByText("Working for 5m 15s")).toBeTruthy();
+    expect(screen.getByText("Working for 13m")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(screen.getByText("Working for 13m 5s")).toBeTruthy();
+
+    unmount();
+    render(
+      <TurnBlock
+        id="h10.0"
+        memberIds={seg2Live.map((it) => it.item_id)}
+        summary={summarizeTurn(seg2Live)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+      />,
+    );
+    expect(screen.getByText("Working for 13m 5s")).toBeTruthy();
 
     const settled = [
-      ...priorHiddenTurns,
-      blockItem("agent_code", "h80.0", {
-        created_at: new Date(t0 + 312_000).toISOString(),
+      ...seg1,
+      blockItem("inbound_chat", "h40.0", {
+        source: "agent:228",
+        created_at: new Date(t0 + 70 * MIN).toISOString(),
       }),
-      blockItem("code_output", "h90.0", {
-        created_at: new Date(t0 + 330_000).toISOString(),
-        exec_ms: 18_000,
+      blockItem("agent_code", "h50.0", {
+        created_at: new Date(t0 + 71 * MIN).toISOString(),
+      }),
+      blockItem("code_output", "h60.0", {
+        created_at: new Date(t0 + 80 * MIN).toISOString(),
+        exec_ms: 9 * MIN,
       }),
     ];
-    rerender(
+    cleanup();
+    render(
       <TurnBlock
         id="h10.0"
         memberIds={settled.map((it) => it.item_id)}
@@ -455,14 +453,216 @@ describe("Work block wall-clock span semantics (#7509)", () => {
         turnActive={false}
       />,
     );
-    expect(screen.getByText("Worked for 5m 30s")).toBeTruthy();
+    expect(screen.getByText("Worked for 20m")).toBeTruthy();
+  });
+
+  it("handles hidden agent_chat close -> 1h idle -> hidden heartbeat wake before first item arrives (lastEventAt or 0) and on settle", () => {
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+
+    const closedSeg1 = [
+      blockItem("agent_reasoning", "h10.0", {
+        created_at: new Date(t0 + 5 * MIN).toISOString(),
+        reasoning_ms: 5 * MIN,
+      }),
+      blockItem("agent_code", "h20.0", {
+        created_at: new Date(t0 + 6 * MIN).toISOString(),
+      }),
+      blockItem("code_output", "h30.0", {
+        created_at: new Date(t0 + 9 * MIN).toISOString(),
+        exec_ms: 3 * MIN,
+      }),
+      blockItem("agent_chat", "h40.0", {
+        user_facing: false,
+        created_at: new Date(t0 + 10 * MIN).toISOString(),
+      }),
+    ];
+
+    vi.setSystemTime(t0 + 70 * MIN + 5_000);
+    const { rerender } = render(
+      <TurnBlock
+        id="h10.0"
+        memberIds={closedSeg1.map((it) => it.item_id)}
+        summary={summarizeTurn(closedSeg1)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        lastEventAt={0}
+      />,
+    );
+    expect(screen.getByText("Working for 10m")).toBeTruthy();
+    expect(vi.getTimerCount()).toBe(0);
+
+    rerender(
+      <TurnBlock
+        id="h10.0"
+        memberIds={closedSeg1.map((it) => it.item_id)}
+        summary={summarizeTurn(closedSeg1)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        lastEventAt={t0 + 70 * MIN}
+      />,
+    );
+    expect(screen.getByText("Working for 10m 5s")).toBeTruthy();
+
+    const settledWithHeartbeat = [
+      ...closedSeg1,
+      blockItem("agent_reasoning", "h50.0", {
+        created_at: new Date(t0 + 75 * MIN).toISOString(),
+        reasoning_ms: 5 * MIN,
+      }),
+      blockItem("code_output", "h60.0", {
+        created_at: new Date(t0 + 80 * MIN).toISOString(),
+        exec_ms: 5 * MIN,
+      }),
+    ];
+    rerender(
+      <TurnBlock
+        id="h10.0"
+        memberIds={settledWithHeartbeat.map((it) => it.item_id)}
+        summary={summarizeTurn(settledWithHeartbeat)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={false}
+      />,
+    );
+    expect(screen.getByText("Worked for 20m")).toBeTruthy();
+  });
+
+  it("keeps same-step hidden agent_chat + agent_code joined with its long code_output (8m+)", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const sameStep = [
+      blockItem("agent_chat", "h100.0", {
+        user_facing: false,
+        created_at: new Date(t0).toISOString(),
+      }),
+      blockItem("agent_code", "h100.1", {
+        created_at: new Date(t0 + 1_000).toISOString(),
+      }),
+      blockItem("code_output", "h120.0", {
+        created_at: new Date(t0 + 8 * MIN + 1_000).toISOString(),
+        exec_ms: 8 * MIN,
+      }),
+    ];
+    render(
+      <TurnBlock
+        id="h100.0"
+        memberIds={sameStep.map((it) => it.item_id)}
+        summary={summarizeTurn(sameStep)}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Worked for 8m 1s")).toBeTruthy();
+  });
+
+  it("does not count queue waiting between consecutive inbound_chat messages without agent output", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const queued = [
+      blockItem("inbound_chat", "1.0", {
+        source: "agent:10",
+        created_at: new Date(t0).toISOString(),
+      }),
+      blockItem("inbound_chat", "2.0", {
+        source: "agent:11",
+        created_at: new Date(t0 + 60 * MIN).toISOString(),
+      }),
+      blockItem("agent_code", "3.0", {
+        created_at: new Date(t0 + 60 * MIN + 5_000).toISOString(),
+      }),
+      blockItem("code_output", "4.0", {
+        created_at: new Date(t0 + 60 * MIN + 30_000).toISOString(),
+        exec_ms: 25_000,
+      }),
+    ];
+    render(
+      <TurnBlock
+        id="1.0"
+        memberIds={queued.map((it) => it.item_id)}
+        summary={summarizeTurn(queued)}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Worked for 30s")).toBeTruthy();
+  });
+
+  it("holds Working for 10m (not 70m) in the same tab after settleTurn + trailing snapshot and 1h idle wake", () => {
+    vi.useFakeTimers();
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const closedTurn1 = [
+      blockItem("agent_reasoning", "h10.0", {
+        created_at: new Date(t0 + 5 * MIN).toISOString(),
+        reasoning_ms: 5 * MIN,
+      }),
+      blockItem("code_output", "h20.0", {
+        created_at: new Date(t0 + 9 * MIN).toISOString(),
+        exec_ms: 4 * MIN,
+      }),
+      blockItem("agent_chat", "h30.0", {
+        user_facing: false,
+        created_at: new Date(t0 + 10 * MIN).toISOString(),
+      }),
+    ];
+
+    const store = useTimelineStore.getState();
+    act(() => {
+      store.switchThread(42, [], false);
+      store.processSseEvent({ role: "reasoning_start", agent_id: 42, item_id: "h10.0" }, t0);
+      store.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: closedTurn1 }, t0 + 10 * MIN);
+      store.settleTurn(t0 + 10 * MIN);
+      store.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: closedTurn1 }, t0 + 10 * MIN + 500);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+
+    vi.setSystemTime(t0 + 70 * MIN);
+    render(
+      <TurnBlock
+        id="h10.0"
+        memberIds={closedTurn1.map((it) => it.item_id)}
+        summary={summarizeTurn(closedTurn1)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        lastEventAt={useTimelineStore.getState().liveAnchorAt}
+      />,
+    );
+    expect(screen.getByText("Working for 10m")).toBeTruthy();
+  });
+
+  it("excludes idle gaps around trailing non-wake markers and lifecycle terminate/resurrect transitions", () => {
+    const t0 = Date.parse("2026-11-22T10:00:00.000Z");
+    const MIN = 60_000;
+    const items = [
+      blockItem("agent_code", "1.0", { created_at: new Date(t0).toISOString() }),
+      blockItem("code_output", "2.0", { created_at: new Date(t0 + 10 * MIN).toISOString(), exec_ms: 10 * MIN }),
+      blockItem("system_marker", "3.0", { source: "lifecycle_terminate", created_at: new Date(t0 + 10 * MIN).toISOString(), show_timestamp: true }),
+      blockItem("system_marker", "4.0", { source: "task", created_at: new Date(t0 + 10 * MIN + 1_000).toISOString(), show_timestamp: true }),
+      blockItem("system_marker", "5.0", { source: "lifecycle_resurrect", created_at: new Date(t0 + 130 * MIN).toISOString(), show_timestamp: true }),
+      blockItem("agent_reasoning", "6.0", { created_at: new Date(t0 + 135 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+    ];
+    render(
+      <TurnBlock
+        id="1.0"
+        memberIds={items.map((it) => it.item_id)}
+        summary={summarizeTurn(items)}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Worked for 15m")).toBeTruthy();
   });
 
   it("shows plain Worked with no warning icon when block timestamps are truly missing", () => {
     const legacy = [blockItem("agent_code", "h0.0"), blockItem("code_output", "h1.0")];
     const summary = summarizeTurn(legacy);
-    expect(summary.startedAtMs).toBeNull();
-    expect(summary.endedAtMs).toBeNull();
+    expect(summary.settledActiveMs).toBeNull();
+    expect(summary.liveSegmentStartMs).toBeNull();
 
     render(
       <TurnBlock
@@ -591,8 +791,9 @@ describe("Working title Silver Glint shimmer", () => {
       thinking: 0,
       code: 0,
       output: 0,
-      startedAtMs: null,
-      endedAtMs: null,
+      settledActiveMs: null,
+      priorActiveMs: 0,
+      liveSegmentStartMs: null,
     };
     const { container } = render(
       <TurnBlock
@@ -648,8 +849,9 @@ describe("Working title Silver Glint shimmer", () => {
       vi.setSystemTime(SAMPLE_START + 850);
       const subSecondSummary: TurnSummary = {
         ...sampleSummary,
-        startedAtMs: SAMPLE_START,
-        endedAtMs: SAMPLE_START + 850,
+        settledActiveMs: 850,
+        priorActiveMs: 0,
+        liveSegmentStartMs: SAMPLE_START,
       };
       const { rerender } = render(
         <TurnBlock
@@ -682,7 +884,7 @@ describe("Working title Silver Glint shimmer", () => {
         <TurnBlock
           id="turn-subsec"
           memberIds={["s1"]}
-          summary={{ ...subSecondSummary, endedAtMs: SAMPLE_START + 1_900 }}
+          summary={{ ...subSecondSummary, settledActiveMs: 1_900 }}
           expanded={false}
           turnActive={false}
           onToggle={vi.fn()}
