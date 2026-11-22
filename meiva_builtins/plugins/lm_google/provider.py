@@ -231,6 +231,22 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
+        "gemini-4-neon": ModelSpec(
+            provider="gemini",
+            spawnable=True,
+            context_window=1_048_576,
+            knowledge_cutoff="2026-03",
+            # meiva:note
+            # Google documents an `xhigh` rung for Neon on the Interactions API and `agy`,
+            # while `ChatGoogleGenerativeAI.thinking_level` validates `minimal|low|medium|high`
+            # only; native sessions cap at `high` and Antigravity probes `xhigh` from `agy models`.
+            effort_levels=("low", "medium", "high"),
+            tuning=ModelTuning(
+                reasoning_effort="high",
+                llm_stream_ttft_timeout_seconds=90.0,
+            ),
+            media_types=frozenset({"image", "pdf", "audio", "video"}),
+        ),
     },
     pricing={
         "gemini-3.8-flash": PriceRates(
@@ -429,6 +445,14 @@ PROVIDER = ProviderContribution(
             output=7.50,
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-11-16",
+            vendor="google",
+        ),
+        "gemini-4-neon": PriceRates(
+            cache_miss=3.0,
+            cache_hit=0.15,
+            output=15.0,
+            source_url="https://ai.google.dev/gemini-api/docs/pricing",
+            source_checked_at="2026-11-22",
             vendor="google",
         ),
     },

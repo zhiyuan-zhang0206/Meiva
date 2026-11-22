@@ -456,6 +456,10 @@ async def test_multi_step_turn_logs_each_step_usage_and_calls(
     (
         ("gemini-4-hydrogen-xhigh", "gemini-4-hydrogen"),
         ("gemini-4-carbon-high", "gemini-4-carbon"),
+        ("gemini-4-neon", "gemini-4-neon"),
+        ("gemini-4-neon-high", "gemini-4-neon"),
+        ("gemini-4-neon-medium", "gemini-4-neon"),
+        ("gemini-4-neon-xhigh", "gemini-4-neon"),
         ("claude-fable-5-2[1m]", "claude-fable-5-2"),
     ),
 )
@@ -478,6 +482,7 @@ async def test_harness_turn_prices_gemini_4_and_fable_5_2_cli_selectors(
     assert row["extra"]["model"] == expected_model
     assert "unpriced" not in row["extra"]
     assert row["extra"]["cost_usd"] > 0
+    assert not [msg for msg in loguru_records.messages("WARNING") if "is unpriced" in msg]
 
 
 async def test_unpriced_multi_step_turn_warns_once_while_recording_every_step(

@@ -107,6 +107,8 @@ def test_external_harness_overlay_resolves_catalog_model_and_window(
         (101, "claude_code", "claude-fable-5-2[1m]", "claude-fable-5-2", 1_000_000),
         (102, "antigravity", "gemini-4-carbon-high", "gemini-4-carbon", 1_048_576),
         (103, "meiva", "claude-fable-5-2[1m]", "claude-fable-5-2[1m]", 0),
+        (104, "antigravity", "gemini-4-neon", "gemini-4-neon", 1_048_576),
+        (105, "antigravity", "gemini-4-neon-high", "gemini-4-neon", 1_048_576),
     )
     for agent_id, harness, raw_model, _, _ in cases:
         db_conn.execute(

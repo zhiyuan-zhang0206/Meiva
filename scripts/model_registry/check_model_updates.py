@@ -105,10 +105,10 @@ SOURCES: dict[str, SourceDescriptor] = {
     # Anthropic org-level keys require `anthropic-workspace-id` alongside `x-api-key` on `/v1/models`.
     "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),), (("anthropic-workspace-id", "ANTHROPIC_WORKSPACE_ID"),)),
     # meiva:note
-    # `flash(-lite)?` keeps numbered Flash-Lite ids in the family, and `argon|carbon|hydrogen` tracks
+    # `flash(-lite)?` keeps numbered Flash-Lite ids in the family, and `argon|carbon|hydrogen|neon` tracks
     # Gemini 4's element-named lines alongside `pro|flash`. The unversioned `gemini-flash-lite-latest`
     # alias stays outside the numbered pattern so a new numbered Flash-Lite cues a manual alias re-check.
-    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon|carbon|hydrogen)(-preview)?$"), re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon|carbon|hydrogen)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon|carbon|hydrogen)(-preview)?$")),
+    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon|carbon|hydrogen|neon)(-preview)?$"), re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon|carbon|hydrogen|neon)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon|carbon|hydrogen|neon)(-preview)?$")),
     # Official docs: xAI Models API.
     "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"), re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),
     # Official docs: Moonshot Models API.

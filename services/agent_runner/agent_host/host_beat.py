@@ -112,7 +112,7 @@ def _report_database_beat_failure(
 # review pairs the failures with the recovery instead of reading the gap as silence.
 # meiva:link agent/docs/loop.md
 def _report_database_beat_recovery(machine: str, failures_cleared: int) -> None:
-    logger.warning(
+    logger.info(
         "the agent host's database beat recovered after {failures_cleared} consecutive failure(s)",
         event="host_database_beat_recovered",
         machine=machine,
@@ -176,7 +176,7 @@ async def beat_forever(
             bus, machine, scheduler.active_agents, host.turn_progress, timeout_s=publish_timeout_s
         )
         if published and not heartbeat_ok:
-            host_log.warning("[agent-host] turn-progress heartbeat publish recovered")
+            host_log.info("[agent-host] turn-progress heartbeat publish recovered")
         heartbeat_ok = published
         _report_long_admission_waits(host, read_alert_seconds=read_alert_seconds)
         await asyncio.sleep(beat_step_s)

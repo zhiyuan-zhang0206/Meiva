@@ -1,4 +1,5 @@
 exports = []
 
 [uses]
+"test_system_message.py" = []
 "test_user_text.py" = []

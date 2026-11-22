@@ -120,6 +120,7 @@ def test_gemini_chat_catalog_entries_are_in_the_archive() -> None:
         "gemini-4-argon",
         "gemini-4-carbon",
         "gemini-4-hydrogen",
+        "gemini-4-neon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -485,6 +486,9 @@ def test_gemini_4_argon_intro_price_uses_earliest_global_boundary(
         assert rates_at("gemini-4-hydrogen", instant, _M, prices=gemini_archive_catalog) == Rates(
             1.5, 0.075, 7.5
         )
+        assert rates_at("gemini-4-neon", instant, _M, prices=gemini_archive_catalog) == Rates(
+            3.0, 0.15, 15.0
+        )
 
 
 def test_quote_returns_cost_and_the_exact_selected_rates(
@@ -537,6 +541,7 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
     model_ids = (
         "gemini-4-carbon",
         "gemini-4-hydrogen",
+        "gemini-4-neon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",

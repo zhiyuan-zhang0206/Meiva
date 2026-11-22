@@ -1997,6 +1997,29 @@
         }
       ]
     },
+    "gemini-4-neon": {
+      "vendor": "google",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "source_checked_at": "2026-11-22",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "3.0",
+                "cache_read": "0.15",
+                "output": "15.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
     "gemini-decision-1": {
       "vendor": "google",
       "source_url": "https://blog.google/innovation-and-ai/technology/developers-tools/gemini-decisions-api/",

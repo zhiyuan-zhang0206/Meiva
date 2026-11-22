@@ -171,6 +171,25 @@ def test_invalid_input_and_notice_report_shape_without_logging_body() -> None:
     assert "DO_NOT_LOG_SYNTHETIC_BODY" not in "".join(messages)
 
 
+def test_cli_reminder_system_message_is_ignored_without_unread_warning() -> None:
+    reminder = (
+        "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the "
+        "system as important information to pay attention to.\n\n"
+        "<SYSTEM_MESSAGE>\n"
+        "Reminder: work efficiently. In this turn, issue in parallel every independent search, "
+        "read and edit or write you need next.\n"
+        "</SYSTEM_MESSAGE>"
+    )
+    records = [FileRow(0, 1, row("SYSTEM_MESSAGE", content=reminder))]
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert EntryParser(UnreadRows()).entries(records) == ()
+    finally:
+        logger.remove(sink)
+    assert warnings == []
+
+
 @pytest.mark.parametrize(
     "body",
     [

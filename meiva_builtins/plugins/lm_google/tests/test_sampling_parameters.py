@@ -55,7 +55,9 @@ def test_deprecated_flash_models_are_superseded_by_3_8_flash(model: str) -> None
 # so the 30s shared TTFT floor turns a throttled-but-healthy request into a
 # fatal stall (agent 6933, 2026-10-18: the turn died at 30.02s with zero chunks).
 # meiva:link meiva_builtins/plugins/README.md
-@pytest.mark.parametrize("model", ("gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen"))
+@pytest.mark.parametrize(
+    "model", ("gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon")
+)
 def test_gemini_4_argon_ttft_budget_clears_the_sdks_silent_retry_window(model: str) -> None:
     tuning = PROVIDER.models[model].tuning
     assert tuning is not None

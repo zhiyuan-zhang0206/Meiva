@@ -7,7 +7,7 @@ exports = ["window.py", "file.py"]
 "system_message.py" = ["errors.py"]
 "text.py" = []
 "window.py" = ["errors.py", "system_message.py", "text.py"]
-"tests" = ["text.py"]
+"tests" = ["errors.py", "system_message.py", "text.py"]
 
 [purity]
 "." = "strict"
