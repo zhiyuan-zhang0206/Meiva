@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import sys
-from collections.abc import Callable, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -167,46 +168,43 @@ def _probe_cluster_row(
     )
 
 
-def _probe_value(future: Future[object] | None) -> object:
-    if future is None or not future.done() or future.cancelled():
-        return None
-    return future.result()
+type StatusProbe[T] = Callable[[str], Awaitable[T]]
 
 
-def _cluster_rows(
+async def collect_cluster_rows(
     machines: Sequence[tuple[str, str | None, str | None]],
-    computer_probe: Callable[[str], dict[str, object]] | None,
-    browser_probe: Callable[[str], bool | str | None] | None,
+    computer_probe: StatusProbe[dict[str, object]] | None,
+    browser_probe: StatusProbe[bool | str | None] | None,
+    *,
+    timeout_s: float = 3.0,
 ) -> list[ComputerTargetRow]:
-    pool = ThreadPoolExecutor(max_workers=8)
+    slots = asyncio.Semaphore(8)
+    results: dict[tuple[str, str], object] = {}
 
-    def run(probe: Callable[[str], object], url: str) -> object:
-        return probe(url)
+    async def record(label: str, name: str, url: str, probe: StatusProbe[object]) -> None:
+        async with slots:
+            results[name, label] = await probe(url)
 
-    computers: dict[str, Future[object]] = {}
-    browsers: dict[str, Future[object]] = {}
-    try:
-        for name, url, _desc in machines:
-            if url and computer_probe is not None:
-                computers[name] = pool.submit(run, computer_probe, url)
-            if url and browser_probe is not None:
-                browsers[name] = pool.submit(run, browser_probe, url)
-        _ = wait([*computers.values(), *browsers.values()], timeout=3.0)
-        rows: list[ComputerTargetRow] = []
-        for name, _url, desc in machines:
-            desktop = _probe_value(computers.get(name))
-            chrome = _probe_value(browsers.get(name))
-            row = _probe_cluster_row(
-                name,
-                desc,
-                desktop if is_object_dict(desktop) else {},
-                browser_available=chrome if isinstance(chrome, bool | str) else None,
-            )
-            if row is not None:
-                rows.append(row)
-        return rows
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    with suppress(TimeoutError):
+        async with asyncio.timeout(timeout_s), asyncio.TaskGroup() as tasks:
+            for name, url, _desc in machines:
+                if url and computer_probe is not None:
+                    _ = tasks.create_task(record("desktop", name, url, computer_probe))
+                if url and browser_probe is not None:
+                    _ = tasks.create_task(record("chrome", name, url, browser_probe))
+    rows: list[ComputerTargetRow] = []
+    for name, _url, desc in machines:
+        desktop = results.get((name, "desktop"))
+        chrome = results.get((name, "chrome"))
+        row = _probe_cluster_row(
+            name,
+            desc,
+            desktop if is_object_dict(desktop) else {},
+            browser_available=chrome if isinstance(chrome, bool | str) else None,
+        )
+        if row is not None:
+            rows.append(row)
+    return rows
 
 
 def _collect_ssh_rows(
@@ -244,8 +242,8 @@ def cmd_computer_list(
     local_machine: str | None = None,
     local_description: str | None = None,
     cluster_machines: Sequence[tuple[str, str | None, str | None]] = (),
-    cluster_status_probe: Callable[[str], dict[str, object]] | None = None,
-    browser_status_probe: Callable[[str], bool | str | None] | None = None,
+    cluster_status_probe: StatusProbe[dict[str, object]] | None = None,
+    browser_status_probe: StatusProbe[bool | str | None] | None = None,
     local_browser_available: bool | None = None,
     ssh_health_probe: Callable[[str], dict[str, object] | None] = probe_win_bridge_health,
     json_output: bool = False,
@@ -257,13 +255,16 @@ def cmd_computer_list(
         local_description,
         browser_available=local_browser_available,
     )
-    rows.extend(
-        _cluster_rows(
-            [machine for machine in cluster_machines if machine[0] != local_machine],
-            cluster_status_probe,
-            browser_status_probe,
+    if cluster_machines:
+        rows.extend(
+            asyncio.run(
+                collect_cluster_rows(
+                    [machine for machine in cluster_machines if machine[0] != local_machine],
+                    cluster_status_probe,
+                    browser_status_probe,
+                )
+            )
         )
-    )
     try:
         rows.extend(_collect_ssh_rows(home, ssh_health_probe))
     except RemoteHostConfigError as exc:

@@ -76,10 +76,10 @@ async def call_browser_peer(
     return raw.get("result")
 
 
-def probe_browser_peer(url: str, *, headers: Mapping[str, str]) -> bool | str | None:
+async def probe_browser_peer(url: str, *, headers: Mapping[str, str]) -> bool | str | None:
     try:
-        with httpx.Client(trust_env=False, timeout=2.0) as client:
-            response = client.post(
+        async with httpx.AsyncClient(trust_env=False, timeout=2.0) as client:
+            response = await client.post(
                 url.rstrip("/") + BROWSER_RPC_ROUTE[1], headers=headers, json={"method": "status"}
             )
             if response.status_code == 404:

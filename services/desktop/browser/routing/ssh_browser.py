@@ -174,8 +174,7 @@ class SshBrowser:
         name: str,
         args: dict[str, object],
     ) -> CallToolResult:
-        if name != "new_page":
-            await self._refresh_pages(session)
+        await self._refresh_pages(session)
         authorize_page(name, args, self._pages.__contains__)
         if name in PAGE_SCOPED_TOOLS:
             page = page_number(args.get("pageId")) if "pageId" in args else self._current
