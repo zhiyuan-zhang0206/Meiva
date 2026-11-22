@@ -56,18 +56,26 @@ describe("marker data-testid hooks (Task #1018)", () => {
 
 describe("classifyMarker", () => {
   it.each(NOTE_TAGS)("NoteTag %s has a card", (tag) => {
-    expect(classifyMarker(tag).kind).not.toBe("ephemeral");
+    expect(classifyMarker(tag).kind).not.toBe("unrecognized");
   });
 
-  it("splits the vocabulary into lifecycle, memory and note", () => {
+  it("splits known sources and payload prefixes into typed card families", () => {
     expect(classifyMarker("lifecycle_fork")).toEqual({ kind: "lifecycle", tag: "lifecycle_fork" });
     expect(classifyMarker("agent_memory")).toEqual({ kind: "memory" });
+    expect(classifyMarker("task")).toEqual({ kind: "task" });
+    expect(classifyMarker("background_task", "status:done")).toEqual({ kind: "background_task" });
+    expect(classifyMarker("task-notification", "status:done")).toEqual({ kind: "background_task" });
     expect(classifyMarker("timezone")).toEqual({ kind: "note" });
+    expect(classifyMarker("scheduled_wake", "status:woke")).toEqual({ kind: "system_notice" });
+    expect(classifyMarker("queued_input_revived", "status:revived")).toEqual({ kind: "system_notice" });
+    expect(classifyMarker(null, "status:retrying")).toEqual({ kind: "system_notice" });
+    expect(classifyMarker(null, "error:boom")).toEqual({ kind: "error" });
   });
 
-  it("sends an untagged or unknown source to the ephemeral path", () => {
-    expect(classifyMarker(null)).toEqual({ kind: "ephemeral" });
-    expect(classifyMarker("tag_from_a_newer_server")).toEqual({ kind: "ephemeral" });
+  it("sends truly unrecognized sources/payloads to the unrecognized card family", () => {
+    expect(classifyMarker(null)).toEqual({ kind: "unrecognized" });
+    expect(classifyMarker("tag_from_a_newer_server")).toEqual({ kind: "unrecognized" });
+    expect(classifyMarker("tag_from_a_newer_server", "plain body")).toEqual({ kind: "unrecognized" });
   });
 });
 

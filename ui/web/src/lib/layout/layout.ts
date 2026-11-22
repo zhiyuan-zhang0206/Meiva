@@ -26,7 +26,6 @@ export {
   BAR_HEIGHT_CLASS,
   BAR_HEIGHT_PX,
   BAR_MIN_HEIGHT_CLASS,
-  BAR_STICKY_TOP_CLASS,
   COLUMN_TITLE_BAR_CLASS,
   COLUMN_TITLE_BAR_WRAP_CLASS,
 } from "./primitives/bars";
@@ -51,11 +50,6 @@ export const BAR_CLEAR_TOP_PADDING_CLASS = "pt-[52px]";
 // Top offset that places floating banners (such as ConnectionNotice) immediately
 // below the floating HeaderBar (top-0 h-11 = 44px + 8px clearance = 52px).
 export const BAR_CLEAR_TOP_OFFSET_CLASS = "top-[52px]";
-
-// Like OVERFLOW_HIDDEN, but without creating a scroll container — a sticky
-// descendant keeps resolving against the outer scroller (task #3215: the work
-// block body wrapper must not become the pinned child header's scrollport).
-export const OVERFLOW_CLIP = "overflow-clip";
 
 // meiva:note
 // Matches space-y-1 in work-block bodies for both inner and timeline row windows.

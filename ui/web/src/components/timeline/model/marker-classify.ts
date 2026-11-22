@@ -32,19 +32,38 @@ export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }
   | { readonly kind: "memory" }
+  | { readonly kind: "task" }
+  | { readonly kind: "background_task" }
   | { readonly kind: "note" }
-  | { readonly kind: "ephemeral" };
+  | { readonly kind: "system_notice" }
+  | { readonly kind: "error" }
+  | { readonly kind: "unrecognized" };
 
 // meiva:note
-// Every NoteTag has a card: lifecycle and memory tags have their own, the rest are notes.
-// The vocabulary is generated from the backend enum, so only a source this build does
-// not know (an untagged message, or a tag newer than the page) falls to ephemeral.
+// Every rendered system_marker maps to a collapsible card family: background_task /
+// task-notification, NoteTag families (task, lifecycle, memory, note), payload-typed
+// error: / status: notices, and an unrecognized fallback card so no status or receipt
+// dumps bare text into the timeline.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
-export function classifyMarker(source: string | null): MarkerClass {
-  if (source === null || !isNoteTag(source)) return { kind: "ephemeral" };
-  if (isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
-  if (MEMORY_SOURCES.has(source)) return { kind: "memory" };
-  return { kind: "note" };
+export function classifyMarker(source: string | null, payload?: string): MarkerClass {
+  if (source === "background_task" || source === "task-notification") {
+    return { kind: "background_task" };
+  }
+  if (source === "task") {
+    return { kind: "task" };
+  }
+  if (source !== null && isNoteTag(source)) {
+    if (isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
+    if (MEMORY_SOURCES.has(source)) return { kind: "memory" };
+    return { kind: "note" };
+  }
+  if (payload?.startsWith("error:")) return { kind: "error" };
+  if (payload?.startsWith("status:")) return { kind: "system_notice" };
+  return { kind: "unrecognized" };
+}
+
+export function stripStatusPrefix(payload: string): string {
+  return payload.startsWith("status:") ? payload.slice("status:".length) : payload;
 }
 
 export function isSilentEphemeralPayload(payload: string): boolean {

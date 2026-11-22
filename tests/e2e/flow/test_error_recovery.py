@@ -67,6 +67,9 @@ def test_llm_error_renders_error_marker_and_agent_recovers(e2e_env: E2EEnv) -> N
     expect(page.get_by_text(ERROR_MSG, exact=False)).not_to_be_visible()
     work_toggle.click()
     expect(work_toggle).to_have_attribute("aria-expanded", "true")
+    collapsed_cards = error_work.locator('[data-testid="card-toggle"][data-expanded="false"]')
+    while collapsed_cards.count() > 0:
+        collapsed_cards.first.click()
     error_marker = error_work.get_by_test_id("marker-error").filter(has_text=ERROR_MSG).first
     expect(error_marker).to_be_visible(timeout=15_000)
     page.wait_for_selector("text=The agent is blocked", timeout=15_000)

@@ -419,7 +419,7 @@ def test_expanded_work_block_bounded_scroll_and_no_sticky(
             header.click()
             expect(header).to_have_attribute("aria-expanded", "true")
         row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
-        assert turn_toggle.evaluate("el => getComputedStyle(el).position") == "sticky"
+        assert turn_toggle.evaluate("el => getComputedStyle(el).position") != "sticky"
         assert header.evaluate("el => getComputedStyle(el).position") != "sticky"
         assert turn.locator('[data-testid="turn-scroll-viewport"]').count() == 0
         outer_vp = page.locator(

@@ -463,7 +463,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       if (sender === "agent" || sender === "external_agent") agentMessages += 1;
       else systemNotes += 1;
     } else if (it.kind === "system_marker") {
-      if (classifyMarker(it.source).kind === "memory") memories += 1;
+      if (classifyMarker(it.source, it.payload).kind === "memory") memories += 1;
       else systemNotes += 1;
     } else {
       // meiva:note

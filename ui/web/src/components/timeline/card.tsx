@@ -10,6 +10,8 @@
 
 import {
   Bot,
+  Clock,
+  Eye,
   FileText,
   Info,
   Paperclip,
@@ -27,7 +29,7 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
 import { markerVisual } from "./markers";
-import { classifyMarker } from "./model/marker-classify";
+import { classifyMarker, isSilentMarker } from "./model/marker-classify";
 import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, LiveClockGate, useNow } from "./model/reasoning-clock";
@@ -44,7 +46,9 @@ export interface CardConfig {
   readonly titleValues?: Record<string, string | number>;
   // meiva:note
   // Default body visibility within an opened TurnBlock, live or settled alike (user ruling
-  // 2026-11-20): only the agent's text output and attachments open by default.
+  // 2026-11-22): only the agent's text output (`agent_chat`) opens by default; every other
+  // secondary card (attach, system inbound, notes, memory, lifecycle, tasks, notices, errors)
+  // starts collapsed.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly fixedDefault: boolean;
   // meiva:note
@@ -57,6 +61,25 @@ export interface CardConfig {
   // attach, system notes) offer none.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   readonly copy: boolean;
+  readonly ownQuoteBody?: boolean;
+}
+
+function systemInboundMeta(source: string | null): {
+  readonly icon: LucideIcon;
+  readonly title: string;
+  readonly titleKey: string;
+} {
+  const s = source ?? "";
+  if (s === "shell" || s.startsWith("shell:")) {
+    return { icon: Terminal, title: "Shell", titleKey: "timeline.inboundShell" };
+  }
+  if (s === "watcher" || s.startsWith("watcher:")) {
+    return { icon: Eye, title: "Watcher", titleKey: "timeline.inboundWatcher" };
+  }
+  if (s === "schedule" || s.startsWith("schedule:")) {
+    return { icon: Clock, title: "Schedule", titleKey: "timeline.inboundSchedule" };
+  }
+  return { icon: Info, title: "System", titleKey: "timeline.system" };
 }
 
 export function messageCardConfig(item: BackendTimelineItem): CardConfig | null {
@@ -117,7 +140,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Paperclip,
         title: null,
         titleKey: "timeline.attachedFiles",
-        fixedDefault: true,
+        fixedDefault: false,
         showTimestamp: true,
         copy: false,
       };
@@ -159,12 +182,13 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           copy: true,
         };
       }
+      const meta = systemInboundMeta(item.source);
       return {
         rich: null,
-        icon: Info,
-        title: "System",
-        titleKey: "timeline.system",
-        fixedDefault: true,
+        icon: meta.icon,
+        title: meta.title,
+        titleKey: meta.titleKey,
+        fixedDefault: false,
         showTimestamp: true,
         copy: false,
       };
@@ -190,17 +214,18 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         copy: false,
       };
     case "system_marker": {
-      const cls = classifyMarker(item.source);
-      if (cls.kind === "ephemeral") return null;
+      if (isSilentMarker(item.source, item.payload)) return null;
+      const cls = classifyMarker(item.source, item.payload);
       const v = markerVisual(cls);
       return {
         rich: null,
         icon: v.icon,
         title: v.title,
         titleKey: v.titleKey ? `markers.${v.titleKey}` : undefined,
-        fixedDefault: cls.kind === "note",
+        fixedDefault: false,
         showTimestamp: item.show_timestamp,
         copy: false,
+        ownQuoteBody: cls.kind === "error" || cls.kind === "unrecognized",
       };
     }
   }
