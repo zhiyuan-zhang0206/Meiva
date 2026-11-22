@@ -3880,7 +3880,7 @@
   "services/desktop/computer/errors.py": 1,
   "services/desktop/computer/execute.py": 14,
   "services/desktop/computer/input.py": 10,
-  "services/desktop/computer/mcp_daemon.py": 47,
+  "services/desktop/computer/mcp_daemon.py": 21,
   "services/desktop/computer/mcp_wrapper.py": 2,
   "services/desktop/computer/ocr/__init__.py": 8,
   "services/desktop/computer/ocr/tests/test_computer_ocr.py": 1,

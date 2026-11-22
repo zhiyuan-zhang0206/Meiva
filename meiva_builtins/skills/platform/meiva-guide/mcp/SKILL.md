@@ -69,6 +69,24 @@ meiva mcp disable <name>
 stops it loading. A plugin-bundled server comes in with its plugin (see
 [packages](../packages/SKILL.md)) rather than `meiva mcp add`.
 
+## Cross-Machine Computer Use
+
+`meiva.mcps.computer_use` drives the current machine by default (omit `host`) and can also route
+actions to registered cluster desktops (`meiva://<machine>`) or external SSH-controlled desktops
+configured in `$MEIVA_HOME/remote_hosts.toml` (`ssh://<alias>`).
+
+1. Discover available targets, online status, and active lease holders first:
+   ```bash
+   meiva computer list          # human-readable table
+   meiva computer list --json   # machine-readable JSON
+   ```
+2. Pass `host="<target>"` (or an unambiguous registered short name such as `"macmini"` or
+   `"zzyasus"`) to any `computer_use` tool call — for example
+   `meiva.mcps.computer_use.snapshot(host="ssh://zzyasus")`. Bare IP addresses and unregistered
+   URLs are rejected.
+3. Call `meiva.mcps.computer_use.release_control(host="<target>")` when your multi-step flow ends
+   (or `meiva computer release --host <target>` as an operator kick).
+
 ## When to Fix Behavior in a Wrapper Instead
 
 If a first-party MCP server (one Meiva ships with) has a behavior bug, the fix is

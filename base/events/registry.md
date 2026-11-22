@@ -82,7 +82,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `skill_invoked` | skill invoked by an agent | business | — | events |
 | `task_create` | task created | business | — | events |
 | `task_update` | task updated | business | status | events |
-| `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id | events |
+| `computer_action` | computer-use desktop action (executed or refused) | business | action, app, outcome, error, coords, path, task_id, target_host | events |
 | `env_write` | official .env config write (actor and keys; old/new values for non-sensitive fields stay in the local record; sensitive values never recorded) | business | — | events |
 | `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |

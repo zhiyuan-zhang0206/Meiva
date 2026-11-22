@@ -76,11 +76,13 @@ class BrowserFact:
 
 
 # meiva:note
-# computer-mcp: the permissions-helper flag and the platform's incapability reason.
+# computer-mcp: the permissions-helper flag, the platform's incapability reason, and whether
+# remote desktop targets (remote_hosts.toml or a multi-machine cluster) allow headless mounting.
 @dataclass(frozen=True)
 class ComputerFact:
     helper_enabled: bool
     incapability: str | None
+    has_remote_targets: bool = False
 
 
 # meiva:note
@@ -147,7 +149,13 @@ def gate_reason(session: str, fact: GateFact | None) -> str | None:
             return _flag_reason(session, enabled=enabled)
         case BrowserFact(enabled=enabled, incapability=incapability):
             return incapability if enabled else "disabled (MEIVA_BROWSER_ENABLED off)"
-        case ComputerFact(helper_enabled=helper_enabled, incapability=incapability):
+        case ComputerFact(
+            helper_enabled=helper_enabled,
+            incapability=incapability,
+            has_remote_targets=has_remote_targets,
+        ):
+            if has_remote_targets:
+                return None
             return incapability if helper_enabled else _HELPER_OFF
         case StationFact(is_station=is_station):
             return None if is_station else "this home is not an observability station"

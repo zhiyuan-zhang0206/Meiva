@@ -67,6 +67,7 @@ from ops.cluster_status import ShellNotFoundError, cluster_now
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
+from services.agent_runner.agent_ops.computer_rpc import computer_rpc_route
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route, workspace_file_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -635,6 +636,15 @@ async def serve_ops_daemon(
                     upload_object_route,
                     pool=pool,
                     receiver=receiver,
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
+                ("POST", "/computer/rpc"): functools.partial(
+                    computer_rpc_route,
+                    home=home,
+                    platform_system=host.platform.system,
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,

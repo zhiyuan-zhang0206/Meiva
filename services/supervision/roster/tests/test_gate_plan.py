@@ -82,6 +82,13 @@ def test_computer_mcp_is_gated_by_the_helper_flag_before_the_platform() -> None:
     )
     assert gate_reason("computer-mcp", ComputerFact(helper_enabled=True, incapability="x")) == "x"
     assert gate_reason("computer-mcp", ComputerFact(helper_enabled=True, incapability=None)) is None
+    assert (
+        gate_reason(
+            "computer-mcp",
+            ComputerFact(helper_enabled=False, incapability="x", has_remote_targets=True),
+        )
+        is None
+    )
 
 
 def test_the_native_backends_run_only_on_the_observability_station() -> None:

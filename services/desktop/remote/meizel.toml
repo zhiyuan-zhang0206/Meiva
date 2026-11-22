@@ -1,0 +1,13 @@
+exports = ["__init__.py", "cluster_rpc.py", "errors.py", "router.py", "ssh_tunnel.py", "win_bridge.py"]
+
+[uses]
+"__init__.py" = ["cluster_rpc.py", "errors.py", "plan.py", "router.py", "ssh_tunnel.py", "uia_map.py", "win_bridge.py"]
+"cluster_rpc.py" = ["errors.py", "plan.py"]
+"errors.py" = ["plan.py"]
+"router.py" = ["cluster_rpc.py", "ssh_tunnel.py", "win_bridge.py"]
+"ssh_tunnel.py" = ["plan.py"]
+"win_bridge.py" = ["errors.py", "plan.py", "uia_map.py"]
+
+[purity]
+"plan.py" = "strict"
+"uia_map.py" = "strict"

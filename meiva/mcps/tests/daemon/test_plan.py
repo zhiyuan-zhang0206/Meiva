@@ -100,6 +100,10 @@ def test_malformed_args_or_env_never_reach_the_child(spec: dict[str, Any], messa
 def test_a_display_requirement_is_unmet_on_a_headless_host() -> None:
     reason = unmet_requirement({"display": True}, display_available=False)
     assert reason == "MCP server requires a display, but this host has none (headless server)"
+    assert (
+        unmet_requirement({"display": True}, display_available=False, remote_desktop_available=True)
+        is None
+    )
 
 
 @pytest.mark.parametrize(

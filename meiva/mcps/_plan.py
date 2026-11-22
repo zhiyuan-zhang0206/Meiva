@@ -40,9 +40,14 @@ type ConnectPlan = HttpConnect | StdioConnect | DirectConnect
 
 
 # meiva:note
-# The refusal for a server whose `requires` the host cannot meet, or None when it can run here. `requires` is the validated `requires` map of the entry (`validate_requirements`).
-def unmet_requirement(requires: Mapping[str, bool], *, display_available: bool) -> str | None:
-    if requires.get("display") and not display_available:
+# The refusal for a server whose `requires` the host cannot meet, or None when it can run here. `requires` is the validated `requires` map of the entry (`validate_requirements`). `remote_desktop_available` lets `computer_use` mount on headless hosts that can route to remote desktop targets.
+def unmet_requirement(
+    requires: Mapping[str, bool],
+    *,
+    display_available: bool,
+    remote_desktop_available: bool = False,
+) -> str | None:
+    if requires.get("display") and not display_available and not remote_desktop_available:
         return "MCP server requires a display, but this host has none (headless server)"
     return None
 

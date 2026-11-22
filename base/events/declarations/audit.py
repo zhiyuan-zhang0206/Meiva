@@ -47,6 +47,7 @@ class ComputerAction(TypedDict):
     coords: str | None  # compact "x,y" / "x,y,w,h" / key code — for audit replay
     path: str | None  # snapshot PNG path (snapshot actions only) — trace replay
     task_id: int | None  # originating task, when the call carried one
+    target_host: NotRequired[str]
 
 
 class ComputerSessionStart(TypedDict):

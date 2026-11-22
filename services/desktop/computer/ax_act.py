@@ -22,6 +22,7 @@ from base.host.permissions_helper.wire import AxActResult
 from .ax_ids import AxIdTable, AxSession
 from .ax_tools import require_helper_support
 from .errors import ComputerUseError
+from .input import HOST_PARAM_SCHEMA
 from .screen import DesktopHelper, current_scale
 
 
@@ -243,6 +244,7 @@ TOOL_DECLARATIONS: list[dict[str, object]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "host": HOST_PARAM_SCHEMA,
                 "id": {"type": "string"},
                 "action": {"type": "string", "enum": list(ACTIONS)},
                 "value": {"type": "string", "maxLength": _MAX_VALUE_CHARS},

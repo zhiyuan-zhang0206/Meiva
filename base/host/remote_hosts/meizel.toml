@@ -1,0 +1,8 @@
+exports = ["__init__.py", "store.py"]
+
+[uses]
+"__init__.py" = ["plan.py", "store.py"]
+"store.py" = ["plan.py"]
+
+[purity]
+"plan.py" = "strict"

@@ -197,10 +197,25 @@ def png_size(path: Path) -> tuple[int, int]:
     return width, height
 
 
+def image_size(path: Path) -> tuple[int, int]:
+    with Path(path).open("rb") as f:
+        head = f.read(24)
+    if len(head) >= 24 and head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+        width, height = struct.unpack(">II", head[16:24])
+        return width, height
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as img:
+            return int(img.width), int(img.height)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ComputerUseError(f"captured file {path} is not a readable image: {exc}") from exc
+
+
 def to_logical(value: float, scale: float) -> float:
     """Physical-pixel coordinate -> helper's logical-point space (divide by the
     measured backing scale; scale 1 (1x display) is a no-op there)."""
-    return value / scale if scale > 1 else value
+    return value / scale if scale > 0 and scale != 1.0 else value
 
 
 def _pixel_scale(pixels_w: int, logical_w: float) -> float:
@@ -345,23 +360,32 @@ def snapshot_path(agent_id: int | None, *, stamp: str, home: Path) -> Path:
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
+def _actual_capture_path(captured: object, requested: Path) -> Path:
+    if is_object_dict(captured) and isinstance(captured.get("path"), str) and captured["path"]:
+        candidate = Path(str(captured["path"]))
+        if candidate.is_file():
+            return candidate
+    return requested
+
+
 def capture_screen(
     helper: ScreenHelper, agent_id: int, *, stamp: str, home: Path
 ) -> tuple[Path, ScreenSize, float, tuple[int, int]]:
-    """One full-screen capture: (PNG path, helper screen report, measured
+    """One full-screen capture: (image path, helper screen report, measured
     scale, physical pixel size).
 
     The capture shared by snapshot and the OCR text tools — screencapture -R
-    takes logical points and clips to the display; the PNG comes out at
-    physical resolution (Retina 2x), reported via IHDR. Measure, don't trust:
-    the PNG is the ground truth callers click against; the helper's reported
-    scale can be stale (see _pixel_scale).
+    takes logical points and clips to the display; the PNG/WebP comes out at
+    physical resolution (Retina 2x on macOS), reported via image header. Measure,
+    don't trust: the image is the ground truth callers click against; the helper's
+    reported scale can be stale (see _pixel_scale).
     """
     path = snapshot_path(agent_id, stamp=stamp, home=home)
     size = helper.screen_size()
-    helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
-    pw, ph = png_size(path)
-    return path, size, _pixel_scale(pw, size["w"]), (pw, ph)
+    captured = helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
+    actual = _actual_capture_path(captured, path)
+    pw, ph = image_size(actual)
+    return actual, size, _pixel_scale(pw, size["w"]), (pw, ph)
 
 
 def capture_region(
@@ -375,7 +399,7 @@ def capture_region(
     The helper's region capture can clip out-of-display rectangles silently.
     Reject those before capture so the requested origin and measured scale
     describe the pixels that actually came back. Coordinates are global
-    logical points; the resulting PNG's coordinates start at the region origin.
+    logical points; the resulting image's coordinates start at the region origin.
     """
     screen = helper.screen_size()
     if not (
@@ -385,9 +409,10 @@ def capture_region(
         and region.y + region.h <= screen["y"] + screen["h"]
     ):
         raise ComputerUseError("region must be wholly inside the main display")
-    helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
-    pw, ph = png_size(path)
+    captured = helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
+    actual = _actual_capture_path(captured, path)
+    pw, ph = image_size(actual)
     scale = _pixel_scale(pw, region.w)
     if abs(ph - region.h * scale) > 1:
         raise ComputerUseError("captured region dimensions do not match the requested rectangle")
-    return path, scale, (pw, ph)
+    return actual, scale, (pw, ph)

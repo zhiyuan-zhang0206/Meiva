@@ -1,0 +1,23 @@
+exports = ["__init__.py", "auth.py", "input_logic.py", "lease.py", "overlay_render.py", "server.py", "tests", "win32_ffi.py", "win32_input.py", "win32_overlay.py", "win32_uia.py"]
+
+[uses]
+"__init__.py" = ["constants.py"]
+"auth.py" = ["win32_ffi.py"]
+"failsafe_logic.py" = ["constants.py"]
+"lease.py" = ["constants.py", "win32_ffi.py"]
+"overlay_render.py" = ["constants.py"]
+"server.py" = ["auth.py", "constants.py", "lease.py", "win32_ffi.py", "win32_input.py", "win32_overlay.py", "win32_uia.py"]
+"tests" = ["auth.py", "constants.py", "failsafe_logic.py", "input_logic.py", "lease.py", "overlay_render.py", "uia_logic.py", "win32_ffi.py"]
+"win32_input.py" = ["constants.py", "input_logic.py", "win32_ffi.py"]
+"win32_overlay.py" = ["constants.py", "failsafe_logic.py", "overlay_render.py", "win32_ffi.py"]
+"win32_uia.py" = ["uia_logic.py", "win32_ffi.py", "win32_input.py"]
+
+[purity]
+"__init__.py" = "strict"
+"constants.py" = "strict"
+"failsafe_logic.py" = "strict"
+"uia_logic.py" = "strict"
+
+[roots]
+"server.py" = { kinds = ["clock", "environ", "pid"], why = "Standalone Windows Session 1 helper entrypoint: reads MEIVA_WIN_BRIDGE_ROOT/PORT/CORNER_FAILSAFE_PX environment variables, current PID for session introspection, and UTC clock once at startup" }
+"win32_ffi.py" = { kinds = ["platform"], why = "Single Win32 FFI platform guard module for the standalone Windows Session 1 desktop helper" }

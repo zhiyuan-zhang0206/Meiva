@@ -31,8 +31,23 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
 
 from base.clock import Timers
+from base.db import Database
+from base.host.boundary.fields import optional_float_field
+from base.host.permissions_helper.client import PermissionsHelperError, UserAbortError
+from base.log import logger
+from base.telemetry import audit_events
+
+from .audit_coords import audit_coords
+from .ax_ids import AxSession
+from .config import ComputerUseConfig
+from .execute import execute_tool
+from .ocr import OcrCache
+from .screen import DesktopHelper, measured_tool_scale
 
 # Waiter poll interval: short enough that a released screen is re-taken
 # promptly, long enough that idle waiters cost nothing.
@@ -177,3 +192,236 @@ class ScreenSession:
             f"ScreenSession(holder={self._holder}, "
             f"lease_until={self._lease_until:.1f}, waiters={len(self._waiters)})"
         )
+
+
+def _float_field(record: dict[str, object], key: str) -> float:
+    value = optional_float_field(record, key)
+    if value is None:
+        raise TypeError(f"{key} is not a number")
+    return value
+
+
+@dataclass
+class TargetSessionState:
+    screen: ScreenSession
+    action_lock: asyncio.Lock
+    ax_session: AxSession
+    ocr_cache: OcrCache
+    pointer: tuple[float, float] | None = None
+    scale: float | None = None
+    mouse_holder: int | None = None
+
+    def track_effects(self, tool: str, args: dict[str, object], result: dict[str, object]) -> None:
+        ocr_scale = self.ocr_cache.get("scale")
+        self.scale = measured_tool_scale(
+            tool, args, result, self.scale, ocr_scale, self.ax_session.visual_scale
+        )
+        if tool == "click_text":
+            self.pointer = (_float_field(result, "x"), _float_field(result, "y"))
+        if "frame" in args:
+            return
+        if tool in {"click", "move"} or (
+            tool in {"scroll", "mouse_down", "mouse_up"} and "x" in args and "y" in args
+        ):
+            self.pointer = (_float_field(args, "x"), _float_field(args, "y"))
+        elif tool == "drag":
+            self.pointer = (_float_field(args, "end_x"), _float_field(args, "end_y"))
+
+    def track_mouse_hold(self, tool: str, agent_id: int | None, result: dict[str, object]) -> None:
+        if result.get("auto_released"):
+            self.mouse_holder = None
+        if tool == "mouse_down" and agent_id is not None:
+            self.mouse_holder = agent_id
+        elif tool == "mouse_up":
+            self.mouse_holder = None
+
+    def release_held_mouse(self, helper: DesktopHelper, why: str) -> dict[str, object]:
+        holder = self.mouse_holder
+        try:
+            released = helper.mouse_release_all()["released"]
+        except (PermissionsHelperError, OSError) as e:
+            logger.error(
+                f"[computer-mcp] could not release the mouse button held for agent {holder} ({why}): {e}"
+            )
+            return {"mouse_release_error": str(e)}
+        self.mouse_holder = None
+        if released:
+            logger.warning(
+                f"[computer-mcp] released the mouse button held for agent {holder} ({why}): {released}"
+            )
+        return {"mouse_released": released}
+
+    def run_tool(
+        self,
+        helper: DesktopHelper,
+        tool: str,
+        tool_args: dict[str, object],
+        agent_id: int | None,
+        *,
+        stamp: str,
+        home: Path,
+    ) -> tuple[dict[str, object] | None, str | None, bool]:
+        if agent_id is not None and self.mouse_holder not in (None, agent_id):
+            _ = self.release_held_mouse(helper, f"screen passed to agent {agent_id}")
+        try:
+            result = execute_tool(
+                helper,
+                tool,
+                tool_args,
+                agent_id or 0,
+                pointer=self.pointer,
+                scale=self.scale,
+                ocr_cache=self.ocr_cache,
+                ax_session=self.ax_session,
+                stamp=stamp,
+                home=home,
+            )
+            self.track_effects(tool, tool_args, result)
+            self.track_mouse_hold(tool, agent_id, result)
+        except UserAbortError as e:
+            return None, f"{type(e).__name__}: {e}", True
+        except Exception as e:
+            return None, f"{type(e).__name__}: {e}", False
+        return result, None, False
+
+    async def release_session(
+        self,
+        agent_id: int | None,
+        *,
+        force: bool,
+        helper: DesktopHelper | None,
+        target_uri: str,
+    ) -> tuple[int | None, dict[str, object], str, str | None]:
+        released = await self.screen.release(None if force else agent_id)
+        outcome, error = (
+            ("ok", None) if released is not None else ("error", "not the screen holder")
+        )
+        if force and released is not None:
+            logger.info(
+                f"[computer-mcp] operator forced release of agent {released} on {target_uri}"
+            )
+        mouse: dict[str, object] = {}
+        if (
+            helper is not None
+            and self.mouse_holder is not None
+            and (released is not None or self.mouse_holder == agent_id)
+        ):
+            mouse = self.release_held_mouse(helper, "release_control")
+            if "mouse_release_error" in mouse:
+                outcome, error = "error", f"mouse not released: {mouse['mouse_release_error']}"
+        return released, mouse, outcome, error
+
+
+class TargetSessionRegistry:
+    def __init__(self, config: ComputerUseConfig, *, timers: Timers) -> None:
+        self._config = config
+        self._timers = timers
+        self._states: dict[str, TargetSessionState] = {"local": self._create()}
+
+    def _create(self) -> TargetSessionState:
+        return TargetSessionState(
+            screen=ScreenSession(
+                timers=self._timers,
+                lease_s=self._config.computer_use_lease_s,
+                queue_timeout_s=self._config.computer_use_queue_timeout_s,
+            ),
+            action_lock=asyncio.Lock(),
+            ax_session=AxSession(),
+            ocr_cache={},
+        )
+
+    def state_for(self, target_uri: str) -> TargetSessionState:
+        state = self._states.get(target_uri)
+        if state is None:
+            state = self._create()
+            self._states[target_uri] = state
+        return state
+
+    def holders_snapshot(self) -> dict[str, int | None]:
+        return {uri: st.screen.holder for uri, st in self._states.items()}
+
+
+class LocalTargetMixin:
+    _targets: TargetSessionRegistry
+
+    @property
+    def _screen(self) -> ScreenSession:
+        return self._targets.state_for("local").screen
+
+    @property
+    def _ocr_cache(self) -> OcrCache:
+        return self._targets.state_for("local").ocr_cache
+
+    @property
+    def _pointer(self) -> tuple[float, float] | None:
+        return self._targets.state_for("local").pointer
+
+    @_pointer.setter
+    def _pointer(self, value: tuple[float, float] | None) -> None:
+        self._targets.state_for("local").pointer = value
+
+    @property
+    def _scale(self) -> float | None:
+        return self._targets.state_for("local").scale
+
+    @_scale.setter
+    def _scale(self, value: float | None) -> None:
+        self._targets.state_for("local").scale = value
+
+    @property
+    def _mouse_holder(self) -> int | None:
+        return self._targets.state_for("local").mouse_holder
+
+    @_mouse_holder.setter
+    def _mouse_holder(self, value: int | None) -> None:
+        self._targets.state_for("local").mouse_holder = value
+
+
+def emit_audit_event(
+    db: Database, event_type: str, agent_id: int, payload: dict[str, object]
+) -> None:
+    from base import telemetry
+    from base.telemetry.audit_events import record_audit
+
+    event = audit_events.prepare_event_log(
+        event_type=event_type, agent_id=agent_id, source=f"agent:{agent_id}", payload=payload
+    )
+    with db.write_transaction() as conn:
+        tagged = record_audit(conn, event)
+    telemetry.emit_prepared(tagged)
+
+
+def emit_computer_action(
+    db: Database,
+    agent_id: int | None,
+    tool: str,
+    args: dict[str, object],
+    outcome: str,
+    error: str | None,
+    result: dict[str, object] | None = None,
+    *,
+    helper: DesktopHelper | None = None,
+    target_host: str = "local",
+) -> None:
+    coords = audit_coords(tool, args, result)
+    if agent_id is None:
+        return
+    app = None
+    if helper is not None:
+        with suppress(PermissionsHelperError, OSError):
+            app = helper.frontmost_app()["app"] or None
+    emit_audit_event(
+        db,
+        "computer_action",
+        agent_id,
+        {
+            "action": tool,
+            "app": app,
+            "outcome": outcome,
+            "error": error,
+            "coords": coords,
+            "path": result.get("path") if tool == "snapshot" and result else None,
+            "task_id": args.get("task_id"),
+            "target_host": target_host,
+        },
+    )

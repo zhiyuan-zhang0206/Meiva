@@ -54,6 +54,7 @@ __all__ = [
     "is_paused",
     "list_agent_runners",
     "list_all",
+    "list_all_with_description",
     "list_paused",
     "list_stopped_agent_runners",
     "lookup",
@@ -513,6 +514,15 @@ def list_all(db: Database) -> list[tuple[str, str | None]]:
     """SELECT name, gateway_url FROM machines — for `meiva machines list` (future) / debug."""
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT name, gateway_url FROM machines ORDER BY name")
+        return cur.fetchall()
+
+
+def list_all_with_description(db: Database) -> list[tuple[str, str | None, str | None]]:
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, gateway_url, description FROM machines "
+            "WHERE 'agent-runner' = ANY(role) AND paused_at IS NULL ORDER BY name"
+        )
         return cur.fetchall()
 
 
