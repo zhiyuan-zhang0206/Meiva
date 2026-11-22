@@ -80,8 +80,7 @@ See [arbiter workflow](references/arbiter.md#workspace-promotion-closed-loop) fo
      check `git log`, file path existence, symbol/contract definitions, and deleted
      scripts/queues so notes citing removed paths or retired contracts are caught.
    - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
-     machine topology): check active vs. terminated agents, live schedule triggers,
-     and task status so notes naming terminated role holders or obsolete
+     machine topology): check active vs. terminated agents and live schedule triggers so notes naming terminated role holders or obsolete
      cron times are caught.
    - *Host environment & embedded probes*: check machine configuration and execute
      `<!-- fact-check: <cmd> -->` directives.

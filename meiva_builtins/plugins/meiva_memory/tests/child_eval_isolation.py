@@ -6,7 +6,6 @@
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import meiva
 from agent.process_boot import apply_per_agent_eval_isolation
@@ -15,7 +14,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.tests.configuration import defaults
 from base.packages.plugin_config_images import DiskPluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkNamespace
+from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_memory import plugin
@@ -23,17 +22,7 @@ from meiva_builtins.plugins.meiva_memory import plugin
 
 def _install() -> None:
     install.install(
-        ExtensionRegistry(
-            (
-                (
-                    "tasks_namespace",
-                    PluginContributions(
-                        sdk_namespaces=(SdkNamespace("tasks", SimpleNamespace(list=list)),)
-                    ),
-                ),
-                ("meiva_memory", plugin.contribute()),
-            )
-        ),
+        ExtensionRegistry((("meiva_memory", plugin.contribute()),)),
         config_images=DiskPluginConfigImages(resolve_meiva_home()),
         sampling=fixed_sampling_owner(),
     )
@@ -41,7 +30,6 @@ def _install() -> None:
 
 def isolated() -> None:
     _install()
-    assert hasattr(meiva, "tasks")
 
     process_context.bind_context(
         MeivaContext(identity=AgentIdentity(417, True), meiva_home=resolve_meiva_home())
@@ -58,7 +46,6 @@ def isolated() -> None:
     assert not hasattr(meiva, "mcps")
     assert not hasattr(meiva, "ui")
     assert not hasattr(meiva.agents, "get_last_message")
-    assert not hasattr(meiva, "tasks")
     assert meiva.memory.SHARED_PATH.name == "memory-pool"
     assert meiva.memory.SHARED_PATH.parent.name == "417"
     assert meiva.memory.SHARED_PATH.is_dir()

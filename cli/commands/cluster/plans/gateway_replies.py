@@ -49,7 +49,7 @@ def pause_lines(name: str, reply: PauseReply) -> tuple[str, ...]:
     return (
         f"{name}: PAUSED (since {reply.paused_at[:19]}){reason}",
         f"  agents terminated via the machine's ops server: {reply.terminated_agents}; "
-        f"force-marked in DB (machine unreachable): {reply.force_marked_agents}; "
+        f"force-marked in DB (machine unreachable): {reply.force_marked_agents}",
         "  hidden from roster/probe/fan-out/spawn until resumed: "
         f"`meiva cluster resume {name}` (run on the gateway host)",
     )

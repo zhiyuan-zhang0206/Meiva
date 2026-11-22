@@ -1,8 +1,7 @@
 # Notification spine
 
 A system notification has exactly two triggers: an agent **asked a question**, and an agent has
-**unread output**. Nothing else is one; any other event belongs in the log, the task board or the
-timeline that already carries it. The decision is recorded in
+**unread output**. Nothing else is one; any other event belongs in the log or the timeline that already carries it. The decision is recorded in
 [system notifications are questions and unread output](../../../docs/decisions/engineering/notifications/2026-11-11-notifications-are-questions-and-unread.md).
 
 `base/events/notifications` owns the delivery: a producer plans a push (`triggers.py`, pure), the

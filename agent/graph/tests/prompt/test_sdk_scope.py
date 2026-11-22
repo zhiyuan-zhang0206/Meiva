@@ -28,10 +28,10 @@ def test_the_wildcard_is_replaced_by_the_discovered_namespaces() -> None:
 
 def test_plugin_expansions_lead_and_repeats_keep_their_first_place() -> None:
     plan = expand_plan(
-        ["files", "*", "cwd"], plugin_expansions=("cwd", "tasks"), discovered=DISCOVERED
+        ["files", "*", "cwd"], plugin_expansions=("cwd", "memory"), discovered=DISCOVERED
     )
 
-    assert plan.paths == ("cwd", "tasks", "files", "agents", "self", "shell", "shell.sessions")
+    assert plan.paths == ("cwd", "memory", "files", "agents", "self", "shell", "shell.sessions")
 
 
 def test_members_of_a_capability_surface_are_refused_and_reported() -> None:

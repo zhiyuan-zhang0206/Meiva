@@ -4,7 +4,7 @@ Dynamic Workflow is a script written by an ordinary persistent peer. Independent
 work can benefit from concurrency without requiring a script or one peer per
 item. The skill starts with one representative dispatch/delivery/verification
 path before expanding. The current agent freely chooses execution, orchestration,
-and evaluation roles; no Fleet labels or task records are prerequisites.
+and evaluation roles.
 
 The entrypoint carries method selection; `references/execution.md` carries
 dispatch, collection, verification, budget handling, and cleanup. Read it when

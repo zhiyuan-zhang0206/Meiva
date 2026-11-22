@@ -36,7 +36,7 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 
 - **One approval buys high Autonomy**: before batch autonomy, package the scope, intended work and budget cap into a **single** `meiva.ui.ask(...)`; the user's reply authorizes it, and **the original text is recorded** into the agreed handoff record. After approval, do not ask step-by-step; whether the user is online does not change behavior.
 - **Safety boundary** (the authorization broadens what can be done, does not remove guardrails): only produce PRs without merging, do not send outward messages, do not touch prod, do not spend money beyond the authorization.
-- **Usage reminders**: the independent `meiva-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff. Task records and task escalation do not attribute or enforce costs.
+- **Usage reminders**: the independent `meiva-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff.
 
 ## Reference Sub-documents
 
