@@ -18,11 +18,11 @@ def load_skill_script(*parts: str, name: str | None = None) -> ModuleType:
     sys.modules[spec.name] = module
     original_path = sys.path
     saved = list(original_path)
+    original_path.insert(0, str(path.parent))
     try:
-        original_path.insert(0, str(path.parent))
         spec.loader.exec_module(module)
     finally:
         original_path[:] = saved
         if sys.path is not original_path:
-            raise RuntimeError("Loaded skill script unexpectedly rebound sys.path")
+            sys.path[:] = saved
     return module

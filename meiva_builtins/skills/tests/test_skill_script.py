@@ -59,9 +59,16 @@ def test_load_skill_script_restores_path_on_failure(tmp_path: Path) -> None:
         _ = sys.modules.pop("broken_under_test", None)
 
 
-def test_load_skill_script_rejects_rebinding_path(tmp_path: Path) -> None:
+def test_load_skill_script_restores_both_paths_after_rebinding(tmp_path: Path) -> None:
     script = tmp_path / "rebind.py"
-    _ = script.write_text("import sys\nsys.path = []\n", encoding="utf-8")
+    _ = script.write_text(
+        "import sys\n"
+        "class ScriptError(ValueError):\n    pass\n"
+        "failure = ScriptError('import failed after rebinding')\n"
+        "sys.path = []\n"
+        "raise failure\n",
+        encoding="utf-8",
+    )
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "meiva_builtins.skills.tests.test_skill_script", str(script)],
         capture_output=True,
@@ -75,9 +82,11 @@ def test_load_skill_script_rejects_rebinding_path(tmp_path: Path) -> None:
 def _check_rebinding_in_child(script: str) -> None:
     original_path = sys.path
     saved = original_path[:]
-    with pytest.raises(RuntimeError, match=r"^Loaded skill script unexpectedly rebound sys\.path$"):
+    with pytest.raises(ValueError, match=r"^import failed after rebinding$") as caught:
         _ = load_skill_script(script)
+    assert caught.value is vars(sys.modules["rebind_under_test"])["failure"]
     assert original_path == saved
+    assert sys.path == saved
 
 
 if __name__ == "__main__":
