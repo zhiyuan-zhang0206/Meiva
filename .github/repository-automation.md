@@ -11,9 +11,7 @@ that guard.
 
 ## `workflows/attribution-gate.yml`
 
-One job, one step, two reminders the description owes: the agent attribution line and the
-`Closes-task:` line. Both only comment — the job sets `continue-on-error` and cannot fail or block a
-merge. What each line means, why the task line records an intention rather than a reference, and how
+The job comments when a Meiva pull request is missing agent attribution.
 `tests/harness/test_attribution_gate_workflow.py` covers the shell:
 [the attribution gate](attribution-gate.md).
 

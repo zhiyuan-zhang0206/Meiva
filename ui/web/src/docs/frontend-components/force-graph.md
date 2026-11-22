@@ -1,15 +1,13 @@
 # Force Graph
 
 `components/fleet/force-graph.tsx` and `components/fleet/force-graph-geometry.ts`
-implement the shared force-directed canvas rendered by both `GraphView` (circle
-agent nodes) and `TaskGraph` (square task nodes). Its d3 zoom/pan behavior,
+implement the force-directed canvas rendered by `GraphView`. Its d3 zoom/pan behavior,
 transform state, reset, and box-fit math come from `lib/fleet/use-svg-zoom-pan.ts`,
 also used by the memory graph; each canvas retains its own layout timing and
 focus-neighbor bounds.
 
 Label sizing/wrapping and its direct contracts use `fleet/presentation/labels.ts`;
 `force-graph-geometry.ts` retains focus/hover hooks and graph model declarations.
-Task canvas/chrome/contracts share the records and legend in `presentation/task-palette.ts`.
 `layoutOptions` remains owned by the actual `ForceGraph` renderer.
 
 ## Hover card geometry and pointer transitions
@@ -28,8 +26,7 @@ involved in `force-graph-geometry.ts`:
   node or card, and otherwise waits out `HOVER_CARD_HIDE_GRACE_MS` symmetrically
   in both directions so node-to-card and card-to-node travel never flickers.
 
-Task titles, descriptions and results lay out in full inside `TaskHoverCard`
-(`task-graph-chrome.tsx`); tall cards scroll via the inner scroll container
+Tall hover cards scroll via the inner scroll container
 while `ResizeObserver` watches the uncapped content wrapper for async growth.
 Selection rings (`isRinged`) carry `pointerEvents="none"` and node bounds read
 `[data-node-shape]` so dashed ring gaps do not trigger spurious leave events.
@@ -39,8 +36,7 @@ Selection rings (`isRinged`) carry `pointerEvents="none"` and node bounds read
 Every edge uses `text-muted-foreground` (`stroke="currentColor"`), distinguished
 by opacity and width alone. Incident edges highlight at `0.96` opacity; unselected
 lineage edges render at `0.86`; dimmed lineage edges (when another node
-is selected) stay at `0.48` opacity rather than near-zero so the task tree
-skeleton remains readable on dark canvases. Stroke widths scale gently by
+is selected) stay at `0.48` opacity rather than near-zero so agent lineage remains readable on dark canvases. Stroke widths scale gently by
 `Math.sqrt(viewSpan / 900)` above a 900-unit `viewBox` span (capped at `2x`) so
 multi-branch graphs do not shrink into sub-pixel hairlines.
 
@@ -48,9 +44,8 @@ multi-branch graphs do not shrink into sub-pixel hairlines.
 
 Navigation is a value the surfaces are handed, not a module they read:
 `app/fleet/page.tsx` reads the router, wraps `push` as `navigate` and passes it
-down through `FleetView`, `LeftGraphPanel` and the mobile layout to `GraphView`,
-`TaskGraph` and its Kanban cards. A double-clicked node opens
-`/?agent_id=<owner>` through that prop, and a suite hands in a spy instead of
+through `FleetView` to `GraphView`. A double-clicked node opens
+`/?agent_id=<id>` through that prop, and a suite hands in a spy instead of
 replacing `next/navigation`.
 
 A graph of 200 nodes or more (`layoutOptions` in `force-graph.tsx`) settles in
@@ -79,5 +74,5 @@ stored `display.*_force_params` keeps its own value, and the slider range stays
 
 ## Relationship to Other Nodes
 
-- [Fleet View](fleet-view.md) — the supervision surface whose `GraphView` and `TaskGraph` tabs mount this canvas.
+- [Fleet View](fleet-view.md) — the supervision surface whose `GraphView` mounts this canvas.
 - [Frontend Components](frontend-components.md) — the component catalog this node hangs from.

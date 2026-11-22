@@ -19,15 +19,14 @@ class ClusterPorts(TypedDict):
     `FIXED_PORTS` service names, typed. A dict at runtime, so the start intent's
     on-disk JSON shape is the plain service->port object.
 
-    `cli.start_identity` refuses a record whose keys differ from `FIXED_PORTS`,
-    so every key is always present."""
+    `cli.start_identity` requires every key in `FIXED_PORTS` and filters retired
+    slots when reading a record."""
 
     gateway: int
     frontend: int
     app: int
     heartbeat: int
     labeler: int
-    task_maintenance: int
     memory_indexer: int
     ops: int
     browser: int

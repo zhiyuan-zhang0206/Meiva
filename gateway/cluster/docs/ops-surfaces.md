@@ -94,7 +94,7 @@ or synchronous Loki scan occurs here.
 `GET /api/agents/{id}/inspect/live` exclusively owns the current projection,
 notice, runner shell probe, and indexed recent-pause lookup from the durable
 Postgres trail. It never queries Loki. An unavailable runner sets
-`shells_available=false`. `/inspect/widgets` owns plugin extensions. The three reads load,
+`shells_available=false`. `/inspect/metrics` serves the enabled plugins' metrics. These reads load,
 render, fail, and retry independently. The old mixed `/inspect` route is absent.
 
 ## Key Dependencies

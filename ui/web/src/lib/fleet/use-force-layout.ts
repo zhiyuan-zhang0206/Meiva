@@ -1,5 +1,4 @@
-// Shared d3-force layout hook — used by the fleet Graph View, Task Graph,
-// and Memory Graph so all three views share the same simulation engine.
+// Shared d3-force layout hook for the fleet relationship and memory graphs.
 // Each view passes its own node/edge signature, force params, and a radius
 // function; the hook owns the simulation lifecycle and exposes settled
 // positions as React state.

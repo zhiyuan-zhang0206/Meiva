@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
-  InspectWidget,
 } from "@/lib/contracts/types";
 import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
 import {
@@ -14,7 +13,6 @@ import {
   fixture,
   getAgentInspectLive,
   getAgentInspectStatistics,
-  getAgentInspectWidgets,
   getAgentRoster,
   liveFixture,
   QueryClientProvider,
@@ -194,7 +192,6 @@ describe("InspectorPanel", () => {
     qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ harness: "meiva" }));
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
     getAgentInspectStatistics.mockReturnValue(new Promise<AgentInspectStatistics>(() => undefined));
-    getAgentInspectWidgets.mockReturnValue(new Promise<InspectWidget[]>(() => undefined));
 
     render(<InspectorPanel agentId={1} />, qc);
 
@@ -221,7 +218,6 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Page")).toBeNull();
     expect(screen.queryByText("Persistent shells")).toBeNull();
     expect(screen.queryByText("Configuration")).toBeNull();
-    expect(screen.queryByText("Extensions")).toBeNull();
     expect(screen.queryByText("Context")).toBeNull();
     expect(screen.queryByText("Notice")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
@@ -269,8 +265,7 @@ describe("InspectorPanel", () => {
     expect(within(activitySection).queryByText("Cost (API)")).toBeNull();
   });
 
-  it("shows current state while statistics and plugins are pending", async () => {
-    getAgentInspectWidgets.mockReturnValue(new Promise<InspectWidget[]>(() => undefined));
+  it("shows current state while statistics are pending", async () => {
     let releaseWindowed: (v: AgentInspectStatistics) => void = () => undefined;
     getAgentInspectStatistics.mockReturnValue(
       new Promise<AgentInspectStatistics>((resolve) => {
@@ -289,16 +284,11 @@ describe("InspectorPanel", () => {
     expect(screen.queryByLabelText("Liveness loading")).toBeNull();
   });
 
-  it("a current-state failure does not hide statistics or extension state", async () => {
+  it("a current-state failure leaves statistics available", async () => {
     getAgentInspectLive.mockRejectedValue(new Error("runner unreachable"));
-    getAgentInspectWidgets.mockRejectedValue(new Error("plugin unavailable"));
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
     expect(screen.getByText("runner unreachable")).toBeTruthy();
-    expect(screen.getByText("Inspector extensions unavailable")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry extensions" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry extensions" }));
-    await waitFor(() => expect(getAgentInspectWidgets).toHaveBeenCalledTimes(2));
     expect(getAgentInspectLive).toHaveBeenCalledTimes(1);
     expect(getAgentInspectStatistics).toHaveBeenCalledTimes(1);
   });
@@ -311,7 +301,6 @@ describe("InspectorPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry windowed data" }));
     await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
     expect(getAgentInspectLive).toHaveBeenCalledTimes(1);
-    expect(getAgentInspectWidgets).toHaveBeenCalledTimes(1);
   });
 
   it("replaces the prior window's values with spinners while a new window is pending", async () => {

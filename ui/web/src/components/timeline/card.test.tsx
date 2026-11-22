@@ -209,10 +209,10 @@ describe("messageCardConfig", () => {
     }
   });
 
-  it("classifies task, background_task, status, error, and unrecognized system_markers as collapsed cards", () => {
+  it("classifies archived notes, background_task, status, error, and unrecognized system_markers as collapsed cards", () => {
     const taskCfg = messageCardConfig(item("system_marker", { source: "task", payload: "Task updated" }));
-    expect(taskCfg!.title).toBe("Task");
-    expect(taskCfg!.titleKey).toBe("markers.task");
+    expect(taskCfg!.title).toBe("Note");
+    expect(taskCfg!.titleKey).toBe("markers.note");
     expect(taskCfg!.fixedDefault).toBe(false);
 
     for (const src of ["background_task", "task-notification"]) {

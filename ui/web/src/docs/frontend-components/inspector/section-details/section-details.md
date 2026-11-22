@@ -13,9 +13,6 @@ When visible, it wears the same row chrome as the Page section's rows — the ro
 hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and the hover highlight — so the panel's clickable rows and `Metric` cells read as one
 family. A cold failure gets the full error message (`InlineError`) in the body
 instead. Background refresh failures stay silent while cached snapshots are retained.
-The fleet task link (`fleetTaskHref`) is a typed literal route so `next/link` infers it
-without a cast.
-
 **Activity** carries the cost, TPS and duration cells in its own node: [Activity section](../activity.md).
 
 **Context** is the selected agent's context-window occupancy: a wide gauge
@@ -46,7 +43,7 @@ both schedules owned by the agent (`owner_agent_id = agent_id`) and cluster-leve
 schedules created by it (`owner_agent_id IS NULL` with `created_by_agent_id = agent_id`),
 ordered by status priority (`running`, `error`, `scheduled`, `stopped`, others) and
 next launch time. The section hides itself when empty. Each row links to
-`/control/schedules?schedule={id}` (via `scheduleHref`), shows a status dot,
+`/control/schedules?schedule={id}`, shows a status dot,
 the truncated name with full trigger/status/machine tooltip, a compact `Cluster`
 badge whenever `owner_agent_id` is null, and either the next fire time (for
 scheduled rows) or the localized status label on the right.
@@ -66,13 +63,7 @@ next heartbeat, the last pause, machine and status — the cell rules, including
 what a pause or a queued wake renders, are in
 [the Liveness section](liveness.md).
 
-**Widgets.** Plugin widgets render through the shared section chrome
-(`inspector-section.tsx`), which also owns `Section` loading attributes and
-`Metric`'s card primitive, so plugin sections and built-in ones
-share one header and card primitive; the widget section itself renders only the
-closed-set kinds the console knows (`InspectWidgetSection`), renders nothing
-while pending or empty, and a widgets fetch failure leaves the rest of the panel
-intact. Open questions are rendered once in `SharedContextPanel`'s pinned bottom
+Open questions are rendered once in `SharedContextPanel`'s pinned bottom
 `question-region` ([shared user context](../../../frontend-state/shared-context/shared-context.md)),
 never duplicated inside the Inspector scroll body.
 

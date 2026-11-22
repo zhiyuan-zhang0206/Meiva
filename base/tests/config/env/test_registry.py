@@ -224,7 +224,6 @@ class TestConsumptionMatrixDeclarations:
         assert set(aliases) == {
             "labeler",
             "heartbeat",
-            "task_maintenance",
             "events_maintenance",
             "pg_backup",
             "ttl_reaper",

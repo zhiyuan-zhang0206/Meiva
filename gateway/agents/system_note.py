@@ -29,7 +29,6 @@ def system_note_blocking(
     content: str,
     source: str,
     note_tag: str,
-    task_id: int | None,
     provenance: InboundProvenance | None = None,
     *,
     client_message_id: str,
@@ -38,7 +37,6 @@ def system_note_blocking(
     """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
     payload: dict[str, object] = {
         "note_tag": note_tag,
-        **({"task_id": task_id} if task_id is not None else {}),
     }
     # Freeze the delivery policy with the inbound receipt.
     payload["delivery_resurrect"] = resurrect
@@ -46,8 +44,6 @@ def system_note_blocking(
     with write_transaction(pool) as conn:
         inbound_id = _existing_receipt(conn, client_message_id, agent_id, content, source, payload)
         if inbound_id is None:
-            if task_id is not None:
-                _validate_task_owner(conn, task_id, agent_id)
             try:
                 with conn.transaction(), conn.cursor() as cur:
                     inbound_id, prepared_event = insert_inbound_message_in_transaction(
@@ -94,7 +90,7 @@ def _existing_receipt(
     source: str,
     payload: dict[str, object],
 ) -> int | None:
-    """Serialize same-key inserts and replay before mutable task validation."""
+    """Serialize same-key inserts and return the existing receipt on replay."""
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
     previous = query_one(
         conn,
@@ -122,16 +118,3 @@ def _existing_receipt(
             status_code=409, detail="idempotency key identifies a different system note"
         )
     return previous.id
-
-
-def _validate_task_owner(conn: psycopg.Connection, task_id: int, agent_id: int) -> None:
-    """Lock current ownership through the note transaction's commit."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT owner FROM agent_tasks WHERE id = %s FOR UPDATE", (task_id,))
-        row = cur.fetchone()
-    if row is None:
-        raise HTTPException(status_code=422, detail=f"task_id {task_id} does not exist")
-    if row[0] != agent_id:
-        raise HTTPException(
-            status_code=422, detail=f"task_id {task_id} is not owned by agent {agent_id}"
-        )

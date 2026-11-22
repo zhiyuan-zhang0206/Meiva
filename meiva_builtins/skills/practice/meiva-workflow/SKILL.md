@@ -154,8 +154,7 @@ A routine task needs no capability report or mandatory `Not used` entry.
 
 Use a sentence or a few working notes for ordinary tasks. Persist the objective,
 acceptance evidence, boundaries, next action, and necessary coordination state
-when work spans turns or needs recovery. Use durable working notes or existing work records; no collaboration plugin,
-task registry, label convention, or specific SDK is required.
+when work spans turns or needs recovery. Use durable working notes or existing work records; use the available collaboration tools.
 
 Alignment, capability/timescale calibration, goal definition, planning, and
 evaluation can stand alone, interleave,

@@ -118,9 +118,6 @@
   "tests/e2e/visual/test_layout_invariants.py": [
     "skip('the inspector scroll matrix requires deterministic stubbed sections')"
   ],
-  "tests/e2e/visual/test_mobile_no_horizontal_overflow.py": [
-    "skipif(not _OVERRIDE_BASE_URL)"
-  ],
   "tests/e2e/visual/test_spawn_button_mobile.py": [
     "skipif(not _OVERRIDE_BASE_URL)"
   ],

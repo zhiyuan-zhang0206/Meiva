@@ -86,8 +86,8 @@ Memory. Examples include who owns a domain and which accounts are logged in on
 host Chrome. Promote reusable private facts to shared Vault Memory at
 `~/.meiva/vault/memory/` after checking existing entries and verifying the fact.
 Include its verification point and update stale facts in place. Store account
-availability and routing, never credentials. Keep transient task status in task
-records rather than durable shared Memory.
+availability and routing, never credentials. Keep transient work status in the
+working notes for the job.
 
 ### Level 3 - Skill (Reusable Procedures & Playbooks - between Memory and Plugin)
 

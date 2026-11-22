@@ -30,14 +30,6 @@ class LeakAuditEntry(TypedDict):
 
 
 # meiva:note
-# The agent's task receipts in the window, by the request field each one carried.
-class TaskUpdates(TypedDict):
-    note: int
-    status: int
-    results: int
-
-
-# meiva:note
 # What the record is based on (`record._evidence_block`). Absent from datasets collected before
 # `schema_version` 2, which is why `evidence_grade` is optional on the record.
 class Evidence(TypedDict):
@@ -52,8 +44,6 @@ class Evidence(TypedDict):
     terminal_status: str | None
     inbound_total: int
     inbound_claimed: int
-    task_updates: TaskUpdates
-    task_state_changes: int
     exec_ok: int
     exec_failed: int
 

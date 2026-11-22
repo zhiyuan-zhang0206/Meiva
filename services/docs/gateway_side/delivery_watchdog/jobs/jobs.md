@@ -26,5 +26,3 @@ There are no wake re-dispatch, poison budgets, persistent alert dedup, harvest o
 wedged-turn recovery jobs. Healthy hosts discover fresh pending inputs through
 their ordinary polling and claim CAS. Message senders retain finite same-key
 retries and the ordinary delivery-time attempt to wake a terminated agent. Task
-notices retain their ordinary enqueue and best-effort wake; see
-[Durable task notification recovery](task-notifications.md).

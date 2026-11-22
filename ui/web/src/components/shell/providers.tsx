@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AppUpdateBanner } from "@/components/app/app-settings";
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
-import { OpenTasksNoticeHost } from "@/components/notifications/open-tasks-notice";
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
 import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
@@ -172,8 +171,7 @@ export function Providers({
   // What rides at the root, and why each is here rather than on a page: the plugin skin's tokens
   // over the active light/dark palette (`ThemePackTokens`, renders nothing), the theme colour sync,
   // the navigation timing report, the connection banner, the toast host (an error must reach the
-  // user on every route, not just the Home page) and the terminate open-tasks notice (a terminate
-  // that reports open tasks must surface wherever the action was taken).
+  // user on every route).
   const [streamHub] = useState(
     () =>
       hub ??
@@ -198,7 +196,6 @@ export function Providers({
                     <AppUpdateBanner />
                     {children}
                     <ToastHost />
-                    <OpenTasksNoticeHost />
                   </LanguageProvider>
                 </theme.Provider>
               </AlertsProvider>

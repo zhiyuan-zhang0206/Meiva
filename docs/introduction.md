@@ -280,7 +280,7 @@ the agent graph topology are in the OKF knowledge graph, rooted at
 **No terminal UI, by design.** The Next.js console above is the only
 supervision surface — plus chat channels (e.g. X, via `meiva mcp install`)
 for talking to individual agents. An always-on fleet's state (many concurrent
-agents, the spawn/fork/message graph, task tracking) doesn't compress into a
+agents and the spawn/fork/message graph) doesn't compress into a
 terminal's single-pane model without losing most of what supervision needs;
 see [`docs/conventions/non-goals.md`](conventions/non-goals.md).
 

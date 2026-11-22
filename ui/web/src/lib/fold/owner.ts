@@ -8,7 +8,7 @@
 // per-hook folding skeletons
 // (useAgentsCacheSync and friends); hooks only read their keys now.
 //
-// Debounce policy (the invalidating domains): fleet-graph / tasks bursts
+// Debounce policy (the invalidating domains): fleet graph bursts
 // collapse into one refetch per key family.
 
 "use client";

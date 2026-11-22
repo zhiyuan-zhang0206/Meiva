@@ -543,7 +543,7 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
     expect(screen.getByText("Internal closing text")).toBeTruthy();
   });
 
-  it("expands only agent_chat by default inside an opened TurnBlock and collapses notes, attach, system inbound, and task markers", () => {
+  it("expands only agent_chat by default inside an opened TurnBlock and collapses notes, attachments, system inbound, and background markers", () => {
     render(
       <TimelineView
         items={[
@@ -551,7 +551,7 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
           makeItem({ item_id: "1.1", kind: "system_marker", source: "sdk_hint", payload: "hidden sdk note" }),
           makeItem({ item_id: "1.2", kind: "system_marker", source: "memory", payload: "hidden memory" }),
           makeItem({ item_id: "1.3", kind: "system_marker", source: "lifecycle_restart", payload: "hidden lifecycle" }),
-          makeItem({ item_id: "1.4", kind: "system_marker", source: "task", payload: "hidden task note" }),
+          makeItem({ item_id: "1.4", kind: "system_marker", source: "task", payload: "hidden archived note" }),
           makeItem({ item_id: "1.5", kind: "system_marker", source: "background_task", payload: "status:hidden bg task" }),
           makeItem({ item_id: "1.6", kind: "system_marker", source: "scheduled_wake", payload: "status:hidden wake notice" }),
           makeItem({ item_id: "1.7", kind: "attach", payload: "hidden attach body" }),
@@ -571,12 +571,15 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
     }
     expect(screen.getByText("agent internal output")).toBeTruthy();
     expect(screen.queryByText(/hidden /)).toBeNull();
-    expect(screen.getByText("Task")).toBeTruthy();
+    expect(screen.getAllByText("Note")).toHaveLength(2);
+    expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
     expect(screen.getByText("Background task")).toBeTruthy();
     expect(screen.getByText("System notice")).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
     expect(screen.getByText("Watcher")).toBeTruthy();
     expect(screen.getByText("Schedule")).toBeTruthy();
     expect(screen.getByText("System")).toBeTruthy();
+    fireEvent.click(toggles[4]);
+    expect(screen.getByText("hidden archived note")).toBeTruthy();
   });
 });

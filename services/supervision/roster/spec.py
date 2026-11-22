@@ -223,7 +223,7 @@ def gate_reason(
 # authored order, so each single-capability view keeps its load-bearing order.
 #
 # Config/capability-gated services (browser, disabled heartbeat; and plugin services with their
-# own gate, e.g. disabled task-maintenance) are kept in this list WITH their reason rather than
+# own gate, e.g. a disabled memory indexer) are kept in this list WITH their reason rather than
 # dropped, so `meiva start` / `meiva status` can show WHY a service is absent instead of silently
 # shrinking the roster. `services_for_capabilities` is the start-roster view that drops them.
 def services_for_capabilities_annotated(

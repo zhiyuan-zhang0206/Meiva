@@ -94,9 +94,6 @@ A minimal **runnable** case that failed before the fix:
 - No coverage metrics (they breed number-chasing).
 - No human-signature ceremony (incidents already proved human rules fail;
   incidents must go machine).
-- No task-kernel enforcement (deliberate): the gate is the reviewer verdict + the 405
-  closeout check; the task registry does not hard-block a closeout that omits
-  the line.
 - Repro artifacts do not enter the repo; they become guards or stay in task
   records.
 

@@ -271,7 +271,7 @@ def load_state(path: Path) -> WatchState:
                 else None
             ),
             # meiva:note
-            # Legacy state files carry `task_id` from the retired `meiva.tasks` tracker. Those
+            # Legacy state files carry `task_id` from the retired task tracker. Those
             # integers are Meiva task ids, never GitHub Issue numbers, so they are ignored here
             # rather than copied into `issue_number`.
             issue_number=_parse_issue_number(value.get("issue_number")),

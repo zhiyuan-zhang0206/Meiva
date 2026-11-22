@@ -227,9 +227,8 @@ of mass-editing targets.
    `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
-Shipped examples: `meiva_builtins/plugins/meiva_fleet/metrics.py` (task completion
-rate), `meiva_builtins/plugins/meiva_memory/metrics.py` (passive-recall runs /
-empty ratio / deadline-skip ratio plus search latency and notes injected).
+The shipped `meiva_builtins/plugins/meiva_memory/metrics.py` declares passive-recall
+runs, empty ratio, deadline-skip ratio, search latency, and notes injected.
 
 ## Layout
 

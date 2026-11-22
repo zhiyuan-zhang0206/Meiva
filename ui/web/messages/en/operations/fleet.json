@@ -2,9 +2,6 @@
   "title": "Fleet",
   "activeTotal": "{active} active · {total} total",
   "backToConversation": "Back to conversation",
-  "sections": "Fleet sections",
-  "agents": "Agents",
-  "tasks": "Tasks",
   "force": {
     "settings": "Graph layout settings",
     "layout": "Layout",
@@ -24,8 +21,7 @@
     "yGravity": "Y gravity",
     "coolSpeed": "Cool speed",
     "fillRatio": "Fill ratio",
-    "padding": "Padding",
-    "size": "Size"
+    "padding": "Padding"
   },
   "forceGraph": {
     "loading": "Loading…",
@@ -47,45 +43,5 @@
     "loading": "Loading...",
     "unavailable": "Graph unavailable.",
     "empty": "No agents to graph."
-  },
-  "task": {
-    "status": {
-      "inProgress": "In progress",
-      "done": "Done",
-      "canceled": "Canceled"
-    },
-    "root": "Root",
-    "agent": "Agent #{id}",
-    "unowned": "Unowned",
-    "user": "User",
-    "system": "System",
-    "every": "every {duration}",
-    "task": "Task #{id}",
-    "meta": {
-      "status": "Status",
-      "priority": "Priority",
-      "owner": "Owner",
-      "createdBy": "Created by",
-      "parent": "Parent",
-      "reminder": "Reminder",
-      "created": "Created",
-      "updated": "Updated",
-      "description": "Description",
-      "result": "Result"
-    },
-    "reminders": "{count, plural, one {# reminder} other {# reminders}}",
-    "lastReminder": "last {time}",
-    "fullFailed": "Could not load the full task.",
-    "openOwnerConversation": "Double-click the node to open the owner's conversation",
-    "stale": "Stale",
-    "window": "Time window",
-    "all": "All",
-    "loading": "Loading tasks…",
-    "loadFailed": "Failed to load tasks.",
-    "empty": "No tasks yet.",
-    "graph": "Graph",
-    "kanban": "Kanban",
-    "taskCount": "{count, plural, one {# task} other {# tasks}}",
-    "legend": "Task graph legend"
   }
 }

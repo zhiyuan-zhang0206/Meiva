@@ -24,7 +24,6 @@ class SystemNote:
     agent_id: int
     content: str
     tag: str
-    task_id: int | None
     resurrect: bool
     idempotency_key: str
 
@@ -34,35 +33,27 @@ def validate_system_note(
     content: str,
     *,
     tag: str,
-    task_id: int | None,
     resurrect: bool,
     idempotency_key: str,
 ) -> SystemNote:
     """Check one `send_system_note` request before anything reaches the gateway.
 
     Raises:
-        ValueError: `tag` is not a NoteTag value, `task_id` is not positive, or a `task_id`
-            comes with a tag other than `task`.
+        ValueError: `tag` is not a NoteTag value.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
     content = coerce_str(content, "content")
     tag = coerce_str(tag, "tag")
-    task_id = coerce_typed(task_id, "task_id", int, allow_none=True)
-    if task_id is not None and task_id <= 0:
-        raise ValueError(f"task_id must be a positive integer, got {task_id!r}")
     try:
         NoteTag(tag)
     except ValueError as exc:
         valid_tags = ", ".join(member.value for member in NoteTag)
         raise ValueError(f"tag must be one of: {valid_tags}; got {tag!r}") from exc
-    if task_id is not None and tag != NoteTag.TASK.value:
-        raise ValueError("task_id requires tag='task'")
     resurrect = coerce_typed(resurrect, "resurrect", bool)
     return SystemNote(
         agent_id=agent_id,
         content=content,
         tag=tag,
-        task_id=task_id,
         resurrect=resurrect,
         idempotency_key=validate_idempotency_key(idempotency_key),
     )

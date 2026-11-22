@@ -7,7 +7,6 @@ from typing import get_args
 import pytest
 
 from base.agents.messages.inbound import InboundKind
-from base.agents.tasks.status import TaskStatus
 from base.api_contracts.agent_contract import (
     AgentStatus,
     Harness,
@@ -32,7 +31,6 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),
     ("extensions", "kind"): set(get_args(ExtensionKind)),
-    ("agent_tasks", "status"): {s.value for s in TaskStatus},
     ("signal_state", "severity"): {s.value for s in SignalSeverity},
 }
 

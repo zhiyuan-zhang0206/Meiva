@@ -1,7 +1,7 @@
 # Gateway-Side Services
 
 ## What is it
-Groupings of background services running on machines whose capabilities set includes `gateway` (single machine with `gateway,agent-runner` or pure gateway). The gateway capability owns data-plane-adjacent daemons: the HTTP gateway itself, frontend, cluster-level wake-up daemons (heartbeat / task-maintenance only INSERT inbound + Redis best-effort publish to wake the owner; the agent's SELECT recheck guarantees delivery, so they belong to a single gateway, not every runner), memory/vector stack, all selected into the host root manifest.
+Groupings of background services running on machines whose capabilities set includes `gateway` (single machine with `gateway,agent-runner` or pure gateway). The gateway capability owns data-plane-adjacent daemons: the HTTP gateway itself, frontend, cluster-level wake-up daemons such as heartbeat, memory/vector stack, all selected into the host root manifest.
 
 `services/docs/gateway_side/` is a **capability grouping, not a directory of code** — there is no `services/gateway_side/` package. Each daemon's code lives in a domain group under `services/<group>/<name>/` (groups: `wake`, `upkeep`, `derived`, `entrypoints`, `backup`, ...); which side it runs on is a `ServiceSpec.capabilities` attribute, which cuts across the filesystem and cannot be expressed by co-location. This node and its children are the index layer for that attribute, the same way the domain roots under `docs/` are the index layer for the whole graph. Do not "fix" it by moving the capability split into the code tree — that deletes the only place the capability split is represented in the hierarchy.
 
@@ -24,7 +24,6 @@ Source of truth = services in `build_services()` of `services/supervision/roster
 The following services also run on the gateway capability (core `GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:
 
 - **gateway** — HTTP gateway itself (see [Gateway](../../../gateway/docs/gateway.md))
-- **task-maintenance** — overdue task reminder + escalation. Registered by the `meiva_fleet` plugin via `meiva_builtins/plugins/meiva_fleet/services.py`, folded into the roster by `services/supervision/roster/plugin_services.py:plugin_services()`; runs on the gateway side, but **the node lives with its code in the plugin subtree** (see [meiva_fleet › Task Maintenance](../../../meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task_maintenance.md))
 - **frontend** — Next.js frontend (`ui/web/` subtree)
 - **gate** — the public fleet UI entry, an ordinary gateway `ServiceSpec` owned by root. It uses the `frontend` entry-port slot and proxies the Next.js app on the separate `app` slot. Root readiness checks `GET /__meiva/healthz` and the captured listener lineage; status shows Gate in the ordinary service table. Gate stops with its selected application tree during planned downtime. See [Gate authentication and maintenance projection](../../entrypoints/gate/docs/gate.md).
 

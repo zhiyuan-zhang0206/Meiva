@@ -127,8 +127,7 @@ sample (psutil cannot be made to fail).
 
 `base.agents.birth.spawn.create_agent_row` retains its public transaction and
 post-commit announcement contract. Its cursor-owned SQL writer is
-`base.agents.birth.transaction.insert_agent_birth`; see
-[creation transaction primitives](../../base/agents/tasks/docs/creation-transactions.md).
+`base.agents.birth.transaction.insert_agent_birth`.
 The writer opens no connection, commits nothing and performs no launch.
 A keyed birth retains its original snapshot in this same transaction; see [Guarded Draft Agent Creation](../../gateway/agents/docs/guarded-drafts.md).
 

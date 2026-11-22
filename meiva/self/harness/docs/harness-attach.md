@@ -75,7 +75,7 @@ document cannot do it either, so the SDK makes the attachment itself — on the
 | `meiva.context` (framework and plugin code), `meiva.DB`, `meiva.REDIS` | the context slot |
 | `meiva.self.AGENT_ID`, every `meiva.agents` call | `agent_identity._bound()` |
 | `meiva.ui.ask`, `publish`, `close_question` | the context slot, followed by caller validation |
-| a plugin namespace (`meiva.tasks`, …) | `boot.maybe_load_plugins_for_missing` |
+| a plugin namespace (`meiva.memory`, …) | `boot.maybe_load_plugins_for_missing` |
 
 Attaching replays the agent's plugin-state snapshot through the codec, and that opens
 the database. Doing it at import would make every provider tool call that merely imports

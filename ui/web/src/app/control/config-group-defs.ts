@@ -88,7 +88,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MEIVA_HEARTBEAT_INTERVAL_SECONDS",
     "MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
   ],
-  "config-daemon-tasks": [
+  "config-daemon-events": [
     "MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
   ],
   "config-gateway": [
@@ -174,7 +174,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MEIVA_GATEWAY_HEALTH_URL",
     "MEIVA_LABELER_HEALTH_PORT",
     "MEIVA_HEARTBEAT_HEALTH_PORT",
-    "MEIVA_TASK_MAINTENANCE_HEALTH_PORT",
     "MEIVA_EVENTS_MAINTENANCE_HEALTH_PORT",
     "MEIVA_MEMORY_INDEXER_HEALTH_PORT",
     "MEIVA_OPS_HEALTH_PORT",

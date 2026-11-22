@@ -222,8 +222,9 @@ def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[st
 # since the snapshot was written.
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
 # Snapshots carry no database credential (bootstrap serves the credential-free
-# endpoint); a snapshot of any other version is never reused.
-SNAPSHOT_VERSION = 3
+# endpoint). Version 4 invalidates runner caches with the retired Fleet task
+# configuration fields, which fail the current plugin projection validation.
+SNAPSHOT_VERSION = 4
 
 
 # Transport-level httpx failures mean "gateway unreachable / mid-restart" —

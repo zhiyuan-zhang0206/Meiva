@@ -1,7 +1,7 @@
 # meiva:note
 # The system push has exactly two kinds of event: an agent asked the user a question, and an
 # agent has output the user has not read. Anything else the user may want to know belongs in the
-# log, the task board or the timeline that already carries it, never in this catalog.
+# log, or the timeline that already carries it, never in this catalog.
 # meiva:link base/events/notifications/README.md
 
 from __future__ import annotations

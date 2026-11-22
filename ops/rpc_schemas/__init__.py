@@ -41,8 +41,6 @@ from ops.rpc_schemas.harness_timeline import (
 )
 from ops.rpc_schemas.harness_timeline import HarnessTimelineWindow as HarnessTimelineWindow
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
-from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
-from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse
 from ops.rpc_schemas.transfer import TransferAgentRequest as TransferAgentRequest

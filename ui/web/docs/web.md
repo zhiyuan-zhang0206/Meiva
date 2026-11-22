@@ -2,7 +2,7 @@
 
 ## What it is
 
-Meiva frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversation management, task tracking, cluster configuration. All source code is in `ui/web/src/`.
+Meiva frontend subsystem—Next.js 16 web interface for fleet supervision, agent conversations and cluster configuration. All source code is in `ui/web/src/`.
 
 The console exposes four agent statuses: `running`, `idling`, `impersonated`,
 and `terminated`. The first, second and last are the gateway's lifecycle

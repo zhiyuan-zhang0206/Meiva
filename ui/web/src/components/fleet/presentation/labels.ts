@@ -85,9 +85,8 @@ export function wrapLabel(label: string, r: number): string[] {
 }
 
 // meiva:note
-// The status vocabulary the display tables are keyed by. A graph node carries a bare string (the
-// task board reuses the same canvas with task statuses), so a view narrows through this list
-// instead of asserting the union at the call site: an unknown value keeps its own text.
+// Display tables use public agent statuses. This narrows a graph node's
+// status before choosing a color and label.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const AGENT_STATUSES: readonly PublicAgentStatus[] = [
   "running",

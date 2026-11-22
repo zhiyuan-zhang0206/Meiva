@@ -1380,7 +1380,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"audit_machine_unknown|checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop|task_reminder_undelivered\")))",
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"audit_machine_unknown|checkpoint_write_failed|compact_turn_aborted|dangling_tool_pairing_repaired|db_pool_acquire_slow|db_pool_acquire_timeout|delivery_stalled|event_log_drop|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|label_generate_failed|llm_cancelled|llm_provider_error|llm_turn_aborted|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|screen_capture_notify_failed|sse_drop\")))",
      "legendFormat": "events",
      "queryType": "range",
      "refId": "A"
@@ -3806,89 +3806,6 @@
    },
    "id": 1001,
    "panels": [],
-   "title": "meiva_fleet",
-   "type": "row"
-  },
-  {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "description": "Share of task status changes that are done: numerator = task_update events with status='done', denominator = task_update events carrying any status (event_name='task_update', category='audit'). This is NOT a backlog completion rate \u2014 a cluster that closes nothing has no denominator, and the panel stays empty.",
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "custom": {
-      "drawStyle": "line",
-      "fillOpacity": 12,
-      "lineInterpolation": "smooth",
-      "lineWidth": 1,
-      "showPoints": "never",
-      "spanNulls": true
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "percent"
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 178
-   },
-   "id": 1002,
-   "options": {
-    "legend": {
-     "calcs": [
-      "mean",
-      "max",
-      "last"
-     ],
-     "displayMode": "table",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   },
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "100 * sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status=\"done\" [1h])) / sum(count_over_time({service_name=\"unknown_service\", event_name=\"task_update\"} | json | category=\"audit\" | attributes_status!=\"\" [1h]))",
-     "legendFormat": "done %",
-     "queryType": "range",
-     "refId": "A"
-    }
-   ],
-   "title": "Done share of task status changes",
-   "type": "timeseries"
-  },
-  {
-   "collapsed": false,
-   "gridPos": {
-    "h": 1,
-    "w": 24,
-    "x": 0,
-    "y": 185
-   },
-   "id": 1003,
-   "panels": [],
    "title": "meiva_memory",
    "type": "row"
   },
@@ -3927,9 +3844,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 186
+    "y": 178
    },
-   "id": 1004,
+   "id": 1002,
    "options": {
     "legend": {
      "calcs": [
@@ -3997,9 +3914,9 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 186
+    "y": 178
    },
-   "id": 1005,
+   "id": 1003,
    "options": {
     "legend": {
      "calcs": [
@@ -4075,9 +3992,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 193
+    "y": 185
    },
-   "id": 1006,
+   "id": 1004,
    "options": {
     "legend": {
      "calcs": [
@@ -4138,9 +4055,9 @@
     "h": 4,
     "w": 8,
     "x": 12,
-    "y": 193
+    "y": 185
    },
-   "id": 1007,
+   "id": 1005,
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -4206,9 +4123,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 200
+    "y": 192
    },
-   "id": 1008,
+   "id": 1006,
    "options": {
     "legend": {
      "calcs": [
@@ -4276,9 +4193,9 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 200
+    "y": 192
    },
-   "id": 1009,
+   "id": 1007,
    "options": {
     "legend": {
      "calcs": [
@@ -4317,7 +4234,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 207
+    "y": 199
    },
    "id": 2006,
    "panels": [],
@@ -4359,7 +4276,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 208
+    "y": 200
    },
    "id": 2101,
    "options": {
@@ -4424,7 +4341,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 208
+    "y": 200
    },
    "id": 2102,
    "options": {
@@ -4487,7 +4404,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 216
+    "y": 208
    },
    "id": 2103,
    "options": {
@@ -4574,7 +4491,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 216
+    "y": 208
    },
    "id": 2104,
    "options": {
@@ -4637,7 +4554,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 224
+    "y": 216
    },
    "id": 2105,
    "options": {
@@ -4700,7 +4617,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 224
+    "y": 216
    },
    "id": 2106,
    "options": {
@@ -4764,7 +4681,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 232
+    "y": 224
    },
    "id": 2107,
    "options": {
@@ -4838,7 +4755,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 232
+    "y": 224
    },
    "id": 2108,
    "options": {
@@ -4912,7 +4829,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 240
+    "y": 232
    },
    "id": 2109,
    "options": {
@@ -4975,7 +4892,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 240
+    "y": 232
    },
    "id": 2110,
    "options": {
@@ -5050,7 +4967,7 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 248
+    "y": 240
    },
    "id": 2111,
    "options": {
@@ -5124,7 +5041,7 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 248
+    "y": 240
    },
    "id": 2112,
    "options": {
@@ -5200,7 +5117,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 256
+    "y": 248
    },
    "id": 2303,
    "options": {
@@ -5264,7 +5181,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 256
+    "y": 248
    },
    "id": 2304,
    "options": {
@@ -5300,7 +5217,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 263
+    "y": 255
    },
    "id": 2007,
    "panels": [],
@@ -5336,7 +5253,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 264
+    "y": 256
    },
    "id": 38,
    "options": {
@@ -5442,7 +5359,7 @@
     "h": 4,
     "w": 16,
     "x": 8,
-    "y": 264
+    "y": 256
    },
    "id": 39,
    "options": {
@@ -5551,7 +5468,7 @@
     "h": 7,
     "w": 24,
     "x": 0,
-    "y": 268
+    "y": 260
    },
    "id": 41,
    "options": {
@@ -5641,7 +5558,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 275
+    "y": 267
    },
    "id": 42,
    "options": {
@@ -5690,7 +5607,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 275
+    "y": 267
    },
    "id": 43,
    "options": {
@@ -5750,7 +5667,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 282
+    "y": 274
    },
    "id": 50,
    "options": {
@@ -5815,7 +5732,7 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 282
+    "y": 274
    },
    "id": 51,
    "options": {
@@ -5917,7 +5834,7 @@
     "h": 4,
     "w": 8,
     "x": 0,
-    "y": 289
+    "y": 281
    },
    "id": 52,
    "options": {
@@ -5967,7 +5884,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 293
+    "y": 285
    },
    "id": 2008,
    "panels": [],
@@ -5993,7 +5910,7 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 294
+    "y": 286
    },
    "id": 2401,
    "options": {
@@ -6066,7 +5983,7 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 301
+    "y": 293
    },
    "id": 2009,
    "panels": [],
@@ -6092,7 +6009,7 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 302
+    "y": 294
    },
    "id": 2506,
    "options": {

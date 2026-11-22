@@ -92,15 +92,6 @@ def _set_label(db: psycopg.Connection, tid: int, label: str) -> None:
         cur.execute("UPDATE agents SET label = %s WHERE id = %s", (label, tid))
 
 
-def _seed_task_note(db: psycopg.Connection, tid: int, content: str) -> None:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, %s, 'system_note', 'agent:405', %s::jsonb)",
-            (tid, content, '{"note_tag": "task"}'),
-        )
-
-
 def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connection) -> None:
     a = create_agent(db_conn)
     _set_label(db_conn, a, "")
@@ -118,9 +109,7 @@ def test_select_unlabeled_treats_empty_label_as_unset(db_conn: psycopg.Connectio
     assert c not in picked
 
 
-def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connection) -> None:
-    a = create_agent(db_conn)
-    _seed_task_note(db_conn, a, 'Task #2669 "meiva.ui docs gap" is now assigned to you.')
+def test_select_unlabeled_skips_system_notes(db_conn: psycopg.Connection) -> None:
     b = create_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -132,7 +121,6 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
 
     with db_conn.cursor() as cur:
         rows = dict(daemon.select_unlabeled(cur, []))
-    assert rows[a] == 'Task #2669 "meiva.ui docs gap" is now assigned to you.'
     assert b not in rows
 
 

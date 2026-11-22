@@ -4,7 +4,7 @@ A plugin without a manifest is refused (`load_manifest` raises). With one, each 
 must list exactly the identifiers the plugin's `PluginContributions` provides on that surface: a
 declared surface it does not deliver, and a delivered one it does not declare, both refuse. Each process
 gates only the keys of the faces it loads (the agent registry the hooks and system prompt sections,
-the data registry the metrics and inspector widgets), so one manifest is never judged against a
+the data registry the plugin metrics), so one manifest is never judged against a
 declaration the process cannot see.
 """
 

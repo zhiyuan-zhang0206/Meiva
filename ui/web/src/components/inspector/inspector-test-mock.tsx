@@ -16,7 +16,6 @@ import type {
   AgentInspectStatistics,
   AgentRoster,
   AgentRow,
-  InspectWidget,
   WireAgentCard,
 } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
@@ -44,9 +43,6 @@ export const getAgentInspectLive =
   vi.fn<(agentId: number, signal?: AbortSignal) => Promise<AgentInspectLive>>();
 export const getAgentRoster = vi.fn<(signal?: AbortSignal) => Promise<AgentRoster>>();
 export const getAgent = vi.fn<(id: number, signal?: AbortSignal) => Promise<AgentRow>>();
-export const getAgentInspectWidgets = vi.fn<
-  (agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>
->(() => Promise.resolve([]));
 export const putSetting = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" }),
 );
@@ -122,7 +118,6 @@ export async function setupInspectorTest() {
     ...pageRig.api,
     getAgentInspectStatistics,
     getAgentInspectLive,
-    getAgentInspectWidgets,
     getAgentRoster,
     getAgent,
     putSetting,
@@ -133,7 +128,6 @@ export async function setupInspectorTest() {
   setInspectorHours(24);
   getAgentInspectStatistics.mockResolvedValue(fixture());
   getAgentInspectLive.mockResolvedValue(liveFixture());
-  getAgentInspectWidgets.mockResolvedValue([]);
   getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
 }
 
@@ -142,7 +136,6 @@ export async function cleanupInspectorTest() {
   cleanup();
   getAgentInspectStatistics.mockReset();
   getAgentInspectLive.mockReset();
-  getAgentInspectWidgets.mockReset();
   getAgentRoster.mockReset();
   getAgent.mockReset();
   putSetting.mockClear();
@@ -286,20 +279,5 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       ...overrides,
     })],
     ancestors: [],
-  };
-}
-
-export function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget {
-  return {
-    plugin: "meiva_fleet",
-    id: "today-tasks",
-    kind: "taskList",
-    order: 250,
-    title: null,
-    tasks: [
-      { id: 42, title: "Ship the inspector fix", priority: "P1" },
-      { id: 43, title: "Reply to QA", priority: "P2" },
-    ],
-    ...over,
   };
 }

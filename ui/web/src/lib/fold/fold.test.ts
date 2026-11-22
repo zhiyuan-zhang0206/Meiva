@@ -12,7 +12,6 @@ import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_Q
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, applyEvent } from "./index";
 import { foldQuestions, QUESTIONS_QUERY_KEY } from "./questions";
-import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 
 const baseAgent: AgentRow = {
@@ -71,11 +70,9 @@ describe("invalidation policies", () => {
     expect(o.invalidations).toEqual([{ key: QUESTIONS_QUERY_KEY }]);
   });
 
-  it("fleet-graph invalidates on spawn/update; tasks on create/update", () => {
+  it("fleet graph invalidates on spawn and update", () => {
     const spawn = { role: "agent_spawned", agent_id: 1, snapshot: baseAgent } as unknown as SystemEvent;
     expect(foldFleetGraph(spawn).invalidations.map((i) => i.key[0])).toContain(FLEET_GRAPH_KEY_PREFIX[0]);
-    const task = { role: "task_created", agent_id: 1, task: {} } as unknown as SystemEvent;
-    expect(foldTasks(task).invalidations.map((i) => i.key)).toEqual([TASKS_QUERY_KEY]);
   });
 });
 

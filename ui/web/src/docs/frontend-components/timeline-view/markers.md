@@ -2,7 +2,7 @@
 
 `components/timeline/model/marker-classify.ts` classifies every rendered `system_marker`
 item by its `source` and `payload` into collapsible `MessageCard` families —
-`background_task` (`background_task` / `task-notification`), `task`, lifecycle
+`background_task` (`background_task` / `task-notification`), lifecycle
 transitions, memory recall, guidance notes, `system_notice` (`status:*`), `error`
 (`error:*`), and `unrecognized` — so no status line, task return, or receipt ever
 dumps bare text into the timeline (user ruling 2026-11-22). Every rendered marker
@@ -17,7 +17,7 @@ English fallback.
 The vocabulary is generated, not mirrored: `NOTE_TAGS` in
 `lib/contracts/constants-generated.ts` comes from the backend `NoteTag` enum
 (`scripts/codegen/dump_frontend_constants.py`, kept fresh by the
-`constants-codegen-fresh` hook). `LIFECYCLE_TAGS`, `MEMORY_SOURCES`, and `"task"`
+`constants-codegen-fresh` hook). `LIFECYCLE_TAGS` and `MEMORY_SOURCES`
 are typed subsets of it, and every other member is a note, so a new backend tag
 renders as a generic note with no frontend change. A frontend test iterating
 `NOTE_TAGS` locks every member to its card and never the unrecognized alarm.
@@ -26,7 +26,8 @@ nothing that carries a `NoteTag`: every note the agent read renders, including t
 `non_human_wake` recency reminder and `reply_visibility` (user ruling 2026-11-09,
 replacing the silent filter those two used to have). Only the ephemeral bookkeeping
 payloads below are silent, and a recognised tag is never judged by its payload — a
-note whose body reads like machinery still renders.
+note whose body reads like machinery still renders. Archived markers with source
+`task` render as ordinary notes.
 
 Non-`NoteTag` markers inside the Work Block follow one card-based dispatch:
 `compact_done` and `compact_request:*` are normally filtered at the SSE layer

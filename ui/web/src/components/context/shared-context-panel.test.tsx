@@ -94,7 +94,6 @@ beforeEach(() => {
   transport.getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
   transport.getAgentInspectLive.mockImplementation(() => new Promise(() => undefined));
   transport.getAgentInspectStatistics.mockImplementation(() => new Promise(() => undefined));
-  transport.getAgentInspectWidgets.mockImplementation(() => new Promise(() => undefined));
 });
 
 afterEach(() => {

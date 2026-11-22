@@ -7,11 +7,10 @@ apart: every new home records this table as its ports at birth, and a unit whose
 settings-free half of the boot chain (`base.daemon.health`, the `.env` registry)
 needs it and must import neither `base.config` nor `base.cluster`.
 
-The table is closed. A home's recorded `ports` must carry exactly these keys
-(`cli.start_identity` refuses a record with more or fewer), so adding or removing
-a slot means rewriting every existing record by hand before its next start.
-The numbers 8117 to 8120 belonged to removed slots and are not handed to another
-service.
+A home's recorded `ports` must cover every key in this table.
+`cli.start_identity` refuses missing slots and filters retired ones when it
+reads a record. The numbers 8108 and 8117 to 8120 belong to retired slots and
+are reserved.
 
 Tests never use these numbers: every port a test binds or dials comes from the
 kernel or from a private range above 21000, and `base/cluster/tests/test_fixed_ports.py`
@@ -34,7 +33,6 @@ FIXED_PORTS: dict[str, int] = {
     "app": 3001,
     "heartbeat": 8107,
     "labeler": 8103,
-    "task_maintenance": 8108,
     "memory_indexer": 8105,
     "ops": 8113,
     "browser": 9222,

@@ -7,7 +7,7 @@
 # back).
 #
 # Split out of gateway/cluster/router.py at the 800-line ceiling (same pattern
-# as `roster_rows.py`): the pause contract is the three-step operator act
+# as `roster_rows.py`): the pause contract is the operator act
 # below, the roster/staging/delete endpoints stay in cluster.py.
 
 from __future__ import annotations
@@ -19,28 +19,17 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
-from base.agents.tasks.notes import task_note_line
-from base.clock import Clock
 from base.cluster import machines
 from base.db import Database
-from base.db.rows import query_all, query_one
-from base.db.transaction import write_transaction
+from base.db.rows import query_one
 from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
-from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
+from gateway.http.config import gateway_rpc, gateway_state
 from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()
-
-# The drain owner every active task of a paused machine's agents is
-# reassigned to. #405 is the Meiva P0 lead — the role that redistributes work when
-# an owner disappears (2026-08-14 Task #1283 ruling: drain reassigns, with a
-# note on each task; the reminder daemon surfaces the reassignment to the new
-# owner). A constant, not a flag: the pause is an operator act on the gateway,
-# and the CLI surface stays one verb.
-_MACHINE_PAUSE_DRAIN_OWNER = 405
 
 
 # meiva:note
@@ -49,15 +38,6 @@ _MACHINE_PAUSE_DRAIN_OWNER = 405
 class _PauseStateRow:
     paused_at: datetime | None
     pause_reason: str | None
-
-
-# meiva:note
-# An in-progress task owned by a live agent of the machine, with its results text to append to.
-@dataclass(frozen=True)
-class _DrainedTaskRow:
-    task_id: int
-    owner_id: int
-    results: str | None
 
 
 def _read_machine_row(pool: ConnectionPool, name: str) -> tuple[bool, datetime | None, str | None]:
@@ -73,50 +53,6 @@ def _read_machine_row(pool: ConnectionPool, name: str) -> tuple[bool, datetime |
     if row is None:
         return False, None, None
     return True, row.paused_at, row.pause_reason
-
-
-def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
-    """Reassign every active task owned by a LIVE agent on `name`
-    to the drain owner (#405), appending a note on each so the new owner knows
-    why it landed on their board.
-
-    The note goes through `base.agents.tasks.notes.task_note_line`, the same builder
-    the SDK task registry uses, so the two writers into one `results` column
-    cannot drift apart on format or timezone; the write resets the reminder
-    clock like a normal update would. Agents already terminated before the
-    pause own nothing that this pause needs to rescue (their tasks are another
-    cleanup's business).
-    """
-    with write_transaction(pool) as conn:
-        rows = query_all(
-            conn,
-            _DrainedTaskRow,
-            "SELECT t.id AS task_id, a.id AS owner_id, t.results FROM agent_tasks t "
-            "JOIN agents_meta a ON t.owner = a.id "
-            "WHERE a.machine = %s AND a.status != 'terminated' "
-            "AND t.status = 'in_progress'",
-            (name,),
-        )
-        for row in rows:
-            task_id = row.task_id
-            line = task_note_line(
-                f"machine {name} paused \u2014 owner agent #{row.owner_id} "
-                f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
-                f"(see `meiva cluster resume {name}`)",
-                clock=clock,
-                now=clock.now(),
-            )
-            current = row.results or ""
-            prefix = (current.rstrip("\n") + "\n\n") if current else ""
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE agent_tasks SET owner = %s, updated_at = now(), "
-                    "results = %s "
-                    "WHERE id = %s",
-                    (_MACHINE_PAUSE_DRAIN_OWNER, prefix + line, task_id),
-                )
-        conn.commit()
-    return len(rows)
 
 
 def _list_agent_rows_for_pause_blocking(pool: ConnectionPool, name: str) -> list[tuple[int, bool]]:
@@ -155,16 +91,13 @@ async def pause_cluster_machine(
 ) -> MachinePauseResponse:
     """Temporarily pull a machine out of the cluster (`meiva cluster pause`).
 
-    The operator act starts with an admission fence, then drains and sweeps:
+    The operator act sets an admission fence and sweeps the machine:
 
     1. **Latch** — set `paused_at`/`pause_reason` first. Every resurrection
        transaction (explicit, pending-work, controller, and retry) locks and
        checks this latch before its agent row, so stale resurrection cannot
        escape the sweep.
-    2. **Drain** — every in_progress task owned by a live agent on this
-       machine is reassigned to the drain owner (#405) with a note; the
-       reminder daemon then surfaces it.
-    3. **Final sweep** — every agent row on the machine, including an already
+    2. **Final sweep** — every agent row on the machine, including an already
        terminated row, receives a newer force-terminate intent fence. A
        pre-latch resurrection holding the agent row lock completes first, then
        this sweep terminates its exact session; older pending work on a dead
@@ -189,7 +122,7 @@ async def pause_cluster_machine(
     The expected absence is silent at the source: the latch removes the machine
     from the liveness pass's targets, so it emits no `machine_probe_failed`
     signal. Idempotent: pausing an already-paused machine re-runs the
-    (now-empty) drain/terminate and returns the existing latch.
+    termination sweep and returns the existing latch.
 
     Refuses (400) to pause the gateway's own machine — the gateway host must
     stay a cluster member for the cluster to answer anything.
@@ -208,9 +141,6 @@ async def pause_cluster_machine(
     if paused_at is None:
         machines.pause(gateway_state(request).db, name, reason=req.reason)
         exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
-
-    clock = gateway_clock(request)
-    reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name, clock)
 
     agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)
 
@@ -253,7 +183,6 @@ async def pause_cluster_machine(
         paused=True,
         terminated_agents=terminated,
         force_marked_agents=force_marked,
-        reassigned_tasks=reassigned,
         paused_at=paused_at,
         pause_reason=pause_reason if pause_reason is not None else req.reason,
     )

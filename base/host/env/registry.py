@@ -162,7 +162,6 @@ _PASSTHROUGH_ROWS = (
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "labeler",
     "heartbeat",
-    "task_maintenance",
     "events_maintenance",
     # The supervised pg-backup scheduler has its own per-unit health endpoint.
     "pg_backup",

@@ -112,7 +112,7 @@ Example (the shape `meiva_code` would declare):
     "sdkWraps": ["files.read"],
     "systemPromptSections": ["context_file"],
     "compactReminderSections": ["prepare_compaction"],
-    "opsServices": ["task_maintenance"],
+    "opsServices": ["example_worker"],
     "config": { "schema": "default_config.py", "perAgentFields": ["marker"] },
     "skills": ["skills/"],
     "commands": ["commands/"],
@@ -166,7 +166,7 @@ it for the only copy of critical state. See
 | `dependencies.plugins` | Plugin-to-plugin dependencies `{"other": ">=1.0"}`; resolved before load, missing → `failed`, never silently skipped (resolution lands S3) | load order by luck (A8) |
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
 | `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. **Two kinds of claim in one object** (S5): `display` / `unixSocket` are HOST REQUIREMENTS matched against the machine's capability set to decide placement, while `db` / `network` / `shell` are RESOURCE ACCESS gated by the context at injection time. The execution side of both lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
-| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The manifest is checked against the plugin's own declaration.** A plugin declares what it contributes in code (`contribute()` returning `PluginContributions`); `meiva-plugin.json` states the same facts, and `base/packages/plugins/gate.py:check_manifest` compares them in both directions as the load-time gate (`base/packages/plugins/loading/registry.py:build_registry` for the surface and runtime faces, `base/packages/plugins/data_registry.py` for `metrics` / `inspectWidgets`): a mismatch is a load failure of that plugin. The gate covers, per plugin, only the faces this process actually loaded, so a surface-only child never judges a runtime declaration it cannot see. `meiva plugins inspect <name>` reports the same diff (`agent/extensions/catalog.py:declared_vs_registered`) | surfaces pre-checkable, listable, auditable |
+| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The manifest is checked against the plugin's own declaration.** A plugin declares what it contributes in code (`contribute()` returning `PluginContributions`); `meiva-plugin.json` states the same facts, and `base/packages/plugins/gate.py:check_manifest` compares them in both directions as the load-time gate (`base/packages/plugins/loading/registry.py:build_registry` for the surface and runtime faces, `base/packages/plugins/data_registry.py` for `metrics`): a mismatch is a load failure of that plugin. The gate covers, per plugin, only the faces this process actually loaded, so a surface-only child never judges a runtime declaration it cannot see. `meiva plugins inspect <name>` reports the same diff (`agent/extensions/catalog.py:declared_vs_registered`) | surfaces pre-checkable, listable, auditable |
 | `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` static cards or dynamic `statsFace` faces (evaluated against plugin configuration), `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `base/packages/plugins/surface/ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../../../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
 | `contributions.schedules` | Declarative schedule contribution: `{"face": "<filename>.py"}`. The face module exports `contribute(cfg?) -> tuple[ScheduleSpec, ...]`, validated by `base/packages/plugins/surface/schedules.py` and loaded by `base/packages/plugins/loading/schedule_face.py`. Gateway and management reconcile plugin schedules into the database and sync them to target machines | machine-placed declarative background tasks owned by plugins |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
@@ -180,42 +180,10 @@ faces use `cron` or `every`; every intervals are at least 30 seconds. Reconcilia
 preserves the operator's enabled state, updates trigger policy in place, and
 each fire runs one payload process.
 
-### Console surfaces — two lanes, deliberately not one mechanism
+### Console surfaces
 
-| Lane | Mechanism | For |
-|---|---|---|
-| Declarative | `contributions.ui` in the manifest (`agentInspect` proxied sections, `nav`, `themes`) — data the console reads itself; there is no registration side | plugin-*served* content, links, skins |
-| Runtime registry | `inspect_widgets` of the `contribute()` in `inspector.py` (`base/packages/plugins/surface/inspector.py`, admitted by `base/packages/plugins/data_registry.py`) — the gateway loads each ENABLED builtin plugin's `inspector.py` declaration and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
-
-The inspector-widget registry resolves each widget's payload server-side —
-the console never receives a row it cannot address — and a widget with no
-payload drops out of the response, matching the panel's empty-section rule.
-The shipped kind is `taskList`: the agent's active tasks (`in_progress`,
-priority-ordered — P0 first, ties by task id — complete, no cap), each row a
-link to the task in the fleet view carrying the task's priority (P0..P3)
-badge beside its `#id`; `title` may be left unset to take the console's
-localized default ("Tasks"). v1 covers builtin
-plugins (the gateway imports no third-party plugin code; the plugin-metric
-loader is the sibling precedent). Failure follows the plugin-load fail-soft
-contract (2026-08-28 meiva_ledger incident; restated for plugins 2026-09-11):
-an `inspector.py` that fails to import, or a spec that fails registration, is
-reported (loguru ERROR + the `plugin_load_failed` event) and skipped — the
-endpoint keeps serving the remaining widgets, never a 500, never a silently
-shrunken panel. Registrations that landed before the failure are dropped, so
-the next request's retry starts clean instead of dying on
-`DuplicateInspectWidget`; a fixed `inspector.py` is picked up without a
-gateway restart.
-
-**Widget order keys.** A widget's `order` is any int; the panel's built-in
-sections carry fixed keys, so a value slots a widget anywhere between them:
-
-| runLink | page | shells | liveness | configOverlay | context | costActivity |
-|---|---|---|---|---|---|---|
-| 100 | 200 | 300 | 400 | 500 | 600 | 900 |
-
-Equal orders stack built-in sections first, then widgets by `(plugin, id)` —
-deterministic, independent of registration order. (The fleet plugin's task
-list uses 250: the work queue sits directly below the built-in `page` section.)
+The console reads declarative `contributions.ui` entries from the manifest.
+Plugins declare proxied `agentInspect` sections, navigation links and themes.
 
 ### Version ranges
 

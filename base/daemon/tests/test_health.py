@@ -336,7 +336,6 @@ def test_health_port_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert health_port("labeler", read_field=unconfigured) == 8103
     assert health_port("memory_indexer", read_field=unconfigured) == 8105
     assert health_port("heartbeat", read_field=unconfigured) == 8107
-    assert health_port("task_maintenance", read_field=unconfigured) == 8108
     assert health_port("events_maintenance", read_field=unconfigured) == 8109
 
 

@@ -264,13 +264,8 @@ def test_fleet_layout_invariants(
     ctx = new_context(playwright_browser, width)
     try:
         page = open_page(ctx, frontend_target, "/fleet", stub_api=not OVERRIDE_BASE_URL)
-        wait_layout_settled(page)
+        page.get_by_role("button", name="Graph layout settings").wait_for()
         assert _no_page_scroll(page), "I1: page-level horizontal scroll (fleet)"
-
-        page.locator('[role="tab"]', has_text="Tasks").click()
-        page.wait_for_selector('button:has-text("Kanban")', timeout=15_000)
-        page.wait_for_timeout(800)
-        assert _no_page_scroll(page), "I4: Tasks toolbar widens the page"
     finally:
         ctx.close()
 

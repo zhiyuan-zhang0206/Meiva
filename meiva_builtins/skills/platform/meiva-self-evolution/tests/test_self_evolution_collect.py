@@ -17,7 +17,6 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg.types.json import Jsonb
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import GatewayApiBaseMissing
@@ -664,34 +663,3 @@ def test_loaded_skills_keeps_only_validated_loads(collect_mod: Any) -> None:
     ]
 
     assert collect_mod.loaded_skills(log_events) == ["a", "b"]
-
-
-def test_task_receipts_by_agent_counts_notes_states_and_changes(
-    collect_mod: Any, db_conn: psycopg.Connection
-) -> None:
-    receipts = [
-        (7001, 501, "k1", {"note": "still working"}),
-        (7001, 501, "k2", {"note": "still working"}),
-        (7001, 501, "k3", {"status": "in_progress"}),
-        (7001, 501, "k4", {"status": "done"}),
-        (7001, 501, "k5", {"status": "done"}),
-        (7001, 501, "k6", {"results": "shipped"}),
-        (7001, 501, "k7", {"status": "in_progress"}),
-        (7001, 502, "k8", {"status": "done", "note": "closed"}),
-        (7002, 503, "k9", {"note": "unrelated actor"}),
-    ]
-    with db_conn.cursor() as cur:
-        for offset, (actor, task_id, key, request) in enumerate(receipts):
-            cur.execute(
-                "INSERT INTO task_update_receipts "
-                "(actor_agent_id, task_id, operation_key, request, accepted_at) "
-                "VALUES (%s, %s, %s, %s, now() + %s * interval '1 second')",
-                (actor, task_id, key, Jsonb(request), offset),
-            )
-    db_conn.commit()
-
-    counts = collect_mod._task_receipts_by_agent(db_conn, [7001, 7002, 7999])
-
-    assert counts[7001] == record_mod.TaskReceipts(2, 5, 1, 3)
-    assert counts[7002] == record_mod.TaskReceipts(1, 0, 0, 0)
-    assert 7999 not in counts

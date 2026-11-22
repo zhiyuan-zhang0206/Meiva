@@ -5,7 +5,6 @@ import {
   GitFork,
   Hand,
   Info,
-  ListTodo,
   NotebookText,
   PowerOff,
   RotateCw,
@@ -38,7 +37,6 @@ const LIFECYCLE_META: Record<
 };
 
 const MEMORY_META: MarkerVisual = { icon: NotebookText, title: "Memory", titleKey: "memory" };
-const TASK_META: MarkerVisual = { icon: ListTodo, title: "Task", titleKey: "task" };
 const BACKGROUND_TASK_META: MarkerVisual = {
   icon: Terminal,
   title: "Background task",
@@ -63,8 +61,6 @@ export function markerVisual(cls: MarkerClass): MarkerVisual {
       return LIFECYCLE_META[cls.tag];
     case "memory":
       return MEMORY_META;
-    case "task":
-      return TASK_META;
     case "background_task":
       return BACKGROUND_TASK_META;
     case "note":

@@ -14,7 +14,7 @@ reporting, instructions — because an agent that skims it still meets the instr
 Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
 `meiva` entry — which attaches this session's identity on first use — plus
 `meiva.agents` and `meiva.self` (`pause_heartbeat`, `terminate`), while plugins
-contribute their own cluster namespaces (`meiva.tasks`, `meiva.memory`,
+contribute their own cluster namespaces (`meiva.memory`,
 `meiva.schedules`). External harnesses use their own native file, shell, search,
 and in-turn background tools, so `meiva.files` is not exposed in `DEFAULT_ENTRIES`.
 Listing every namespace there would become a second copy of `meiva.help()` that

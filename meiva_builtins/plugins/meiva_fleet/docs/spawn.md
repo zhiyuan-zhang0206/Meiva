@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect, including the `label=` keyword, are `meiva.agents` **core** methods: the fleet plugin does not register or wrap them. Disabling fleet removes `create_and_assign`, not `spawn`.
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect, including the `label=` keyword, are `meiva.agents` **core** methods: the fleet plugin does not register or wrap them.
 
 ## API
 
@@ -30,7 +30,7 @@ Terminates an agent. A terminated agent is resurrected by any new message, inclu
 - `message`: retain a final message for the next resurrection without another response
 - `force=True`: request interruption when a clean stop cannot progress
 - `kill_all_shell_sessions=True`: also kill every shell session the agent owns (watchers included), silently — right before a graceful termination applies, or at once for `force=True` / an already-terminated agent
-- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first), or None — and `shell_sessions`: what the shell-session kill did (`when` = `now` with the `killed` ids, or `at_exit`), or None when none was requested
+- Result: reads as the acceptance status string (`enqueued` / `already_terminated`); `enqueued` confirms acceptance, not exit or completion of owned work. It carries `shell_sessions`: what the shell-session kill did (`when` = `now` with the `killed` ids, or `at_exit`), or None when none was requested
 
 ### `meiva.agents.restart(agent_id: int) -> RestartResult`
 
@@ -96,5 +96,4 @@ child_id = meiva.agents.spawn(
 
 - [Neighbors — Inter-Agent Communication and Discovery](neighbors/neighbors.md) — spawn/fork/resurrect establish ties, terminate does not affect existing ties
 - [meiva.self](../../../../meiva/self/README.md) — `set_label` changes the label after spawn
-- [Tasks — Shared Task Registry Overview](tasks/tasks.md) — task owner is an agent_id, agent must exist when changing
 - [meiva_fleet — Fleet Plugin Overview](meiva_fleet.md) — Overview

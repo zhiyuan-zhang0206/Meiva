@@ -96,13 +96,11 @@ def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMe
 
 
 def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
-    task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
     now = ctx.require_clock().now()
     return [
         system_note_message(
             content=item.content,
             tag=_system_note_tag(item.payload),
-            task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
             inputs=ctx.timestamp_policy(),
@@ -162,18 +160,6 @@ def _system_note_tag(payload: dict[str, object] | None) -> NoteTag:
         return NoteTag(raw)
     except ValueError as exc:
         raise ValueError(f"system_note inbound 'note_tag' {raw!r} is not a NoteTag value") from exc
-
-
-def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -> int | None:
-    """Return the timeline task link from a task note, if present."""
-    if tag is not NoteTag.TASK or not payload or "task_id" not in payload:
-        return None
-    task_id = payload["task_id"]
-    if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id <= 0:
-        raise ValueError(
-            f"system_note inbound 'task_id' must be a positive integer, got {task_id!r}"
-        )
-    return task_id
 
 
 # meiva:note

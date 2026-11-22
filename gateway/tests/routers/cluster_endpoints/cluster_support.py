@@ -154,42 +154,6 @@ def seed_agent_on_machine(
 
 
 # meiva:note
-# The pause endpoint reassigns a paused machine's tasks to a fixed drain owner
-# (`_MACHINE_PAUSE_DRAIN_OWNER`, #405), so the row has to exist here as the FK
-# target. Writing an id by hand does not move the id sequence, and the next spawn
-# then takes a number that is already in the table: with two spawns, the second
-# took 405 and the insert failed on `agents_pkey`. Moving the sequence past every
-# id the table holds makes the manual row a reservation instead of a trap.
-# meiva:link gateway/tests/routers/cluster_endpoints/test_admin_machine_delete.py
-def seed_drain_owner(db_conn: psycopg.Connection, agent_id: int = 405) -> None:
-    # meiva:note
-    # The drain-owner agent row the pause endpoint reassigns tasks to.
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agents (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
-            (agent_id,),
-        )
-        cur.execute(
-            "SELECT setval(pg_get_serial_sequence('agents', 'id'), (SELECT max(id) FROM agents))"
-        )
-    db_conn.commit()
-
-
-def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -> int:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, status, owner, created_by) "
-            "VALUES (%s, 'desc', 'in_progress', %s, 'user') RETURNING id",
-            (title, owner),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        (task_id,) = row
-    db_conn.commit()
-    return task_id
-
-
-# meiva:note
 # The serving gate, as the home's own state file: a completed start (`serving`) is the root
 # publishing its birth evidence. Without this fixture the unit has not reached `serving`, so the
 # local machine reads `paused` with reason `startup`.

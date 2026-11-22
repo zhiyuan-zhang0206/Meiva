@@ -92,20 +92,21 @@ def test_a_message_carries_the_long_timeout_its_key_and_the_notice_only_when_set
     assert noticed.body == {"content": "hi", "source": "user", "completion_notice": True}
 
 
-def test_a_system_note_links_its_task_only_when_given() -> None:
-    note = NoteIntent(content="c", note_tag="task", source="agent:1", task_id=None, resurrect=True)
-    plan = system_note_request(7, note, "k")
+def test_a_system_note_preserves_its_tag_and_delivery_policy() -> None:
+    note = NoteIntent(content="c", note_tag="context", source="agent:1", resurrect=False)
+    plan = system_note_request(7, note, "reply-1")
     assert plan.path == "/api/agents/7/system-note"
-    assert plan.body == {"content": "c", "note_tag": "task", "source": "agent:1", "resurrect": True}
-    assert plan.timeout_seconds == SEND_TIMEOUT_SECONDS
-    linked = system_note_request(
-        7, NoteIntent("c", "task", "agent:1", task_id=3, resurrect=False), "k"
-    )
-    assert linked.body is not None and linked.body["task_id"] == 3
+    assert plan.body == {
+        "content": "c",
+        "note_tag": "context",
+        "source": "agent:1",
+        "resurrect": False,
+    }
+    assert plan.idempotency_key == "reply-1"
 
 
 def test_a_system_note_refuses_an_invalid_key() -> None:
-    note = NoteIntent("c", "task", "agent:1", None, True)
+    note = NoteIntent("c", "context", "agent:1", True)
     with pytest.raises(ValueError, match="idempotency key"):
         system_note_request(7, note, "")
 

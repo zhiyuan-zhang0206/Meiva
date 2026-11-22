@@ -105,7 +105,6 @@ class _PauseAnswer(BaseModel):
     pause_reason: str | None = None
     terminated_agents: int
     force_marked_agents: int
-    reassigned_tasks: int
 
 
 class _ResumeAnswer(BaseModel):
@@ -143,7 +142,6 @@ def cmd_cluster_pause(name: str, *, reason: str | None, access: GatewayAccess) -
         pause_reason=body.pause_reason or "",
         terminated_agents=body.terminated_agents,
         force_marked_agents=body.force_marked_agents,
-        reassigned_tasks=body.reassigned_tasks,
     )
     for line in pause_lines(name, reply):
         print(line)

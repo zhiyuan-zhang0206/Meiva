@@ -15,7 +15,7 @@
 // (markdown / code / envelope / marker payload).
 //
 // system_marker renders inside a collapsible MessageCard for every non-silent
-// family: lifecycle / memory / task / note render Markdown bodies,
+// family: lifecycle / memory / note render Markdown bodies,
 // background_task / system_notice strip a leading status: prefix into
 // MarkerBody, error renders ErrorMarkerBody, and unrecognized renders
 // UnknownMarkerChip.

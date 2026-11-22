@@ -62,7 +62,6 @@ describe("classifyMarker", () => {
   it("splits known sources and payload prefixes into typed card families", () => {
     expect(classifyMarker("lifecycle_fork")).toEqual({ kind: "lifecycle", tag: "lifecycle_fork" });
     expect(classifyMarker("agent_memory")).toEqual({ kind: "memory" });
-    expect(classifyMarker("task")).toEqual({ kind: "task" });
     expect(classifyMarker("background_task", "status:done")).toEqual({ kind: "background_task" });
     expect(classifyMarker("task-notification", "status:done")).toEqual({ kind: "background_task" });
     expect(classifyMarker("timezone")).toEqual({ kind: "note" });
@@ -90,6 +89,11 @@ describe("isSilentMarker", () => {
     expect(isSilentMarker(null, "status:Cancellation requested.")).toBe(true);
     expect(isSilentMarker("tag_from_a_newer_server", "cancelled")).toBe(true);
     expect(isSilentMarker(null, "error:boom")).toBe(false);
+  });
+
+  it("preserves archived notes when the payload resembles ephemeral bookkeeping", () => {
+    expect(classifyMarker("task", "cancelled")).toEqual({ kind: "note" });
+    expect(isSilentMarker("task", "cancelled")).toBe(false);
   });
 
   it("never silences a known note by a payload that happens to match", () => {

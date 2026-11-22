@@ -47,24 +47,24 @@ def test_gateway_roster_probe_checks_the_answering_units_home(
 
 
 async def test_plugin_roster_probe_accepts_its_real_health_daemon(unit_home: Path) -> None:
-    original_port = get_field("task_maintenance_health_port")
-    pidfile = unit_home / "run" / "task_maintenance.pid"
+    original_port = get_field("memory_indexer_health_port")
+    pidfile = unit_home / "run" / "memory_indexer.pid"
     server = await start_health_server(
-        "task_maintenance", home=meiva_home(), port=0, image=unknown_image()
+        "memory_indexer", home=meiva_home(), port=0, image=unknown_image()
     )
     try:
         port = server.sockets[0].getsockname()[1]
-        set_field("task_maintenance_health_port", port)
+        set_field("memory_indexer_health_port", port)
         pidfile.parent.mkdir(parents=True, exist_ok=True)
         pidfile.write_text(str(os.getpid()))
-        declared = _service("task-maintenance")
+        declared = _service("memory-indexer")
         assert declared.identity_probe is not None
         verdict = await asyncio.to_thread(declared.identity_probe)
         assert verdict.alive is True
         assert verdict.terminal is False
     finally:
         await stop_health_server(server)
-        set_field("task_maintenance_health_port", original_port)
+        set_field("memory_indexer_health_port", original_port)
         pidfile.unlink(missing_ok=True)
 
 

@@ -47,7 +47,6 @@ import type {
   SpawnedAgent,
   StatsDashboard,
   SystemStatus,
-  TaskRow,
   TerminateAgentResponse,
   ToUserDocument,
   UiContributionsResponse,
@@ -361,6 +360,5 @@ export function createControlApi(http: Http) {
       f(`/api/keyed/v1/agents/${agentId}/retry-launch`, postJson({ expected_prior_attempt_id: priorAttempt }))
         .then(ok<RetryLaunchAccepted>),
 
-    getTask: (id: number): Promise<TaskRow> => f(`/api/tasks/${id}`).then(ok<TaskRow>),
   };
 }

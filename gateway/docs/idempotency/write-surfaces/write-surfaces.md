@@ -25,7 +25,7 @@ Owners:
 | `POST /api/cluster/stopping` | one-shot | control-plane op — host self-report during stop |
 | `DELETE /api/cluster/machines/{name}` | one-shot | control-plane op — deregisters a machine |
 | `POST /api/cluster/machines/{name}/staging` | natural | control-plane op — operator sets/clears the staging flag |
-| `POST /api/cluster/machines/{name}/pause` | natural | control-plane op — drains tasks, terminates the machine's agents, sets the pause latch (idempotent: re-pause is a safe no-op) |
+| `POST /api/cluster/machines/{name}/pause` | natural | control-plane op — sets the pause latch and terminates the machine's agents (idempotent: re-pause repeats the sweep) |
 | `POST /api/cluster/machines/{name}/resume` | natural | control-plane op — clears the pause latch (idempotent no-op when not paused) |
 | `PUT /api/config` | natural | full config replace — PUT is idempotent |
 | `PUT /api/config/default-model` | natural | set default model — PUT is idempotent |
@@ -53,5 +53,4 @@ Owners:
 | `PUT /api/extensions/{kind}/{name}` | natural | content-addressed blob plus name-keyed upsert — a replay stores the same content |
 | `POST /api/agents/{agent_id}/messages` | keyed | enqueue chat inbound — one logical message must land exactly once; clients retry with an Idempotency-Key |
 | `POST /api/agents/{agent_id}/messages/reconcile` | natural | idempotent receipt recovery — heals the pending wake/resurrection tail for an uncertain same-key delivery |
-| `POST /api/agents/{agent_id}/system-note` | keyed | optional principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |
-| `PATCH /api/tasks/{task_id}` | keyed / transactional | receipt commits with task and notification; replay skips writes and wakes |
+| `POST /api/agents/{agent_id}/system-note` | keyed | a principal-scoped identity reuses one system-note inbound; changed payload or resurrection policy conflicts |

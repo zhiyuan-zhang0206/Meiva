@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -36,7 +35,6 @@ from schedules.plans.watch.main_red_issues import (
 )
 
 _REPO = "zhiyuan-zhang0206/Meiva"
-_SCHEDULES_DIR = Path(__file__).resolve().parents[2]
 
 
 class _FakeGh:
@@ -442,39 +440,3 @@ def test_legacy_state_json_with_task_id_loads_safely_without_closing_wrong_issue
     assert "issue_number" in saved_raw["slot"]
     assert "task_id" not in saved_raw["blind"]
     assert "issue_number" in saved_raw["blind"]
-
-
-def test_schedules_has_zero_meiva_tasks_or_task_registry_dependencies() -> None:
-    offenders: list[str] = []
-    for path in sorted(_SCHEDULES_DIR.rglob("*.py")):
-        if "tests" in path.relative_to(_SCHEDULES_DIR).parts:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                if (
-                    "meiva_fleet" in node.module
-                    or "task_registry" in node.module
-                    or node.module == "meiva.tasks"
-                ):
-                    offenders.append(
-                        f"{path.relative_to(_SCHEDULES_DIR)}:{node.lineno}: from {node.module}"
-                    )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if (
-                        "meiva_fleet" in alias.name
-                        or "task_registry" in alias.name
-                        or alias.name == "meiva.tasks"
-                    ):
-                        offenders.append(
-                            f"{path.relative_to(_SCHEDULES_DIR)}:{node.lineno}: import {alias.name}"
-                        )
-            elif (
-                isinstance(node, ast.Attribute)
-                and node.attr == "tasks"
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "meiva"
-            ):
-                offenders.append(f"{path.relative_to(_SCHEDULES_DIR)}:{node.lineno}: meiva.tasks")
-    assert offenders == [], f"retired meiva.tasks references remain in schedules/: {offenders}"

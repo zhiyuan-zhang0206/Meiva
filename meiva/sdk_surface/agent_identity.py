@@ -23,7 +23,6 @@ from meiva.sdk_surface.pure.caller.identity_plan import (
     native_harness_refusal,
     self_action_refusal,
 )
-from meiva.sdk_surface.pure.caller.usage_plan import actor_id_refusal, lease_refusal
 
 from .installation import installed
 
@@ -111,23 +110,6 @@ def require_agent_id(context: MeivaContext | None = None) -> int:
             "of a shell session launched by one"
         )
     return resolved
-
-
-def require_lease_free_agent_id() -> int:
-    """Require an agent context without a borrowed lease for remote admission.
-
-    A live ExternalLease is an in-process callback, not an HTTP credential or
-    serializable authority. Remote compound acceptance cannot revalidate it
-    after its own transaction lock wait. This guard makes no server ACL claim.
-    """
-    refused = lease_refusal(caller_facts(_bound()))
-    if refused is not None:
-        raise ValueError(refused)
-    actor = require_agent_id()
-    invalid = actor_id_refusal(actor)
-    if invalid is not None:
-        raise invalid[0](invalid[1])
-    return actor
 
 
 # meiva:note

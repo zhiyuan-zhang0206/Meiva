@@ -65,7 +65,6 @@ segments stay globally distinct.
 | `question_asked` | `meiva.ui.ask()` question created | `question_id`, `title` |
 | `question_resolved` | question resolved | `question_id` |
 | `impersonation_changed` | committed impersonation status or reply | `agent_id`; invalidates the unified timeline |
-| `task_created` / `task_updated` | task registry write | `task_id` |
 
 ## Notes
 

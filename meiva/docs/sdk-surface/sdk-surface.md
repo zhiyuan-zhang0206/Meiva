@@ -42,7 +42,6 @@ The decisions of the surface are strict modules under `meiva/sdk_surface/pure/`:
 ### Agent Interop
 - [Harness attach](../../self/harness/docs/harness-attach.md) — external process attachment to an agent identity, bound on the first read that needs one
 - [meiva.agents — Agent Interop](../../agents/docs/agents.md) — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
-- [Tasks](../../../meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.md) — Task registry `meiva.tasks`: create / get / list / update / log (injected by meiva_fleet plugin, not core SDK—docs in fleet subtree)
 
 ### Tools & External
 - [MCP Server System](../../mcps/docs/mcps.md) — MCP tool servers (determined by config; built-in chrome + servers installed via `meiva mcp install` beyond core)

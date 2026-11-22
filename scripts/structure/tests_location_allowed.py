@@ -356,10 +356,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "compares every workflow's trigger set with the table this repository declares",
     ),
-    "tests/contracts/test_task_status_wire_contract.py": (
-        "contract",
-        "keeps the TaskStatus enum in step with ui/web/openapi.json and the frontend contract types",
-    ),
     "tests/harness/test_os_job_leak_guard.py": (
         "contract",
         "tests the session OS-job leak guard, tests/_os_jobs.py",

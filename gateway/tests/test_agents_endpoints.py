@@ -19,21 +19,18 @@ pytestmark = pytest.mark.usefixtures("gateway_local_runner")
 
 _ENQUEUED_AT_EXIT: dict[str, object] = {
     "status": "enqueued",
-    "open_tasks": None,
     "shell_sessions": {"when": "at_exit", "killed": []},
     "attached": None,
 }
 
 _ENQUEUED_WITH_DEFERRED_SHELL_CLEANUP: dict[str, object] = {
     "status": "enqueued",
-    "open_tasks": None,
     "shell_sessions": None,
     "attached": None,
 }
 
 _ALREADY_TERMINATED_WITH_DEFERRED_SHELL_CLEANUP: dict[str, object] = {
     "status": "already_terminated",
-    "open_tasks": None,
     "shell_sessions": None,
     "attached": None,
 }
@@ -565,7 +562,6 @@ _RESULT_READ_ENDPOINTS = [
     ("GET", "/api/agents/{agent_id}/events/stream"),
     ("GET", "/api/events"),
     ("POST", "/api/memory/search"),
-    ("GET", "/api/tasks"),
 ]
 
 # meiva:note

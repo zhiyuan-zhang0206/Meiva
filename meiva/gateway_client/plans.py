@@ -64,7 +64,6 @@ class NoteIntent:
     content: str
     note_tag: str
     source: str
-    task_id: int | None
     resurrect: bool
 
 
@@ -130,8 +129,6 @@ def system_note_request(agent_id: int, note: NoteIntent, idempotency_key: str) -
         "source": note.source,
         "resurrect": note.resurrect,
     }
-    if note.task_id is not None:
-        body["task_id"] = note.task_id
     return Request(
         "POST",
         f"/api/agents/{agent_id}/system-note",

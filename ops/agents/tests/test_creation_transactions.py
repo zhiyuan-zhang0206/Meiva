@@ -1,37 +1,20 @@
-from contextlib import nullcontext
-from datetime import UTC, datetime
-
 import psycopg
 import pytest
 
 from base.agents.birth.creation_identity import creation_request_hash
 from base.agents.birth.transaction import insert_agent_birth
-from base.agents.tasks.creation import create_task_in_transaction
-from base.agents.tasks.model import Task
 from base.api_contracts.agent_contract import InvalidModelConfig
-from base.clock.tests.fakes import clock_at
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
-from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
-
-
-def _seed_parent(conn: psycopg.Connection) -> int:
-    row = conn.execute(
-        "INSERT INTO agent_tasks(title,description,status,created_by,is_root) "
-        "VALUES ('Root','root','in_progress','system',true) RETURNING id"
-    ).fetchone()
-    assert row is not None
-    conn.commit()
-    return row[0]
 
 
 def _counts(conn: psycopg.Connection) -> tuple[int, ...]:
     row = conn.execute(
         "SELECT (SELECT count(*) FROM agents), (SELECT count(*) FROM agents_meta), "
-        "(SELECT count(*) FROM agent_tasks), (SELECT count(*) FROM audit_events), "
+        "(SELECT count(*) FROM audit_events), "
         "(SELECT count(*) FROM inbound_messages)"
     ).fetchone()
     assert row is not None
@@ -61,103 +44,6 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
             authority=config_authority,
         )
     assert _counts(db_conn) == before
-
-
-@pytest.mark.parametrize("commit", [False, True])
-def test_caller_owns_birth_task_audit_and_inbound_commit(
-    db_conn: psycopg.Connection,
-    database: Database,
-    commit: bool,
-    *,
-    config_authority: ConfigAuthority,
-    machine_identity: MachineIdentityReader,
-) -> None:
-    parent = _seed_parent(db_conn)
-    with database.connect(autocommit=True) as observer:
-        before = _counts(observer)
-        expected = nullcontext() if commit else pytest.raises(RuntimeError, match="caller refuses")
-        with expected, db_conn.transaction(), db_conn.cursor() as cur:
-            actor = insert_agent_birth(
-                cur,
-                machine=machine_identity.name(),
-                config={"llm_model": "deepseek-flash"},
-                catalog=build_model_catalog(home=meiva_home()),
-                authority=config_authority,
-            )
-            birth = insert_agent_birth(
-                cur,
-                machine=machine_identity.name(),
-                config={"llm_model": "deepseek-flash"},
-                prompt="First instruction",
-                prompt_source="user",
-                catalog=build_model_catalog(home=meiva_home()),
-                authority=config_authority,
-            )
-            task, event, notes = create_task_in_transaction(
-                cur,
-                "Combined task",
-                "Assignment",
-                parent=parent,
-                clock=clock_at(datetime(2026, 11, 6, tzinfo=UTC)),
-                owner=birth.agent_id,
-                actor=actor.agent_id,
-                priority="P2",
-                remind_interval_seconds=None,
-            )
-            assert isinstance(task, Task)
-            assert event is not None and notes
-            assert birth.birth_event is not None and birth.prompt_inbound_id is not None
-            assert _counts(observer) == before
-            inside = _counts(db_conn)
-            assert all(after > earlier for after, earlier in zip(inside, before, strict=True))
-            if not commit:
-                raise RuntimeError("caller refuses the complete operation")
-        assert _counts(observer) == (inside if commit else before)
-
-
-def test_task_validation_failure_rolls_back_birth_and_prompt(
-    db_conn: psycopg.Connection,
-    database: Database,
-    *,
-    config_authority: ConfigAuthority,
-    machine_identity: MachineIdentityReader,
-) -> None:
-    _seed_parent(db_conn)
-    row = db_conn.execute(
-        "INSERT INTO agent_tasks(title,description,status,created_by) "
-        "VALUES ('Closed parent','','done','system') RETURNING id"
-    ).fetchone()
-    assert row is not None
-    parent = row[0]
-    db_conn.commit()
-    with database.connect(autocommit=True) as observer:
-        before = _counts(observer)
-        with (
-            pytest.raises(ValueError, match="closed task cannot be"),
-            db_conn.transaction(),
-            db_conn.cursor() as cur,
-        ):
-            birth = insert_agent_birth(
-                cur,
-                machine=machine_identity.name(),
-                config={"llm_model": "deepseek-flash"},
-                prompt="First instruction",
-                prompt_source="user",
-                catalog=build_model_catalog(home=meiva_home()),
-                authority=config_authority,
-            )
-            create_task_in_transaction(
-                cur,
-                "Rejected task",
-                "",
-                parent=parent,
-                clock=clock_at(datetime(2026, 11, 6, tzinfo=UTC)),
-                owner=birth.agent_id,
-                actor=birth.agent_id,
-                priority="P2",
-                remind_interval_seconds=None,
-            )
-        assert _counts(observer) == before
 
 
 def test_cursor_birth_replay_returns_original_attempt_without_new_effects(

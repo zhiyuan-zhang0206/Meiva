@@ -1,6 +1,4 @@
 {
-  "widgetsUnavailable": "Inspector extensions unavailable",
-  "retryWidgets": "Retry extensions",
   "title": "Inspector",
   "toggle": "Inspect",
   "closeInspector": "Close inspector",
@@ -18,7 +16,6 @@
   "retrying": "Retrying…",
   "noData": "No data",
   "sectionPage": "Page",
-  "sectionTasks": "Tasks",
   "sectionShells": "Persistent shells",
   "sectionSchedules": "Schedules",
   "scheduleScopeCluster": "Cluster",

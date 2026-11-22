@@ -69,9 +69,9 @@ def pool(database: Database) -> Iterator[ConnectionPool]:
 
 
 def _metric(
-    name: str = "demo_task_done_rate",
+    name: str = "demo_termination_rate",
     *,
-    event_name: str = "task_update",
+    event_name: str = "terminate",
     category: str = "audit",
     panel: str = "stat",
     query: str = _DEMO_QUERY,
@@ -81,7 +81,7 @@ def _metric(
     """A registry-row dict (the shape a MetricSpec registration carries)."""
     return {
         "name": name,
-        "title": "Task done rate",
+        "title": "Termination rate",
         "description": "test metric",
         "event_name": event_name,
         "category": category,
@@ -462,8 +462,8 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
-    assert {s.plugin for s in plugin_specs} == {"meiva_fleet", "meiva_memory"}
-    assert len(plugin_specs) == 9
+    assert {s.plugin for s in plugin_specs} == {"meiva_memory"}
+    assert len(plugin_specs) == 7
     # core section follows, plugin section first (old snapshot order)
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16
@@ -477,21 +477,21 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 
 
 # meiva:note
-# Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
+# A disabled shipped plugin
 # contributes none (the per-agent inspector panel), read per request from the machine's
 # plugin config.
 def test_a_disabled_plugins_metrics_are_not_loaded(unit_home: Path) -> None:
-    shipped = SHIPPED_PLUGINS_DIR / "meiva_fleet" / "metrics.py"
+    shipped = SHIPPED_PLUGINS_DIR / "meiva_memory" / "metrics.py"
     assert shipped in _plugin_metrics.plugin_metric_modules(
         SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=unit_home)
     )
     (unit_home / "plugins_config.json").write_text(
-        json.dumps({"plugins": {"meiva_fleet": {"enabled": False}}}), encoding="utf-8"
+        json.dumps({"plugins": {"meiva_memory": {"enabled": False}}}), encoding="utf-8"
     )
     enabled = enabled_plugin_names(home=unit_home)
-    assert "meiva_fleet" not in enabled
+    assert "meiva_memory" not in enabled
     assert shipped not in _plugin_metrics.plugin_metric_modules(SHIPPED_PLUGINS_DIR, enabled)
-    assert "meiva_fleet" not in {
+    assert "meiva_memory" not in {
         s.plugin for s in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled)
     }
 
@@ -528,7 +528,7 @@ def _fixture_metrics_source(metric: str, query: str, *, raises: bool = False) ->
         "from base.packages.plugins.extensions import PluginContributions\n"
         "from base.telemetry.metrics.plugin_metrics import MetricSpec\n"
         f"METRICS = (MetricSpec(name={metric!r}, title='Fixture', "
-        f"event_name='task_update', category='audit', output=['inspector'], query={query!r}),)\n"
+        f"event_name='terminate', category='audit', output=['inspector'], query={query!r}),)\n"
         "def contribute():\n"
         "    return PluginContributions(metrics=METRICS)\n"
     )

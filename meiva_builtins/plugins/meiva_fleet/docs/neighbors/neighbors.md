@@ -7,6 +7,5 @@ Inter-agent interaction is the communication layer of the fleet — how agents d
 ## Relationship to Other Subsystems
 
 - [Spawn](../spawn.md) — spawn/fork/resurrect establish ties
-- [Tasks](../tasks/tasks.md) — system-note notification (NoteTag `task`) on task owner change
 - [meiva.self](../../../../../meiva/self/README.md) — discover peers via label
 - [Meiva Fleet](../meiva_fleet.md) — overview

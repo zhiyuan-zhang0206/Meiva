@@ -330,8 +330,7 @@ def installed_plugin_dirs(*, home: Path) -> dict[str, Path]:
     enable-state (`meiva plugins enable/disable`) — to fold plugin-declared
     ServiceSpecs into `build_services()`. The roster is a machine/cluster concern
     and must not depend on the agent-plugin-registration plane; a plugin gates its
-    own service via an explicit settings field in `ServiceSpec.gate` (e.g.
-    task-maintenance's Fleet `task_maintenance_enabled`).
+    own service via an explicit settings field in `ServiceSpec.gate`.
     """
     return discover_plugins(home=home)
 

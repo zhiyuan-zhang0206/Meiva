@@ -22,7 +22,6 @@ def test_note_tag_value_set() -> None:
         "agent_reply",
         "non_human_wake",
         "reply_visibility",
-        "task",
         "compact_reminder",
         "compact_failed",
         "history_dump",

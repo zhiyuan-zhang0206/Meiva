@@ -12,7 +12,7 @@
 # `services.supervision.roster.plugin_services.plugin_services`), so the cluster-level on/off is the
 # explicit gate below rather than the presence check.
 #
-# Deliberately light, like `meiva_fleet/task_maintenance/declaration.py`: it imports the ops service
+# The declaration imports the ops service
 # contract and roster probe helper plus `base` — never `plugin.py` or the memory domain code — so
 # the ops/CLI/watchdog process that discovers it does not pull in the agent kernel. `services()` is
 # a function so probe ports derived from settings are read at use-time.

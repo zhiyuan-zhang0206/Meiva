@@ -28,5 +28,5 @@ keeping the imported targets visible to static dependency tooling.
 The SDK guards its LM, database, telemetry and connection stacks in
 `meiva/tests/bootstrap/test_lazy_lm_import.py` and `test_lazy_boot_import.py`.
 `meiva_builtins/plugins/meiva_fleet/tests/test_lazy_plugin_import.py` guards
-database and telemetry imports across the plugin, task registry and task-update
+database and telemetry imports across plugin registration
 modules. These are import-laziness checks, not deployed boot-latency measurements.

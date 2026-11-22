@@ -1,160 +1,12 @@
-"""Fleet policy and maintenance configuration; pure across agent and service faces."""
+"""Fleet policy configuration."""
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from base.agents.tasks.reminder_window import DEFAULT_RESET_ON, validate_reset_on
 from base.packages.plugins.extensions import PluginContributions
 
 
 class FleetConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-
-    task_maintenance_enabled: bool = Field(
-        title="Enable task maintenance",
-        default=True,
-        description="Run the task-maintenance daemon on the gateway. On by default; set false to disable task reminders and the escalation pass cluster-wide.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_MAINTENANCE_ENABLED",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    task_maintenance_interval_seconds: float = Field(
-        title="Task maintenance check interval (seconds)",
-        default=300.0,
-        description="Task-maintenance daemon poll interval (seconds): how often it checks for overdue tasks and reminds owners. A precision lower bound, not the cadence — each task controls its own remind_interval_seconds.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_MAINTENANCE_INTERVAL_SECONDS",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_backoff_seconds: float = Field(
-        title="Minimum task reminder interval (seconds)",
-        default=3600.0,
-        description="Floor for the interval (seconds) between repeated reminders for the same overdue window: a task whose remind_interval_seconds exceeds this repeats at its own interval instead.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_REMINDER_BACKOFF_SECONDS",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_digest_window_p0_seconds: float = Field(
-        default=0.0,
-        description="Coalescing window (seconds) for check-in digests to a P0 task owner: a second digest is held back while one was already delivered within this window. 0 delivers immediately — a P0 interval exists to be heard now.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P0_SECONDS",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_digest_window_p1_seconds: float = Field(
-        default=7200.0,
-        description="Coalescing window (seconds) for check-in digests to a P1 task owner. The sweep runs every task_maintenance_interval_seconds, so without a window a due task is delivered one task per message; the window trades at most this much delivery delay for one message per owner.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P1_SECONDS",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_digest_window_p2_seconds: float = Field(
-        default=10800.0,
-        description="Coalescing window (seconds) for check-in digests to a P2 or P3 task owner. Widest of the three: low-priority reminders tolerate the most delay and account for most of the daily message count.",
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P2_SECONDS",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_escalate_n: int = Field(
-        title="Unanswered task reminders before escalation",
-        default=3,
-        description=(
-            "Cadence periods a task may stay without a state change before the daemon escalates "
-            "to the nearest live manager; a task with no live manager is not escalated. One cadence period is the task's own "
-            "`max(task_reminder_backoff_seconds, remind_interval_seconds)`, so the count follows the "
-            "task, not the per-owner delivery window; a task is only escalated once at least one "
-            "reminder has actually reached its owner."
-        ),
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_ESCALATE_N",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "capability": "gateway",
-            "scope": "cluster-pinned",
-        },
-    )
-
-    task_reminder_reset_on: tuple[str, ...] = Field(
-        title="Task updates that reset reminders",
-        default=DEFAULT_RESET_ON,
-        description=(
-            "Which kinds of task update restart a task's reminder window, the counter the "
-            "task-maintenance daemon escalates on. The default counts activity on the task: a "
-            "change to the work (status, results, owner, priority, parent) and a note. A note "
-            "counts because answering a reminder with one is an owner still on the task, and "
-            "reading it as silence escalated tasks nobody had abandoned; renaming a task or "
-            "editing its description is not activity on it. Any kind an update can change may be "
-            "named — status, title, description, results, owner, priority, parent, "
-            "remind_interval_seconds, note — so leaving 'note' out restores a window only "
-            "progress moves."
-        ),
-        json_schema_extra={
-            "env_var": "MEIVA_TASK_REMINDER_RESET_ON",
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "capability": "common",
-            "scope": "host",
-        },
-    )
-
-    task_reminder_pause_max_seconds: int | None = Field(
-        title="Maximum task reminder pause (seconds)",
-        default=None,
-        description=(
-            "Longest silence an owner may ask for with update(reminders_paused_until=...). "
-            "Unset (None) means this home cannot pause reminders at all: a pause request fails "
-            "fast and names this key, so an operator has to choose the bound and write down why. "
-            "The value is a Fleet decision, not a product default — a task's reminder window is "
-            "the only thing standing between a frozen task and its escalation."
-        ),
-        json_schema_extra={
-            "help_text": "Leave unset to disallow pausing task reminders.",
-            "env_var": "MEIVA_TASK_REMINDER_PAUSE_MAX_SECONDS",
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "capability": "common",
-            "scope": "host",
-        },
-    )
 
     reduce_context_switch: bool = Field(
         title="Reduce interruptions to the user",
@@ -177,25 +29,6 @@ class FleetConfig(BaseModel):
             "capability": "agent-runner",
         },
     )
-
-    # meiva:note
-    # Reject an unknown kind or an empty policy at the config boundary, before an update reads it.
-    @field_validator("task_reminder_reset_on")
-    @classmethod
-    def _known_reset_kinds(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return validate_reset_on(value)
-
-    # meiva:note
-    # Zero or negative would make every pause request invalid while reading as "configured"; the
-    # unset value is None, so only a positive bound reaches the write boundary.
-    @field_validator("task_reminder_pause_max_seconds")
-    @classmethod
-    def _positive_pause_bound(cls, value: int | None) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError(
-                "task_reminder_pause_max_seconds must be positive; unset it to disable pausing"
-            )
-        return value
 
 
 # meiva:note

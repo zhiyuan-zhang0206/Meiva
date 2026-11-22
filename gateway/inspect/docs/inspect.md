@@ -1,7 +1,6 @@
 # Agent Inspect Router
 
-`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics`
-+ `/inspect/widgets` — per-agent LLM cost/token/TPS + neighbor graph.
+`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics` — per-agent LLM cost/token/TPS + neighbor graph.
 
 The live inspector's heartbeat block — the four display states (a pause, a queued wake,
 a projected check-in, nothing) and the daemon predicate each one mirrors — has its own
@@ -60,17 +59,3 @@ the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_eve
 see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
 Which plugins are enabled is read once per request (`_plugin_faces.enabled_plugin_names`, from the machine's plugin config) and
 handed to the loader as a set of names; the loader and the per-agent execution (`metrics_for_agent(pool, agent_id, registry=..., clock=...)`) take values.
-
-## Plugin inspector-widget surface (`/inspect/widgets`, task #2909)
-
-Builds the widget registry in process — ENABLED builtin plugins' `inspector.py`
-declarations (`contribute()`, admitted into a data registry) — and resolves each widget's payload
-server-side: a `taskList` lists the agent's active tasks (owner-scoped,
-priority-ordered (P0 first, ties by id), complete; each row carries the
-task's id, title, and its P0..P3 priority — tasks #3819/#3866). A widget with
-nothing to show leaves the payload
-entirely — see `base/packages/plugins/surface/inspector.py`. An `inspector.py` that
-fails to import is skipped with a loud report (loguru ERROR + the
-`plugin_load_failed` event) and the remaining widgets still serve — fail-soft
-per the plugin-load contract (user ruling 2026-09-11); a declaration is admitted
-whole or not at all, so the next request retries clean.

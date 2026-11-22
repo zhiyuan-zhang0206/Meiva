@@ -26,7 +26,7 @@
     "config-sdk": "Agent SDK",
     "config-agent-infra": "Agent 数据库与基础设施",
     "config-daemon-heartbeat": "守护进程：心跳",
-    "config-daemon-tasks": "守护进程：任务与事件",
+    "config-daemon-events": "守护进程：事件",
     "config-gateway": "Gateway",
     "config-connection": "连接",
     "config-dataplane": "数据面",

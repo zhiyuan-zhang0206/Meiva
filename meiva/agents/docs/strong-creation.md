@@ -60,7 +60,5 @@ and observed-attempt launch recovery remain separate gateway operations.
 
 ## Compound operations
 
-`meiva.tasks.create_and_assign` has its own required operation key and atomic
-[compound acceptance](../../../gateway/agents/task_assignment/README.md).
 A standalone spawn key does not make an entire script or workflow atomic.
 The SDK has one creation path and does not select behavior using a mode flag.

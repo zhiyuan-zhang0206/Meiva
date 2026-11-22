@@ -258,7 +258,7 @@ class DiagnosticMonitor:
 
     # meiva:note
     # Re-publish the latest definitive status gauge for checks with an observed state so OTLP
-    # reconnects restore gauges between long diagnostic intervals (such as hourly task-telemetry).
+    # reconnects restore gauges between long diagnostic intervals.
     def refresh_state_gauges(self) -> None:
         for check in self._checks:
             ok = self._states[check.name].last_known_ok

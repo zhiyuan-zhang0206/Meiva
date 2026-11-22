@@ -52,7 +52,6 @@ from gateway.agents.reply_suggestion import feedback as suggestion_feedback_rout
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
 from gateway.agents.reply_suggestion.service import ReplySuggestionService
-from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.agents.to_user import publications as publications_router
 from gateway.agents.transfer import router as agents_transfer_router
@@ -133,9 +132,6 @@ from gateway.routers import (
 )
 from gateway.routers import (
     shell as shell_router,
-)
-from gateway.routers import (
-    tasks as tasks_router,
 )
 from gateway.routers.configuration import runtime as config_router
 from gateway.routers.fleet import fleet_graph as fleet_graph_router
@@ -559,8 +555,6 @@ def create_app(
         fleet_graph_router.router,
         frontend_telemetry_router.router,
         grafana_router.router,
-        tasks_router.router,
-        task_assignments_router.router,
         plugin_ui_router.router,
         ui_contributions_router.router,
         uploads_router.router,

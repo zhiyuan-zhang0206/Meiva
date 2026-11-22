@@ -14,7 +14,7 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 |---|---|---|
 | `codex` interactive TUI | Agent dialog (`meiva.agents.spawn`) | |
 | `codex exec "<task>"` | `meiva.shell.run` / `run_background` for command one-shots; spawn an agent for multi-step reasoning tasks | |
-| `codex resume` | Hand off via files + the task registry; spawn a fresh agent with the handoff file's path | No conversation resume — the file is the memory. |
+| `codex resume` | Hand off via workspace files; spawn a fresh agent with the handoff file's path | No conversation resume — the file is the memory. |
 | `AGENTS.md` (also reads `.cursorrules`, `CLAUDE.md`) | Same file — Meiva surfaces AGENTS.md / CLAUDE.md along resolved paths | |
 | `~/.codex/config.toml`, `.codex/config.toml` (`CODEX_HOME`) | `meiva config get/set/unset` (cluster + host `.env`) for deployment settings; per-agent `config_overlay` for model / effort | |
 | `approval_policy` (`untrusted` / `on-request` / `never`) | No approval-policy engine. Onboarding records the user's gates as the feedback kind memory; irreversible actions raise `meiva.ui.ask(...)` | |
@@ -44,7 +44,7 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
 4. **Rewrite one-shots.** `codex exec` calls become `meiva.shell.run` (plain
    commands) or a spawned agent (tasks that need judgment).
 5. **Replace session resuming with handoffs.** `codex resume` has no analog;
-   instead use tasks in `meiva.tasks` and handoff files.
+   Send a handoff file to the next agent.
 
 ## Differences and pitfalls
 
@@ -57,7 +57,7 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
   agents run under your platform account from the start — scope them by
   prompt and workspace instead.
 - **The unit of work differs.** Codex is one agent per terminal session; Meiva
-  is a fleet — one agent per task, tracked in the task registry, with a
+  is a fleet — agents coordinating through messages, with a
   delegator who gathers results.
 - **`config.toml` has no single equivalent.** Settings split across `meiva
   config` (deployment), per-agent `config_overlay` (agent shape), and memory

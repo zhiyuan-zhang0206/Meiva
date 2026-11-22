@@ -11,7 +11,7 @@ registries instead of a hand-maintained file. This module locks the renderer
    file, modulo three enumerable normalizations (below). This is the migration
    lock: nothing the user sees may change beyond those.
 2. **The layout engine reproduces the file's full geometry** — replaying the
-   fixture's 97 entries (sizes + order + the one pinned position + the
+   fixture's entries (sizes + order + the one pinned position + the
    section gaps) through the renderer's flow engine must reproduce every
    gridPos exactly.
 3. **Invariants** — unique ids, no overlapping rectangles, the stable
@@ -37,7 +37,7 @@ All panels are covered since S2 (task #3697) registered the last 18 and
 task #2174 added the exec-envelope size/serialize pair; the fixture-only worklist
 (``_S2_PENDING``) is empty. The fidelity lock compares panel content AND
 geometry (gridPos) panel-for-panel; the layout replay separately locks the
-engine on the fixture's full 97-entry geometry.
+engine on the fixture's full geometry.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DASHBOARD_FILE = (
     _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
 )
-_PLUGINS = ("meiva_fleet", "meiva_memory")
+_PLUGINS = ("meiva_memory",)
 
 # Empty since S2 (task #3697) registered the last 18 panels — the Events
 # trio, the gateway sample count, and the host + memory-search gauges. Kept as
@@ -259,7 +259,7 @@ def test_rendered_sequence_follows_the_fixture(
 def test_layout_engine_reproduces_the_full_fixture_geometry(
     world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
 ) -> None:
-    """Replay the fixture's 97 entries — sizes and order from the file, the
+    """Replay the fixture's entries — sizes and order from the file, the
     pin from the spec, the gaps from the section registry — through the
     renderer's flow engine; every gridPos must come back exactly."""
     core_specs, plugin_specs, _ = world
@@ -521,7 +521,7 @@ def test_repo_supplier_loads_the_shipped_plugins() -> None:
     assert result.loaded == list(_PLUGINS)
     assert result.failed == []
     grafana = [spec for spec in result.specs if "grafana" in spec.output]
-    assert len(grafana) == 7
+    assert len(grafana) == 6
     assert {spec.plugin for spec in result.specs} == set(_PLUGINS)
 
 

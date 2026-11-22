@@ -65,8 +65,6 @@ const REQUIRED_FIELDS: Record<SystemEvent["role"], readonly string[]> = {
   agent_updated: ["agent_id", "role"],
   question_asked: ["agent_id", "role", "question_id", "title"],
   question_resolved: ["agent_id", "role", "question_id"],
-  task_created: ["agent_id", "role", "task_id"],
-  task_updated: ["agent_id", "role", "task_id"],
   notification: [
     "agent_id",
     "role",
@@ -130,8 +128,6 @@ function assertSystemEventShape(obj: unknown): asserts obj is SystemEvent {
     case "agent_updated":
     case "question_asked":
     case "question_resolved":
-    case "task_created":
-    case "task_updated":
     case "notification":
       break;
     default:

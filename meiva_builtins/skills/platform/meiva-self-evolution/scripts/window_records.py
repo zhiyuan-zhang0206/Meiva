@@ -20,7 +20,6 @@ from record_inputs import (
     EventFact,
     Inbound,
     RunInputs,
-    TaskReceipts,
     TranscriptLine,
     event_facts,
     inbound_facts,
@@ -113,7 +112,6 @@ class WindowRows:
     logs: Mapping[int, list[Event]]
     inbounds: Mapping[int, list[Inbound]]
     meta: Mapping[int, AgentMeta]
-    receipts: Mapping[int, TaskReceipts]
     transcripts: Mapping[int, list[TranscriptLine]]
     skills: Mapping[int, list[str]]
 
@@ -132,7 +130,6 @@ def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list
                 meta=rows.meta[agent_id],
                 transcript=transcript_facts(rows.transcripts[agent_id]),
                 skills_touched=tuple(rows.skills[agent_id]),
-                task_receipts=rows.receipts.get(agent_id),
             )
         )
         for agent_id in selected
