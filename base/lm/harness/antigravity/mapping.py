@@ -41,6 +41,7 @@ def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[d
 
 @dataclass(frozen=True, slots=True)
 class PlannerRow:
+    index: int
     row: dict[str, object]
     input_key: str | None
     notice: BackgroundNotice | None
@@ -54,7 +55,7 @@ def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iter
     marks = {input_marker(key): key for key in keys}
     foreground: str | None = None
     background: BackgroundNotice | None = None
-    for row in rows:
+    for index, row in enumerate(rows):
         kind = row.get("type")
         if kind == "USER_INPUT":
             foreground = next(
@@ -64,10 +65,7 @@ def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iter
         elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row)) is not None:
             background = notice
         elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
-            step = PlannerRow(row, foreground if background is None else None, background)
-            yield step
-            if step.final:
-                background = None
+            yield PlannerRow(index, row, foreground, background)
 
 
 _SENDER = re.compile(r"^\[Message\] (?:timestamp=\S+ )?sender=(\S+)([^\n]*)", re.MULTILINE)
@@ -107,14 +105,25 @@ class ProjectedFrame:
         return None
 
 
+Frame = dict[str, object]
+Evidence = tuple[int, str, int]
+
+
 @dataclass(slots=True)
 class OutputProjection:
     offset: int
     keys: list[str] = field(default_factory=list[str])
-    pending: deque[dict[str, object]] = field(default_factory=deque[dict[str, object]])
-    _cursor: dict[str, int] = field(default_factory=dict[str, int])
-    _prefix: dict[str, str] = field(default_factory=dict[str, str])
+    pending: deque[Frame] = field(default_factory=deque[Frame])
+    confirmed: set[int] = field(default_factory=set[int])
+    settled: set[str] = field(default_factory=set[str])
+    seen: set[Evidence] = field(default_factory=set[Evidence])
     _tool_owners: dict[str, ProjectedFrame] = field(default_factory=dict[str, ProjectedFrame])
+
+    def owns(self, step: PlannerRow) -> bool:
+        return step.input_key is not None and (step.notice is None or step.index in self.confirmed)
+
+    def steps(self, rows: Sequence[Frame]) -> tuple[PlannerRow, ...]:
+        return tuple(planner_rows(rows[self.offset :], self.keys))
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -122,69 +131,101 @@ class OutputProjection:
             or any(item.get("toolCallId") == tool_id for item in self.pending)
         )
 
-    def project(self, rows: Sequence[dict[str, object]]) -> Iterator[ProjectedFrame]:
-        steps = tuple(planner_rows(rows[self.offset :], self.keys))
-        waiting: deque[dict[str, object]] = deque()
-        blocked: set[str] = set()
+    def project(self, rows: Sequence[Frame]) -> Iterator[ProjectedFrame]:
+        steps = self.steps(rows)
         while self.pending:
-            frame = self.pending.popleft()
-            kind = str(frame.get("sessionUpdate"))
-            projected = None if kind in blocked else self._take(frame, steps)
-            if projected is None:
-                waiting.append(frame)
-                blocked.add(kind)
-            else:
-                yield projected
-        self.pending = waiting
+            consumed: set[int] = set()
+            frames = list(self.pending)
+            for index in range(len(frames)):
+                if index in consumed:
+                    continue
+                match = self._match(index, frames, consumed, steps)
+                if match is not None:
+                    event, indices = match
+                    consumed.update(indices)
+                    yield event
+            if not consumed:
+                return
+            self.pending = deque(frame for i, frame in enumerate(frames) if i not in consumed)
 
-    def _take(self, frame: dict[str, object], steps: Sequence[PlannerRow]) -> ProjectedFrame | None:
+    def _match(
+        self, index: int, frames: Sequence[Frame], consumed: set[int], steps: Sequence[PlannerRow]
+    ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
+        frame = frames[index]
         kind = frame.get("sessionUpdate")
         tool_id = frame.get("toolCallId")
         if kind == "tool_call_update" and isinstance(tool_id, str):
             owner = self._tool_owners.get(tool_id)
-            return replace(owner, frame=frame) if owner is not None else None
+            return (replace(owner, frame=frame), (index,)) if owner is not None else None
         if kind == "tool_call" and isinstance(tool_id, str):
-            calls = ((step, call) for step in steps for call in _calls(step.row))
-            for index, (step, call) in enumerate(calls):
-                if index == self._cursor.get("tool", 0) and _matches_call(frame, call):
-                    self._cursor["tool"] = index + 1
-                    projected = ProjectedFrame(frame, step.input_key, step.notice)
-                    self._tool_owners[tool_id] = projected
-                    return projected
-            return None
+            item = self._take_tool(frame, tool_id, steps)
+            return (item, (index,)) if item is not None else None
         field_name = "thinking" if kind == "agent_thought_chunk" else "content"
-        return self._take_text(frame, steps, field_name)
+        return self._take_text(index, frames, consumed, steps, field_name)
+
+    def _owner(
+        self, step: PlannerRow, frame: Frame, *, text_finished: bool = False
+    ) -> ProjectedFrame | None:
+        if self.owns(step):
+            return ProjectedFrame(frame, step.input_key, None, text_finished=text_finished)
+        if step.notice is not None and (step.input_key is None or step.input_key in self.settled):
+            reply = content_text(frame.get("content")) if text_finished and step.final else ""
+            return ProjectedFrame(frame, None, step.notice, reply, text_finished)
+        return None
+
+    def _take_tool(
+        self, frame: Frame, tool_id: str, steps: Sequence[PlannerRow]
+    ) -> ProjectedFrame | None:
+        matches = [
+            (step, evidence)
+            for step in steps
+            for index, call in enumerate(_calls(step.row))
+            if (evidence := (step.index, "tool", index)) not in self.seen
+            and _matches_call(frame, call)
+        ]
+        if len(matches) != 1:
+            return None
+        step, evidence = matches[0]
+        owner = self._owner(step, frame)
+        if owner is not None:
+            self.seen.add(evidence)
+            self._tool_owners[tool_id] = owner
+        return owner
 
     def _take_text(
-        self, frame: dict[str, object], steps: Sequence[PlannerRow], name: str
-    ) -> ProjectedFrame | None:
-        texts = (
-            (step, value)
+        self,
+        index: int,
+        frames: Sequence[Frame],
+        consumed: set[int],
+        steps: Sequence[PlannerRow],
+        name: str,
+    ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
+        options = [
+            (step, value.strip())
             for step in steps
-            if isinstance(value := step.row.get(name), str) and value.strip()
-        )
-        for index, (step, value) in enumerate(texts):
-            if index < self._cursor.get(name, 0):
+            if (step.index, name, 0) not in self.seen
+            and isinstance(value := step.row.get(name), str)
+            and value.strip()
+        ]
+        indices: list[int] = []
+        text = ""
+        kind = frames[index].get("sessionUpdate")
+        for current in range(index, len(frames)):
+            if current in consumed or frames[current].get("sessionUpdate") != kind:
                 continue
-            prefix = self._prefix.get(name, "") + content_text(frame.get("content"))
-            received, expected = prefix.strip(), value.strip()
-            if not expected.startswith(received):
+            indices.append(current)
+            text += content_text(frames[current].get("content"))
+            options = [(step, value) for step, value in options if value.startswith(text.strip())]
+            if not options:
                 return None
-            reply = ""
-            if received == expected:
-                self._cursor[name] = index + 1
-                self._prefix.pop(name, None)
-                if name == "content" and step.notice and step.final:
-                    reply = expected
-            else:
-                self._prefix[name] = prefix
-            return ProjectedFrame(
-                frame,
-                step.input_key,
-                step.notice,
-                reply,
-                text_finished=name == "content" and received == expected,
-            )
+            if len(options) == 1 and options[0][1] == text.strip():
+                step, value = options[0]
+                frame = {"sessionUpdate": kind, "content": {"type": "text", "text": value}}
+                owner = self._owner(step, frame, text_finished=name == "content")
+                if owner is not None:
+                    self.seen.add((step.index, name, 0))
+                    return owner, tuple(indices)
+                return None
         return None
 
 

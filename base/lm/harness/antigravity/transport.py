@@ -103,24 +103,27 @@ class AgyTransport:
         self,
         config: AntigravityConfig,
         *,
-        environ: Mapping[str, str] | None = None,
+        environ: Mapping[str, str],
+        owner_uid: int,
+        generation_id: str,
         clock: WaitClock,
         max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
+        if not generation_id:
+            raise ValueError("an ACP transport requires a process generation ID")
         self._config = config
         self._clock = clock
         self._max_frame_bytes = max_frame_bytes
-        self._environ = dict(environ) if environ else None
-        csrf_seed = (
-            (self._environ.get("MEIVA_HARNESS_HANDLE") or "") if self._environ is not None else ""
-        ) or str(config.cwd)
+        self._environ = dict(environ)
+        self._owner_uid = owner_uid
+        self._process_marker = ("MEIVA_AGY_GEN_ID", generation_id)
+        csrf_seed = self._environ.get("MEIVA_HARNESS_HANDLE") or str(config.cwd)
         self._csrf_token = (
-            (self._environ.get("ANTIGRAVITY_SERVER_CSRF_TOKEN") or "").strip()
-            if self._environ is not None
-            else ""
-        ) or hashlib.sha256(csrf_seed.encode("utf-8")).hexdigest()[:32]
-        if self._environ is not None:
-            self._environ["ANTIGRAVITY_SERVER_CSRF_TOKEN"] = self._csrf_token
+            self._environ.get("ANTIGRAVITY_SERVER_CSRF_TOKEN", "").strip()
+            or hashlib.sha256(csrf_seed.encode("utf-8")).hexdigest()[:32]
+        )
+        self._environ["ANTIGRAVITY_SERVER_CSRF_TOKEN"] = self._csrf_token
+        self._environ[self._process_marker[0]] = self._process_marker[1]
         self._process: asyncio.subprocess.Process | None = None
         self._stdio: asyncio.SubprocessTransport | None = None
         self._family: ProcessFamily | None = None
@@ -141,13 +144,19 @@ class AgyTransport:
 
     @classmethod
     def create(
-        cls, config: AntigravityConfig, *, environ: Mapping[str, str] | None, clock: WaitClock
+        cls,
+        config: AntigravityConfig,
+        *,
+        environ: Mapping[str, str],
+        owner_uid: int,
+        generation_id: str,
+        clock: WaitClock,
     ) -> AgyTransport:
-        resolved = resolve_harness_binary(
-            config.executable[0], path_env=(environ or {}).get("PATH")
-        )
+        resolved = resolve_harness_binary(config.executable[0], path_env=environ.get("PATH"))
         config = replace(config, executable=(resolved, *config.executable[1:]))
-        return cls(config, environ=environ, clock=clock)
+        return cls(
+            config, environ=environ, owner_uid=owner_uid, generation_id=generation_id, clock=clock
+        )
 
     @property
     def pid(self) -> int | None:
@@ -192,7 +201,9 @@ class AgyTransport:
         process = asyncio.subprocess.Process(io, protocol, loop)
         self._process = process
         self._stdio = io
-        self._family = ProcessFamily(process.pid, PsutilChildProbe())
+        self._family = ProcessFamily(
+            process.pid, PsutilChildProbe(), uid=self._owner_uid, marker=self._process_marker
+        )
         if process.stdout is None or process.stderr is None:
             raise RuntimeError("agy stdio pipes are not available")
         if not self._tasks_entered:
@@ -330,7 +341,7 @@ class AgyTransport:
 
     def _timing_record(self, conversation_id: str | None = None) -> Path | None:
         target = conversation_id or self._conversation_id
-        if not target or self._environ is None or not self._environ.get("HOME"):
+        if not target or not self._environ.get("HOME"):
             return None
         return session_file(self._environ, target)
 
@@ -403,7 +414,7 @@ class AgyTransport:
             if process is not None and io is not None:
                 try:
                     if family is not None:
-                        family.observe_session()
+                        family.observe()
                     if not broken:
                         await self._request_exit(process)
                 finally:
@@ -413,7 +424,7 @@ class AgyTransport:
                     io.close()
                     try:
                         if family is not None:
-                            family.observe_session()
+                            family.observe_session(include_marked=broken)
                             family.kill()
                     finally:
                         await self._close_streams(process)
@@ -421,6 +432,7 @@ class AgyTransport:
             if family is not None:
                 await family.settle(
                     harness="antigravity",
+                    include_marked=broken,
                     agent_id=agent_id,
                     timeout=self._config.cancel_settle_seconds,
                     clock=self._clock,

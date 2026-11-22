@@ -8,7 +8,15 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness.antigravity.acp import input_marker
-from base.lm.harness.antigravity.foreground import PromptUsage, planner_usage, turn_usage
+from base.lm.harness.antigravity.foreground import (
+    PromptTurn,
+    PromptUsage,
+    bill_prompt,
+    planner_usage,
+    turn_usage,
+)
+from base.lm.harness.antigravity.mapping import OutputProjection
+from base.lm.harness.antigravity.session import ActiveTurn
 from base.lm.harness.antigravity.tests.support import start
 from base.lm.harness.antigravity.timing_store import timing_path
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
@@ -190,25 +198,32 @@ async def test_detached_timer_reply_stays_out_of_an_already_active_turn(tmp_path
         tool = await harness.wait_for(
             lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
         )
+        await harness.session.deliver([HarnessInput.of("steer", "steer")])
+        await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "steer")
         harness.release("release-tool")
         await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
         harness.release()
-        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
-        assert background.text == "BACKGROUND"
         assert harness.session.active_turn_id == tool.turn_id
-        await harness.session.deliver([HarnessInput.of("steer", "steer")])
         harness.release("release-steer")
         done = await harness.wait_for(
             lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
         )
+        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        assert background.text == "BACKGROUND"
         assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
         assert done.usage == Usage(80, 10, 0, 60) and not done.usage_uncertain
     finally:
         await harness.stop()
 
 
-async def test_foreground_tool_and_usage_precede_the_detached_reply(tmp_path: Path) -> None:
-    harness = await start(tmp_path)
+@pytest.mark.parametrize(
+    "args",
+    [(), ("--test-early-hub",), ("--test-background-row-first",)],
+)
+async def test_foreground_tool_and_usage_precede_the_detached_reply(
+    tmp_path: Path, args: tuple[str, ...]
+) -> None:
+    harness = await start(tmp_path, extra_args=args)
     try:
         await harness.session.deliver([HarnessInput.of("timer", "background")])
         timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
@@ -218,24 +233,56 @@ async def test_foreground_tool_and_usage_precede_the_detached_reply(tmp_path: Pa
         harness.release("release-tool")
         await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
         harness.release("release-foreground")
-        assistant = await harness.wait_for(
-            lambda e: isinstance(e, AssistantText) and e.text == "FOREGROUND"
-        )
-        assert assistant.turn_id == harness.session.active_turn_id
-        assert ToolResult(assistant.turn_id, "tool-1", False, "WORK_DONE") in harness.events
-        assert any(isinstance(e, ToolUse) and e.tool_use_id == "tool-1" for e in harness.events)
+        await harness.wait_for_marker("foreground-sent")
+        if not args:
+            assistant = await harness.wait_for(
+                lambda e: isinstance(e, AssistantText) and e.text == "FOREGROUND"
+            )
+            assert assistant.turn_id == harness.session.active_turn_id
         assert not any(isinstance(e, UnsolicitedOutput) for e in harness.events)
         assert harness.session.background_work().items
         harness.release()
-        assert (
-            await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
-        ).text == "BACKGROUND"
         harness.release("release-front-result")
         done = await harness.wait_for(
             lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
         )
         assert done.text == "FOREGROUND"
+        assert ToolResult(done.turn_id, "tool-1", False, "WORK_DONE") in harness.events
+        background = await harness.wait_for(lambda e: isinstance(e, UnsolicitedOutput))
+        assert background.text == "BACKGROUND"
         assert not harness.session.background_work().items
+    finally:
+        await harness.stop()
+
+
+async def test_unverified_background_tail_cannot_hold_foreground_completion(tmp_path: Path) -> None:
+    harness = await start(
+        tmp_path, extra_args=("--test-missing-background-planner",), reply_seconds=2
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        await harness.session.deliver([HarnessInput.of("first", "overlap-first")])
+        await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "first")
+        harness.release("release-tool")
+        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+        harness.release("release-foreground")
+        await harness.wait_for(lambda e: isinstance(e, AssistantText) and e.text == "FOREGROUND")
+        harness.release()
+        await harness.wait_for_marker("background-sent")
+        harness.release("release-front-result")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
+        )
+        assert done.text == "FOREGROUND"
+        assert harness.session.background_work().items
+        failure = await harness.wait_for(lambda e: isinstance(e, SessionFailed))
+        assert "background reply timed out" in failure.error
+        assert (
+            sum(isinstance(e, TurnCompleted) and e.turn_id == done.turn_id for e in harness.events)
+            == 1
+        )
+        assert not any(isinstance(e, UnsolicitedOutput) for e in harness.events)
     finally:
         await harness.stop()
 
@@ -504,6 +551,43 @@ def test_disjoint_steer_usage_survives_background_overlap_and_requires_first_pla
     steps = planner_usage(rows, ("one", "two"), "FINAL")
     bill = turn_usage(reports, steps, request_count=2, terminal_reported=True)
     assert bill.usage == Usage(34_430, 231, 0, 29_767) and not bill.uncertain
+    billed = bill_prompt(rows, ("one", "two"), "FINAL", dict(enumerate(reports, 1)), 2)
+    assert billed.calls == 2 and billed.usage == bill.usage and not billed.steps
     partial = planner_usage([rows[0], *rows[2:]], ("one", "two"), "FINAL")
     bill = turn_usage(reports, partial, request_count=2, terminal_reported=True)
     assert bill.usage == Usage(17_349, 106, 0, 15_032) and bill.uncertain
+
+
+@pytest.mark.parametrize("answers", [("BACKGROUND",), ("BACKGROUND", "FOREGROUND")])
+def test_turn_keeps_candidates_buffered_without_unique_ownership(answers: tuple[str, ...]) -> None:
+    key = "one"
+    ticket = ActiveTurn(turn_id="turn", key=key, blocks=())
+    turn = PromptTurn(ticket, 0)
+    turn.register_request(1, key)
+    turn.stop_reason = "end_turn"
+    turn.reports[1] = PromptUsage(10, 3, 0, 0, 0)
+    projection = OutputProjection(0, keys=[key])
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker(key)},
+        {"type": "SYSTEM_MESSAGE", "content": "[Message] sender=conv/task-1 content=timer"},
+    ]
+    for answer in answers:
+        rows.append(
+            {
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "content": answer,
+                "input_tokens": 10,
+                "output_tokens": 3,
+            }
+        )
+        projection.pending.append(
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": answer},
+            }
+        )
+    turn.prove_projection(projection, rows)
+    assert list(projection.project(rows)) == []
+    assert len(projection.pending) == len(answers)
+    assert not turn.projection_ready(projection, rows)

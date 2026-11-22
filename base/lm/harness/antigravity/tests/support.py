@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
+from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.events import BridgeEvent, UnsolicitedSink
 
@@ -50,6 +53,11 @@ class Harness:
             while not any(frame.get("method") == method for frame in self.frames()):
                 await asyncio.sleep(0.005)
 
+    async def wait_for_marker(self, name: str) -> None:
+        async with asyncio.timeout(3):
+            while not (self.cwd / name).exists():
+                await asyncio.sleep(0.005)
+
     async def stop(self) -> None:
         await self.session.close(reason="test done")
         await asyncio.wait_for(self._drain, timeout=3)
@@ -66,19 +74,24 @@ async def start(
     reply_seconds: float = 30.0,
 ) -> Harness:
     env = {"HOME": str(tmp_path / "home")}
+    clock = system_clock()
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        model="gemini-4-hydrogen-low",
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=extra_args,
+        cancel_settle_seconds=cancel_seconds,
+        prompt_write_seconds=write_seconds,
+        background_reply_seconds=reply_seconds,
+    )
     session = AgySession(
-        AntigravityConfig(
-            cwd=tmp_path,
-            model="gemini-4-hydrogen-low",
-            executable=(sys.executable, str(FAKE_CLI)),
-            extra_args=extra_args,
-            cancel_settle_seconds=cancel_seconds,
-            prompt_write_seconds=write_seconds,
-            background_reply_seconds=reply_seconds,
-        ),
+        config,
         environ=env,
+        transport_factory=lambda: AgyTransport(
+            config, environ=env, owner_uid=os.getuid(), generation_id=uuid4().hex, clock=clock
+        ),
         binding=SessionBinding(unsolicited=unsolicited),
-        clock=system_clock(),
+        clock=clock,
         home=tmp_path / "home",
         timing_refresh_interval=0,
     )

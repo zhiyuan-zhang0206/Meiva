@@ -105,7 +105,7 @@ def finish_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
-def finish_background(transcript: Path) -> None:
+def background_notice(transcript: Path) -> None:
     record(
         transcript,
         {
@@ -113,14 +113,31 @@ def finish_background(transcript: Path) -> None:
             "content": f"[Message] sender={SID}/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
         },
     )
-    record(transcript, planner_row("BACKGROUND"))
+
+
+def finish_background(transcript: Path, early_notice: bool, early_planner: bool) -> None:
+    if not early_notice:
+        background_notice(transcript)
+    missing_tail = "--test-missing-background-planner" in sys.argv
+    if not early_planner and not missing_tail:
+        record(transcript, planner_row("BACKGROUND", tokens=237))
     message("BACK")
-    message("GROUND")
+    if not missing_tail:
+        message("GROUND")
+    Path("background-sent").touch()
 
 
 def trigger_background(transcript: Path) -> None:
+    early_planner = "--test-background-row-first" in sys.argv
+    early_notice = early_planner or "--test-early-hub" in sys.argv
+    if early_notice:
+        background_notice(transcript)
+    if early_planner:
+        record(transcript, planner_row("BACKGROUND", tokens=237))
     update("tool_call_update", toolCallId="timer", status="completed")
-    after_release(Path("release"), lambda: finish_background(transcript))
+    after_release(
+        Path("release"), lambda: finish_background(transcript, early_notice, early_planner)
+    )
 
 
 def beginning_of_tool() -> None:
@@ -146,7 +163,19 @@ def foreground_first(transcript: Path, request: int) -> None:
     record(transcript, planner_row("FOREGROUND"))
     message("FOREGROUND")
     update("usage_update", used=50, size=1000)
-    after_release(Path("release-front-result"), lambda: result(request))
+    Path("foreground-sent").touch()
+    after_release(
+        Path("release-front-result"),
+        lambda: frame(
+            {
+                "id": request,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 20, "cachedReadTokens": 60, "outputTokens": 6},
+                },
+            }
+        ),
+    )
 
 
 def hold_prompt(transcript: Path, command: str) -> None:
@@ -170,7 +199,7 @@ def hold_prompt(transcript: Path, command: str) -> None:
 
 def exit_peer() -> None:
     if "--test-child" in sys.argv:
-        child = subprocess.Popen(("/bin/sleep", "120"))
+        child = subprocess.Popen(("/bin/sleep", "120"), start_new_session=True)
         _ = Path("child.pid").write_text(str(child.pid))
     sys.exit(0)
 

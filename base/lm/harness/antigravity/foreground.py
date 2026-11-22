@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from itertools import combinations
 
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
-from base.lm.harness.antigravity.mapping import planner_rows
+from base.lm.harness.antigravity.mapping import OutputProjection, PlannerRow, planner_rows
 from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
 from base.lm.harness.base_session import ActiveTurn
 from base.lm.harness.events import ToolResult, ToolUse, TurnCompleted, Usage
@@ -53,15 +54,23 @@ def planner_usage(
     marks = {input_marker(key) for key in keys}
     if received_markers(rows) & marks != marks:
         return ()
-    planner = [step.row for step in planner_rows(rows, keys) if step.input_key is not None]
+    planner = [
+        step.row
+        for step in planner_rows(rows, keys)
+        if step.input_key is not None and step.notice is None
+    ]
     if not planner or not final_text:
         return ()
     last_text = planner[-1].get("content")
     if not isinstance(last_text, str) or last_text.strip() != final_text.strip():
         return ()
-    if not all(type(row.get("input_tokens")) is int for row in planner):
+    if not all(_has_planner_tokens(row) for row in planner):
         return ()
     return tuple(_planner_tokens(row) for row in planner)
+
+
+def _has_planner_tokens(row: dict[str, object]) -> bool:
+    return type(row.get("input_tokens")) is int and type(row.get("output_tokens")) is int
 
 
 def _planner_tokens(row: dict[str, object]) -> Usage:
@@ -78,6 +87,7 @@ class TurnBilling:
     usage: Usage
     uncertain: bool = False
     steps: tuple[Usage, ...] = ()
+    calls: int = 1
 
 
 def turn_usage(
@@ -162,18 +172,51 @@ def bill_prompt(
     final_text: str,
     reports: Mapping[int, PromptUsage],
     latest: int,
+    *,
+    verified: tuple[Usage, ...] | None = None,
 ) -> TurnBilling:
-    steps = planner_usage(rows, keys, final_text)
+    steps = planner_usage(rows, keys, final_text) if verified is None else verified
     bill = turn_usage(
         [reports[request] for request in sorted(reports)],
         steps,
         request_count=len(keys),
         terminal_reported=latest in reports,
     )
-    return (
-        replace(bill, steps=steps)
-        if not bill.uncertain and sum(steps, Usage()) == bill.usage
-        else bill
+    if bill.uncertain:
+        return bill
+    return replace(
+        bill, calls=max(1, len(steps)), steps=steps if sum(steps, Usage()) == bill.usage else ()
+    )
+
+
+MAX_AMBIGUOUS_PLANNER_ROWS = 10
+
+
+def _witnesses(
+    known: tuple[PlannerRow, ...],
+    possible: tuple[PlannerRow, ...],
+    reports: Sequence[PromptUsage],
+) -> Iterator[tuple[PlannerRow, ...]]:
+    if not reports or len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
+        return
+    terminals = {step.index for step in possible if step.final}
+    if not all(_has_planner_tokens(step.row) for step in (*known, *possible)):
+        return
+    for count in range(len(possible) + 1):
+        for extra in combinations(possible, count):
+            if extra and not terminals.difference(step.index for step in extra):
+                continue
+            span = tuple(sorted((*known, *extra), key=lambda step: step.index))
+            if span and _matches_reports(span, reports):
+                yield span
+
+
+def _matches_reports(span: Sequence[PlannerRow], reports: Sequence[PromptUsage]) -> bool:
+    if not span[-1].final:
+        return False
+    steps = tuple(_planner_tokens(step.row) for step in span)
+    return _covers_cumulative(reports, steps, sum(steps, Usage())) or _covers_disjoint(
+        reports, steps
     )
 
 
@@ -189,6 +232,46 @@ class PromptTurn:
     reports: dict[int, PromptUsage] = field(default_factory=dict[int, PromptUsage])
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     interrupted: bool = False
+    verified_steps: tuple[Usage, ...] | None = None
+
+    def register_request(self, request: int, key: str) -> None:
+        self.keys.append(key)
+        self.requests[request] = key
+        self.latest = request
+        self.stop_reason = None
+        self.verified_steps = None
+
+    def prove_projection(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> None:
+        if self.verified_steps is not None:
+            return
+        scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
+        known = tuple(step for step in scope if projection.owns(step))
+        possible = tuple(step for step in scope if not projection.owns(step))
+        witnesses = _witnesses(known, possible, self._projection_reports())
+        span = next(witnesses, None)
+        if span is not None and next(witnesses, None) is None:
+            projection.confirmed.update(step.index for step in span)
+            self.verified_steps = tuple(_planner_tokens(step.row) for step in span)
+
+    def _projection_reports(self) -> tuple[PromptUsage, ...]:
+        if len(self.reports) != len(self.keys) or self.latest not in self.reports:
+            return ()
+        return tuple(self.reports[request] for request in sorted(self.reports))
+
+    def projection_ready(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> bool:
+        scope = [step for step in projection.steps(rows) if step.input_key in self.keys]
+        owned = [step for step in scope if projection.owns(step)]
+        if owned and owned[-1].final and owned[-1].input_key == self.keys[-1]:
+            final = owned[-1].index
+            proven = self.verified_steps is not None or all(
+                step.index > final or projection.owns(step) for step in scope
+            )
+            return proven and (final, "content", 0) in projection.seen
+        return scope == owned and not projection.pending
 
     def complete(
         self,
@@ -201,7 +284,12 @@ class PromptTurn:
         ticket = self.ticket
         final = ticket.parts[-1] if ticket.parts else ""
         bill = bill_prompt(
-            rows[self.transcript_offset :], self.keys, final, self.reports, self.latest
+            rows[self.transcript_offset :],
+            self.keys,
+            final,
+            self.reports,
+            self.latest,
+            verified=self.verified_steps,
         )
         interrupted = reason == "cancelled"
         subtype = "interrupted" if interrupted else "denied" if ticket.denials else "success"
@@ -213,7 +301,7 @@ class PromptTurn:
             is_error=reason != "end_turn" or bool(ticket.denials),
             interrupted=interrupted,
             stop_reason=reason,
-            num_turns=max(len(bill.steps), 1),
+            num_turns=bill.calls,
             duration_ms=int((monotonic_now - (ticket.started_at or 0)) * 1000),
             usage=bill.usage,
             usage_uncertain=bill.uncertain,

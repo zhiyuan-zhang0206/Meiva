@@ -40,7 +40,11 @@ stdin is backpressured. A write failure or unconfirmed cancel retires the
 process generation. Closing the transport aborts stdin, closes stdout and
 stderr, and joins the reader tasks. The process-tree cleanup checks process
 identity and covers observed descendants and members of the CLI's private
-POSIX session, including children that inherit its pipes. A residue fence
+POSIX session. Broken-generation cleanup also checks same-user processes that
+retain the generation's unique inherited environment marker. This identifies a child that creates its own session and
+outlives the CLI. On Linux and macOS the marker scan uses psutil's process
+environment reader. If a process clears its environment or the platform
+denies access, process-tree and POSIX session observations remain available. A residue fence
 prevents reopening while an observed process still holds the generation.
 Losing the process requires a new ACP handshake and `session/load` before
 another prompt.
@@ -56,13 +60,16 @@ The stdio reader runs for the whole session. In-flight tool results keep the
 ownership of the original call even when they arrive after the prompt ends.
 ACP v1 update frames carry a session ID. While a detached timer can produce
 output, the adapter buffers unkeyed assistant and new tool frames until the
-corresponding completed planner rows identify the owner. Foreground planner
-rows follow the input marker. A timer's planner rows follow the task's Hub
-message, and the complete text of a terminal planner row settles the reply.
-The adapter sends that reply through `UnsolicitedOutput` to the bridge wake
-sink. ACP usage updates can trigger a transcript read and have no role in
-deciding ownership or completeness. A future timer still allows foreground
-input. A due or triggered timer holds new dispatch and keeps the process alive,
+corresponding completed planner rows identify the owner. A Hub notice identifies
+a detached task. During overlap, planner rows after the notice stay provisional
+until a unique ordered foreground span matches the prompt's ACP usage receipts.
+Assigning a provisional row also requires a separate terminal planner row for
+the detached reply. Candidate sets larger than ten rows stay unresolved to
+bound the work done in the session reader. A completed foreground reply and its terminal ACP result settle the foreground
+independently of unmatched timer chunks. Each stream frame can match a completed
+row regardless of the other stream's order. A task-confirmed timer reply goes
+through `UnsolicitedOutput` to the bridge wake sink. Usage updates can trigger a
+transcript read. A future timer still allows foreground input. A due or triggered timer holds new dispatch and keeps the process alive,
 and an unverified reply at its deadline retires the generation. Cron-like
 calls retain the existing one-day bound. Timers also supply the foreground
 watchdog's silence floor while a prompt is active. See

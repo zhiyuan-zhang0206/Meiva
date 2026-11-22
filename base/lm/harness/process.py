@@ -273,26 +273,38 @@ class CloseResidueError(RuntimeError):
 
 
 class ProcessFamily:
-    def __init__(self, root_pid: int, probe: ChildProbe) -> None:
+    def __init__(
+        self, root_pid: int, probe: ChildProbe, *, uid: int, marker: tuple[str, str]
+    ) -> None:
         self._root = root_pid
         self._probe = probe
         self._started = probe.started_at(root_pid)
         self._known = {root_pid: self._started}
+        self._marker = marker
+        self._uid = uid
 
     def observe(self) -> None:
         if self._same_root():
             self._capture(self._probe.descendants(self._root))
 
-    def observe_session(self) -> None:
+    def observe_session(self, *, include_marked: bool) -> None:
         self.observe()
         current = self._probe.started_at(self._root)
-        if self._started is None or (current is not None and not self._same_root()):
-            return
-        self._capture(
-            process.pid
-            for process in psutil.process_iter()
-            if _session_id(process.pid) == self._root
+        original_session = self._started is not None and (
+            current is None or current == self._started
         )
+        for process in psutil.process_iter():
+            try:
+                if process.uids().real != self._uid:
+                    continue
+                started = process.create_time()
+                same_session = original_session and _session_id(process.pid) == self._root
+                if same_session or (
+                    include_marked and process.environ().get(self._marker[0]) == self._marker[1]
+                ):
+                    self._known[process.pid] = started
+            except (psutil.Error, OSError, NotImplementedError):
+                continue
 
     def _same_root(self) -> bool:
         return self._started is not None and self._probe.started_at(self._root) == self._started
@@ -316,11 +328,14 @@ class ProcessFamily:
         self,
         *,
         harness: str,
+        include_marked: bool,
         agent_id: int | None,
         timeout: float,
         clock: WaitClock,
         poll_seconds: float,
     ) -> None:
+        self.observe_session(include_marked=include_marked)
+        self.kill()
         deadline = clock.monotonic() + timeout
         remaining = self._remaining()
         while remaining and clock.monotonic() < deadline:

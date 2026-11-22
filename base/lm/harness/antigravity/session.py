@@ -72,7 +72,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         environ: Mapping[str, str] | None = None,
         binding: SessionBinding,
         probe: ChildProbe | None = None,
-        transport_factory: Callable[[], AgyTransport] | None = None,
+        transport_factory: Callable[[], AgyTransport],
         clock: SessionClock,
         home: Path | None = None,
         timing_refresh_interval: float = TIMING_REFRESH_MIN_INTERVAL_SECONDS,
@@ -139,11 +139,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     async def _open_transport(self, resume: str | None) -> AgyTransport:
         generation = self._begin_generation()
-        transport = (
-            self._factory()
-            if self._factory
-            else AgyTransport.create(self.config, environ=self._environ, clock=self._clock)
-        )
+        transport = self._factory()
         try:
             await transport.start()
             session_id = await transport.open_session(resume=resume)
@@ -266,10 +262,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                         "agy ACP session failed while waiting for a background reply"
                     )
             except TimeoutError as exc:
-                if self._transport is not None:
-                    self._fail_transport(
-                        self._transport, RuntimeError("agy ACP background reply timed out")
-                    )
+                if (transport := self._transport) is not None:
+                    if (error := self._watch_output(transport)) is None:
+                        continue
+                    self._fail_transport(transport, RuntimeError(error))
                 raise SessionClosedError("agy ACP background reply timed out") from exc
         raise SessionClosedError("session is closed")
 
@@ -319,10 +315,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         starts_turn: bool = False,
     ) -> None:
         request = transport.next_request_id()
-        turn.keys.append(entry.key)
-        turn.requests[request] = entry.key
-        turn.latest = request
-        turn.stop_reason = None
+        turn.register_request(request, entry.key)
         if self._projection is not None:
             self._projection.keys.append(entry.key)
         blocks = prompt_blocks(entry.key, entry.blocks)
@@ -501,6 +494,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         projection, turn = self._projection, self._prompt_turn
         if projection is None:
             return
+        if turn is not None and turn.stop_reason:
+            turn.prove_projection(projection, rows)
         for item in projection.project(rows):
             if turn is not None and item.input_key in turn.keys:
                 self._project_update(turn, item.frame)
@@ -508,10 +503,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     self._flush_text(turn.ticket)
             elif (notice := item.timer_notice(self._session_id)) is not None:
                 self._finish_background_reply(notice.sender, notice.prompt, item.reply)
-        if turn is not None and turn.stop_reason is not None and not projection.pending:
+        if turn is None:
+            self._projection = projection if self._schedules.has_detached else None
+        elif turn.stop_reason and turn.projection_ready(projection, rows):
             self._finish_turn(turn, turn.stop_reason, rows)
-        elif turn is None and not self._schedules.has_detached and not projection.pending:
-            self._projection = None
 
     def _finish_background_reply(self, sender: str, prompt: str, reply: str) -> None:
         remaining = self._schedules.reply_finished(sender, prompt)
@@ -642,8 +637,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._prompt_turn = None
         if not self._schedules.has_detached:
             self._projection = None
-        elif self._projection is None or (turn.interrupted and self._projection.pending):
+        elif self._projection is None:
             self._projection = OutputProjection(len(rows))
+        else:
+            self._projection.settled.update(turn.keys)
         self._complete(ticket)
         turn.finished.set()
 
@@ -677,10 +674,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     def _watch_output(self, transport: AgyTransport) -> str | None:
         if not transport.alive:
             return "agy ACP stream ended"
-        projection = self._projection
-        if projection is not None and projection.pending:
+        projection, turn = self._projection, self._prompt_turn
+        if projection is not None and (projection.pending or (turn and turn.stop_reason)):
             self._replay(self._transcript())
-        turn = self._prompt_turn
+            turn = self._prompt_turn
         if turn is not None and turn.stop_reason and self._monotonic() >= turn.stop_deadline:
             return "agy ACP output attribution timed out"
         now = self._clock.now().timestamp()

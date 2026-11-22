@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
@@ -391,7 +393,9 @@ async def test_a_real_child_exit_status_reaches_the_recorder(
     )
     stub.chmod(0o755)
     config = AntigravityConfig(cwd=tmp_path, executable=(str(stub),))
-    transport = AgyTransport(config, clock=system_clock())
+    transport = AgyTransport(
+        config, environ={}, owner_uid=os.getuid(), generation_id=uuid4().hex, clock=system_clock()
+    )
     recorder = ExitRecorder()
     owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder, clock=system_clock())
     await owner.start()

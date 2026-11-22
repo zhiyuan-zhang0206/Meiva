@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.api_contracts.agent_contract import Harness
@@ -18,6 +19,7 @@ from base.host.env.harness_binaries import (
 from base.host.env.registry import process_environment
 from base.lm.harness.antigravity import (
     AgySession,
+    AgyTransport,
     AntigravityConfig,
     resolve_antigravity_cli_model,
 )
@@ -131,11 +133,19 @@ def open_session(
                 antigravity_config,
                 model=resolve_antigravity_cli_model(model, reasoning_effort),
             )
+        owner_uid = os.getuid()
         return AgySession(
             antigravity_config,
             environ=environ,
             binding=binding,
             clock=clock,
+            transport_factory=lambda: AgyTransport.create(
+                antigravity_config,
+                environ=environ,
+                owner_uid=owner_uid,
+                generation_id=uuid4().hex,
+                clock=clock,
+            ),
         )
     raise ValueError(f"no session adapter for harness {harness.value!r}")
 
