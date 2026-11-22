@@ -10,6 +10,11 @@ async def test_headless_listing_and_remote_call_preserve_caller_and_strip_host(
     tmp_path: Path,
 ) -> None:
     received: list[tuple[str, object, object]] = []
+    identity_calls: list[str] = []
+
+    def identity(method: str, _caller: str, _target: str) -> dict[str, object]:
+        identity_calls.append(method)
+        return {"agent_id": 427, **({"proof": "proof-127"} if method == "issue" else {})}
 
     async def local(_: dict[str, object]) -> object:
         pytest.fail("headless Chrome must not dial a local socket")
@@ -28,7 +33,7 @@ async def test_headless_listing_and_remote_call_preserve_caller_and_strip_host(
         headers=lambda: {"Authorization": "Bearer fixture"},
         timers=system_clock(),
         connect_timeout_s=2,
-        verify_caller=lambda _caller, _target: {"agent_id": 427, "proof": "proof-127"},
+        verify_caller=identity,
     )
     session = RoutedBrowserSession(routes, local_request=local, peer_request=peer)
     session.client_agent_id = 427
@@ -37,7 +42,13 @@ async def test_headless_listing_and_remote_call_preserve_caller_and_strip_host(
     assert "host" in tools.tools[0].input_schema["properties"]
     with pytest.raises(RuntimeError, match="Local Chrome is unavailable"):
         await session.call_tool("take_snapshot", {})
+    with pytest.raises(ValueError, match="workspace"):
+        await session.call_tool(
+            "upload_file", {"host": "meiva://macmini", "filePath": "missing.txt"}
+        )
+    assert identity_calls == ["identify"]
     result = await session.call_tool("take_snapshot", {"host": "meiva://macmini"})
+    assert identity_calls == ["identify", "identify", "issue"]
     assert result.content[0].type == "text"
     assert result.content[0].text == "remote"
     assert received[-1] == (

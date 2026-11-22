@@ -38,12 +38,12 @@ async def test_browser_rpc_auth_upload_output_and_cleanup(short_tmp: Path) -> No
             assert request["inputs"] and path.name == "large.txt"
             files: dict[str, object] = {}
         else:
-            files = {"filePath": [{"path": "output.txt", "data": "ZHVtbXkgc25hcHNob3Q="}]}
+            files = {"filePath": [{"path": "output.png", "data": "ZHVtbXkgc25hcHNob3Q="}]}
         reply = {
             "id": request["id"],
             "ok": True,
             "result": {
-                "mcp": {"content": [{"type": "text", "text": "output.txt"}]},
+                "mcp": {"content": [{"type": "text", "text": "output.png"}]},
                 "files": files,
             },
         }
@@ -78,7 +78,7 @@ async def test_browser_rpc_auth_upload_output_and_cleanup(short_tmp: Path) -> No
             unauthorized = await client.post(url + BROWSER_RPC_ROUTE[1], json={"method": "status"})
             assert unauthorized.status_code == 401
 
-        for name, path in [("upload_file", "large.txt"), ("take_snapshot", "out.txt")]:
+        for name, path in [("upload_file", "large.txt"), ("take_screenshot", "out.png")]:
             await _roundtrip_artifact(
                 url,
                 token,
@@ -87,7 +87,7 @@ async def test_browser_rpc_auth_upload_output_and_cleanup(short_tmp: Path) -> No
                 path,
                 issuer.issue("fixture-secret", "meiva://target", PURPOSE)["proof"],
             )
-        assert (caller / "out.txt").read_bytes() == b"dummy snapshot"
+        assert (caller / "out.png").read_bytes() == b"dummy snapshot"
         with pytest.raises(RuntimeError, match="target-bound caller proof"):
             await call_browser_peer(
                 url,

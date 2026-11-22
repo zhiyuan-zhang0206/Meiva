@@ -71,6 +71,8 @@ from services.desktop.browser.routing.remote_pages import (
     PAGE_LIST_TOOLS,
     PAGE_SCOPED_TOOLS,
     authorize_page,
+    bound_page_id_required,
+    public_page_schema,
     reconnected,
     scope_page_list,
 )
@@ -163,7 +165,7 @@ class ChromeMcpDaemon:
         self.tab_groups = tab_groups
         self.guard = guard
         self._lock = asyncio.Lock()
-        self._tools: list[types.Tool] | None = None
+        self._tools: dict[str, types.Tool] | None = None
         # meiva:note
         # Set by the guard when the upstream session is judged unusable; run() watches
         # it to terminate this unusable daemon.
@@ -188,17 +190,21 @@ class ChromeMcpDaemon:
 
     async def list_tools(self) -> list[dict[str, object]]:
         async with self._lock:
-            if self._tools is None:
-                self._tools = (
-                    await self.guard.request("tool listing", self._upstream.list_tools)
-                ).tools
+            tools = await self._tool_catalog()
         # meiva:note
-        # Daemon-owned tool appended after the upstream's verbatim passthrough:
+        # Daemon-owned tool appended after adapting the upstream tool schema:
         # `chrome-devtools-mcp` has no TTL concept, so `renew_page` is
         # implemented entirely on this side (see `page_lifecycle`).
-        return [t.model_dump(mode="json", by_alias=True) for t in self._tools] + [
-            renew_page_tool_dump()
-        ]
+        return [
+            public_page_schema(tool).model_dump(mode="json", by_alias=True)
+            for tool in tools.values()
+        ] + [renew_page_tool_dump()]
+
+    async def _tool_catalog(self) -> dict[str, types.Tool]:
+        if self._tools is None:
+            listed = await self.guard.request("tool listing", self._upstream.list_tools)
+            self._tools = {tool.name: tool for tool in listed.tools}
+        return self._tools
 
     # meiva:note
     # Forward one call under the serial lock, pinned to `current_page`.
@@ -338,6 +344,9 @@ class ChromeMcpDaemon:
             current_page = await self._repin(current_page)
             if current_page is None:
                 return await self._bootstrap_page(name, args, agent_id=agent_id)
+            tool = (await self._tool_catalog()).get(name)
+            if "pageId" not in args and tool is not None and bound_page_id_required(tool):
+                args = {**args, "pageId": current_page}
 
         # meiva:note
         # A page created here gets its TTL slot (see `page_lifecycle`) and tab

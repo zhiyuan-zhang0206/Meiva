@@ -42,6 +42,6 @@ def test_remote_artifact_path_confined(tmp_path: Path, name: str) -> None:
     workspace.mkdir()
     (workspace / "symlink").symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(ValueError, match="workspace"):
-        files = CallerFiles(workspace, "take_snapshot", {"filePath": name})
+        files = CallerFiles(workspace, "take_screenshot", {"filePath": name})
         result = CallToolResult(content=[])
-        files.receive(result, {"filePath": [{"path": "output.txt", "data": "eA=="}]})
+        files.receive(result, {"filePath": [{"path": "output.png", "data": "eA=="}]})

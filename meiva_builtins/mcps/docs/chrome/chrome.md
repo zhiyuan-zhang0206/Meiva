@@ -41,13 +41,16 @@ browser_port = 9222
 Chrome listens on the target's loopback interface. An on-demand SSH tunnel
 binds a random local loopback port, and the local Chrome DevTools MCP process
 connects through the tunnel. It may address Tabs created by its own connection.
-An SSH connection recovery starts with a fresh Tab scope.
+An SSH connection recovery starts with a fresh Tab scope. Named
+`isolatedContext` is unavailable over SSH.
 
 Remote file transfer uses paths inside the calling agent's workspace, with an
 8 MiB file limit. The browser executor stages `upload_file` input long enough
 for Chrome to read it after attachment. Submit uploads within ten minutes and
-before an SSH connection ends. The caller writes `take_screenshot` and
-`take_snapshot` artifacts from bounded replies. Remote screenshots capture
+before an SSH connection ends. The caller writes `take_screenshot` artifacts
+from bounded replies. Remote `take_snapshot` accepts inline results only.
+The executor rejects replies over 8 MiB of UTF-8 text before forwarding.
+Remote screenshots capture
 up to 800 by 600 viewport pixels at a bounded scale. Screenshot capture brings
 the owned tab to the foreground so Chrome can composite it. Full-page and
 element screenshots remain available through local Chrome. Remote navigation accepts

@@ -42,7 +42,9 @@ class FakeUpstream:
         self.calls: list[tuple[str, dict[str, Any], int | None]] = []
 
     async def list_tools(self) -> Any:
-        tool = types.Tool(name="take_snapshot", description="", input_schema={})
+        tool = types.Tool(
+            name="take_snapshot", description="", input_schema={"required": ["pageId"]}
+        )
         return type("R", (), {"tools": [tool]})()
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
@@ -171,6 +173,7 @@ async def test_two_connections_do_not_clobber() -> None:
     res, a_page = await d.call_tool("take_snapshot", {}, a_page)
     assert text_of(res) == "ran take_snapshot on page 1"
     assert a_page == 1
+    assert up.calls[-1] == ("take_snapshot", {"pageId": 1}, 1)
 
 
 async def test_navigate_cold_start_from_no_page() -> None:
@@ -367,7 +370,7 @@ async def test_agent_affinity_shares_page_across_connections() -> None:
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is False
     assert ("select_page", {"pageId": 1}, 1) in up.calls
-    assert up.calls[-1] == ("take_snapshot", {}, 1)
+    assert up.calls[-1] == ("take_snapshot", {"pageId": 1}, 1)
 
 
 async def test_agent_affinity_isolated_between_agents() -> None:
@@ -376,7 +379,7 @@ async def test_agent_affinity_isolated_between_agents() -> None:
     await d.call_tool_for_agent("new_page", {"url": "b"}, 8)
     res = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert res.is_error is False
-    assert up.calls[-1] == ("take_snapshot", {}, 1)
+    assert up.calls[-1] == ("take_snapshot", {"pageId": 1}, 1)
 
 
 async def test_agent_affinity_repin_failure_drops_slot() -> None:

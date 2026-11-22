@@ -10,7 +10,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from mcp import ClientSession
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+from mcp.types import CallToolResult, ListToolsResult, Tool
 
 from base.clock import Timers
 from base.host.remote_hosts import RemoteHostConfig
@@ -22,13 +22,13 @@ from .remote_files import CallerFiles, replace_paths
 from .remote_pages import (
     PAGE_LIST_TOOLS,
     PAGE_SCOPED_TOOLS,
+    ListedPage,
     authorize_page,
-    listed_pages,
     page_number,
     reconnected,
-    scope_page_list,
-    selected_page,
+    scoped_structured_page_list,
     structured_fields,
+    structured_pages,
 )
 from .remote_rpc import RPC_TIMEOUT_S
 from .ssh_upload import stage_ssh_upload
@@ -112,7 +112,7 @@ class SshBrowser:
             return
         with suppress(RuntimeError, OSError, ValueError):
             async with asyncio.timeout(2.0):
-                await self._refresh_pages(session)
+                _ = await self._refresh_pages(session)
                 for page in tuple(self._pages):
                     result = await session.call_tool("close_page", {"pageId": page})
                     self._require_generation(result)
@@ -174,8 +174,12 @@ class SshBrowser:
         name: str,
         args: dict[str, object],
     ) -> CallToolResult:
-        await self._refresh_pages(session)
+        if name == "new_page" and "isolatedContext" in args:
+            raise ValueError("SSH Chrome does not support named isolated contexts")
+        previous = await self._refresh_pages(session)
         authorize_page(name, args, self._pages.__contains__)
+        if name == "list_pages":
+            return scoped_structured_page_list(previous, self._pages.__contains__, self._current)
         if name in PAGE_SCOPED_TOOLS:
             page = page_number(args.get("pageId")) if "pageId" in args else self._current
             if page is None:
@@ -189,11 +193,12 @@ class SshBrowser:
         self._require_generation(result)
         if result.is_error:
             if name in PAGE_SCOPED_TOOLS:
-                await self._refresh_pages(session)
+                _ = await self._refresh_pages(session)
             return result
-        self._remember_page(name, args, result)
         if name in PAGE_LIST_TOOLS:
-            return scope_page_list(result, self._pages.__contains__, self._current)
+            pages = self._read_pages(result)
+            self._remember_page(name, args, pages, previous)
+            return scoped_structured_page_list(pages, self._pages.__contains__, self._current)
         return result
 
     async def _screenshot(
@@ -206,7 +211,7 @@ class SshBrowser:
         self._require_generation(tab)
         tab_id = structured_fields(tab).get("tabId")
         if tab.is_error or not isinstance(tab_id, str) or self._cdp_port is None:
-            await self._refresh_pages(session)
+            _ = await self._refresh_pages(session)
             raise ValueError("Could not verify the owned SSH Chrome target")
         return await capture_owned_viewport(self._cdp_port, tab_id, args, tab_target=True)
 
@@ -216,34 +221,40 @@ class SshBrowser:
             self._current = None
             raise ValueError("SSH Chrome reconnected. Open a new page before calling tools.")
 
-    async def _refresh_pages(self, session: BrowserToolSession) -> None:
-        listing = await session.call_tool("list_pages", {})
-        self._require_generation(listing)
-        if listing.is_error:
+    def _read_pages(self, result: CallToolResult) -> dict[int, ListedPage]:
+        try:
+            pages = structured_pages(result)
+        except ValueError:
             self._pages.clear()
             self._current = None
-            raise ValueError("SSH Chrome could not verify tab ownership")
-        self._pages.intersection_update(listed_pages(listing))
+            raise
+        self._pages.intersection_update(pages)
         if self._current not in self._pages:
             self._current = None
+        return pages
 
-    def _remember_page(self, name: str, args: Mapping[str, object], result: CallToolResult) -> None:
+    async def _refresh_pages(self, session: BrowserToolSession) -> dict[int, ListedPage]:
+        listing = await session.call_tool("list_pages", {})
+        self._require_generation(listing)
+        return self._read_pages(listing)
+
+    def _remember_page(
+        self,
+        name: str,
+        args: Mapping[str, object],
+        pages: Mapping[int, ListedPage],
+        previous: Mapping[int, ListedPage],
+    ) -> None:
         if name == "new_page":
-            if (page := selected_page(result)) is None:
-                raise RuntimeError("Could not identify the page created by remote Chrome")
-            self._current = page
-            self._pages.add(page)
+            created = [
+                page.id for page in pages.values() if page.selected and page.id not in previous
+            ]
+            if len(created) != 1:
+                raise ValueError("Could not identify the page created by remote Chrome")
+            self._current = created[0]
+            self._pages.add(created[0])
         elif name == "select_page":
             self._current = page_number(args.get("pageId"))
-        elif name == "close_page":
-            page = page_number(args.get("pageId"))
-            if page is not None and not any(
-                isinstance(item, TextContent) and f"\n{page}: " in f"\n{item.text}"
-                for item in result.content
-            ):
-                self._pages.discard(page)
-                if self._current == page:
-                    self._current = None
 
     async def call_tool(
         self,

@@ -19,7 +19,7 @@ from .workspace_files import read_workspace_file, workspace_path_for, write_work
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_RPC_BYTES = 4 * ((MAX_FILE_BYTES + 2) // 3) + 64 * 1024
-_FILE_TOOLS = frozenset({"upload_file", "take_screenshot", "take_snapshot"})
+_FILE_TOOLS = frozenset({"upload_file", "take_screenshot"})
 _PATH_FIELDS = frozenset(
     {
         "filePath",
@@ -124,7 +124,7 @@ class CallerFiles:
         if not isinstance(source, str) or Path(source).name != source:
             raise ValueError("Chrome peer returned an unexpected output name")
         suffix = Path(source).suffix
-        if suffix not in {".png", ".jpeg", ".jpg", ".webp", ".txt"}:
+        if suffix not in {".png", ".jpeg", ".jpg", ".webp"}:
             raise ValueError("Chrome peer returned an unexpected output format")
         dest = self.destination.with_suffix(suffix)
         write_workspace_file(self.workspace, dest, decode_bytes(entry.get("data")))

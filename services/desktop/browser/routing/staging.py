@@ -17,7 +17,6 @@ from .remote_files import (
     MAX_FILE_BYTES,
     Artifact,
     decode_bytes,
-    encode_bytes,
     file_argument,
     replace_paths,
     stage_upload,
@@ -31,32 +30,39 @@ _IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpeg", "image/webp": ".w
 type InvokeTool = Callable[[str, dict[str, object], int], Awaitable[CallToolResult]]
 
 
+def _verify_text_budget(result: CallToolResult) -> None:
+    remaining = MAX_FILE_BYTES
+    for item in result.content:
+        if isinstance(item, TextContent):
+            if len(item.text) > remaining:
+                raise ValueError("Remote Chrome text exceeds the 8 MiB reply budget")
+            for start in range(0, len(item.text), 4096):
+                remaining -= len(item.text[start : start + 4096].encode())
+                if remaining < 0:
+                    raise ValueError("Remote Chrome text exceeds the 8 MiB reply budget")
+
+
 def remote_result(
     tool: str,
     args: dict[str, object],
     result: CallToolResult,
 ) -> dict[str, object]:
+    _verify_text_budget(result)
     files: dict[str, list[Artifact]] = {}
-    if "filePath" in args and tool != "upload_file" and not result.is_error:
-        if tool == "take_screenshot":
-            image = next((item for item in result.content if isinstance(item, ImageContent)), None)
-            if image is None or image.mime_type not in _IMAGE_SUFFIXES:
-                raise ValueError("Remote Chrome screenshot did not return a bounded image")
-            data = decode_bytes(image.data)
-            suffix = _IMAGE_SUFFIXES[image.mime_type]
-        else:
-            data = "\n".join(
-                item.text for item in result.content if isinstance(item, TextContent)
-            ).encode()
-            suffix = ".txt"
-        if len(data) > MAX_FILE_BYTES:
-            raise ValueError("Chrome output exceeded the file transfer limit")
-        source = "output" + suffix
-        files["filePath"] = [{"path": source, "data": encode_bytes(data)}]
+    if tool == "take_screenshot" and "filePath" in args and not result.is_error:
+        image = next((item for item in result.content if isinstance(item, ImageContent)), None)
+        if image is None or image.mime_type not in _IMAGE_SUFFIXES:
+            raise ValueError("Remote Chrome screenshot did not return a bounded image")
+        _ = decode_bytes(image.data)
+        source = "output" + _IMAGE_SUFFIXES[image.mime_type]
+        files["filePath"] = [{"path": source, "data": image.data}]
         result = CallToolResult(
             content=[TextContent(type="text", text=f"Saved Chrome output to {source}")]
         )
-    return {"mcp": result.model_dump(mode="json", by_alias=True), "files": files}
+    return {
+        "mcp": result.model_dump(mode="json", by_alias=True, exclude={"structured_content"}),
+        "files": files,
+    }
 
 
 class BrowserStaging:

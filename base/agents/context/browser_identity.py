@@ -48,10 +48,16 @@ class BrowserAuthority:
     def revoke(self, token: str) -> None:
         _ = self._callers.pop(token, None)
 
-    def issue(self, caller: str, target: str, purpose: str) -> dict[str, object]:
+    def identify(self, caller: str) -> int:
         agent_id = self._callers.get(caller)
-        if agent_id is None or purpose != PURPOSE:
+        if agent_id is None:
             raise ValueError("Chrome caller credential is invalid or expired")
+        return agent_id
+
+    def issue(self, caller: str, target: str, purpose: str) -> dict[str, object]:
+        agent_id = self.identify(caller)
+        if purpose != PURPOSE:
+            raise ValueError("Invalid Chrome caller purpose")
         now = self._now()
         self._proofs = {key: proof for key, proof in self._proofs.items() if proof.expires > now}
         if len(self._proofs) >= _PROOF_LIMIT:
@@ -84,6 +90,8 @@ class BrowserAuthority:
         ):
             raise TypeError("Invalid Chrome identity request")
         match request.get("method"):
+            case "identify":
+                return {"agent_id": self.identify(token)}
             case "issue":
                 return self.issue(token, target, purpose)
             case "redeem":

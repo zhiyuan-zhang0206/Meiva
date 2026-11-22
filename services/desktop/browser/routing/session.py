@@ -18,7 +18,7 @@ from base.log import logger
 from base.paths import workspace_path
 
 from .remote_files import CallerFiles
-from .remote_pages import REMOTE_TOOLS, require_remote_tool
+from .remote_pages import REMOTE_TOOLS, public_page_schema, require_remote_tool
 from .remote_rpc import RPC_TIMEOUT_S, call_browser_peer
 from .ssh_browser import SshBrowser
 
@@ -35,7 +35,7 @@ class BrowserRoutes:
     headers: Callable[[], Mapping[str, str]]
     timers: Timers
     connect_timeout_s: float
-    verify_caller: Callable[[str, str], dict[str, object]] | None = None
+    verify_caller: Callable[[str, str, str], dict[str, object]] | None = None
 
 
 async def _peer_request(url: str, headers: Mapping[str, str], body: Mapping[str, object]) -> object:
@@ -171,7 +171,7 @@ class RoutedBrowserSession:
         if agent_id is None or agent_id <= 0:
             raise ValueError("Remote Chrome requires a Meiva agent identity")
         require_remote_tool(name, arguments)
-        proof = await self._issue(caller, target.canonical_uri, agent_id)
+        _ = await self._claims("identify", caller, "", agent_id)
         workspace = workspace_path(self._routes.home, agent_id)
         if target.kind == "ssh":
             config = hosts[target.name]
@@ -192,9 +192,13 @@ class RoutedBrowserSession:
         if not url:
             raise RuntimeError(f"No runner endpoint for {target.canonical_uri}")
         files = CallerFiles(workspace, name, arguments)
+        headers = self._routes.headers()
+        proof = (await self._claims("issue", caller, target.canonical_uri, agent_id)).get("proof")
+        if not isinstance(proof, str):
+            raise TypeError("Chrome caller authority did not issue a proof")
         raw = await self._peer(
             url,
-            self._routes.headers(),
+            headers,
             {
                 "method": "call_tool",
                 "tool": name,
@@ -208,20 +212,21 @@ class RoutedBrowserSession:
             raise ValueError("Browser peer returned an invalid tool result")
         return files.receive(CallToolResult.model_validate(raw.get("mcp")), raw.get("files"))
 
-    async def _issue(self, caller: object, target: str, agent_id: int) -> str:
+    async def _claims(
+        self, method: str, caller: object, target: str, agent_id: int
+    ) -> dict[str, object]:
         if not isinstance(caller, str) or not caller:
             raise ValueError("Remote Chrome requires an agent-host caller credential")
         verifier = self._routes.verify_caller
         if verifier is None:
             claims = await asyncio.to_thread(
-                hosted_browser_identity, self._routes.home, "issue", caller, target
+                hosted_browser_identity, self._routes.home, method, caller, target
             )
         else:
-            claims = verifier(caller, target)
-        proof = claims.get("proof")
-        if claims.get("agent_id") != agent_id or not isinstance(proof, str):
+            claims = verifier(method, caller, target)
+        if claims.get("agent_id") != agent_id:
             raise ValueError("Chrome caller credential does not belong to this agent")
-        return proof
+        return claims
 
     async def _call_local(
         self,
@@ -236,6 +241,7 @@ class RoutedBrowserSession:
 
 
 def _with_host(tool: Tool) -> Tool:
+    tool = public_page_schema(tool)
     if tool.name not in REMOTE_TOOLS:
         return tool
     schema = dict(tool.input_schema)

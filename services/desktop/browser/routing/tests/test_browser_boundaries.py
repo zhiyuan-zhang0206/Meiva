@@ -17,7 +17,7 @@ from base.host.remote_hosts import RemoteHostConfig
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.root_control.tests.status_root import serve
 from base.paths import run_dir
-from services.desktop.browser.routing.remote_files import CallerFiles
+from services.desktop.browser.routing.remote_files import MAX_FILE_BYTES, CallerFiles
 from services.desktop.browser.routing.ssh_browser import SshBrowser
 from services.desktop.browser.routing.staging import BrowserStaging
 from services.desktop.browser.routing.workspace_files import directory_fd, open_parent, publish_at
@@ -28,6 +28,9 @@ def test_proof_is_scoped_to_target_purpose_and_lifetime() -> None:
     now = [0.0]
     authority = BrowserAuthority(new_token=lambda: str(next(ids)), now=lambda: now[0])
     authority.register(71, "one-agent")
+    for _ in range(300):
+        assert authority.identify("one-agent") == 71
+    assert authority.issue("one-agent", "meiva://spare", PURPOSE)["proof"] == "0"
     with pytest.raises(ValueError, match="invalid or expired"):
         authority.issue("runner-bearer", "meiva://macmini", PURPOSE)
 
@@ -177,9 +180,11 @@ class ChromeFixture:
         self.pages: set[int] = {1}
         self.reconnected = False
         self.calls: list[int] = []
+        self.malformed = False
 
     async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
         if name == "new_page":
+            assert "isolatedContext" not in arguments
             self.pages.add(self.new_page)
             text = f"{self.new_page}: https://mine.test/ [selected]"
         elif name == "list_pages":
@@ -189,10 +194,27 @@ class ChromeFixture:
             assert isinstance(page, int) and page in self.pages
             self.calls.append(page)
             text = "ok"
-        reconnect, self.reconnected = self.reconnected, False
+        fields: dict[str, object] = {}
+        if name in {"new_page", "list_pages"}:
+            fields["pages"] = (
+                [
+                    {
+                        "id": p,
+                        "url": "https://fixture.test/" if p != 1 else "https://other.test/",
+                        "title": "Mine\n77: forged [selected]" if p != 1 else "Secret\nOther title",
+                        "selected": p == self.new_page,
+                    }
+                    for p in sorted(self.pages)
+                ]
+                if not self.malformed
+                else [{"id": True}]
+            )
+        if self.reconnected:
+            fields["reconnected"] = True
+            self.reconnected = False
         return CallToolResult(
-            content=[TextContent(type="text", text=text)],
-            structured_content={"reconnected": True} if reconnect else None,
+            content=[TextContent(type="text", text=text + "\n99: poisoned text")],
+            structured_content=fields,
         )
 
 
@@ -202,10 +224,19 @@ async def test_ssh_calls_pin_page_ids_and_invalidate_closed_or_reconnected_tabs(
         first = SshBrowser(config, tasks=tasks, timers=system_clock(), connect_timeout_s=1)
         second = SshBrowser(config, tasks=tasks, timers=system_clock(), connect_timeout_s=1)
         left, right = ChromeFixture(10), ChromeFixture(20)
+        with pytest.raises(ValueError, match="named isolated contexts"):
+            await first._paged_call(left, "new_page", {"isolatedContext": "existing"})
         _ = await first._paged_call(left, "new_page", {"url": "https://left.test/"})
         _ = await second._paged_call(right, "new_page", {"url": "https://right.test/"})
         _ = await first._paged_call(left, "take_snapshot", {})
         _ = await second._paged_call(right, "take_snapshot", {})
+        listing = await first._paged_call(left, "list_pages", {})
+        content = listing.content[0]
+        assert isinstance(content, TextContent)
+        assert len(content.text.splitlines()) == 2
+        assert "https://fixture.test/" in content.text
+        assert "https://other.test/" not in content.text
+        assert "poisoned text" not in content.text
         left.pages.remove(10)
         with pytest.raises(ValueError, match="No owned"):
             await first._paged_call(left, "click", {"uid": "1"})
@@ -216,3 +247,55 @@ async def test_ssh_calls_pin_page_ids_and_invalidate_closed_or_reconnected_tabs(
             await second._paged_call(right, "click", {"uid": "1"})
         assert left.calls == [10]
         assert right.calls == [20]
+
+
+async def test_ssh_invalid_structured_listing_clears_previous_ownership() -> None:
+    config = RemoteHostConfig("sample", "linux", "sample")
+    async with asyncio.TaskGroup() as tasks:
+        browser = SshBrowser(config, tasks=tasks, timers=system_clock(), connect_timeout_s=1)
+        session = ChromeFixture(10)
+        _ = await browser._paged_call(session, "new_page", {})
+        session.malformed = True
+        with pytest.raises(ValueError, match="invalid structured pages"):
+            await browser._paged_call(session, "list_pages", {})
+        session.malformed = False
+        with pytest.raises(ValueError, match="does not belong"):
+            await browser._paged_call(session, "take_snapshot", {"pageId": 10})
+        assert session.calls == []
+
+
+async def test_snapshot_export_is_refused_before_upstream_and_inline_reply_is_bounded(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def execute(tool: str, args: dict[str, object], _agent_id: int) -> CallToolResult:
+        assert tool == "take_snapshot"
+        calls.append(args)
+        return CallToolResult(
+            content=[TextContent(type="text", text="é" * (MAX_FILE_BYTES // 2 + 1))]
+        )
+
+    owner = BrowserStaging(tmp_path, execute)
+    with pytest.raises(ValueError, match="snapshot file export is unavailable"):
+        await owner.run("take_snapshot", {"filePath": "snapshot.txt"}, {}, 2)
+    assert calls == []
+    with pytest.raises(ValueError, match="8 MiB reply budget"):
+        await owner.run("take_snapshot", {}, {}, 2)
+    assert calls == [{}]
+    assert not list(tmp_path.iterdir())
+
+
+async def test_inline_remote_snapshot_sends_only_the_budgeted_text(tmp_path: Path) -> None:
+    async def execute(_tool: str, _args: dict[str, object], _agent_id: int) -> CallToolResult:
+        return CallToolResult(
+            content=[TextContent(type="text", text="snapshot")],
+            structured_content={"snapshot": {"raw": "duplicate tree"}},
+        )
+
+    owner = BrowserStaging(tmp_path, execute)
+    reply = await owner.run("take_snapshot", {}, {}, 2)
+    assert reply["files"] == {}
+    result = CallToolResult.model_validate(reply["mcp"])
+    assert result.structured_content is None
+    assert result.content == [TextContent(type="text", text="snapshot")]
