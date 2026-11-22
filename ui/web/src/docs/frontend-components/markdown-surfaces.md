@@ -22,6 +22,7 @@ The gateway retains placement and workspace/cwd access checks; neither image
 rendering nor file preview grants access to arbitrary paths on the frontend or
 gateway machine. Remote and upload images keep their URLs. The To user panel's
 explicit document resolver remains authoritative for its registered resources.
+Only explicit Markdown links (`[label](target)`, including `file://` and workspace-relative targets) and standard protocol URLs (`http://`, `https://`) are clickable; plain text and inline code spans remain inert and are never heuristically turned into file links.
 
 Question titles and question option labels/descriptions use the same renderer in
 inline mode, including resolved history. Emphasis, links and inline code render
