@@ -653,6 +653,7 @@ async def test_answered_background_turn_outlives_stall_threshold_indefinitely(
             AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nStarted background training."),
         )
     )
+    engine.background_waiting = True
     async with asyncio.timeout(10):
         _, _, timers, task = await _start_virtual_turn(
             db_conn, harness_runtime, engine, agent_id=agent_id

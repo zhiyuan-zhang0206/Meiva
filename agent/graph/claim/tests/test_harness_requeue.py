@@ -730,6 +730,7 @@ async def test_steer_after_long_background_silence_resets_stall_clock(
     chat1 = insert_row(db_conn, agent_id, "chat", "user", "start background job")
     timers = ProbeTimers(start=100.0)
     engine = FakeEngine(script=script)
+    engine.background_waiting = True
     rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
     task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     async with asyncio.timeout(10):
@@ -777,6 +778,7 @@ async def test_answered_background_turn_exits_cleanly_on_process_eof_without_abo
             inputs, AssistantText("t1", "MEIVA_DISPLAY_TO_USER\nWatching build in background.")
         )
     )
+    engine.background_waiting = True
     rt = with_virtual_clock(harness_runtime(engine, agent_id=agent_id), timers)
     task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     async with asyncio.timeout(10):

@@ -18,6 +18,7 @@ from base.lm.harness.delivery import (
     TextBlock,
 )
 from base.lm.harness.engine import (
+    BackgroundWaitReporting,
     EventSubscription,
     HarnessSession,
     HarnessTurn,
@@ -89,6 +90,7 @@ __all__ = [
     "AssistantText",
     "BackgroundItem",
     "BackgroundKind",
+    "BackgroundWaitReporting",
     "BackgroundWork",
     "BackgroundWorkReporting",
     "BridgeEvent",

@@ -172,6 +172,11 @@ class Schedules:
     def pending_at(self, now: float) -> tuple[BackgroundItem, ...]:
         return tuple(item for item in self.items if item.pending_at(now))
 
+    def has_active_wait(self, turn_id: str, *, now: float, monotonic_now: float) -> bool:
+        return any(
+            t.turn_id == turn_id and monotonic_now < t.due_monotonic for t in self.timers
+        ) or bool(self.pending_at(now))
+
     def _finish_kill(self, kill: _PendingKill, *, is_error: bool) -> Schedules:
         rest_kills = tuple(k for k in self.pending_kills if k.tool_use_id != kill.tool_use_id)
         if is_error:

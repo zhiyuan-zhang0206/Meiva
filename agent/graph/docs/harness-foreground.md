@@ -148,16 +148,23 @@ is not detected; the facts above are the whole protection, and no process regist
 
 A turn that stops before it delivered a reply halts the agent instead of failing it: the harness ran out of quota
 (HTTP 429, a usage limit), or the turn stalled, no event from the harness for the agent's
-`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began still awaits a
-reply. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
+`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began remained in
+flight. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
 process is alive, and `harness_turn` is exempt from the node stall probe. The stall clock is the last event read
 or the last handover; an event being written or waiting to be read counts as heard. Once every handed input has
-delivered a non-empty `AssistantText` reply and only open background turn(s) remain (`not awaiting_reply`), the
-stall watchdog is disarmed so background commands, sub-agents, and timers may wait silently for as long as the
-underlying CLI process stays alive (if the process exits or EOFs in that state, the session is retired and the
-agent idles cleanly without `llm_turn_aborted` or a crash corpse mark). If a new input is later steered into that
-open turn, `awaiting_reply` becomes true again, the stall clock resets to the new input's handover, and only inputs
-from the new unanswered wave are eligible for requeue if it stalls or hits quota.
+delivered a non-empty `AssistantText` reply (`can_wait_on_background`) **and** the live adapter explicitly proves
+the open turn is parked in silent background wait (`BackgroundWaitReporting.waiting_on_background()`, e.g.
+Antigravity's `GetCascadeTrajectory` reporting `CASCADE_RUN_STATUS_IDLE` with live background steps or an active
+schedule and no running planner step), the stall watchdog is disarmed so background commands, sub-agents, and
+timers may wait silently for as long as the underlying CLI process stays alive (if the process exits or EOFs in
+that confirmed state, the session is retired and the agent idles cleanly without `llm_turn_aborted` or a crash
+corpse mark). Multi-step foreground turns that emit intermediate `AssistantText` commentary before tools (in
+Claude Code, Codex, or Antigravity) stay protected: foreground tool/delta/reasoning activity re-arms
+`awaiting_reply`, Claude Code and Codex never report `BackgroundWaitReporting`, and an active `RUNNING` Antigravity
+turn reports `False`, so hangs still stall at 900s and mid-turn crashes still emit `llm_turn_aborted`. If a new
+input is later steered into a confirmed background-waiting turn, `_confirmed_background_wait` clears, the stall
+clock resets to the new input's handover, and only inputs from the new unanswered wave are eligible for requeue if
+it stalls or hits quota.
 
 Both settle the same way (`harness_turn.py::_settle_halted_turn`, `harness_inbox.py::settle_halted_turn`): the
 session is retired (a stalled CLI cannot act on the inputs later), the turn's unanswered rows, those already marked

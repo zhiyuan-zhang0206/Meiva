@@ -58,6 +58,7 @@ from base.events.live.projection import LLMDone
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import (
     AssistantText,
+    BackgroundWaitReporting,
     BridgeEvent,
     EventSubscription,
     HarnessClosedError,
@@ -163,6 +164,7 @@ class ForegroundRun:
         self._clock = ctx.require_clock()
         self._stall_seconds = stall_seconds
         self._last_heard = 0.0
+        self._confirmed_background_wait = False
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
@@ -174,9 +176,13 @@ class ForegroundRun:
     @property
     def settled_for_background_exit(self) -> bool:
         return (
-            not self.awaiting_reply
-            and not self._synthetic
-            and (bool(self.fg.turns) or self._turn_ended)
+            not self._synthetic
+            and not self.fg.handed
+            and not self._settling
+            and (
+                (self._confirmed_background_wait and self.fg.can_wait_on_background)
+                or (not self.fg.turns and self._turn_ended)
+            )
         )
 
     def pending_inputs(self) -> list[dict[str, str]]:
@@ -387,6 +393,15 @@ class ForegroundRun:
             await self._bridge.wait_inbound(DELIVERY_FALLBACK_SECONDS)
             self._changed.set()
 
+    def _advance_foreground(self, event: BridgeEvent) -> tuple[Settlement, ...]:
+        self.fg, settlements = self.fg.on_event(event)
+        self._settling.extend(s.handed for s in settlements)
+        if not self.fg.can_wait_on_background or self.fg.awaiting_reply:
+            self._confirmed_background_wait = False
+        if isinstance(event, AssistantText) and event.text.strip():
+            _ = self._committed_by_turn.pop(event.turn_id, None)
+        return settlements
+
     async def _on_event(self, event: BridgeEvent) -> None:
         if self.fg.is_stale(event):
             logger.info(
@@ -400,13 +415,12 @@ class ForegroundRun:
             return
         if (fault := fault_of_event(self._ctx.harness, event)) is not None:
             raise fault
+        settlements = self._advance_foreground(event)
         match event:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
                 await self._projector.on_event(event)
                 if text.strip():
-                    self._committed_by_turn.pop(turn_id, None)
-                    self._committed_by_turn.pop("", None)
                     await persist_last_active(self._ctx, self._agent_id, text)
             case (
                 ReasoningDelta()
@@ -423,8 +437,6 @@ class ForegroundRun:
                 await self._on_turn_completed(event)
             case _:
                 pass
-        self.fg, settlements = self.fg.on_event(event)
-        self._settling.extend(s.handed for s in settlements)
         for settlement in settlements:
             await self._settle(settlement)
             self._settling.remove(settlement.handed)
@@ -520,26 +532,45 @@ class ForegroundRun:
         await self._wait_for_change(backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS)
         return False
 
+    async def _is_waiting_on_background(self) -> bool:
+        if (
+            not self.fg.can_wait_on_background
+            or self._settling
+            or not isinstance(self._bridge, BackgroundWaitReporting)
+        ):
+            self._confirmed_background_wait = False
+            return False
+        try:
+            waiting = await self._bridge.waiting_on_background(self.fg.turns)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "agent {agent_id}: background wait check failed; keeping stall guard armed",
+                agent_id=self._agent_id,
+            )
+            waiting = False
+        confirmed = waiting and self.fg.can_wait_on_background and not self._settling
+        self._confirmed_background_wait = confirmed
+        return confirmed
+
     # meiva:note
-    # Every wait of the delivery loop while an input or open turn still awaits a reply is bounded by
-    # `stall_seconds`: no event for `stall_seconds` ends the invocation with `HarnessTurnStalledError`
-    # (`harness_turn.py` halts the agent and alerts). Once every input has delivered a non-empty
-    # `AssistantText` reply and only open background turn(s) remain (`not self.awaiting_reply`), the
-    # harness may stay silent indefinitely while the underlying process lives (process exit/EOF still
-    # wakes `_read` immediately). If a new input is later steered in, `_deliver_ready` flips
-    # `awaiting_reply` back to True and resets `_last_heard` to that moment so prior background silence
-    # is never charged to the new input. The harness is not silent while an event it sent is being
-    # written or waits to be read, and the host's progress tick does not count as harness activity.
+    # Every wait of the delivery loop is bounded by `stall_seconds` while inputs or open turns remain
+    # in flight, except when every input has delivered a reply (`can_wait_on_background`) AND the live
+    # adapter proves the open turn is parked in silent background wait (`BackgroundWaitReporting`, e.g.
+    # Antigravity reactive-IDLE with live background tasks). Multi-step turns emitting commentary
+    # `AssistantText` before tools remain protected because foreground activity re-arms `awaiting_reply`
+    # and adapters only confirm background wait when no planner/foreground step is running. Steering a
+    # new input clears `_confirmed_background_wait`, resets `_last_heard`, and starts a fresh delivery
+    # wave so prior background silence is never charged to the new input.
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _wait_for_change(self, timeout: float) -> None:
-        now = self._clock.monotonic()
-        if self._reading or (self._subscription is not None and self._subscription.unread):
-            self._last_heard = now
-        if self.awaiting_reply:
+        if not self._foreground_quiet() and not await self._is_waiting_on_background():
+            now = self._clock.monotonic()
+            if self._reading or (self._subscription is not None and self._subscription.unread):
+                self._last_heard = now
             floor = (
                 None
                 if self.fg.handed or self._settling
-                else self._bridge.silence_floor_monotonic(self.fg.awaiting_reply_turns)
+                else self._bridge.silence_floor_monotonic(self.fg.turns)
             )
             heard = max(self._last_heard, floor) if floor is not None else self._last_heard
             silent = now - heard
@@ -552,6 +583,10 @@ class ForegroundRun:
                     stall_seconds=self._stall_seconds,
                 )
             timeout = min(timeout, self._stall_seconds - silent)
+        else:
+            now = self._clock.monotonic()
+            if self._reading or (self._subscription is not None and self._subscription.unread):
+                self._last_heard = now
         with suppress(TimeoutError):
             _ = await asyncio.wait_for(self._changed.wait(), timeout)
 
@@ -635,8 +670,9 @@ class ForegroundRun:
         )
 
     def _begin_delivery(self, handed: Sequence[Handed]) -> None:
-        if not self.awaiting_reply:
+        if self._confirmed_background_wait or not self.awaiting_reply:
             self._projector.reset_turn_delivery()
+        self._confirmed_background_wait = False
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
         self._last_heard = self._clock.monotonic()

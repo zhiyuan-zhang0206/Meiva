@@ -183,6 +183,7 @@ class FakeEngine:
         self._inbound = asyncio.Event()
         self._delivery_signal = asyncio.Event()
         self.silence_floor: Callable[[Collection[str]], float | None] | None = None
+        self.background_waiting: Callable[[Collection[str]], bool] | bool = False
         # meiva:note
         # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
         # with them, the way the real pump primes it, and the engine reports it as not yet presented.
@@ -278,6 +279,11 @@ class FakeEngine:
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
         return None if self.silence_floor is None else self.silence_floor(turn_ids)
+
+    async def waiting_on_background(self, turn_ids: Collection[str]) -> bool:
+        if callable(self.background_waiting):
+            return self.background_waiting(turn_ids)
+        return self.background_waiting
 
 
 def rejecting(reason: str = "no active turn to steer") -> Script:
