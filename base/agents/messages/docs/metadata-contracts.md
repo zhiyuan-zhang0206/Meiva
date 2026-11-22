@@ -19,17 +19,24 @@ bucketing old history correctly.
 
 ## Assistant text visibility
 
-In `user_delivery_mode=prefix` (the compatibility default), new assistant text
-blocks use an exact first-line marker, followed by a newline
-and a non-blank body. The marker is parsed only once at the start of the block;
-streamed text cannot be retracted or overwritten mid-message, so outputting a marker
-a second time does not replace earlier output. `MEIVA_DISPLAY_TO_USER` puts the body in the main
-conversation for direct answers and meaningful user-facing updates.
-`MEIVA_HIDE_FROM_USER` puts the body in Details, which the user can expand and
-read. A leading fragment that can still form either marker and a marker
-without a non-blank body both project to an empty Details item. Other missing
-or malformed markers preserve the raw text in Details. Invalid blocks still
-trigger a `reply_visibility` system note for the model. The native driver puts tool
+In `user_delivery_mode=prefix` (the compatibility default), the system prompt
+instructs models to start each assistant text block with `MEIVA_DISPLAY_TO_USER`
+or `MEIVA_HIDE_FROM_USER` on its own first line. The parser accepts optional
+leading whitespace before either marker and treats any following separator —
+a line break (`\n` / `\r\n`), horizontal whitespace (` ` / `\t`), direct body
+text with no separator, or a bare/whitespace-only marker — as valid, stripping
+the marker plus horizontal whitespace and at most one line break (preserving
+indentation on later lines). The marker is parsed only once at the start of the
+block; streamed text cannot be retracted or overwritten mid-message, so
+outputting a marker a second time does not replace earlier output.
+`MEIVA_DISPLAY_TO_USER` puts a non-blank body in the main conversation for
+direct answers and meaningful user-facing updates. `MEIVA_HIDE_FROM_USER` puts
+the body in Details, which the user can expand and read. A complete marker with
+no non-blank body is valid and projects to an empty Details item without
+triggering a correction; a leading incomplete fragment that can still form
+either marker is withheld while streaming (`""`, hidden) but remains invalid if
+finalized. Other missing or malformed markers preserve the raw text in Details.
+Invalid blocks still trigger a `reply_visibility` system note for the model. The native driver puts tool
 response corrections after the tool results, and retries a malformed terminal
 reply once. The external harness driver sends the correction as a separate turn
 with a distinct idempotency key and at most one retry.

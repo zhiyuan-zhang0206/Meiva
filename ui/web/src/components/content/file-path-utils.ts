@@ -1,5 +1,5 @@
 // meiva:note
-// Utilities to detect workspace file paths in Markdown links and inline code spans,
+// Utilities to classify explicit Markdown link targets as workspace file paths,
 // extracting paths and line ranges (e.g. #L10 or #L10-L20) for interactive file viewing.
 
 export const COMMON_FILE_EXTENSIONS: readonly string[] = Object.freeze([
@@ -103,8 +103,7 @@ export function isPdfExtension(ext: string): boolean {
 }
 
 const LINE_RANGE_RE = /#L?(\d+)(?:-L?(\d+))?$/i;
-const DANGEROUS_PROTOCOLS = /^(javascript|vbscript):/i;
-const WEB_URL_RE = /^https?:\/\//i;
+const NON_FILE_SCHEME_RE = /^(?!file:\/\/)[a-z][a-z0-9+.-]+:/i;
 
 export interface FilePathMatch {
   isPath: boolean;
@@ -136,23 +135,7 @@ export function isFilePath(text: string): FilePathMatch {
   const trimmed = text.trim();
   if (!trimmed || trimmed.includes("\n")) return notPath;
 
-  if (WEB_URL_RE.test(trimmed) || DANGEROUS_PROTOCOLS.test(trimmed) || trimmed.startsWith("mailto:")) {
-    return notPath;
-  }
-
-  if (
-    trimmed.includes(" ") ||
-    trimmed.includes(";") ||
-    trimmed.includes("(") ||
-    trimmed.includes(")") ||
-    trimmed.includes("{") ||
-    trimmed.includes("}") ||
-    trimmed.includes("==") ||
-    trimmed.includes("!=") ||
-    trimmed.includes("=>") ||
-    trimmed.includes("+=") ||
-    trimmed.includes("|")
-  ) {
+  if (trimmed.startsWith("#") || trimmed.startsWith("//") || NON_FILE_SCHEME_RE.test(trimmed)) {
     return notPath;
   }
 

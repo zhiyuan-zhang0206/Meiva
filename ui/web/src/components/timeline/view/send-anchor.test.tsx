@@ -1,5 +1,6 @@
 import { act, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, timelineLayout } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
@@ -84,6 +85,30 @@ describe("a send", () => {
     expect(model.top()).toBe(200);
     model.scrollTo(model.naturalEnd() - 10);
     model.grow("3.0", 1800);
+    expect(model.top()).toBe(model.naturalEnd());
+    view.unmount();
+  });
+
+  it("mobile coarse-pointer slight upward touch drag leaves tail without pullback while streaming grows", () => {
+    const browser = fakeBrowser({ media: { "(pointer: coarse)": true } });
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} />, { browser });
+    const tail = model.naturalEnd();
+    expect(model.top()).toBe(tail);
+
+    model.touchStart(500);
+    model.touchMove(508);
+    model.scrollTo(tail - 8);
+    model.touchEnd();
+    model.writes.length = 0;
+
+    view.rerender(<TimelineView items={[earlier, sent, reply]} />);
+    model.grow("3.0", 800);
+    expect(model.top()).toBe(tail - 8);
+    expect(model.writes).toEqual([]);
+
+    model.scrollTo(model.naturalEnd() - 40);
+    model.grow("3.0", 1200);
     expect(model.top()).toBe(model.naturalEnd());
     view.unmount();
   });

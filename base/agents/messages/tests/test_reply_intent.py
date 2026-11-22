@@ -96,6 +96,11 @@ def test_normalize_last_message_text_strips_prefix_and_drops_header_only() -> No
     assert normalize_last_message_text("Plain text") == "Plain text"
     assert normalize_last_message_text("Meiva agent to user: Shipped.") == "Shipped."
     assert normalize_last_message_text("Meiva agent to user:   \n ") == ""
+    assert normalize_last_message_text("MEIVA_DISPLAY_TO_USER\nShipped.") == "Shipped."
+    assert normalize_last_message_text("MEIVA_HIDE_FROM_USER Waiting...") == "Waiting..."
+    assert normalize_last_message_text("MEIVA_DISPLAY_TO_USER\u4f60\u597d") == "\u4f60\u597d"
+    assert normalize_last_message_text("MEIVA_HIDE_FROM_USER") == ""
+    assert normalize_last_message_text("MEIVA_HIDE_FROM_USER   \r\n  ") == ""
 
 
 @pytest.mark.parametrize(
@@ -103,22 +108,59 @@ def test_normalize_last_message_text_strips_prefix_and_drops_header_only() -> No
     [
         ("MEIVA_DISPLAY_TO_USER\nShipped.", ("Shipped.", True)),
         ("MEIVA_HIDE_FROM_USER\r\nWork log.", ("Work log.", False)),
+        ("MEIVA_DISPLAY_TO_USER\n  Indented.", ("  Indented.", True)),
+        ("MEIVA_DISPLAY_TO_USER  \nShipped.", ("Shipped.", True)),
+        ("MEIVA_DISPLAY_TO_USER\n\nParagraph.", ("\nParagraph.", True)),
+        ("MEIVA_HIDE_FROM_USER Waiting for verification.", ("Waiting for verification.", False)),
+        ("MEIVA_DISPLAY_TO_USER   Shipped.", ("Shipped.", True)),
+        ("MEIVA_DISPLAY_TO_USER\t\tShipped.", ("Shipped.", True)),
+        ("MEIVA_DISPLAY_TO_USER\u4f60\u597d", ("\u4f60\u597d", True)),
+        ("MEIVA_HIDE_FROM_USERWaiting...", ("Waiting...", False)),
+        ("  \nMEIVA_DISPLAY_TO_USER Shipped.", ("Shipped.", True)),
+        ("  MEIVA_HIDE_FROM_USER\tWork log.", ("Work log.", False)),
         ("MEIVA_DISPLAY_TO_USER", ("", False)),
-        ("MEIVA_H", ("", False)),
+        ("MEIVA_HIDE_FROM_USER", ("", False)),
+        ("MEIVA_HIDE_FROM_USER   ", ("", False)),
         ("MEIVA_HIDE_FROM_USER\r", ("", False)),
+        ("MEIVA_HIDE_FROM_USER\r\n  ", ("", False)),
         ("MEIVA_DISPLAY_TO_USER\n   ", ("", False)),
+        ("MEIVA_H", ("", False)),
+        ("  MEIVA_H", ("", False)),
         ("**MEIVA_DISPLAY_TO_USER**\nShipped.", ("**MEIVA_DISPLAY_TO_USER**\nShipped.", False)),
         ("Missing header.", ("Missing header.", False)),
     ],
 )
 @pytest.mark.parametrize("non_human_wake", [False, True])
-def test_explicit_visibility_routes_by_exact_first_line(
+def test_explicit_visibility_routes_relaxed_prefix_forms(
     text: str, expected: tuple[str, bool], non_human_wake: bool
 ) -> None:
     assert (
         resolve_agent_reply(text, non_human_wake=non_human_wake, explicit_visibility=True)
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("MEIVA_DISPLAY_TO_USER\nShipped.", ("Shipped.", True)),
+        ("MEIVA_HIDE_FROM_USER\r\nWork log.", ("Work log.", False)),
+        ("MEIVA_HIDE_FROM_USER Waiting for verification.", ("Waiting for verification.", False)),
+        ("MEIVA_DISPLAY_TO_USER\tShipped.", ("Shipped.", True)),
+        ("MEIVA_DISPLAY_TO_USER\u4f60\u597d", ("\u4f60\u597d", True)),
+        ("MEIVA_HIDE_FROM_USERWaiting...", ("Waiting...", False)),
+        ("  MEIVA_DISPLAY_TO_USER\nShipped.", ("Shipped.", True)),
+        ("MEIVA_DISPLAY_TO_USER", ("", False)),
+        ("MEIVA_HIDE_FROM_USER", ("", False)),
+        ("MEIVA_HIDE_FROM_USER   ", ("", False)),
+        ("MEIVA_HIDE_FROM_USER\r\n  ", ("", False)),
+        ("MEIVA_DISPLAY_TO_USER\n   ", ("", False)),
+    ],
+)
+def test_parse_reply_visibility_accepts_relaxed_prefix_forms(
+    text: str, expected: tuple[str, bool]
+) -> None:
+    assert parse_reply_visibility(text) == expected
 
 
 @pytest.mark.parametrize("background", [False, True])
@@ -130,6 +172,9 @@ def test_explicit_visibility_routes_by_exact_first_line(
         ("naive", "MEIVA_HIDE_FROM_USER\nverbatim", True, "MEIVA_HIDE_FROM_USER\nverbatim"),
         ("prefix", "ordinary answer", False, "ordinary answer"),
         ("prefix", "MEIVA_DISPLAY_TO_USER\nanswer", True, "answer"),
+        ("prefix", "MEIVA_HIDE_FROM_USER waiting", False, "waiting"),
+        ("prefix", "MEIVA_DISPLAY_TO_USER\u4f60\u597d", True, "\u4f60\u597d"),
+        ("prefix", "MEIVA_HIDE_FROM_USER", False, ""),
         ("sdk", "ordinary final", False, "ordinary final"),
         ("sdk", "MEIVA_H", False, "MEIVA_H"),
         ("sdk", "MEIVA_DISPLAY_TO_USER\nanswer", False, "MEIVA_DISPLAY_TO_USER\nanswer"),
@@ -148,7 +193,7 @@ def test_unknown_delivery_mode_fails_at_boundary() -> None:
         resolve_agent_reply("answer", non_human_wake=False, delivery_mode="typo")
 
 
-@pytest.mark.parametrize("text", ["MEIVA_H", "MEIVA_DISPLAY_TO_USER", "MEIVA_HIDE_FROM_USER\r\n  "])
+@pytest.mark.parametrize("text", ["MEIVA_H", "  MEIVA_DIS", "MEIVA_DISPLAY_TO_USE"])
 def test_incomplete_visibility_marker_is_still_invalid(text: str) -> None:
     assert parse_reply_visibility(text) is None
     assert resolve_agent_reply(text, non_human_wake=False, delivery_mode="prefix") == ("", False)

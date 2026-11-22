@@ -85,11 +85,29 @@ describe("isFilePath", () => {
     expect(isFilePath("~/Meiva/AGENTS.md").isPath).toBe(true);
   });
 
-  it("rejects web URLs and dangerous schemes", () => {
+  it("identifies explicit paths containing spaces or parentheses", () => {
+    const fileUri = isFilePath("file:///Users/dev/my folder/FINAL.json");
+    expect(fileUri.isPath).toBe(true);
+    expect(fileUri.path).toBe("file:///Users/dev/my folder/FINAL.json");
+
+    const rel = isFilePath("reports/my report (v2).md#L10");
+    expect(rel.isPath).toBe(true);
+    expect(rel.path).toBe("reports/my report (v2).md");
+    expect(rel.lineRange).toBe("10");
+  });
+
+  it("rejects web URLs, protocol-relative URLs, non-file schemes, and page anchors", () => {
     expect(isFilePath("https://example.com/foo.py").isPath).toBe(false);
     expect(isFilePath("http://localhost:3000/app.ts").isPath).toBe(false);
+    expect(isFilePath("//example.com/foo.py").isPath).toBe(false);
     expect(isFilePath("javascript:alert(1)").isPath).toBe(false);
     expect(isFilePath("mailto:test@example.com").isPath).toBe(false);
+    expect(isFilePath("ftp://example.com/foo.py").isPath).toBe(false);
+    expect(isFilePath("about:blank").isPath).toBe(false);
+    expect(isFilePath("#section-one").isPath).toBe(false);
+    expect(isFilePath("#foo/bar").isPath).toBe(false);
+    expect(isFilePath("#foo.md").isPath).toBe(false);
+    expect(isFilePath("#L10").isPath).toBe(false);
   });
 
   it("rejects plain text and code snippets", () => {

@@ -24,6 +24,7 @@ from base.lm.harness.events import (
     InputInContext,
     InputReceived,
     InputRejected,
+    ToolResult,
     ToolUse,
     TurnCompleted,
     TurnOrigin,
@@ -468,5 +469,81 @@ async def test_text_blocks_with_images_start_the_turn_with_the_joined_text_and_s
         )
         assert sent["clientMessageId"] == "wake:images"
         assert sent["media"] == [{"mimeType": "image/png", "inlineData": "aGk="}] * 2
+    finally:
+        await harness.stop()
+
+
+async def test_waiting_on_background_uses_live_trajectory_and_schedule_truth_source(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "trajectory.json"
+
+    def set_snapshot(snap: dict[str, Any]) -> None:
+        fixture.write_text(json.dumps({"reply": snap}))
+
+    set_snapshot(BACKGROUND_FIXTURE["snapshots"]["background_wait_idle"])
+    harness = await start(
+        tmp_path,
+        turns=[{"hang": True}],
+        extra_environ={"FAKE_AGY_TRAJECTORY_FIXTURE": str(fixture)},
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("bg-1", "start bg task")])
+        started = await harness.wait_for(lambda e: isinstance(e, TurnStarted))
+        await in_context(harness, "bg-1")
+        assert isinstance(started, TurnStarted)
+        turn_id = started.turn_id
+
+        assert await harness.session.waiting_on_background((turn_id,)) is True
+        assert await harness.session.waiting_on_background(("other-turn",)) is False
+
+        set_snapshot(BACKGROUND_FIXTURE["snapshots"]["final_response_running"])
+        assert await harness.session.waiting_on_background((turn_id,)) is False
+
+        set_snapshot(
+            {
+                "status": "CASCADE_RUN_STATUS_IDLE",
+                "numTotalSteps": 2,
+                "trajectory": {
+                    "steps": [
+                        {
+                            "type": "CORTEX_STEP_TYPE_USER_INPUT",
+                            "status": "CORTEX_STEP_STATUS_DONE",
+                        },
+                        {
+                            "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+                            "status": "CORTEX_STEP_STATUS_GENERATING",
+                        },
+                    ]
+                },
+            }
+        )
+        assert await harness.session.waiting_on_background((turn_id,)) is False
+
+        set_snapshot(
+            {
+                "status": "CASCADE_RUN_STATUS_IDLE",
+                "numTotalSteps": 2,
+                "trajectory": {
+                    "steps": [
+                        {
+                            "type": "CORTEX_STEP_TYPE_USER_INPUT",
+                            "status": "CORTEX_STEP_STATUS_DONE",
+                        },
+                        {
+                            "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+                            "status": "CORTEX_STEP_STATUS_DONE",
+                        },
+                    ]
+                },
+            }
+        )
+        assert await harness.session.waiting_on_background((turn_id,)) is False
+
+        harness.session._track_schedule(
+            ToolUse(turn_id, "s1", "schedule", {"DurationSeconds": 1800, "Prompt": "check"})
+        )
+        harness.session._track_schedule(ToolResult(turn_id, "s1", False, "task id: conv/t1"))
+        assert await harness.session.waiting_on_background((turn_id,)) is True
     finally:
         await harness.stop()

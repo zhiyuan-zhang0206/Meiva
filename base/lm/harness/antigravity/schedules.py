@@ -24,7 +24,6 @@ from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 SCHEDULE_TOOL = "schedule"
 MANAGE_TASK_TOOL = "manage_task"
 UNBOUNDED_SCHEDULE_SECONDS = 24 * 3600.0
-AFTER_DUE_MARGIN_SECONDS = 180.0
 _LIMIT = 100
 _TASK_ID_RE = re.compile(r"task id:\s*([^\s\"']+)", re.IGNORECASE)
 
@@ -172,6 +171,11 @@ class Schedules:
 
     def pending_at(self, now: float) -> tuple[BackgroundItem, ...]:
         return tuple(item for item in self.items if item.pending_at(now))
+
+    def has_active_wait(self, turn_id: str, *, now: float, monotonic_now: float) -> bool:
+        return any(
+            t.turn_id == turn_id and monotonic_now < t.due_monotonic for t in self.timers
+        ) or bool(self.pending_at(now))
 
     def _finish_kill(self, kill: _PendingKill, *, is_error: bool) -> Schedules:
         rest_kills = tuple(k for k in self.pending_kills if k.tool_use_id != kill.tool_use_id)

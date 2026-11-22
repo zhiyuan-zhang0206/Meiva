@@ -14,6 +14,7 @@ from types import MappingProxyType
 
 from agent.graph.claim.harness_render import fit_input_images, skipped_images_note
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
     HarnessInput,
     ImageBlock,
@@ -23,8 +24,13 @@ from base.lm.harness import (
     InputReceived,
     InputRejected,
     InterruptConfirmed,
+    ReasoningDelta,
+    ReasoningText,
     Reconciliation,
     TextBlock,
+    TextDelta,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
     TurnStarted,
 )
@@ -88,19 +94,42 @@ Settlement = Commit | Requeue
 
 
 # meiva:note
-# `handed` keeps delivery order. `turns` are the turns the harness is running, whoever began them. The
-# invocation may end only when both are empty: an input that missed a turn's last boundary is settled
-# after that turn ended (Claude Code runs it as a turn of its own about a second later), and ending
-# earlier would leave that settlement with nobody to write it.
+# `handed` keeps delivery order. `turns` are the turns the harness is running, whoever began them.
+# Both `awaiting_reply_turns` and `replied_turns` are strict subsets of `turns`:
+# - `TurnStarted` and a settled `InputInContext` (when its turn is open) add `turn_id` to
+#   `awaiting_reply_turns` and remove it from `replied_turns`;
+# - top-level foreground activity (`ToolUse`/`ToolResult` without `parent_tool_use_id`, `TextDelta`,
+#   `ReasoningDelta`, `ReasoningText`) re-arms `awaiting_reply_turns` so multi-step turns that emit
+#   commentary before tools never lose the stall watchdog;
+# - a non-empty `AssistantText` clears `awaiting_reply_turns` and marks `replied_turns` only when
+#   `turn_id` is open and no unacknowledged `handed` input is in flight (isolating old replies from
+#   concurrently steered inputs);
+# - `can_wait_on_background` is a necessary prerequisite (not sufficient on its own): `ForegroundRun`
+#   exempts silence or EOF only when the live adapter also confirms reactive background wait.
 @dataclass(frozen=True, slots=True)
 class Foreground:
     handed: tuple[Handed, ...] = ()
     turns: frozenset[str] = frozenset()
     generation: int = 0
+    awaiting_reply_turns: frozenset[str] = frozenset()
+    replied_turns: frozenset[str] = frozenset()
 
     @property
     def quiet(self) -> bool:
         return not self.handed and not self.turns
+
+    @property
+    def awaiting_reply(self) -> bool:
+        return bool(self.handed or self.awaiting_reply_turns)
+
+    @property
+    def can_wait_on_background(self) -> bool:
+        return (
+            bool(self.turns)
+            and not self.handed
+            and not self.awaiting_reply_turns
+            and self.turns <= self.replied_turns
+        )
 
     def hand(self, batch: tuple[Handed, ...]) -> Foreground:
         return replace(self, handed=(*self.handed, *batch))
@@ -125,17 +154,67 @@ class Foreground:
             return self, ()
         match event:
             case TurnStarted(turn_id=turn_id):
-                return replace(self, turns=self.turns | {turn_id}), ()
+                return replace(
+                    self,
+                    turns=self.turns | {turn_id},
+                    awaiting_reply_turns=self.awaiting_reply_turns | {turn_id},
+                    replied_turns=self.replied_turns - {turn_id},
+                ), ()
             case TurnCompleted(turn_id=turn_id):
-                return replace(self, turns=self.turns - {turn_id}), ()
+                return replace(
+                    self,
+                    turns=self.turns - {turn_id},
+                    awaiting_reply_turns=self.awaiting_reply_turns - {turn_id},
+                    replied_turns=self.replied_turns - {turn_id},
+                ), ()
             case InputInContext(key=key, turn_id=turn_id):
-                return self._settle(key, lambda h: Commit(h, turn_id))
+                updated, settlements = self._settle(key, lambda h: Commit(h, turn_id))
+                return (updated._on_committed(turn_id) if settlements else updated), settlements
+            case (
+                ToolUse(turn_id=turn_id, parent_tool_use_id=None)
+                | ToolResult(turn_id=turn_id, parent_tool_use_id=None)
+                | TextDelta(turn_id=turn_id)
+                | ReasoningDelta(turn_id=turn_id)
+                | ReasoningText(turn_id=turn_id)
+            ):
+                return self._rearm(turn_id), ()
+            case AssistantText(turn_id=turn_id, text=text) if text.strip():
+                return self._mark_replied(turn_id), ()
             case InputRejected(key=key, reason=reason):
                 return self._settle(key, lambda h: Requeue(h, reason))
             case InputLost(key=key):
                 return self._settle(key, lambda h: Requeue(h, "the harness lost the input"))
             case _:
                 return self, ()
+
+    def _on_committed(self, turn_id: str) -> Foreground:
+        if turn_id not in self.turns:
+            return self
+        return replace(
+            self,
+            awaiting_reply_turns=self.awaiting_reply_turns | {turn_id},
+            replied_turns=self.replied_turns - {turn_id},
+        )
+
+    def _rearm(self, turn_id: str) -> Foreground:
+        if turn_id not in self.turns or (
+            turn_id in self.awaiting_reply_turns and turn_id not in self.replied_turns
+        ):
+            return self
+        return replace(
+            self,
+            awaiting_reply_turns=self.awaiting_reply_turns | {turn_id},
+            replied_turns=self.replied_turns - {turn_id},
+        )
+
+    def _mark_replied(self, turn_id: str) -> Foreground:
+        if turn_id not in self.turns or self.handed:
+            return self
+        return replace(
+            self,
+            awaiting_reply_turns=self.awaiting_reply_turns - {turn_id},
+            replied_turns=self.replied_turns | {turn_id},
+        )
 
     def _settle(
         self, key: str, make: Callable[[Handed], Settlement]

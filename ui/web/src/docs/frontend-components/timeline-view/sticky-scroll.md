@@ -12,10 +12,14 @@ late height, a virtual-window spacer estimate. Chrome's own scroll anchoring sta
 (`overflow-anchor: none`) so there is no second hand.
 
 Only the reader moves the anchor. A scroll the writer did not cause (wheel, touch, keys, scrollbar,
-find-in-page) is read back from the DOM: the tail inside the bottom zone of the natural end
+find-in-page) is read back from the DOM: the tail when standing at the natural end (`<= 1px`,
+including iOS overscroll bouncing back) or moving downward into the bottom zone of the natural end
 (pointer-dependent, wider on touch for bounce tolerance), otherwise the first row below the header
-bar. An upward wheel notch leaves the tail before its scroll event, so a chunk landing first cannot
-pin the reader back. While a finger is down the writer stands still. Placements only set the anchor:
+bar. Moving upward away from the end always leaves the tail, even inside the wide touch bottom
+zone, so a small mobile scroll-up never snaps back. Both an upward wheel notch and an
+upward-scrolling vertical touch drag release the tail before their scroll event or finger lift, so
+a chunk landing first cannot pin the reader back. While a finger is down without upward drag, the
+writer stands still on the tail. Placements only set the anchor:
 returning, reloading, the first-unseen reveal, a quote, a send, a header toggle and the down arrow
 (the one animated move, interrupted by any reader input).
 

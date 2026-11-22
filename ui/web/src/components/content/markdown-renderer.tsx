@@ -169,37 +169,8 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
   },
   code: ({ node: _node, className, children, ...props }) => {
     const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-
     const text = typeof children === "string" ? children : "";
     if (lang === undefined && !text.includes("\n")) {
-      const fileMatch = isFilePath(text);
-      if (fileMatch.isPath) {
-        return (
-          <span
-            role="link"
-            tabIndex={0}
-            data-testid="file-path-code"
-            onClick={(e) => {
-              if (e.currentTarget.closest("a")) return;
-              e.stopPropagation();
-              onOpenFile(fileMatch.path, fileMatch.lineRange);
-            }}
-            onKeyDown={(e) => {
-              if (e.currentTarget.closest("a")) return;
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                e.stopPropagation();
-                onOpenFile(fileMatch.path, fileMatch.lineRange);
-              }
-            }}
-            className="cursor-pointer"
-          >
-            <code className={className} {...props}>
-              {children}
-            </code>
-          </span>
-        );
-      }
       return (
         <code className={className} {...props}>
           {children}
@@ -222,37 +193,10 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
   },
 });
 
-const createInlineComponents = (onOpenFile: (path: string, lineRange?: string) => void): Components => ({
+const inlineComponents: Components = {
   p: ({ children }) => <>{children}</>,
-  code: ({ children }) => {
-    const text = typeof children === "string" ? children : "";
-    const fileMatch = isFilePath(text);
-    if (fileMatch.isPath) {
-      return (
-        <span
-          role="link"
-          tabIndex={0}
-          data-testid="file-path-code"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenFile(fileMatch.path, fileMatch.lineRange);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              e.stopPropagation();
-              onOpenFile(fileMatch.path, fileMatch.lineRange);
-            }
-          }}
-          className="cursor-pointer"
-        >
-          <code>{children}</code>
-        </span>
-      );
-    }
-    return <code>{children}</code>;
-  },
-});
+  code: ({ children }) => <code>{children}</code>,
+};
 
 export interface ChatMarkdownProps {
   content: string;
@@ -297,10 +241,6 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
       }),
     [effectiveOpenFile, resolveImageUrl, resolveUrl, activeId],
   );
-  const defaultInlineComponents = useMemo(
-    () => createInlineComponents(effectiveOpenFile),
-    [effectiveOpenFile],
-  );
 
   const needsMath = hasMathSyntax(content);
   useEffect(() => {
@@ -320,11 +260,11 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
   const activeComponents = useMemo(() => {
     if (inline) {
       return overrides
-        ? { ...defaultComponents, ...defaultInlineComponents, ...overrides }
-        : { ...defaultComponents, ...defaultInlineComponents };
+        ? { ...defaultComponents, ...inlineComponents, ...overrides }
+        : { ...defaultComponents, ...inlineComponents };
     }
     return overrides ? { ...defaultComponents, ...overrides } : defaultComponents;
-  }, [inline, overrides, defaultComponents, defaultInlineComponents]);
+  }, [inline, overrides, defaultComponents]);
 
   const Wrapper = inline ? "span" : "div";
   return (

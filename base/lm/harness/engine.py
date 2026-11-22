@@ -100,15 +100,21 @@ class ContextDigestKeeping(Protocol):
 
 
 # meiva:note
-# Who knows when open turns are legitimately waiting in silence (for example, an Antigravity
-# one-shot `schedule(DurationSeconds=...)` timer holding its outer turn open). Returns the
-# monotonic clock floor that bounds silence for `turn_ids`, or None when no declared wait covers
-# all of them. Checked structurally on `HarnessSession` so adapters without in-turn silent waits
-# need no boilerplate and the graph never reaches into an adapter's tools.
+# Structural silence/background-wait contracts on `HarnessSession`:
+# - `SilenceFloorReporting` returns the monotonic floor covering declared in-turn silent waits (e.g.
+#   Antigravity one-shot `schedule(DurationSeconds=...)` timers before a reply).
+# - `BackgroundWaitReporting` proves open turns are parked in reactive background wait with no active
+#   planner generation so adapters whose turns close on `TurnCompleted` (Claude Code, Codex) never
+#   exempt open turns from stall or crash reporting.
 # meiva:link agent/graph/docs/harness-foreground.md
 @runtime_checkable
 class SilenceFloorReporting(Protocol):
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None: ...
+
+
+@runtime_checkable
+class BackgroundWaitReporting(Protocol):
+    def waiting_on_background(self, turn_ids: Collection[str]) -> Awaitable[bool]: ...
 
 
 # meiva:note

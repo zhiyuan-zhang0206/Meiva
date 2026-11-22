@@ -22,6 +22,8 @@ export type AnchorChangeCause = "reader" | "placement";
 // meiva:note
 // A row inside a collapsed turn is shown through the block: keep the block below the header bar.
 const COLLAPSED_MIN_OFFSET_PX = BAR_HEIGHT_PX + 8;
+const TOUCH_UPWARD_INTENT_PX = 2;
+const TOUCH_LIFTOFF_REVERSAL_PX = 4;
 
 interface Args {
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -87,7 +89,16 @@ export function useViewportAnchor({
 }: Args): { controls: ViewportAnchor; atEnd: boolean } {
   const anchorRef = useRef<ViewAnchor | null>(null);
   const lastWrittenRef = useRef<number | null>(null);
+  const directionTopRef = useRef<number | null>(null);
   const touchingRef = useRef(false);
+  const touchRef = useRef<{
+    x: number | null;
+    y: number | null;
+    up: number;
+    startTop: number;
+    minTop: number;
+    maxTop: number;
+  } | null>(null);
   const rideRef = useRef<{ frame: number; from: number; start: number; duration: number } | null>(null);
   const holdRef = useRef(false);
   const inOverlaySlackRef = useRef(false);
@@ -157,10 +168,19 @@ export function useViewportAnchor({
   }, [contentRef, overlaySlackHeight, reserveRef]);
 
   const write = useCallback((vp: HTMLElement, top: number) => {
+    const before = vp.scrollTop;
     const max = Math.max(0, vp.scrollHeight - vp.clientHeight);
     const target = Math.min(Math.max(0, top), max);
-    if (Math.abs(vp.scrollTop - target) >= 0.5) vp.scrollTop = target;
-    lastWrittenRef.current = vp.scrollTop;
+    if (Math.abs(before - target) >= 0.5) vp.scrollTop = target;
+    const after = vp.scrollTop;
+    const shift = after - before;
+    if (shift !== 0 && touchRef.current) {
+      touchRef.current.startTop += shift;
+      touchRef.current.minTop += shift;
+      touchRef.current.maxTop += shift;
+    }
+    lastWrittenRef.current = after;
+    directionTopRef.current = after;
   }, []);
 
   const setAnchor = useCallback((anchor: ViewAnchor, cause: AnchorChangeCause) => {
@@ -180,6 +200,7 @@ export function useViewportAnchor({
         setAnchor(row, "reader");
       }
       lastWrittenRef.current = vp.scrollTop;
+      directionTopRef.current = vp.scrollTop;
       refreshEnd(vp);
       return;
     }
@@ -215,6 +236,7 @@ export function useViewportAnchor({
         anchor = TAIL;
         setAnchor(TAIL, "reader");
         lastWrittenRef.current = vp.scrollTop;
+        directionTopRef.current = vp.scrollTop;
       } else if (clamped) {
         const row = readRow(vp);
         if (row) {
@@ -222,11 +244,15 @@ export function useViewportAnchor({
           setAnchor(row, "reader");
         }
         lastWrittenRef.current = vp.scrollTop;
+        directionTopRef.current = vp.scrollTop;
       }
     } else if (anchor.kind === "row" && Math.abs(drift) >= 0.5) {
       anchor = { kind: "row", row: anchor.row, offset: anchor.offset - drift };
       anchorRef.current = anchor;
       lastWrittenRef.current = vp.scrollTop;
+      directionTopRef.current = vp.scrollTop;
+      if (drift < -0.5) towardEndRef.current = false;
+      else if (drift > 0.5) towardEndRef.current = true;
     }
     syncReserve(vp);
     if (anchor.kind === "tail") {
@@ -278,15 +304,14 @@ export function useViewportAnchor({
     const pastNatural = vp.scrollTop > natural + 0.5;
     const distance = natural - vp.scrollTop;
     // meiva:note
-    // Inside the bottom zone a follower keeps following: a resting-finger twitch, a sub-zone nudge or
-    // an iOS bounce does not release the tail (a deliberate wheel notch already did, before its scroll
-    // event). A reader who is not following reaches the tail only by moving down into the zone, or
-    // by reaching the end. Past the natural end (overlay slack or toggle reserve), a row anchor holds
-    // the manually scrolled position instead of snapping back to the resting tail.
+    // Reaching the natural end (including iOS overscroll bouncing back at distance <= 0) or moving
+    // downward into the bottom zone follows the tail. Moving upward away from the end always leaves
+    // the tail, even inside the wide touch bottom zone, so a small mobile scroll-up never snaps back.
+    // Past the natural end (overlay slack or toggle reserve), a row anchor holds the manually
+    // scrolled position instead of snapping back to the resting tail.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     const zone = distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
-    const following = anchorRef.current?.kind === "tail";
-    if (!pastNatural && (distance <= 1 || (zone && (following || towardEnd)))) {
+    if (!pastNatural && (distance <= 1 || (zone && towardEnd))) {
       freeRef.current = false;
       inOverlaySlackRef.current = false;
       setAnchor(TAIL, "reader");
@@ -295,7 +320,9 @@ export function useViewportAnchor({
     const row = readRow(vp);
     if (row) {
       freeRef.current = false;
-      inOverlaySlackRef.current = pastNatural && reserveHeight() === 0 && overlaySlackHeight() > 0;
+      const inSlack = pastNatural && reserveHeight() === 0 && overlaySlackHeight() > 0;
+      inOverlaySlackRef.current = inSlack;
+      if (inSlack) prevOverlaySlackRef.current = overlaySlackHeight();
       setAnchor(row, "reader");
     } else if (!freeRef.current) {
       // meiva:note
@@ -308,13 +335,20 @@ export function useViewportAnchor({
     }
   }, [naturalEnd, overlaySlackHeight, readRow, reserveHeight, setAnchor]);
 
+  const releaseTailAt = useCallback((vp: HTMLElement) => {
+    if (anchorRef.current?.kind !== "tail") return;
+    const row = readRow(vp);
+    if (!row) return;
+    inOverlaySlackRef.current = false;
+    lastWrittenRef.current = vp.scrollTop;
+    directionTopRef.current = vp.scrollTop;
+    setAnchor(row, "reader");
+  }, [readRow, setAnchor]);
+
   const releaseTail = useCallback(() => {
     const vp = viewport();
-    if (!vp || anchorRef.current?.kind !== "tail") return;
-    inOverlaySlackRef.current = false;
-    const row = readRow(vp);
-    if (row) setAnchor(row, "reader");
-  }, [readRow, setAnchor, viewport]);
+    if (vp) releaseTailAt(vp);
+  }, [releaseTailAt, viewport]);
 
   const place = useCallback((anchor: ViewAnchor, options: { smooth?: boolean; hold?: boolean } = {}) => {
     const vp = viewport();
@@ -327,6 +361,7 @@ export function useViewportAnchor({
     // meiva:note
     // A placement replaces the reader's place outright: no movement since the last write is theirs.
     lastWrittenRef.current = vp.scrollTop;
+    directionTopRef.current = vp.scrollTop;
     // meiva:note
     // The ride steers toward the live natural end every frame, so rows that mount or re-measure on
     // the way (virtual spacers) move the goal, never the deadline.
@@ -360,21 +395,35 @@ export function useViewportAnchor({
   useEffect(() => {
     const vp = viewport();
     if (!vp) return;
-    let previousTop = vp.scrollTop;
+    directionTopRef.current = vp.scrollTop;
     const onScroll = () => {
       const top = vp.scrollTop;
-      const up = top < previousTop - 0.5;
-      previousTop = top;
-      if (rideRef.current) return;
+      if (rideRef.current) {
+        directionTopRef.current = top;
+        return;
+      }
       if (lastWrittenRef.current !== null && Math.abs(top - lastWrittenRef.current) < 1) {
         refreshEnd(vp);
         return;
       }
+      const base = directionTopRef.current ?? top;
+      const delta = top - base;
+      if (delta < -0.5) {
+        towardEndRef.current = false;
+        directionTopRef.current = top;
+      } else if (delta > 0.5) {
+        towardEndRef.current = true;
+        directionTopRef.current = top;
+      }
+      const gesture = touchRef.current;
+      if (gesture) {
+        if (top < gesture.minTop) gesture.minTop = top;
+        if (top > gesture.maxTop) gesture.maxTop = top;
+      }
       // meiva:note
       // Moving upward to or past the natural end spends the reserve; movement inside it keeps it.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-      if (up && top <= naturalEnd(vp) + 0.5) releaseReserve(vp);
-      towardEndRef.current = !up;
+      if (!towardEndRef.current && top <= naturalEnd(vp) + 0.5) releaseReserve(vp);
       // meiva:note
       // Under a finger the movement stays unattributed: the writer folds it into the row anchor's
       // offset (keeping rows that change above in place) and the release reads the place back.
@@ -382,7 +431,7 @@ export function useViewportAnchor({
         refreshEnd(vp);
         return;
       }
-      derive(vp, !up);
+      derive(vp, towardEndRef.current);
       lastWrittenRef.current = vp.scrollTop;
       refreshEnd(vp);
     };
@@ -391,29 +440,83 @@ export function useViewportAnchor({
       cancelRide();
       // meiva:note
       // An upward notch leaves the tail before its scroll event: a chunk landing first must not pin.
-      if (event.deltaY < -2 && anchorRef.current?.kind === "tail") {
-        const row = readRow(vp);
-        if (row) setAnchor(row, "reader");
+      if (event.deltaY < -2) {
+        towardEndRef.current = false;
+        releaseTailAt(vp);
       }
     };
     const onInput = (event: Event) => {
       if (event instanceof KeyboardEvent && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
       cancelRide();
     };
-    const onTouchStart = () => {
+    const onTouchStart = (event: TouchEvent) => {
       touchingRef.current = true;
       cancelRide();
+      const top = vp.scrollTop;
+      directionTopRef.current = top;
+      const finger = event.touches.length === 1 ? event.touches[0] : null;
+      touchRef.current = {
+        x: finger && Number.isFinite(finger.clientX) ? finger.clientX : null,
+        y: finger && Number.isFinite(finger.clientY) ? finger.clientY : null,
+        up: 0,
+        startTop: top,
+        minTop: top,
+        maxTop: top,
+      };
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const gesture = touchRef.current;
+      if (!gesture || event.touches.length !== 1 || gesture.y === null) {
+        if (gesture) {
+          gesture.x = null;
+          gesture.y = null;
+          gesture.up = 0;
+        }
+        return;
+      }
+      const finger = event.touches[0];
+      if (!Number.isFinite(finger.clientY)) return;
+      const nextX = Number.isFinite(finger.clientX) ? finger.clientX : (gesture.x ?? 0);
+      const nextY = finger.clientY;
+      const stepX = gesture.x === null ? 0 : nextX - gesture.x;
+      const stepY = nextY - gesture.y;
+      gesture.x = nextX;
+      gesture.y = nextY;
+      if (stepY > 0 && Math.abs(stepY) >= Math.abs(stepX)) {
+        gesture.up += stepY;
+      } else if (stepY < 0) {
+        gesture.up = 0;
+      }
+      if (gesture.up > TOUCH_UPWARD_INTENT_PX && vp.scrollTop <= naturalEnd(vp) + 0.5) {
+        towardEndRef.current = false;
+        releaseTailAt(vp);
+      }
     };
     const onTouchEnd = () => {
       touchingRef.current = false;
+      const gesture = touchRef.current;
+      touchRef.current = null;
+      const top = vp.scrollTop;
+      if (gesture) {
+        const minTop = Math.min(gesture.minTop, top);
+        const maxTop = Math.max(gesture.maxTop, top);
+        if (top < gesture.startTop - 0.5 && top - minTop < TOUCH_LIFTOFF_REVERSAL_PX) {
+          towardEndRef.current = false;
+        } else if (top > gesture.startTop + 0.5 && maxTop - top < TOUCH_LIFTOFF_REVERSAL_PX) {
+          towardEndRef.current = true;
+        }
+      }
       derive(vp, towardEndRef.current);
       lastWrittenRef.current = vp.scrollTop;
+      directionTopRef.current = vp.scrollTop;
+      refreshEnd(vp);
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
     vp.addEventListener("wheel", onWheel, { passive: true });
     vp.addEventListener("keydown", onInput);
     vp.addEventListener("pointerdown", onInput);
     vp.addEventListener("touchstart", onTouchStart, { passive: true });
+    vp.addEventListener("touchmove", onTouchMove, { passive: true });
     vp.addEventListener("touchend", onTouchEnd, { passive: true });
     vp.addEventListener("touchcancel", onTouchEnd, { passive: true });
     const scrollbar = wrapperRef.current;
@@ -430,13 +533,14 @@ export function useViewportAnchor({
       vp.removeEventListener("keydown", onInput);
       vp.removeEventListener("pointerdown", onInput);
       vp.removeEventListener("touchstart", onTouchStart);
+      vp.removeEventListener("touchmove", onTouchMove);
       vp.removeEventListener("touchend", onTouchEnd);
       vp.removeEventListener("touchcancel", onTouchEnd);
       scrollbar?.removeEventListener("pointerdown", onScrollbar, { capture: true });
       observer.disconnect();
       cancelRide();
     };
-  }, [apply, cancelRide, contentRef, derive, naturalEnd, readRow, refreshEnd, releaseReserve, setAnchor, viewport, viewportObserverFactory, wrapperRef]);
+  }, [apply, cancelRide, contentRef, derive, naturalEnd, refreshEnd, releaseReserve, releaseTailAt, viewport, viewportObserverFactory, wrapperRef]);
 
   const placeScrollTop = useCallback((top: number) => {
     const vp = viewport();

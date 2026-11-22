@@ -129,7 +129,12 @@ describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
   it.each([
     ["MEIVA_DISPLAY_TO_USER\n", "Hello.", true],
     ["MEIVA_HIDE_FROM_USER\n", "Hello.", false],
-    ["MEIVA_DISPLAY_TO_USER\uFF1A\n", "MEIVA_DISPLAY_TO_USER\uFF1A\nHello.", false],
+    ["MEIVA_DISPLAY_TO_USER ", "Hello.", true],
+    ["MEIVA_HIDE_FROM_USER\t  ", "Hello.", false],
+    ["  MEIVA_DISPLAY_TO_USER ", "Hello.", true],
+    ["MEIVA_DISPLAY_TO_USER", "Hello.", true],
+    ["MEIVA_HIDE_FROM_USER", "Hello.", false],
+    ["**MEIVA_DISPLAY_TO_USER**\n", "**MEIVA_DISPLAY_TO_USER**\nHello.", false],
     ["", "Hello.", false],
   ])("routes explicit visibility from streamed header %j", (header, payload, userFacing) => {
     const info = { item_id: "5.0", agent_id: 1, explicit_visibility: true };
@@ -160,6 +165,54 @@ describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
     }
     items = applySystemEvent(items, { ...info, role: "chat_delta", content: "Hello." });
     expect(items[0]).toMatchObject({ payload: "  Hello.", user_facing: userFacing });
+  });
+
+  it.each([
+    {
+      chunks: ["  ", "MEIVA_HIDE", "_FROM_USER", " ", "Wait", "ing..."],
+      withheldCount: 4,
+      expectedAfterNext: { payload: "Wait", user_facing: false },
+      final: { payload: "Waiting...", user_facing: false },
+    },
+    {
+      chunks: ["MEIVA_DISPLAY", "_TO_USER", "\u4f60", "\u597d"],
+      withheldCount: 2,
+      expectedAfterNext: { payload: "\u4f60", user_facing: true },
+      final: { payload: "\u4f60\u597d", user_facing: true },
+    },
+    {
+      chunks: ["\n", "MEIVA_DISPLAY_TO_USER", "\t", "Ready"],
+      withheldCount: 3,
+      expectedAfterNext: { payload: "Ready", user_facing: true },
+      final: { payload: "Ready", user_facing: true },
+    },
+  ])("streams relaxed visibility markers without waiting for a newline: $chunks", ({
+    chunks, withheldCount, expectedAfterNext, final,
+  }) => {
+    const info = { item_id: "5.0", agent_id: 1, delivery_mode: "prefix" as const };
+    let items = applySystemEvent([], { ...info, role: "chat_start" });
+    for (let i = 0; i < withheldCount; i += 1) {
+      items = applySystemEvent(items, { ...info, role: "chat_delta", content: chunks[i] });
+      expect(items[0]).toMatchObject({ payload: "", user_facing: false });
+    }
+    items = applySystemEvent(items, { ...info, role: "chat_delta", content: chunks[withheldCount] });
+    expect(items[0]).toMatchObject(expectedAfterNext);
+    for (let i = withheldCount + 1; i < chunks.length; i += 1) {
+      items = applySystemEvent(items, { ...info, role: "chat_delta", content: chunks[i] });
+    }
+    expect(items[0]).toMatchObject(final);
+  });
+
+  it.each([
+    "MEIVA_HIDE_FROM_USER",
+    "MEIVA_DISPLAY_TO_USER",
+    "MEIVA_HIDE_FROM_USER   ",
+    "MEIVA_DISPLAY_TO_USER\r\n  ",
+  ])("projects bare or whitespace-only marker %j to an empty hidden item", (content) => {
+    const info = { item_id: "5.0", agent_id: 1, delivery_mode: "prefix" as const };
+    let items = applySystemEvent([], { ...info, role: "chat_start" });
+    items = applySystemEvent(items, { ...info, role: "chat_delta", content });
+    expect(items[0]).toMatchObject({ payload: "", user_facing: false });
   });
 
   it("releases an ordinary first line as soon as it cannot be a visibility marker", () => {

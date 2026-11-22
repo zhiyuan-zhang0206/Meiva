@@ -1154,4 +1154,34 @@ describe("virtualized restore", () => {
     expect(viewport().querySelector('[data-timeline-spacer="after"]')).toBeNull();
     expect(viewport().querySelector('.timeline-item[data-item-id="110.0"]')).not.toBeNull();
   });
+
+  it("does not jitter back to tail on a small mobile touch scroll-up in a virtualized timeline", () => {
+    const { virtualItems, flushObservers } = setupVirtualizedLayout();
+    const browser = fakeBrowser({ media: { "(pointer: coarse)": true } });
+    renderWithBrowser(host(
+      <TimelineView items={virtualItems} threadKey="42" scrollMemoryKey="virt-mobile-up:agent:42" />,
+    ), { browser });
+    flushObservers();
+    const tail = Math.max(0, viewport().scrollHeight - viewport().clientHeight);
+    expect(viewport().scrollTop).toBe(tail);
+
+    act(() => {
+      fireEvent.touchStart(viewport(), { touches: [{ clientX: 100, clientY: 500 }] });
+      fireEvent.touchMove(viewport(), { touches: [{ clientX: 100, clientY: 505 }] });
+      viewport().scrollTop = tail - 5;
+      fireEvent.scroll(viewport());
+      fireEvent.touchEnd(viewport(), { touches: [] });
+    });
+    flushObservers();
+    expect(viewport().scrollTop).toBe(tail - 5);
+
+    for (const nextTop of [tail - 8, tail - 10, tail - 10.4]) {
+      act(() => {
+        viewport().scrollTop = nextTop;
+        fireEvent.scroll(viewport());
+      });
+      flushObservers();
+      expect(viewport().scrollTop).toBe(nextTop);
+    }
+  });
 });

@@ -613,52 +613,85 @@ describe("line breaks (remark-breaks)", () => {
     expect(link?.textContent).toBe("\u7b2c\u4e09\u884c\u94fe\u63a5");
   });
 
-  describe("workspace file links and inline code paths", () => {
-    it("preserves file:// URLs and workspace-relative paths without rewriting to about:blank or adding icons", () => {
-      const { container } = renderMarkdown(
-        <ChatMarkdown content={"[code](file:///Users/dev/workspace/main.py) and [doc](docs/readme.md#L10)"} />,
-      );
-      const links = container.querySelectorAll("a");
-      expect(links).toHaveLength(2);
-      expect(links[0].getAttribute("href")).toBe("file:///Users/dev/workspace/main.py");
-      expect(links[1].getAttribute("href")).toBe("docs/readme.md#L10");
-      expect(container.querySelector("svg")).toBeNull();
-    });
-
-    it("renders inline code file paths as normal inline code without underlines, button wrappers or icons", () => {
-      const { container } = renderMarkdown(
-        <ChatMarkdown content={"Check `src/index.ts#L10-L20` and `to_user.md` for status"} />,
-      );
-      const codePaths = container.querySelectorAll('[data-testid="file-path-code"]');
-      expect(codePaths).toHaveLength(2);
-      expect(codePaths[0].querySelector("code")).not.toBeNull();
-      expect(codePaths[0].className).not.toContain("underline");
-      expect(codePaths[0].textContent).toBe("src/index.ts#L10-L20");
-      expect(codePaths[1].textContent).toBe("to_user.md");
-      expect(container.querySelector("button, svg")).toBeNull();
-    });
-
-    it("triggers onOpenFile when clicking a file link or inline code file path", () => {
+  describe("workspace file links", () => {
+    it("preserves explicit file:// URLs, workspace-relative links, and standard https:// links", () => {
       const onOpenFile = vi.fn();
       const { container } = renderMarkdown(
         <ChatMarkdown
-          content={"[open me](src/foo.py#L42) and `components/bar.tsx`"}
+          content={
+            "[FINAL.json](file:///Users/dev/workspace/FINAL.json) and [doc](docs/readme.md#L10) and [site](https://example.com) and https://example.org"
+          }
           onOpenFile={onOpenFile}
         />,
       );
+      const links = container.querySelectorAll("a");
+      expect(links).toHaveLength(4);
+      expect(links[0].getAttribute("href")).toBe("file:///Users/dev/workspace/FINAL.json");
+      expect(links[1].getAttribute("href")).toBe("docs/readme.md#L10");
+      expect(links[2].getAttribute("href")).toBe("https://example.com");
+      expect(links[2].getAttribute("target")).toBe("_blank");
+      expect(links[3].getAttribute("href")).toBe("https://example.org");
+      expect(links[3].getAttribute("target")).toBe("_blank");
+      expect(container.querySelector("svg")).toBeNull();
 
-      const link = container.querySelector('[data-testid="file-path-link"]');
-      expect(link).not.toBeNull();
-      link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      expect(onOpenFile).toHaveBeenCalledWith("src/foo.py", "42");
+      fireEvent.click(links[0]);
+      fireEvent.click(links[1]);
+      expect(onOpenFile).toHaveBeenCalledTimes(2);
+      expect(onOpenFile).toHaveBeenNthCalledWith(1, "file:///Users/dev/workspace/FINAL.json", undefined);
+      expect(onOpenFile).toHaveBeenNthCalledWith(2, "docs/readme.md", "10");
 
-      const codePath = container.querySelector('[data-testid="file-path-code"]');
-      expect(codePath).not.toBeNull();
-      codePath?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      expect(onOpenFile).toHaveBeenCalledWith("components/bar.tsx", undefined);
+      links[2].addEventListener("click", (e) => e.preventDefault());
+      fireEvent.click(links[2]);
+      expect(onOpenFile).toHaveBeenCalledTimes(2);
     });
 
-    it("lets the parent link handle clicks when inline code is nested inside a markdown link", () => {
+    it("does not turn plain text or inline code into clickable file links", () => {
+      const onOpenFile = vi.fn();
+      const content =
+        "SSH/GPU/Sunshine and release/\u7eed\u7ea6 and `foo/bar` and `src/foo.py` and `src/index.ts#L10-L20` and `to_user.md` and `SSH/GPU/Sunshine` and `release/\u7eed\u7ea6`";
+      const { container } = renderMarkdown(
+        <ChatMarkdown content={content} onOpenFile={onOpenFile} />,
+      );
+
+      expect(container.querySelectorAll('a, button, [role="link"], [data-testid="file-path-code"], [data-testid="file-path-link"]')).toHaveLength(0);
+      const codes = container.querySelectorAll("code");
+      expect(codes).toHaveLength(6);
+      for (const codeEl of codes) {
+        expect(codeEl.className).not.toContain("cursor-pointer");
+        expect(codeEl.parentElement?.className ?? "").not.toContain("cursor-pointer");
+        fireEvent.click(codeEl);
+      }
+      const paragraph = container.querySelector("p");
+      expect(paragraph).not.toBeNull();
+      fireEvent.click(paragraph!);
+      expect(onOpenFile).not.toHaveBeenCalled();
+    });
+
+    it("does not turn inline code into clickable links in inline mode either", () => {
+      const onOpenFile = vi.fn();
+      const { container } = renderMarkdown(
+        <h4>
+          <ChatMarkdown
+            inline
+            content={"SSH/GPU/Sunshine `foo/bar` `src/foo.py` release/\u7eed\u7ea6 [doc](docs/readme.md#L10)"}
+            onOpenFile={onOpenFile}
+          />
+        </h4>,
+      );
+
+      expect(container.querySelectorAll('[data-testid="file-path-code"], button')).toHaveLength(0);
+      expect(container.querySelectorAll('a, [role="link"]')).toHaveLength(1);
+      for (const codeEl of container.querySelectorAll("code")) {
+        fireEvent.click(codeEl);
+      }
+      expect(onOpenFile).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("link", { name: "doc" }));
+      expect(onOpenFile).toHaveBeenCalledTimes(1);
+      expect(onOpenFile).toHaveBeenCalledWith("docs/readme.md", "10");
+    });
+
+    it("lets the parent link handle clicks when inline code is nested inside an explicit markdown link", () => {
       const onOpenFile = vi.fn();
       const { container } = renderMarkdown(
         <ChatMarkdown
@@ -667,9 +700,10 @@ describe("line breaks (remark-breaks)", () => {
         />,
       );
 
+      expect(container.querySelector('[data-testid="file-path-code"]')).toBeNull();
       const codeEl = container.querySelector("a code");
       expect(codeEl).not.toBeNull();
-      codeEl?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      fireEvent.click(codeEl!);
       expect(onOpenFile).toHaveBeenCalledTimes(1);
       expect(onOpenFile).toHaveBeenCalledWith("file:///Users/dev/workspace/src/foo.py", "42");
     });

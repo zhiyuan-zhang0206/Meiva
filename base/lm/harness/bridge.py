@@ -11,6 +11,7 @@ from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
 from base.lm.harness.delivery import HarnessInput, Reconciliation, ReconciliationUnavailableError
 from base.lm.harness.engine import (
+    BackgroundWaitReporting,
     ContextDigestKeeping,
     HarnessSession,
     HarnessTurn,
@@ -549,6 +550,12 @@ class HarnessBridge:
         if session is None or not isinstance(session, SilenceFloorReporting):
             return None
         return session.silence_floor_monotonic(turn_ids)
+
+    async def waiting_on_background(self, turn_ids: Collection[str]) -> bool:
+        session = self._session
+        if session is None or not isinstance(session, BackgroundWaitReporting):
+            return False
+        return await session.waiting_on_background(turn_ids)
 
     def request_timing_refresh(self) -> None:
         session = self._session
