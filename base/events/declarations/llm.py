@@ -32,6 +32,11 @@ class LlmUsage(TypedDict):
     attribution: str
     source: NotRequired[str]
     parent_call_id: NotRequired[str]
+    call_id: NotRequired[str]
+    occurred_at: NotRequired[str]
+    provider_request_id: NotRequired[str]
+    cost_usd_exact: NotRequired[str]
+    complete: NotRequired[bool]
 
 
 # meiva:note
@@ -83,6 +88,13 @@ class LlmUsageMeteringFailed(TypedDict):
     failures: int
 
 
+class LlmUsageLedgerWriteFailed(TypedDict):
+    call_id: str
+    reason: Literal["conflict", "database"]
+    error_type: str
+    failures: int
+
+
 class LlmRetry(TypedDict):
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"]
     duration_seconds: float
@@ -126,6 +138,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=LlmUsageMeteringFailed,
         tier="anomaly",
         persist=True,
+    ),
+    "llm_usage_ledger_write_failed": telemetry_event(
+        "llm_usage_ledger_write_failed",
+        "synchronous LLM usage commit failed",
+        payload=LlmUsageLedgerWriteFailed,
+        tier="anomaly",
     ),
     "llm_turn_aborted": telemetry_event(
         "llm_turn_aborted",

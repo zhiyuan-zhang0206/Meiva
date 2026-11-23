@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -20,6 +21,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
 from loguru import logger
 
+from base.api_contracts.usage import UsageLedgerWriteError
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import UsageOptions, log_usage_from_message
 from base.lm.usage.reporting import FAILURE_REPORT_EVERY, should_report
@@ -49,7 +51,7 @@ class UsageEmitter(Protocol):
 
 
 class LlmUsageMeter(BaseCallbackHandler):
-    raise_error = False
+    raise_error = True
 
     def __init__(
         self,
@@ -57,11 +59,13 @@ class LlmUsageMeter(BaseCallbackHandler):
         model: str,
         catalog: ModelCatalog,
         emit: UsageEmitter = log_usage_from_message,
+        now: Callable[[], datetime] = process_now,
     ) -> None:
         super().__init__()
         self._model = model
         self._catalog = catalog
         self._emit = emit
+        self._now = now
         self._started: dict[UUID, float] = {}
         self._lock = threading.Lock()
         self._failures = 0
@@ -96,14 +100,15 @@ class LlmUsageMeter(BaseCallbackHandler):
         with self._lock:
             started = self._started.pop(run_id, None)
         latency_ms = None if started is None else (time.monotonic() - started) * 1_000.0
-        for generations in response.generations:
+        for input_index, generations in enumerate(response.generations):
             for generation in generations:
                 message: AIMessage | None = getattr(generation, "message", None)
-                if message is not None:
-                    self._record(message, latency_ms)
+                if message is not None and message.usage_metadata:
+                    self._record(message, latency_ms, f"api:{run_id}:{input_index}")
+                    break
 
-    def _record(self, message: AIMessage, latency_ms: float | None) -> None:
-        options = UsageOptions.metered(latency_ms)
+    def _record(self, message: AIMessage, latency_ms: float | None, call_id: str) -> None:
+        options = UsageOptions.metered(latency_ms, call_id=call_id)
         try:
             self._emit(
                 message,
@@ -111,8 +116,10 @@ class LlmUsageMeter(BaseCallbackHandler):
                 catalog=self._catalog,
                 usage_kind=DIRECT_USAGE_KIND,
                 options=options,
-                now=process_now(),
+                now=self._now(),
             )
+        except UsageLedgerWriteError:
+            raise
         except Exception as exc:
             self._report_failure(exc)
 

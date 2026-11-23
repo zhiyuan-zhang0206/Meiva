@@ -105,6 +105,7 @@ class Rates:
 class CostQuote:
     cost_usd: float
     rates: Rates
+    exact_usd: Decimal | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

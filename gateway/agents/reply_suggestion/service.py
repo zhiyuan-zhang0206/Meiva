@@ -322,7 +322,8 @@ class ReplySuggestionService:
                 agent_id=agent_id,
             )
             return _none("generation_failed")
-        log_usage_from_message(
+        await asyncio.to_thread(
+            log_usage_from_message,
             response["raw"],
             policy.model,
             usage_kind=DRAFT_USAGE_KIND,

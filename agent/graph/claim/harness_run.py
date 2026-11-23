@@ -451,22 +451,26 @@ class ForegroundRun:
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
-        log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
-        await self._projector.finish(
-            (turn,),
-            interrupted=turn.interrupted,
-            input_keys=self._turn_inputs.pop(event.turn_id, []),
-        )
-        self._committed_by_turn.pop(event.turn_id, None)
-        if not turn.is_error:
-            self._projector.reset_turn_delivery()
-            self._taken_back_for_abort = ()
-        self._turn_ended = True
-        if turn.interrupted:
-            self.interrupted = True
-            return
-        self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
-        await persist_last_active(self._ctx, self._agent_id, turn.text)
+        try:
+            await asyncio.to_thread(
+                log_turn_usage, self._ctx, self._agent_id, self._bridge.model, turn
+            )
+        finally:
+            await self._projector.finish(
+                (turn,),
+                interrupted=turn.interrupted,
+                input_keys=self._turn_inputs.pop(event.turn_id, []),
+            )
+            self._committed_by_turn.pop(event.turn_id, None)
+            if not turn.is_error:
+                self._projector.reset_turn_delivery()
+                self._taken_back_for_abort = ()
+            self._turn_ended = True
+            if turn.interrupted:
+                self.interrupted = True
+            else:
+                self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
+                await persist_last_active(self._ctx, self._agent_id, turn.text)
 
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:

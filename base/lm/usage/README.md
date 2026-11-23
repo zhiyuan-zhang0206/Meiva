@@ -1,10 +1,10 @@
 # Durable LLM Usage
 
-`base/lm/usage/` turns completed LLM calls into durable `llm_usage` events and matching billing spans. It is the shared accounting boundary for both LangChain messages and provider-specific raw usage fields.
+`base/lm/usage/` commits each reported usage unit to `llm_usage_ledger` in Postgres. It also emits `llm_usage` events and billing spans for the existing observation path. It is the shared accounting boundary for both LangChain messages and provider-specific raw usage fields.
 
 ## Usage emitters
 
-- `log_usage_from_message()` is the accounting path for completed LangChain messages; it records the `llm_usage` event, usage-time price snapshot (or `unpriced=1`), and its matching billing span.
+- `log_usage_from_message()` is the accounting path for completed LangChain messages; it records the usage-time price snapshot, then emits the matching event and billing span.
 - `log_usage_fields()` serves non-LangChain providers such as the Gemini embedding REST adapter and `decide()` (decision models, `tok_out=0`; see [Decision Models](../docs/decision-models.md)). `for_agent_id` explicitly attributes a daemon-generated event to its target agent; `source` labels the shared caller.
 - `usage_kind` distinguishes agent, chat, batch, and embedding consumption. `source` is an optional payload field for shared text callers (`web.fetch`, `understand` for text, and `understand.<type>` — `image`, `pdf`, `audio` or `video`, the richest type of the content — for media) and is kept distinct from the transport provenance column.
 - `log_usage_from_message(..., stamp_message=True)` (the main-conversation `log_llm_usage`) also writes the event's figures to `msg.additional_kwargs["meiva_usage"]`: one `quote`, one dict, two destinations.
@@ -18,7 +18,7 @@
 
 Exactly one layer owns a call's row. The factory owns it by default. A caller that emits the row itself — with its own `usage_kind`, `source` or agent id — builds with `meter=False`, or strips the meter from an injected build with `unmeter(model)`. The meter also stamps `msg.additional_kwargs["meiva_usage"]`, and `log_usage_from_message` refuses a message that already carries the stamp, so a caller that logs the same response cannot produce a second row.
 
-`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). A meter that cannot account for a call reports one `llm_usage_metering_failed` event and a rate-limited warning; it never fails the model call.
+`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). Each exhausted ledger write or conflicting replay emits one `llm_usage_ledger_write_failed` warning before propagating as a failed step. The OTLP logs lane sends the full event to Loki. Count exhausted writes and replay conflicts in Grafana with LogQL `sum(count_over_time({event_name="llm_usage_ledger_write_failed"}[5m]))` and inspect `reason`, `error_type`, and `call_id` in the event payload. It is a log-derived count under the explicit metric allowlist.
 
 ## Notes
 
@@ -36,6 +36,41 @@ Exactly one layer owns a call's row. The factory owns it by default. A caller th
   such as `priority_cache_read` and `priority_reasoning`.
 
 - Key deps: [Language Model Provider Layer](../docs/lm/lm.md) (provider-layer overview) and [LLM Billing Catalog](../pricing/docs/pricing.md) (price selection).
+
+## Database commit and history
+
+Cluster process boot supplies the database and machine identity. The usage path
+commits before the caller advances, using a separate transaction where the
+caller has no checkpoint transaction to share. The first committed report owns
+its time, machine and price snapshot. A replay of matching usage acknowledges
+that row. Conflicting provider facts raise. Meiva receipts use the provider and
+its request or response ID from `response_metadata`. The graph assigns its own
+message ID separately. Direct callbacks use the LangChain run ID and input
+index. A harness turn uses the provider session, the process generation persisted
+in the session registry, the local turn ID, and the step index. The generation
+advances when the same session resumes in a new process.
+
+The writer retries a transient database failure once with the same frozen
+report. An exhausted commit still emits `llm_usage` with the same ID, original
+occurrence time, and exact quoted cost for historical recovery. The error
+propagates after a completed harness turn finishes projecting its output. A
+process killed after the provider bills and before Postgres commits can leave a
+missing report. Use the provider bill to reconcile that window.
+
+`calls` counts the calls described by a report. A harness can report one step
+or a turn total. `complete` records whether the provider covered the usage.
+API and subscription reports carry different billing labels and use the same
+usage-time USD list prices. Subscription prices represent virtual spend.
+
+After deploying the writer to the gateway and every runner, run
+`meiva metrics backfill-usage-ledger --start YYYY-MM-DD --end YYYY-MM-DD` with
+an approved UTC interval that includes the old producers' final writes.
+Each batch commits independently. Re-running the same interval skips imported
+or dual-written IDs. Existing prices survive intact. Historical rows with no
+price can use the versioned archive at the stored time and carry
+`historical_catalog` as provenance. The batch size defaults to 1,000 reports
+to limit transaction duration. Compare counts, tokens and USD by UTC day,
+model and billing before cutting readers over.
 
 ## Selecting usage scopes
 

@@ -564,7 +564,7 @@ def _load_inputs(
     home: Path,
 ) -> LoadInputs:
     from base.lm.factory import process_provider_keys
-    from base.packages.plugin_providers import build_model_catalog
+    from meiva.sdk_surface.extensions import build_sdk_model_catalog
 
     if config is None:
         config = ConfigBoot()
@@ -578,7 +578,7 @@ def _load_inputs(
         clock = context.require_clock()
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-    catalog = build_model_catalog(home=home)
+    catalog = build_sdk_model_catalog(home, config, clients, machine)
     sampling = process_sampling_owner(
         context.rng if context is not None and context.rng is not None else _new_rng(),
         environ=config.process_environment(),

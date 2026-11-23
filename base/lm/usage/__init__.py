@@ -11,6 +11,13 @@ from typing import Literal
 from langchain_core.messages import AIMessage
 from loguru import logger
 
+from base.api_contracts.agent_contract import harness_billing_of_source
+from base.api_contracts.usage import (
+    UsageLedger,
+    UsageLedgerConflictError,
+    UsageLedgerEntry,
+    UsageLedgerWriteError,
+)
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
@@ -63,15 +70,17 @@ class UsageOptions:
     for_agent_id: int | None = None
     attribution: str | None = None
     stamp_message: bool = False
+    call_id: str | None = None
 
     @classmethod
-    def metered(cls, latency_ms: float | None) -> UsageOptions:
+    def metered(cls, latency_ms: float | None, *, call_id: str | None = None) -> UsageOptions:
         agent_id = ambient_agent_id()
         return cls(
             latency_ms=latency_ms,
             for_agent_id=agent_id,
             attribution="process" if agent_id is not None else "unattributed",
             stamp_message=True,
+            call_id=call_id,
         )
 
 
@@ -91,6 +100,8 @@ class UsageFields:
     source: str | None = None
     for_agent_id: int | None = None
     calls: int = 1
+    complete: bool = True
+    call_id: str | None = None
     parent_call_id: str | None = None
     # meiva:note
     # True when a multi-step batch caller (`log_turn_usage`) has already warned once for this turn's unpriced model so
@@ -143,6 +154,7 @@ def log_usage_from_message(
         default_ttl=_default_cache_write_ttl(model, catalog=catalog),
     )
     record: dict[str, object] = {}
+    complete = "input_tokens" in usage_metadata and "output_tokens" in usage_metadata
     logged = _log_usage(
         _UsageEvent(
             model=usage_model(msg, model, catalog=catalog),
@@ -160,8 +172,11 @@ def log_usage_from_message(
             source=options.source,
             for_agent_id=options.for_agent_id,
             attribution=options.attribution,
-            emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
+            emit_billing=complete,
             requested_model=model,
+            call_id=options.call_id,
+            provider_request_id=_provider_request_id(msg),
+            complete=complete,
             catalog=catalog,
             now=now,
         ),
@@ -170,6 +185,15 @@ def log_usage_from_message(
     if options.stamp_message:
         message_addl_kwargs(msg)["meiva_usage"] = record
     return logged
+
+
+def _provider_request_id(msg: AIMessage) -> str | None:
+    # meiva:link base/lm/usage/README.md
+    for field in ("request_id", "id"):
+        receipt = msg.response_metadata.get(field)
+        if isinstance(receipt, str) and receipt:
+            return receipt
+    return None
 
 
 def log_usage_fields(
@@ -197,6 +221,8 @@ def log_usage_fields(
             source=fields.source,
             for_agent_id=fields.for_agent_id,
             calls=fields.calls,
+            complete=fields.complete,
+            call_id=fields.call_id,
             parent_call_id=fields.parent_call_id,
             unpriced_already_reported=fields.unpriced_already_reported,
             catalog=catalog,
@@ -274,6 +300,9 @@ class _UsageEvent:
     cache_write_30m: int = 0
     attribution: str | None = None
     calls: int = 1
+    complete: bool = True
+    call_id: str | None = None
+    provider_request_id: str | None = None
     parent_call_id: str | None = None
     unpriced_already_reported: bool = False
 
@@ -303,19 +332,9 @@ def _log_usage(
             write_1h=event.cache_write_1h,
             write_30m=event.cache_write_30m,
         ),
-        at=event.priced_at,
+        at=event.priced_at or _utc_usage_time(event.now),
         prices=event.catalog.prices,
     )
-    if priced is not None:
-        snapshot = _price_snapshot(priced)
-    else:
-        if not event.unpriced_already_reported:
-            logger.warning(
-                "[llm usage] model {model!r} is unpriced; add it to "
-                "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
-                model=event.model,
-            )
-        snapshot = {"unpriced": 1}
     # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.
     record: dict[str, object] = {
@@ -324,13 +343,87 @@ def _log_usage(
         "out_total": event.out_total,
         **cache_fields,
         "reasoning": event.reasoning,
-        **snapshot,
+        **_usage_snapshot(event, priced),
         "attribution": event.attribution or _attribution(event.for_agent_id),
     }
+    vendor = vendor_of_model(event.model, catalog=event.catalog)
+    try:
+        inserted = _book_usage(event, priced, vendor, record)
+    except UsageLedgerConflictError:
+        raise
+    except UsageLedgerWriteError:
+        _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
+        raise
     if record_out is not None:
         record_out.update(record)
+    if inserted:
+        _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
+    return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
-    vendor = vendor_of_model(event.model, catalog=event.catalog)
+
+def _usage_snapshot(event: _UsageEvent, priced: CostQuote | None) -> dict[str, float]:
+    if priced is not None:
+        return _price_snapshot(priced)
+    if not event.unpriced_already_reported:
+        logger.warning(
+            "[llm usage] model {model!r} is unpriced; add it to "
+            "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
+            model=event.model,
+        )
+    return {"unpriced": 1}
+
+
+def _book_usage(
+    event: _UsageEvent, priced: CostQuote | None, vendor: str | None, record: dict[str, object]
+) -> bool:
+    resolve_ledger = event.catalog.usage_ledger
+    ledger = resolve_ledger() if resolve_ledger is not None else None
+    if ledger is None:
+        if not event.complete:
+            record["complete"] = False
+        return True
+    call_id = event.call_id
+    if call_id is None and event.provider_request_id is not None:
+        call_id = f"api:provider:{vendor or event.model}:{event.provider_request_id}"
+    if call_id is None:
+        call_id = ledger.new_call_id()
+    record["call_id"] = call_id
+    record["occurred_at"] = _utc_usage_time(event.now).isoformat()
+    if event.provider_request_id is not None:
+        record["provider_request_id"] = event.provider_request_id
+    if priced is not None and priced.exact_usd is not None:
+        record["cost_usd_exact"] = str(priced.exact_usd)
+    record["complete"] = event.complete
+    return _write_usage(ledger, call_id, event, priced, vendor)
+
+
+def _emit_usage_observation(
+    event: _UsageEvent,
+    priced: CostQuote | None,
+    vendor: str | None,
+    record: dict[str, object],
+    cache_text: str,
+    reason_pct: str,
+) -> None:
+    _emit_usage_span(event, priced, vendor)
+    usage_logger = (
+        logger.bind(agent_id=event.for_agent_id) if event.for_agent_id is not None else logger
+    )
+    usage_logger.info(
+        "[llm usage] in={in_total}" + cache_text + "  "
+        "out={out_total} reason={reasoning}{reason_pct}",
+        event="llm_usage",
+        calls=event.calls,
+        reason_pct=reason_pct,
+        latency_ms=event.latency_ms,
+        decode_ms=event.decode_ms,
+        usage_kind=event.usage_kind,
+        **_optional_fields(event),
+        **record,
+    )
+
+
+def _emit_usage_span(event: _UsageEvent, priced: CostQuote | None, vendor: str | None) -> None:
     if vendor is not None and event.emit_billing:
         emit_billing_event(
             BillingSpan(
@@ -352,22 +445,56 @@ def _log_usage(
             now=event.now,
         )
 
-    usage_logger = (
-        logger.bind(agent_id=event.for_agent_id) if event.for_agent_id is not None else logger
+
+def _utc_usage_time(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        return now.replace(tzinfo=UTC)
+    return now.astimezone(UTC)
+
+
+def _write_usage(
+    ledger: UsageLedger,
+    call_id: str,
+    event: _UsageEvent,
+    priced: CostQuote | None,
+    vendor: str | None,
+) -> bool:
+    price_snapshot: dict[str, float | str] = {}
+    if priced is not None:
+        price_snapshot.update(_price_snapshot(priced))
+        del price_snapshot["cost_usd"]
+        price_snapshot["priced_at"] = (event.priced_at or _utc_usage_time(event.now)).isoformat()
+        provenance = event.catalog.prices.provenance(event.model)
+        if provenance is not None:
+            price_snapshot["source_url"], price_snapshot["source_checked_at"] = provenance
+    return ledger.write(
+        UsageLedgerEntry(
+            call_id=call_id,
+            occurred_at=_utc_usage_time(event.now),
+            agent_id=event.for_agent_id if event.for_agent_id is not None else ambient_agent_id(),
+            machine=ledger.machine(),
+            cluster=ledger.cluster,
+            source=event.source,
+            billing=harness_billing_of_source(event.source).value,
+            usage_kind=event.usage_kind,
+            model=event.model,
+            requested_model=event.requested_model,
+            provider=vendor,
+            provider_request_id=event.provider_request_id,
+            calls=event.calls,
+            complete=event.complete,
+            tokens_in=event.in_total,
+            tokens_out=event.out_total,
+            tokens_reasoning=event.reasoning,
+            cache_read=event.cache_read,
+            cache_write_5m=event.cache_write_5m or None,
+            cache_write_1h=event.cache_write_1h or None,
+            cache_write_30m=event.cache_write_30m or None,
+            cost_usd=priced.exact_usd if priced is not None else None,
+            price_snapshot=price_snapshot,
+            price_source="live" if priced is not None else None,
+        )
     )
-    usage_logger.info(
-        "[llm usage] in={in_total}" + cache_text + "  "
-        "out={out_total} reason={reasoning}{reason_pct}",
-        event="llm_usage",
-        calls=event.calls,
-        reason_pct=reason_pct,
-        latency_ms=event.latency_ms,
-        decode_ms=event.decode_ms,
-        usage_kind=event.usage_kind,
-        **_optional_fields(event),
-        **record,
-    )
-    return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
 
 # meiva:note

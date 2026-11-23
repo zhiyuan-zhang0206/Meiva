@@ -321,7 +321,7 @@ async def embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog, now=now())
+    await asyncio.to_thread(_emit_billing, body, catalog=catalog, now=now())
     return _vectors_from_body(body, texts)
 
 

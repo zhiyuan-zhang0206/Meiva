@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Literal
 
@@ -190,8 +191,22 @@ async def _handle_harness_abort(
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
 ) -> HarnessTurnHaltedError | None:
-    if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
-        log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
+    try:
+        if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
+            await asyncio.to_thread(log_turn_usage, ctx, agent_id, bridge.model, exc.outcome)
+    finally:
+        halted = await _finish_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+    return halted
+
+
+async def _finish_harness_abort(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    projector: ReadTimelineSink,
+    run: ForegroundRun,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+) -> HarnessTurnHaltedError | None:
     if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
         reason = (
             exc.retire_reason

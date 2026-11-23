@@ -3,6 +3,7 @@ import logging
 import secrets
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
+from dataclasses import replace
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -26,6 +27,7 @@ from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
 from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoints
+from base.db.usage_ledger import bind_usage_ledger
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.system.cron.health_job import register_os_cron
@@ -477,11 +479,17 @@ def create_app(
     state.gateway_config = config
     state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
     state.scratch = SYSTEM_SCRATCH
-    state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
+        catalog = replace(
+            catalog,
+            usage_ledger=partial(
+                bind_usage_ledger, process.database, process.machine.name, process.home
+            ),
+        )
         state.memory_embedder = memory_router.build_embedder(
             config.memory_search, catalog, now=state.clock.now, rng=config.rng
         )
+    state.catalog = catalog
     state.command_catalog = CommandCatalog.system(
         skills=partial(
             load_skill_names,

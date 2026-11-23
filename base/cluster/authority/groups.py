@@ -20,7 +20,7 @@ from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedEr
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
 
-GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
+GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events", "llm_usage_ledger")
 
 
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
@@ -46,7 +46,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
     ("SELECT, INSERT", ("notification_events",)),
     ("SELECT, INSERT", ("audit_events",)),
-    ("SELECT, INSERT", ("telemetry_events",)),
+    ("SELECT, INSERT", ("telemetry_events", "llm_usage_ledger")),
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
     ("SELECT, INSERT", ("agent_metric_observations",)),
     (

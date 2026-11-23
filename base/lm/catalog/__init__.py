@@ -20,11 +20,12 @@ decision prefix of the same vendor.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from types import MappingProxyType
 
+from base.api_contracts.usage import UsageLedger
 from base.lm.catalog.decide.types import DecisionModelSpec
 from base.lm.catalog.provider_contract import (
     DecisionProviderContribution,
@@ -45,6 +46,9 @@ class ModelCatalog:
     bindings: Mapping[str, ProviderBinding]
     stops: Mapping[str, StopSpec]
     prices: PriceBook
+    usage_ledger: Callable[[], UsageLedger | None] | None = field(
+        default=None, kw_only=True, repr=False, compare=False
+    )
     decision_models: Mapping[str, DecisionModelSpec] = field(
         default_factory=lambda: MappingProxyType({})
     )

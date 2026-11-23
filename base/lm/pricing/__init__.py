@@ -73,6 +73,7 @@ import json
 import math
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -321,7 +322,17 @@ def quote(
         + tok_out * selected.output
         + sum(count * (rate or 0) for count, rate in zip(writes, write_rates, strict=True))
     ) / 1_000_000
-    return CostQuote(cost_usd=cost, rates=selected)
+    exact = _exact_cost(
+        (cache_miss, cache.read, tok_out, *writes), (*selected.as_tuple(), *write_rates)
+    )
+    return CostQuote(cost_usd=cost, rates=selected, exact_usd=exact)
+
+
+def _exact_cost(quantities: tuple[int, ...], rates: tuple[float | None, ...]) -> Decimal:
+    return sum(
+        (count * Decimal(str(rate or 0)) for count, rate in zip(quantities, rates, strict=True)),
+        Decimal(0),
+    ).scaleb(-6)
 
 
 def cost_usd(

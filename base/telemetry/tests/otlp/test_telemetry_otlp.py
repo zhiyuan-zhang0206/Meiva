@@ -263,6 +263,29 @@ def test_only_explicit_metrics_export_with_fixed_kinds(otlp_backend: OtlpFixture
     assert json.loads(usage.body)["attributes"]["cost_usd"] == 0.125
 
 
+def test_usage_ledger_failure_keeps_the_loki_event_without_a_metric(
+    otlp_backend: OtlpFixture,
+) -> None:
+    backend, log_exporter, metric_reader = otlp_backend
+    event = otlp_test_event(
+        event_name="llm_usage_ledger_write_failed",
+        level="warning",
+        attributes={
+            "call_id": "api:receipt",
+            "reason": "database",
+            "error_type": "QueryCanceled",
+            "failures": 1,
+        },
+    )
+    backend.export_batch([event])
+    backend.flush()
+
+    [record] = log_exporter.get_finished_logs()
+    assert (record.log_record.attributes or {})["event_name"] == event.event_name
+    _assert_canonical_log_body(record, event)
+    assert collected_metrics(metric_reader) == {}
+
+
 @pytest.mark.parametrize("process", ["agent-exec", "sdk", "schedule-runner", "cli-health-probe"])
 def test_short_lived_process_reports_queue_loss_on_the_metrics_lane(
     otlp_backend: OtlpFixture, process: str

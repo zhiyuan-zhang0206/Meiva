@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from datetime import date
 from typing import get_args
 
 from base.events.contract import EventGroupBy
@@ -148,6 +149,13 @@ class _MetricsBackfillUnpricedOptions:
 
 
 @dataclass(frozen=True)
+class _UsageLedgerBackfillOptions:
+    start: date
+    end: date
+    batch_size: int
+
+
+@dataclass(frozen=True)
 class _StatsOptions:
     hours: int | None
     json: bool
@@ -180,6 +188,16 @@ def _h_metrics_backfill_unpriced(args: argparse.Namespace) -> int:
         today=runtime_of(args).clock.now().astimezone(UTC).date(),
         apply=opts.apply,
         as_json=opts.json,
+    )
+
+
+def _h_usage_ledger_backfill(args: argparse.Namespace) -> int:
+    from cli.commands.management.metrics_backfill import cmd_backfill_usage_ledger
+    from cli.database import database_factory_of
+
+    opts = options(args, _UsageLedgerBackfillOptions)
+    return cmd_backfill_usage_ledger(
+        database_factory_of(args), start=opts.start, end=opts.end, batch_size=opts.batch_size
     )
 
 
@@ -232,6 +250,20 @@ def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     )
     backfill_p.add_argument("--json", action="store_true", help="print the backfill report as JSON")
     backfill_p.set_defaults(func=_h_metrics_backfill_unpriced)
+
+    ledger_backfill = metrics_sub.add_parser(
+        "backfill-usage-ledger", help="import retained usage reports into the business ledger"
+    )
+    ledger_backfill.add_argument(
+        "--start", required=True, type=date.fromisoformat, help="first UTC day"
+    )
+    ledger_backfill.add_argument(
+        "--end", required=True, type=date.fromisoformat, help="exclusive UTC day"
+    )
+    ledger_backfill.add_argument(
+        "--batch-size", default=1000, type=int, help="maximum reports per transaction"
+    )
+    ledger_backfill.set_defaults(func=_h_usage_ledger_backfill)
 
 
 def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

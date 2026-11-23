@@ -86,7 +86,7 @@ def _raise_retry_budget_exhausted(attempt: int, policy: RetryPolicy) -> NoReturn
     )
 
 
-def _finalize_turn_observability(
+async def _finalize_turn_observability(
     publisher: AgentEventPublisher,
     agent_id: int,
     final_msg: AIMessage,
@@ -113,7 +113,8 @@ def _finalize_turn_observability(
         kw["meiva_code_ms_by_block"] = {
             str(block_idx): ms for block_idx, ms in code_ms_by_block.items()
         }
-    log_llm_usage(
+    await asyncio.to_thread(
+        log_llm_usage,
         final_msg,
         model=model,
         agent_id=agent_id,
@@ -412,7 +413,7 @@ async def _llm_node_impl(
     if text:
         logger.info("[text] {body}", event="text", body=text)
     await persist_last_active(ctx, agent_id, text)
-    _finalize_turn_observability(
+    await _finalize_turn_observability(
         publisher,
         agent_id,
         final_msg,
