@@ -47,7 +47,7 @@ from cli.commands.observability.tests.observability_inputs import (
     lgtm_settings,
     observability,
 )
-from cli.commands.observability.tests.scripted_http import serve
+from cli.commands.observability.tests.scripted_http import Reply, serve
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -186,6 +186,49 @@ def test_converge_restores_missing_and_changed_grafana_release_files(
                 binary.chmod(0o555)
         ensure(lgtm_unit, repo, services=frozenset({"grafana"}), database=operator_database)
         assert len(served.received) == 3
+
+
+@pytest.mark.parametrize("surviving_release", ["staged", "previous", "published"])
+def test_converge_recovers_interrupted_grafana_install_before_an_unavailable_mirror(
+    db_url: str,
+    lgtm_unit: LgtmUnit,
+    operator_database: DatabaseFactory,
+    tmp_path: Path,
+    surviving_release: str,
+) -> None:
+    mirror = Mirror("darwin-arm64")
+    services = frozenset({"grafana"})
+    native = lgtm_unit.native
+    release = native / "grafana-home"
+    with serve(mirror.routes("/grafana.tar.gz")) as served:
+        repo = checkout_pinning(tmp_path / "online", mirror.pins(served.url))
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+
+    staged = native / "meiva-lgtm-tree-interrupted"
+    previous = native / "meiva-lgtm-previous-interrupted"
+    if surviving_release != "published":
+        release.rename(previous)
+    if surviving_release == "staged":
+        shutil.copytree(previous, staged)
+    else:
+        staged.mkdir()
+    survivor = {"staged": staged, "previous": previous, "published": release}[surviving_release]
+    expected_inode = survivor.stat().st_ino
+    (native / "version-grafana").write_text("before-interruption\n")
+    (native / "meiva-lgtm-unpack-interrupted").mkdir()
+    (native / "meiva-lgtm-grafana-download-interrupted").mkdir()
+
+    with serve({}, otherwise=Reply(status=503)) as unavailable:
+        repo = checkout_pinning(tmp_path / "offline", mirror.pins(unavailable.url))
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+
+    assert not unavailable.received
+    assert release.stat().st_ino == expected_inode
+    assert (release / "data/plugins-bundled/prometheus/plugin.json").read_bytes() == b"{}"
+    assert (release / "bin/grafana").stat().st_mode & 0o222 == 0
+    assert (native / "version-grafana").read_text() == "13.2.3\n"
+    assert not list(native.glob("meiva-lgtm-*"))
 
 
 def test_only_the_backend_with_a_stale_marker_is_downloaded_again(

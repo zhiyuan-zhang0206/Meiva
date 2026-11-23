@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import stat
 from collections.abc import Iterator
 from pathlib import Path
 
+from base.paths.scratch import ScratchSpace
+
 _MANIFEST = ".meiva-release.json"
 _WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+GRAFANA_STAGING_PREFIX = "meiva-lgtm-tree-"
+GRAFANA_BACKUP_PREFIX = "meiva-lgtm-previous-"
+GRAFANA_UNPACK_PREFIX = "meiva-lgtm-unpack-"
+GRAFANA_DOWNLOAD_PREFIX = "meiva-lgtm-grafana-download-"
 
 
 def _raise_walk_error(error: OSError) -> None:
@@ -73,3 +80,62 @@ def grafana_release_problem(home: Path, *, archive_sha256: str) -> str | None:
     except (OSError, ValueError) as error:
         return str(error)
     return None
+
+
+def _remove_work_tree(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    path.chmod(0o700)
+    for directory, subdirs, _ in path.walk(on_error=_raise_walk_error):
+        for subdir in subdirs:
+            (directory / subdir).chmod(0o700)
+    shutil.rmtree(path)
+
+
+def publish_grafana_release(staged: Path, destination: Path, *, previous: Path) -> None:
+    backed_up = not destination.is_symlink() and destination.is_dir()
+    if backed_up:
+        destination.rename(previous)
+    else:
+        destination.unlink(missing_ok=True)
+    try:
+        staged.rename(destination)
+    except OSError:
+        if backed_up:
+            previous.rename(destination)
+        raise
+    if backed_up:
+        _remove_work_tree(previous)
+
+
+def _release_work_paths(home: Path, *prefixes: str) -> Iterator[Path]:
+    for prefix in prefixes:
+        yield from sorted(home.parent.glob(prefix + "*"))
+
+
+def recover_grafana_release(home: Path, *, archive_sha256: str, scratch: ScratchSpace) -> bool:
+    candidates = tuple(_release_work_paths(home, GRAFANA_STAGING_PREFIX, GRAFANA_BACKUP_PREFIX))
+    other_work = tuple(_release_work_paths(home, GRAFANA_DOWNLOAD_PREFIX, GRAFANA_UNPACK_PREFIX))
+    if not candidates and not other_work:
+        return False
+    if grafana_release_problem(home, archive_sha256=archive_sha256) is None:
+        return True
+    for candidate in candidates:
+        if grafana_release_problem(candidate, archive_sha256=archive_sha256) is None:
+            with scratch.make(prefix=GRAFANA_BACKUP_PREFIX, parent=home.parent) as previous:
+                publish_grafana_release(candidate, home, previous=previous)
+            print(f"  · lgtm native: recovered Grafana release from {candidate.name}")
+            return True
+    return False
+
+
+def clean_grafana_release_work(home: Path) -> None:
+    for path in _release_work_paths(
+        home,
+        GRAFANA_STAGING_PREFIX,
+        GRAFANA_BACKUP_PREFIX,
+        GRAFANA_UNPACK_PREFIX,
+        GRAFANA_DOWNLOAD_PREFIX,
+    ):
+        _remove_work_tree(path)

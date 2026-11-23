@@ -39,7 +39,14 @@ from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._grafana_release import (
+    GRAFANA_BACKUP_PREFIX,
+    GRAFANA_DOWNLOAD_PREFIX,
+    GRAFANA_STAGING_PREFIX,
+    GRAFANA_UNPACK_PREFIX,
+    clean_grafana_release_work,
     grafana_release_problem,
+    publish_grafana_release,
+    recover_grafana_release,
     seal_grafana_release,
 )
 from cli.commands.observability._lgtm_alert_contact import (
@@ -268,9 +275,9 @@ def _extract_tree(
     parent = destination.parent
     parent.mkdir(parents=True, exist_ok=True)
     with (
-        scratch.make(prefix="meiva-lgtm-unpack-", parent=parent) as extracted,
-        scratch.make(prefix="meiva-lgtm-tree-", parent=parent) as staged,
-        scratch.make(prefix="meiva-lgtm-previous-", parent=parent) as previous,
+        scratch.make(prefix=GRAFANA_UNPACK_PREFIX, parent=parent) as extracted,
+        scratch.make(prefix=GRAFANA_STAGING_PREFIX, parent=parent) as staged,
+        scratch.make(prefix=GRAFANA_BACKUP_PREFIX, parent=parent) as previous,
     ):
         with tarfile.open(archive) as bundle:
             bundle.extractall(extracted, filter="data")
@@ -280,19 +287,9 @@ def _extract_tree(
         roots[0].rename(staged)
         seal_grafana_release(staged, archive_sha256=archive_sha256)
         # meiva:note
-        # Renames within one parent work even for read-only directories. The old tree
-        # stays sealed until it is unreachable at the Grafana homepath.
-        backed_up = not destination.is_symlink() and destination.is_dir()
-        if backed_up:
-            destination.rename(previous)
-        else:
-            destination.unlink(missing_ok=True)
-        try:
-            staged.rename(destination)
-        except OSError:
-            if backed_up:
-                previous.rename(destination)
-            raise
+        # Both renames stay in one parent so the old tree can remain sealed until
+        # unlinked from the homepath. Converge can rediscover both names after SIGKILL.
+        publish_grafana_release(staged, destination, previous=previous)
 
 
 # meiva:note
@@ -307,7 +304,13 @@ def download_and_verify(
     limits: DownloadLimits,
     scratch: ScratchSpace,
 ) -> tuple[Path, ...]:
-    with scratch.make(prefix="meiva-lgtm-download-") as temporary_dir:
+    is_grafana = name == "grafana"
+    if is_grafana:
+        native_dir.mkdir(parents=True, exist_ok=True)
+    with scratch.make(
+        prefix=GRAFANA_DOWNLOAD_PREFIX if is_grafana else "meiva-lgtm-download-",
+        parent=native_dir if is_grafana else None,
+    ) as temporary_dir:
         archive = temporary_dir / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
         download_with_retry(asset["url"], archive, limits=limits)
@@ -340,6 +343,12 @@ def download_and_verify(
                 _extract_member(name, archive, native_dir / destination, member, scratch=scratch)
             case _:
                 assert_never(extraction)
+        return _write_install_markers(native_dir, name, version=version, tag=tag)
+
+
+def _write_install_markers(
+    native_dir: Path, name: str, *, version: str, tag: str
+) -> tuple[Path, ...]:
     return tuple(
         native_dir / filename
         for filename, content in install_markers(name, version=version, tag=tag)
@@ -613,10 +622,24 @@ def _ensure_assets(
     scratch: ScratchSpace,
 ) -> list[Path]:
     assets = native_versions(repo, tag=tag)
+    changed: list[Path] = []
+    release = native_dir / "grafana-home"
+    recovered = "grafana" in services and recover_grafana_release(
+        release, archive_sha256=assets["grafana"]["sha256"], scratch=scratch
+    )
+    if recovered:
+        changed.extend(
+            _write_install_markers(
+                native_dir, "grafana", version=assets["grafana"]["version"], tag=tag
+            )
+        )
+        clean_grafana_release_work(release)
     installed = _installed_markers(native_dir, tuple(assets))
-    if "grafana" in services and (
-        problem := grafana_release_problem(
-            native_dir / "grafana-home", archive_sha256=assets["grafana"]["sha256"]
+    if (
+        "grafana" in services
+        and not recovered
+        and (
+            problem := grafana_release_problem(release, archive_sha256=assets["grafana"]["sha256"])
         )
     ):
         print(f"  · lgtm native: Grafana release needs reinstall ({problem})")
@@ -627,7 +650,6 @@ def _ensure_assets(
         installed=installed,
         services=services,
     )
-    changed: list[Path] = []
     for step in plan:
         asset = assets[step.name]
         match step:
@@ -645,6 +667,8 @@ def _ensure_assets(
                         scratch=scratch,
                     )
                 )
+                if step.name == "grafana":
+                    clean_grafana_release_work(release)
                 print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
             case _:
                 assert_never(step)
