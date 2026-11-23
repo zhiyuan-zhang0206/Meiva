@@ -38,6 +38,7 @@ from tests.scripts.test_alert_rules_signals import SIGNALS
 _EXPECTED_UIDS = {
     "meiva-ops-alert-pipeline-watchdog",
     "meiva-ops-alert-pipeline-silent",
+    "meiva-ops-grafana-rule-evaluation-failed",
     "meiva-ops-warning-error-spike",
     "meiva-ops-llm-rate-limit",
     "meiva-ops-sse-drop-backlog",
