@@ -166,7 +166,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 TRACESTATE="",
             )
         self._transport: AppServerTransport = transport or StdioAppServer(
-            config.command(resolved_binary(config, environ)),
+            config.session_command(resolved_binary(config, environ)),
             cwd=config.cwd,
             environ=child_env,
             trace_requests=config.otlp_endpoint is not None and config.trace_enabled,

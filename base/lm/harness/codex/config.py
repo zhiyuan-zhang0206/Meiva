@@ -65,7 +65,10 @@ class CodexConfig:
             raise ValueError("max_buffered_events must be at least 1")
 
     def command(self, binary: str | None = None) -> tuple[str, ...]:
-        command = (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)
+        return (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)
+
+    def session_command(self, binary: str | None = None) -> tuple[str, ...]:
+        command = self.command(binary)
         if self.otlp_endpoint is None:
             return (
                 *command,
