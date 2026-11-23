@@ -23,7 +23,11 @@ done < "$path_file"
 # not answer a TypeScript question, which is a property of this tree, not of the push.
 run_meizel() {
     local rc=0
-    .venv/bin/python -m meizel check "$@" || rc=$?
+    if [[ "$#" -eq 0 ]]; then
+        .venv/bin/python -m scripts.hooks.meizel_run || rc=$?
+    else
+        .venv/bin/python -m meizel check "$@" || rc=$?
+    fi
     if [[ "$rc" -eq 3 ]]; then
         echo "WARNING: PRE-PUSH SKIPPED [meizel]: frontend dependencies are not ready for the TypeScript analyzer (reason above). CI must pass before merge." >&2
         return 0

@@ -978,12 +978,19 @@ frontend files (`scripts/hooks/precommit-eslint.sh`) and the whole project when 
 lint setup itself changed. A hook that scans the whole repository on every
 commit regardless of the diff is a design error, not a price of the check; CI's
 `pre-commit run --all-files` is the full scan of every hook and the merge gate.
-Pre-push selectors share `scripts/hooks/prepush-base.sh`: the contribution is
-`merge-base(origin/main, HEAD)..HEAD`, independent of a force-push's old remote
-tip. Missing `origin/main` or a missing merge-base fails explicitly; fetch the
-base before pushing. Frontend hooks always enter the selector, so deletions and
-renames cannot disappear behind pre-commit's file filter. Upstream-only UI
+Pre-push refreshes `origin/main` once for the branch-check group in
+`scripts/hooks/prepush-base.sh`. The checks share the merge base and evaluate
+the contribution `merge-base(origin/main, HEAD)..HEAD`. A failed refresh uses
+the local tracking ref with a warning. A missing ref or merge base leaves the
+scope unknown and the affected checks report their existing errors or
+conservative fallbacks. Frontend hooks always enter the selector, so deletions
+and renames cannot disappear behind pre-commit's file filter. Upstream-only UI
 changes inherited by rebase invoke no frontend tool.
+
+Preflight and pre-push share a successful full Meizel report when the checkout
+is clean and the tree and toolchain match. Scoped preflight checks still leave
+the full graph for push to verify. Push reuse also requires the actual pushed
+commit to be the checkout's HEAD.
 
 `frontend-tsc` retains project typecheck and route generation for owned frontend
 changes. `frontend-eslint-full` keeps its ID for CI compatibility but now checks

@@ -135,7 +135,7 @@ def _errors_in_diff(output: str, change: ChangeSet) -> int:
 # meiva:note
 # What the checker claimed: how many manifests and fact edges it read, and the exit code. A bare
 # `ok` hides the difference between "covered the tree" and "found nothing to look at".
-def _meizel_field(code: int, output: str, seconds: float) -> str:
+def meizel_field(code: int, output: str, seconds: float) -> str:
     edges = re.search(r"(\d+) fact edges", output)
     manifests = re.search(r"(\d+) manifests", output)
     parts = [f"exit={code}"]
@@ -264,7 +264,7 @@ def fields_for(
     if run.label == "pyright":
         return _pyright_fields(output, seconds, change)
     if run.label == "meizel":
-        return {"meizel": _meizel_field(code, output, seconds)}
+        return {"meizel": meizel_field(code, output, seconds)}
     if run.label == "vitest-app":
         return {"vitest-app": _vitest_field(code, output, seconds)}
     if run.label == "debt":

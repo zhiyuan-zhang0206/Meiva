@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -20,11 +21,8 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
     ci_document = yaml.safe_load(
         (_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     )
-    static_expr = ci_document["jobs"]["backend-static-tests"]["strategy"]["matrix"]["group"]
-    assert (
-        static_expr
-        == "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4, 5, 6, 7, 8]') }}"
-    )
+    static_expr = ci_document["jobs"]["backend-static-tests"]["strategy"]["matrix"]
+    ci_static = json.loads(static_expr.split(" || '", 1)[1].split("'", 1)[0])["group"]
     nightly_static = _workflow_matrix_groups("refresh-test-durations.yml", "measure-static")
     release_static = _workflow_matrix_groups("release-gate.yml", "backend-static")
     ci_backend = _workflow_matrix_groups("ci.yml", "backend-shard")
@@ -32,7 +30,9 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
     ci_e2e = _workflow_matrix_groups("ci.yml", "e2e-shard")
     nightly_e2e = _workflow_matrix_groups("refresh-test-durations.yml", "measure-e2e")
 
-    assert refresh.STATIC_SHARDS == 8 == len(nightly_static) == len(release_static)
+    assert (
+        refresh.STATIC_SHARDS == 8 == len(ci_static) == len(nightly_static) == len(release_static)
+    )
     assert refresh.BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
     assert refresh.E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
 

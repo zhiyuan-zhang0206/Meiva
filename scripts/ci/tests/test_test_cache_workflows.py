@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -55,38 +59,12 @@ def _env_image_flags(script: str) -> list[str]:
     return re.findall(r'--env\s+"image=[^"]+"', script)
 
 
-def test_workflow_switch_and_classify_probe_contract() -> None:
-    ci = _load_workflow(_CI_WORKFLOW)
-    env = _mapping(ci.get("env"), "ci.yml env")
-    assert env["TEST_CACHE_MODE"] == "enforce"
-
-    classify = _jobs(ci, "ci.yml")["classify"]
-    outputs = _mapping(classify.get("outputs"), "classify outputs")
-    assert outputs["test_cache_skip"] == "${{ steps.test_cache.outputs.skip_enabled }}"
-    assert outputs["test_cache_canary"] == "${{ steps.test_cache.outputs.canary }}"
-
-    probe = _step(classify, "Probe PR test cache")
-    assert probe.get("id") == "pr_cache"
-    assert probe.get("continue-on-error") is True
-    probe_with = _mapping(probe.get("with"), "probe with")
-    assert probe_with["lookup-only"] is True
-    assert probe_with["key"] == f"{_PR_CACHE_PREFIX}none-${{{{ github.run_id }}}}"
-    assert probe_with["restore-keys"] == _PR_CACHE_PREFIX
-    assert probe_with["path"] == "tmp/test-cache/pr-passes.jsonl"
-
-    decide = _step(classify, "Decide static test cache mode")
-    assert decide.get("id") == "test_cache"
-    decide_run = _string(decide.get("run"), "decide run")
-    assert "scripts/ci/pull_requests/test_cache.py decide" in decide_run
-    assert '--mode "$TEST_CACHE_MODE"' in decide_run
-
-
 def test_dual_prefix_restore_contract() -> None:
     ci_jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
     warm_jobs = _jobs(_load_workflow(_WARM_WORKFLOW), "cache-warm.yml")
 
     plan_main_restore = _mapping(
-        _step(ci_jobs["test-cache-plan"], "Restore main recorded passes").get("with"),
+        _step(ci_jobs["test-cache-report"], "Restore main recorded passes").get("with"),
         "ci plan main restore",
     )
     assert plan_main_restore["path"] == "tmp/test-cache/passes.jsonl"
@@ -94,7 +72,7 @@ def test_dual_prefix_restore_contract() -> None:
     assert plan_main_restore["restore-keys"] == _MAIN_CACHE_PREFIX
 
     plan_pr_restore = _mapping(
-        _step(ci_jobs["test-cache-plan"], "Restore PR recorded passes").get("with"),
+        _step(ci_jobs["test-cache-report"], "Restore PR recorded passes").get("with"),
         "ci plan pr restore",
     )
     assert plan_pr_restore["path"] == "tmp/test-cache/pr-passes.jsonl"
@@ -166,10 +144,6 @@ def test_warm_and_ci_jobs_share_container_image_and_pytest_args() -> None:
     ci_jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
     warm_jobs = _jobs(_load_workflow(_WARM_WORKFLOW), "cache-warm.yml")
 
-    ci_plan_image = _string(
-        _mapping(ci_jobs["test-cache-plan"].get("container"), "ci plan container").get("image"),
-        "ci plan image",
-    )
     ci_report_image = _string(
         _mapping(ci_jobs["test-cache-report"].get("container"), "ci report container").get("image"),
         "ci report image",
@@ -188,16 +162,9 @@ def test_warm_and_ci_jobs_share_container_image_and_pytest_args() -> None:
         _mapping(warm_jobs["test-cache-seed"].get("container"), "warm seed container").get("image"),
         "warm seed image",
     )
-    assert ci_plan_image == ci_report_image == ci_static_image == warm_plan_image == warm_seed_image
-    assert ci_plan_image.startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
+    assert ci_report_image == ci_static_image == warm_plan_image == warm_seed_image
+    assert ci_report_image.startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
 
-    ci_plan_run = _string(
-        _step(
-            ci_jobs["test-cache-plan"],
-            "Plan the static-lane tests against the recorded passes",
-        ).get("run"),
-        "ci plan run",
-    )
     ci_report_run = _string(
         _step(ci_jobs["test-cache-report"], "Report cache outcome and record passes").get("run"),
         "ci report run",
@@ -206,49 +173,21 @@ def test_warm_and_ci_jobs_share_container_image_and_pytest_args() -> None:
         _step(warm_jobs["test-cache-plan"], "Plan missing static-lane tests").get("run"),
         "warm plan run",
     )
-    ci_plan_args = _pytest_arg_flags(ci_plan_run)
     ci_report_args = _pytest_arg_flags(ci_report_run)
     warm_args = _pytest_arg_flags(warm_plan_run)
-    assert ci_plan_args, "expected --pytest-arg flags in ci.yml test-cache-plan"
-    assert ci_plan_args == ci_report_args == warm_args
+    assert ci_report_args
+    assert ci_report_args == warm_args
 
-    for script in (ci_plan_run, ci_report_run, warm_plan_run):
+    for script in (ci_report_run, warm_plan_run):
         env_img = _env_image_flags(script)
         assert len(env_img) == 1
         assert "meiva-ci-runner@sha256:[0-9a-f]*" in env_img[0]
 
 
-def test_backend_static_fail_open_contract() -> None:
+def test_cache_report_runs_after_static_tests_and_outside_backend_gate() -> None:
     ci_jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
-    plan_job = ci_jobs["test-cache-plan"]
-    assert "needs.classify.outputs.test_cache_skip == 'true'" in _string(
-        plan_job.get("if"), "test-cache-plan if"
-    )
-    assert plan_job.get("continue-on-error") is True
-
-    static_job = ci_jobs["backend-static-tests"]
-    assert static_job["needs"] == ["classify", "test-cache-plan"]
-    static_if = _string(static_job.get("if"), "backend-static-tests if")
-    assert "needs.test-cache-plan.result == 'success'" in static_if
-    assert "needs.test-cache-plan.result == 'skipped'" in static_if
-    assert "needs.test-cache-plan.result == 'failure'" in static_if
-
-    static_run = _string(
-        _step(static_job, "Run static pytest contracts").get("run"),
-        "static run",
-    )
-    assert (
-        'if [[ "$TEST_CACHE_SKIP" == "true" && -s tmp/test-cache/plan.json ]]; then' in static_run
-    )
-    assert "scripts/ci/pull_requests/test_cache.py shard-targets" in static_run
-    assert "::warning title=test cache fail-open::" in static_run
-
-
-def test_coverage_and_report_job_contract() -> None:
-    ci_jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
-    coverage_step = _step(ci_jobs["backend"], "Combine coverage + gate")
-    coverage_if = _string(coverage_step.get("if"), "coverage if")
-    assert "needs.classify.outputs.test_cache_skip != 'true'" in coverage_if
+    assert ci_jobs["backend-static-tests"]["needs"] == ["classify"]
+    assert ci_jobs["test-cache-report"]["needs"] == ["classify", "backend-static-tests"]
 
     report_job = ci_jobs["test-cache-report"]
     assert "test-cache-report" not in cast("list[str]", ci_jobs["backend"]["needs"])
@@ -256,6 +195,55 @@ def test_coverage_and_report_job_contract() -> None:
     report_if = _string(report_job.get("if"), "report if")
     assert "needs.backend-static-tests.result == 'success'" in report_if
     assert "needs.backend-static-tests.result == 'failure'" in report_if
+
+
+def test_selected_static_matrix_is_published_before_the_artifact() -> None:
+    jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
+    classify = jobs["classify"]
+    plan = _step(classify, "Plan selected static shards")
+    upload = _step(classify, "Publish the selected test list")
+    steps = cast("list[object]", classify["steps"])
+    assert steps.index(plan) < steps.index(upload)
+    assert (
+        _mapping(classify["outputs"], "outputs")["static_matrix"]
+        == "${{ steps.static_plan.outputs.matrix }}"
+    )
+    assert "continue-on-error" not in plan
+    assert "test_cache plan-static" in _string(plan["run"], "planner run")
+    assert _mapping(upload["with"], "upload inputs")["path"] == "${{ runner.temp }}/selected-tests/"
+    gate = _step(jobs["backend-static-tests"], "Validate static test results")
+    assert _mapping(gate["with"], "gate inputs")["min-tests"] == "${{ matrix.min_tests || '1' }}"
+
+
+@pytest.mark.parametrize(
+    ("listing", "minimum", "expected_status"),
+    [(b"", "0", 0), (b"", "1", 1), (None, "0", 1), (b"corrupt", "0", 1)],
+)
+def test_static_runner_accepts_only_the_explicit_empty_plan(
+    tmp_path: Path, listing: bytes | None, minimum: str, expected_status: int
+) -> None:
+    jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
+    static = _step(jobs["backend-static-tests"], "Run static pytest contracts")
+    script = _string(static["run"], "static run")
+    selected = tmp_path / "tmp" / "selected"
+    selected.mkdir(parents=True)
+    if listing is not None:
+        (selected / "static-1.txt").write_bytes(listing)
+    result = subprocess.run(  # noqa: S603 - repository workflow script with fixed test inputs
+        ["bash", "--noprofile", "--norc", "-c", script.replace("${{ matrix.group }}", "1")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IS_PR_SELECTED": "true",
+            "SHARD_DIGEST": hashlib.sha256(b"").hexdigest(),
+            "STATIC_MIN_TESTS": minimum,
+        },
+        check=False,
+    )
+    assert result.returncode == expected_status, result.stdout + result.stderr
+    assert (tmp_path / "tmp" / "junit-backend-static-1.xml").exists() == (expected_status == 0)
 
 
 def test_warm_workflow_concurrency_and_dep_gate_contract() -> None:

@@ -145,9 +145,11 @@ def test_meizel_push_routes_actual_paths_including_deleted_and_renamed(
     _commit_all(repo, change)
     result = _run_meizel(repo)
     assert result.returncode == 0, result.stderr
-    expected = ["-m", "meizel", "check"]
-    if not (path.endswith(".py") or target.name == "meizel.toml"):
-        expected += ["--changed", f"./{path}"]
+    expected = (
+        ["-m", "scripts.hooks.meizel_run"]
+        if path.endswith(".py") or target.name == "meizel.toml"
+        else ["-m", "meizel", "check", "--changed", f"./{path}"]
+    )
     assert [json.loads(row) for row in log.read_text().splitlines()] == [expected]
 
 
@@ -160,7 +162,9 @@ def test_meizel_push_runs_the_full_check_once_for_mixed_inputs(tmp_path: Path) -
     (repo / "logic.py").write_text("VALUE = 1\n")
     _commit_all(repo, "mixed inputs")
     assert _run_meizel(repo).returncode == 0
-    assert [json.loads(row) for row in log.read_text().splitlines()] == [["-m", "meizel", "check"]]
+    assert [json.loads(row) for row in log.read_text().splitlines()] == [
+        ["-m", "scripts.hooks.meizel_run"]
+    ]
 
 
 def test_meizel_push_rejects_an_unknown_range(tmp_path: Path) -> None:
@@ -185,7 +189,7 @@ def test_meizel_hook_keeps_role_inputs_without_a_separate_gate() -> None:
     for path in ["ordinary.py", "scan.sh", "pkg/data.toml", ".pre-commit-config.yaml", "x.yml"]:
         assert re.search(changed.files, path)
     hook = hooks["meizel-check-full"]
-    assert hook.stages == ["pre-push"]
+    assert hook.stages == ["manual"]
     assert hook.always_run is True
     assert hook.verbose is True
     assert hook.entry is not None

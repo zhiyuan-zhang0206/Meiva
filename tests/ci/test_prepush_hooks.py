@@ -106,7 +106,7 @@ def test_stage_contract() -> None:
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
     for name in ("frontend-tsc", "frontend-eslint-full", "frontend-vitest"):
         hook = hooks[name]
-        assert hook["stages"] == ["pre-push"]
+        assert hook["stages"] == ["manual"]
         assert hook["verbose"] is True  # pre-commit hides output on PASS otherwise.
         assert hook["entry"].startswith(".venv/bin/python scripts/provision/prepush_frontend.py ")
         assert hook["always_run"] is True
@@ -125,7 +125,7 @@ def test_pyright_hook_scoped_to_branch_diff() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
     pyright = hooks["pyright"]
-    assert pyright["stages"] == ["pre-push"]
+    assert pyright["stages"] == ["manual"]
     assert pyright["verbose"] is True
     assert pyright["always_run"] is True
     assert pyright["pass_filenames"] is False
@@ -142,14 +142,14 @@ def test_prepush_parity_hooks_configured() -> None:
     hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
 
     branch_diff = hooks["lint-prepush-branch-diff"]
-    assert branch_diff["stages"] == ["pre-push"]
+    assert branch_diff["stages"] == ["manual"]
     assert branch_diff["always_run"] is True
     assert branch_diff["verbose"] is True
     assert branch_diff["pass_filenames"] is False
     assert branch_diff["entry"] == "bash scripts/hooks/prepush-branch-lint.sh"
 
     freshness = hooks["lint-prepush-artifact-freshness"]
-    assert freshness["stages"] == ["pre-push"]
+    assert freshness["stages"] == ["manual"]
     assert freshness["always_run"] is True
     assert freshness["verbose"] is True
     assert freshness["pass_filenames"] is False

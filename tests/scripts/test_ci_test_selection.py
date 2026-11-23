@@ -357,7 +357,7 @@ def test_subset_shards_plan_and_execute_like_the_full_shards_over_the_published_
     downloaded = _step(subset, "Download the selected test list")
     assert published["with"]["name"] == downloaded["with"]["name"] == "selected-tests"
     assert downloaded["with"]["path"] == "tmp/selected"
-    assert published["with"]["path"].endswith("/selected-tests/tests.txt")
+    assert published["with"]["path"].endswith("/selected-tests/")
     assert (
         _step(subset, "Restore the test durations")["with"]["key"]
         == _step(full, "Restore the test durations")["with"]["key"]
@@ -509,17 +509,10 @@ def test_backend_admission_preserves_draft_skip_and_propagates_classify_failure(
 
 def test_static_contracts_job_has_no_native_toolchain() -> None:
     static_job = _workflow_jobs()["backend-static-tests"]
-    assert static_job["needs"] == ["classify", "test-cache-plan"]
-    assert static_job["if"] == (
-        "${{ !cancelled() && needs.classify.outputs.backend == 'true' "
-        "&& (needs.test-cache-plan.result == 'success' "
-        "|| needs.test-cache-plan.result == 'skipped' "
-        "|| needs.test-cache-plan.result == 'failure') }}"
-    )
+    assert static_job["needs"] == ["classify"]
+    assert static_job["if"] == "${{ needs.classify.outputs.backend == 'true' }}"
     assert static_job["container"]["options"] == "--init --shm-size=2g"
-    assert static_job["strategy"]["matrix"]["group"] == (
-        "${{ fromJSON(needs.classify.outputs.static_groups || '[1, 2, 3, 4, 5, 6, 7, 8]') }}"
-    )
+    assert "needs.classify.outputs.static_matrix" in static_job["strategy"]["matrix"]
     assert "continue-on-error" not in static_job
     assert not any(
         step.get("uses")
@@ -593,8 +586,7 @@ def test_coverage_gate_stays_on_the_full_fanout() -> None:
     coverage = _step(_workflow_jobs()["backend"], "Combine coverage + gate")
     assert coverage["if"] == (
         "${{ !(env.TEST_SELECTION_MODE == 'enforce'"
-        " && needs.classify.outputs.decision == 'SELECTED')"
-        " && needs.classify.outputs.test_cache_skip != 'true' }}"
+        " && needs.classify.outputs.decision == 'SELECTED') }}"
     )
 
 

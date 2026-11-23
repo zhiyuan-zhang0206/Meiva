@@ -345,9 +345,8 @@ def test_every_test_running_job_reports_and_uploads_its_counts(job: str, group: 
     if group.startswith("static"):
         condition = (
             "${{ !cancelled() && needs.classify.outputs.backend == 'true' "
-            "&& !(github.event_name == 'pull_request' "
-            "&& (needs.classify.outputs.decision == 'SELECTED' "
-            "|| needs.classify.outputs.test_cache_skip == 'true')) }}"
+            "&& !(needs.classify.outputs.mode == 'enforce' "
+            "&& needs.classify.outputs.decision == 'SELECTED') }}"
         )
     assert report["if"] == upload["if"] == condition
 
@@ -388,12 +387,7 @@ def test_the_total_job_is_informational_and_needs_only_read_access() -> None:
         "backend-shard",
         "backend-serial",
     }
-    # Fan-out and counts share routing, except counts also stand down when static test caching skips shards.
-    expected_counts_if = (
-        _JOBS["backend-shard"]["if"].removesuffix(" }}")
-        + " && needs.classify.outputs.test_cache_skip != 'true' }}"
-    )
-    assert job["if"] == expected_counts_if
+    assert job["if"] == _JOBS["backend-shard"]["if"]
     # Nothing waits on it: the required aggregator does not list it.
     assert "backend-test-counts" not in _JOBS["backend"]["needs"]
     for step in job["steps"]:

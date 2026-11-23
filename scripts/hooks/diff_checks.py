@@ -34,12 +34,16 @@ from scripts.hooks.diff_checks_cache import (  # noqa: E402
     CacheContext,
     CheckMode,
     cache_key,
+    full_meizel_run,
     input_digest_for_run,
     is_cacheable_run,
     is_object_list,
     is_str_object_dict,
     lookup_run,
     lookup_selection,
+    meizel_full_report,
+    meizel_pass,
+    meizel_run_key,
     python_tree_digest,
     record_run,
     record_selection,
@@ -87,6 +91,11 @@ from scripts.hooks.diff_checks_scratch import (  # noqa: E402
     pytest_scratch,
     pytest_scratch_parent,
     retain_for,
+)
+from scripts.hooks.meizel_run import (  # noqa: E402
+    cached_full_meizel,
+    child_environment,
+    input_fingerprint,
 )
 
 __all__ = [
@@ -222,22 +231,6 @@ def select_tests(change: ChangeSet) -> Selection:
     )
 
 
-# meiva:note
-# What a judged child inherits: the launcher's environment, minus the product's own namespace.
-# The receipt exists to predict the verdict CI will give this change, and CI's runner carries no
-# `MEIVA_*` at all — the suite installs the sentinels it needs before any project import
-# (`tests/fixtures/env_bootstrap.py`) — while an agent host exports a hundred of them. They are
-# not inert: the suite's session upgrade drops every cluster-scope key its own `.env` does not
-# declare (`base/host/env/dotenv_boot.py:enforce_cluster_env_authority`), so a key the baseline
-# snapshot still holds is gone from the live environment by the time a test compares the two, and
-# `tests/harness/test_home_isolation.py` reds about the operator's shell rather than the change
-# (#5907). Nothing else is filtered, deliberately: PATH, HOME, TMPDIR, the virtualenv and each
-# toolchain's own variables must locate THIS box's tools, because CI's paths do not exist here —
-# an allowlist would trade this false red for a new one nobody predicted.
-def child_environment(parent: Mapping[str, str]) -> dict[str, str]:
-    return {name: value for name, value in parent.items() if not name.startswith("MEIVA_")}
-
-
 def run_child(
     argv: Sequence[str], root: Path, *, environment: Mapping[str, str]
 ) -> tuple[int, str, float]:
@@ -253,7 +246,9 @@ def run_child(
     return result.returncode, result.stdout + result.stderr, time.monotonic() - started
 
 
-def open_cache_context(root: Path, base: str) -> CacheContext | None:
+def open_cache_context(
+    root: Path, base: str, *, python: str = "", environment: Mapping[str, str] | None = None
+) -> CacheContext | None:
     try:
         status = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -265,8 +260,10 @@ def open_cache_context(root: Path, base: str) -> CacheContext | None:
         if status.stdout != "":
             return None
         common_dir = Path(_git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-        head_tree = _git(root, "rev-parse", "HEAD^{tree}")
+        head = _git(root, "rev-parse", "HEAD")
+        head_tree = _git(root, "rev-parse", f"{head}^{{tree}}")
         base_sha = _git(root, "rev-parse", f"{base}^{{commit}}")
+        merge_base_sha = _git(root, "merge-base", base_sha, head)
         ls_tree = subprocess.run(
             ["git", "ls-tree", "-r", "-z", "HEAD"],
             cwd=root,
@@ -281,6 +278,12 @@ def open_cache_context(root: Path, base: str) -> CacheContext | None:
         head_tree=head_tree,
         base_sha=base_sha,
         python_digest=python_tree_digest(ls_tree),
+        merge_base_sha=merge_base_sha,
+        meizel_input=(
+            partial(input_fingerprint, root, head, python=python, environment=environment)
+            if environment is not None
+            else None
+        ),
     )
 
 
@@ -316,6 +319,39 @@ def _choose_selection(
     return selection
 
 
+def _run_cache_key(
+    cache: CacheContext, run: Run, change: ChangeSet, *, mode: CheckMode
+) -> str | None:
+    if full_meizel_run(run.label, run.argv) or run.label == "debt":
+        return meizel_run_key(cache, run.label, run.argv)
+    return cache_key(
+        mode=mode,
+        label=run.label,
+        argv=run.argv,
+        cwd=run.cwd,
+        input_state_digest=input_digest_for_run(cache, change.root, run.label, run.argv),
+    )
+
+
+def _cached_fields(cache: CacheContext, key: str, *, full_meizel: bool) -> dict[str, str] | None:
+    if full_meizel:
+        return cached_full_meizel(cache, key)
+    cached = lookup_run(cache, key)
+    return cached.fields if cached is not None and cached.code == 0 else None
+
+
+def _record_checked_run(
+    cache: CacheContext, key: str, run: Run, change: ChangeSet, *, code: int, output: str
+) -> None:
+    cached_fields = fields_for(run, code, output, 0.0, change)
+    full_meizel = full_meizel_run(run.label, run.argv)
+    if full_meizel and not (meizel_full_report(output) and meizel_pass(cached_fields)):
+        return
+    if (full_meizel or run.label == "debt") and meizel_run_key(cache, run.label, run.argv) != key:
+        return
+    record_run(cache, key, code=code, output=output, fields=cached_fields)
+
+
 def _execute_run(
     run: Run,
     change: ChangeSet,
@@ -324,28 +360,18 @@ def _execute_run(
     mode: CheckMode,
     cache: CacheContext | None,
 ) -> dict[str, str]:
-    key = ""
-    if cache is not None:
-        key = cache_key(
-            mode=mode,
-            label=run.label,
-            argv=run.argv,
-            cwd=run.cwd,
-            input_state_digest=input_digest_for_run(cache, change.root, run.label, run.argv),
-        )
-        cached = lookup_run(cache, key)
-        if cached is not None and cached.fields is not None:
-            return dict(cached.fields)
+    full_meizel = full_meizel_run(run.label, run.argv)
+    key = _run_cache_key(cache, run, change, mode=mode) if cache is not None else None
+    if (
+        cache is not None
+        and key is not None
+        and (proof := _cached_fields(cache, key, full_meizel=full_meizel)) is not None
+    ):
+        return dict(proof)
     code, output, seconds = execute(run.argv, change.root / run.cwd if run.cwd else change.root)
     fields = fields_for(run, code, output, seconds, change)
-    if cache is not None and is_cacheable_run(code, fields):
-        record_run(
-            cache,
-            key,
-            code=code,
-            output=output,
-            fields=fields_for(run, code, output, 0.0, change),
-        )
+    if cache is not None and key is not None and is_cacheable_run(code, fields):
+        _record_checked_run(cache, key, run, change, code=code, output=output)
     if code != 0:
         fields["_exit_nonzero"] = "1"
     return fields
@@ -627,6 +653,9 @@ def main(argv: Sequence[str]) -> int:
     python = sys.executable
     mode = arguments.mode
     root = arguments.repo_root.resolve()
+    base_sha = _git(
+        root, "rev-parse", "--verify", "--end-of-options", f"{arguments.base}^{{commit}}"
+    )
     files = (
         tuple(
             line.strip()
@@ -634,9 +663,9 @@ def main(argv: Sequence[str]) -> int:
             if line.strip()
         )
         if arguments.changed_files is not None
-        else changed_files(arguments.base, root)
+        else changed_files(base_sha, root)
     )
-    change = ChangeSet(root=root, base=arguments.base, files=files)
+    change = ChangeSet(root=root, base=base_sha, files=files)
     sha = _git(root, "rev-parse", "HEAD")
     if mode == "incremental" and not change.files:
         print(f"{RECEIPT_VERSION} @{sha} no-changes")
@@ -654,23 +683,29 @@ def main(argv: Sequence[str]) -> int:
             )
         )
         return 0
+    environment = child_environment(os.environ)
     cache = (
         None
         if arguments.no_cache or arguments.changed_files is not None
-        else open_cache_context(root, arguments.base)
+        else open_cache_context(
+            root,
+            base_sha,
+            python=python,
+            environment=environment if root == REPOSITORY_ROOT else None,
+        )
     )
-    judged = partial(run_child, environment=child_environment(os.environ))
+    judged = partial(run_child, environment=environment)
     values, failed = check(
         change,
         skip_tests=arguments.skip_tests,
         skip_literal_tests=arguments.skip_literal_tests,
         execute=judged,
-        execute_pytest=partial(run_pytest_child, environment=child_environment(os.environ)),
+        execute_pytest=partial(run_pytest_child, environment=environment),
         mode=mode,
         cache=cache,
         python=python,
     )
-    print(build_receipt(values, sha, _git(root, "rev-parse", arguments.base), failed=failed))
+    print(build_receipt(values, sha, base_sha, failed=failed))
     return 1 if failed else 0
 
 

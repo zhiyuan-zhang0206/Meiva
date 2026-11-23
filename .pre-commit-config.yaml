@@ -99,6 +99,17 @@ repos:
         files: ^(ui/web/(pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|\.npmrc)|scripts/lint/locks/package_lock\.py|scripts/lint/locks/tests/test_lint_package_lock\.py)$
         pass_filenames: false
 
+      # These always-run branch checks share one origin/main refresh per push.
+      # The dispatcher runs their manual stage under the same pre-commit configuration.
+      - id: prepush-branch-checks
+        name: pre-push branch checks (shared contribution range)
+        entry: bash scripts/hooks/prepush-base.sh --run-push-checks
+        language: system
+        stages: [pre-push]
+        verbose: true
+        always_run: true
+        pass_filenames: false
+
       - id: pyright
         name: basedpyright (strict mode, branch-changed files only)
         # Use the basedpyright from the uv venv — deps are complete, no need to
@@ -111,7 +122,7 @@ repos:
         # because the scoping is internal to the script, not pre-commit's
         # own (differently-computed) push-time file selection.
         entry: bash scripts/hooks/prepush-pyright-files.sh
-        stages: [pre-push]
+        stages: [manual]
         verbose: true  # Successful skips must stay visible.
         language: system
         always_run: true
@@ -563,7 +574,7 @@ repos:
         name: meizel check at push (full graph for Python or manifests, global role lists)
         entry: bash scripts/hooks/prepush-meizel.sh
         language: system
-        stages: [pre-push]
+        stages: [manual]
         verbose: true  # A skip must stay visible.
         always_run: true
         pass_filenames: false
@@ -608,7 +619,7 @@ repos:
       - id: frontend-tsc
         name: frontend tsc --noEmit
         entry: .venv/bin/python scripts/provision/prepush_frontend.py tsc
-        stages: [pre-push]
+        stages: [manual]
         verbose: true
         language: system
         always_run: true
@@ -631,7 +642,7 @@ repos:
       - id: frontend-eslint-full
         name: frontend eslint (branch files)
         entry: .venv/bin/python scripts/provision/prepush_frontend.py eslint
-        stages: [pre-push]
+        stages: [manual]
         verbose: true
         language: system
         always_run: true
@@ -642,7 +653,7 @@ repos:
       - id: frontend-vitest
         name: frontend vitest run
         entry: .venv/bin/python scripts/provision/prepush_frontend.py vitest
-        stages: [pre-push]
+        stages: [manual]
         verbose: true
         language: system
         always_run: true
@@ -737,7 +748,7 @@ repos:
       - id: lint-prepush-branch-diff
         name: "lint prepush branch diff (re-run pre-commit stage over merge-base..HEAD)"
         entry: bash scripts/hooks/prepush-branch-lint.sh
-        stages: [pre-push]
+        stages: [manual]
         verbose: true  # Successful skips must stay visible.
         language: system
         always_run: true
@@ -754,7 +765,7 @@ repos:
       - id: lint-prepush-artifact-freshness
         name: "lint prepush artifact freshness (hooks whose inputs the branch deleted)"
         entry: .venv/bin/python scripts/provision/prepush_freshness.py
-        stages: [pre-push]
+        stages: [manual]
         verbose: true  # Successful skips must stay visible.
         language: system
         always_run: true

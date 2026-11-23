@@ -12,6 +12,7 @@ from typing import assert_never
 from scripts.hooks.diff_checks_cache import (
     CacheContext,
     CheckMode,
+    full_meizel_argv,
     lookup_closure,
     record_closure,
 )
@@ -160,7 +161,7 @@ def _meizel_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
 
 
 def _full_meizel_runs(*, python: str) -> tuple[Run, ...]:
-    return (Run("meizel", (python, "-m", "meizel", "check"), "exit code"),)
+    return (Run("meizel", full_meizel_argv(python), "exit code"),)
 
 
 # meiva:note

@@ -255,7 +255,7 @@ jobs:
           [[ -f tmp/test-cache/passes.jsonl ]] || : > tmp/test-cache/passes.jsonl
           uv run python -m meizel test-cache import tmp/test-cache/passes.jsonl
           uv run python -m scripts.audit.input_closures closures --out tmp/test-cache/closures.json
-          # The arguments and the image are part of every key: they must match ci.yml's test-cache-plan.
+          # The arguments and the image are part of every key: they must match ci.yml's test-cache-report.
           uv run python -m meizel test-cache plan --lane static \
             --closures-file tmp/test-cache/closures.json \
             --pytest-arg=--test-environment=static \

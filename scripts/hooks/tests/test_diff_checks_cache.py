@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
@@ -25,12 +26,15 @@ from scripts.hooks.diff_checks_cache import (
     CACHE_FILENAME,
     CacheContext,
     cache_key,
+    full_meizel_argv,
     input_digest_for_run,
     lookup_run,
+    meizel_run_key,
     python_tree_digest,
     record_run,
 )
 from scripts.hooks.diff_checks_plan import schedule_groups
+from scripts.hooks.meizel_run import cached_full_meizel, safe_environment
 
 # meiva:note
 # The interpreter the runner hands its children is the caller's value, so these tests name it here:
@@ -181,6 +185,8 @@ def test_failing_or_unreadable_runs_are_never_cached(tmp_path: Path) -> None:
         head_tree="tree-fail",
         base_sha="base-111",
         python_digest="py-1",
+        merge_base_sha="merge-1",
+        meizel_input=lambda: "test-toolchain",
     )
     attempts = 0
 
@@ -239,6 +245,7 @@ def test_git_cache_context_requires_clean_worktree_and_survives_message_amend(
     assert after_amend.head_tree == before_amend.head_tree
     assert after_amend.python_digest == before_amend.python_digest
     assert after_amend.base_sha == before_amend.base_sha
+    assert after_amend.merge_base_sha == before_amend.merge_base_sha == base_sha
 
     (repo / "untracked.py").write_text("y = 1\n")
     assert open_cache_context(repo, "origin/main") is None
@@ -424,6 +431,8 @@ def test_cache_replay_preserves_counts_when_output_exceeds_32kb_tail(tmp_path: P
         head_tree="tree-big-out",
         base_sha="base-111",
         python_digest="py-1",
+        merge_base_sha="merge-1",
+        meizel_input=lambda: "test-toolchain",
     )
     trailing_noise = "stderr/stdout trailing line beyond 32KB\n" * 1_200
     calls: list[str] = []
@@ -489,6 +498,8 @@ def test_unreadable_vitest_and_legacy_entries_without_fields_never_replay_zero_t
         head_tree="tree-neg",
         base_sha="base-111",
         python_digest="py-1",
+        merge_base_sha="merge-1",
+        meizel_input=lambda: "test-toolchain",
     )
     change = ChangeSet(root=tmp_path, base="origin/main", files=("ui/web/src/lib/page.ts",))
 
@@ -567,3 +578,104 @@ def test_unreadable_vitest_and_legacy_entries_without_fields_never_replay_zero_t
     assert repaired_calls == 1
     assert refreshed["vitest-app"] == "ok(373tests)(9s)"
     assert replayed["vitest-app"] == "ok(373tests)(0s)"
+
+
+def test_debt_cache_keys_the_base_commit_merge_base_and_toolchain(tmp_path: Path) -> None:
+    cache = CacheContext(
+        tmp_path / CACHE_FILENAME, "tree", "base", "python", "ancestor", lambda: "toolchain"
+    )
+    argv = (
+        _PYTHON,
+        "-m",
+        "meizel",
+        "debt",
+        "diff",
+        "--against",
+        cache.base_sha,
+        "--on-growth",
+        "warn",
+    )
+    original = meizel_run_key(cache, "debt", argv)
+    assert original is not None
+    assert meizel_run_key(replace(cache, merge_base_sha="other-ancestor"), "debt", argv) != original
+    assert meizel_run_key(replace(cache, base_sha="other-base"), "debt", argv) != original
+    assert (
+        meizel_run_key(replace(cache, meizel_input=lambda: "other-toolchain"), "debt", argv)
+        != original
+    )
+    assert meizel_run_key(replace(cache, merge_base_sha=""), "debt", argv) is None
+    assert meizel_run_key(cache, "debt", (*argv[:-1], "fail")) != original
+
+
+def test_push_reuses_full_preflight_proof_but_rejects_partial_and_zero_reports(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 1\n")
+    cache = CacheContext(
+        tmp_path / CACHE_FILENAME, "tree", "base", "python", "ancestor", lambda: "toolchain"
+    )
+    argv = full_meizel_argv(_PYTHON)
+    key = meizel_run_key(cache, "meizel", argv)
+    assert key is not None
+    change = ChangeSet(root=tmp_path, base="base", files=("mod.py",))
+
+    def run(
+        change: ChangeSet, execute: Callable[[Sequence[str], Path], tuple[int, str, float]]
+    ) -> None:
+        check(
+            change,
+            skip_tests=True,
+            choose=lambda _change: Selection("SELECTED", (), ()),
+            cache=cache,
+            python=_PYTHON,
+            execute=execute,
+        )
+
+    def execute(_argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        return (
+            0,
+            "meizel: ok (2 fact edges, 3 manifests; 1 recorded debt remains in 1 ratchet directory)\n",
+            4.0,
+        )
+
+    run(change, execute)
+    assert cached_full_meizel(cache, key) is None
+    (tmp_path / "meizel.toml").write_text("exports = []\n")
+    manifest_change = replace(change, files=("meizel.toml",))
+
+    def empty(_argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        return 0, "meizel: ok (0 fact edges, 0 manifests)\n", 4.0
+
+    run(manifest_change, empty)
+    assert cached_full_meizel(cache, key) is None
+    run(manifest_change, execute)
+    assert cached_full_meizel(cache, key) == {"meizel": "ok(exit=0,3manifests,2edges)(0s)"}
+    assert meizel_run_key(replace(cache, meizel_input=lambda: None), "meizel", argv) is None
+
+
+def test_git_hook_environment_allows_the_default_paths_for_linked_worktree(tmp_path: Path) -> None:
+    repo = tmp_path / "repository"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(
+        repo,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "base",
+        "--allow-empty",
+    )
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "--quiet", "--detach", str(linked))
+    environment = {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+        "GIT_DIR": _git(linked, "rev-parse", "--absolute-git-dir"),
+        "GIT_EXEC_PATH": _git(linked, "--exec-path"),
+        "GIT_PREFIX": "",
+    }
+    assert safe_environment(linked, environment)
+    assert not safe_environment(linked, {**environment, "GIT_DIR": str(repo / ".git")})
+    assert not safe_environment(linked, {**environment, "GIT_INDEX_FILE": str(tmp_path / "index")})

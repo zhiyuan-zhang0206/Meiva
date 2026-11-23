@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeGuard
@@ -23,6 +24,11 @@ MAX_CACHE_ENTRIES = 200
 _MAX_OUTPUT_CHARS = 32_768
 _PYTHON_CONFIG_FILES = ("pyproject.toml", "pyrightconfig.json", "uv.lock")
 _PYTHON_CONFIG_SET = frozenset(_PYTHON_CONFIG_FILES)
+_FULL_MEIZEL_ARGS = ("-m", "meizel", "check")
+_FULL_MEIZEL_REPORT = re.compile(
+    r"^meizel: ok \([1-9]\d* fact edges, [1-9]\d* manifests(?:[;,)]|$)", re.MULTILINE
+)
+_MEIZEL_PASS = re.compile(r"ok\(exit=0,[1-9]\d*manifests,[1-9]\d*edges\)\(0s\)")
 _RUFF_CONFIG_FILES = ("pyproject.toml", "ruff.toml", ".ruff.toml", "uv.lock")
 
 
@@ -32,6 +38,8 @@ class CacheContext:
     head_tree: str
     base_sha: str
     python_digest: str
+    merge_base_sha: str = ""
+    meizel_input: Callable[[], str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -119,7 +127,7 @@ def input_digest_for_run(
         if len(argv) > 2:
             return files_digest(root, (*_RUFF_CONFIG_FILES, *argv[2:]))
         return f"{context.python_digest}:{files_digest(root, _RUFF_CONFIG_FILES)}"
-    if label in {"debt", "selector"}:
+    if label == "selector":
         return f"{context.head_tree}:{context.base_sha}"
     return context.head_tree
 
@@ -137,6 +145,41 @@ def cache_key(
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def full_meizel_argv(python: str) -> tuple[str, ...]:
+    return python, *_FULL_MEIZEL_ARGS
+
+
+def meizel_run_key(context: CacheContext, label: str, argv: Sequence[str]) -> str | None:
+    if context.meizel_input is None:
+        return None
+    identity = context.meizel_input()
+    if identity is None:
+        return None
+    if label == "debt":
+        if not context.merge_base_sha:
+            return None
+        identity = f"{identity}:{context.base_sha}:{context.merge_base_sha}"
+    return cache_key(
+        mode="full",
+        label=label,
+        argv=argv,
+        cwd="",
+        input_state_digest=f"{context.head_tree}:{identity}",
+    )
+
+
+def full_meizel_run(label: str, argv: Sequence[str]) -> bool:
+    return label == "meizel" and tuple(argv[1:]) == _FULL_MEIZEL_ARGS
+
+
+def meizel_full_report(output: str) -> bool:
+    return _FULL_MEIZEL_REPORT.search(output) is not None
+
+
+def meizel_pass(fields: Mapping[str, str]) -> bool:
+    return _MEIZEL_PASS.fullmatch(fields.get("meizel", "")) is not None
 
 
 def is_cacheable_run(code: int, fields: Mapping[str, str]) -> bool:
