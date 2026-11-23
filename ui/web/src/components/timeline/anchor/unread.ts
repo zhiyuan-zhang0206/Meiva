@@ -33,16 +33,26 @@ function departureIndex(
 }
 
 export function unreadBoundary(
-  items: readonly BackendTimelineItem[], itemId: string | null, departure: TailDeparture | undefined,
+  items: readonly BackendTimelineItem[], reveal: { itemId: string | null; entrySeenId?: number },
+  departure: TailDeparture | undefined,
   buffer: CompactTransitionBuffer | null,
 ): { row: RowRef | null; needsOlder: boolean } {
+  const { itemId, entrySeenId } = reveal;
   const delivery = itemId === null ? -1 : items.findIndex((item) => item.item_id === itemId);
   const watermark = departure ? departureIndex(items, departure, buffer) : -1;
   const missingDeparture = departure?.last != null && watermark === -1;
-  const stream = departure ? items.findIndex((item, index) => item.userDelivery === undefined && isReply(item) &&
-    (index > watermark || (index === watermark && departure.partialPayload !== undefined && item.payload !== departure.partialPayload))) : -1;
-  const index = delivery === -1 ? stream : stream === -1 ? delivery :
-    missingDeparture ? delivery : Math.min(stream, delivery);
+  let index = delivery;
+  if (departure && !(missingDeparture && delivery >= 0)) {
+    index = items.findIndex((item, position) => {
+      const grewAtWatermark = position === watermark && departure.partialPayload !== undefined &&
+        item.payload !== departure.partialPayload;
+      if (position <= watermark && !grewAtWatermark) return false;
+      if (position === delivery) return true;
+      const publication = item.userDelivery;
+      return isReply(item) && (publication === undefined ||
+        (watermark >= 0 && entrySeenId !== undefined && publication.content !== null && publication.id > entrySeenId));
+    });
+  }
   if (index < 0) return { row: null, needsOlder: missingDeparture };
   const reply = items[index];
   const row = refOf(reply, buffer);

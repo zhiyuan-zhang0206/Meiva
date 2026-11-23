@@ -208,6 +208,16 @@ describe("unread boundary", () => {
   const reply = row("4.0");
   const showReply = { decided: true, itemId: reply.item_id };
 
+  function delivered(item: BackendTimelineItem, id: number): BackendTimelineItem {
+    return {
+      ...item,
+      userDelivery: {
+        id, agent_id: 42, mode: "prefix", source_key: `harness:${item.item_id}`,
+        content: item.payload, suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false,
+      },
+    };
+  }
+
   it("includes the adjacent human prompt across ordinary work within the same turn", () => {
     const machine = machineFor(null);
     const fx = effects();
@@ -249,6 +259,26 @@ describe("unread boundary", () => {
     expect(fx.place).not.toHaveBeenCalled();
     machine.step(inputs({ items: [human, work, { ...reply, partial: true }] }), fx);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
+  });
+
+  it.each(["2.0", "3.0"])("keeps the tail when the feed delivers an unchanged departure row or earlier reply (%s)", (itemId) => {
+    const old = rows(1, 3);
+    const machine = machineFor(tailDeparture(old, null));
+    const fx = effects();
+    const reveal = { decided: true, itemId, entrySeenId: 0 };
+    machine.step(inputs({ items: old.map((item) => item.item_id === itemId ? delivered(item, 1) : item), reveal }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
+  });
+
+  it("opens on the first new unread reply when an older delivery leads the feed", () => {
+    const old = rows(1, 3);
+    const machine = machineFor(tailDeparture(old, null));
+    const fx = effects();
+    const items = [delivered(old[0], 6), ...old.slice(1), delivered(reply, 5), delivered(row("5.0"), 7)];
+    const reveal = { decided: true, itemId: old[0].item_id, entrySeenId: 5 };
+    machine.step(inputs({ items, reveal }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "5.0", rank: 0 } }, { hold: false });
   });
 
   it.each([true, false])("reads the prompt across a page boundary (delivered: %s)", (delivered) => {

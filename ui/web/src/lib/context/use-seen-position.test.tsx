@@ -134,10 +134,10 @@ describe("useSeenPosition", () => {
   it("reveals the first delivery past the cursor it held on entry, and keeps that target after the advance", async () => {
     const view = mount();
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
     view.rerender({ ...entered, seenId: 8, updatedAt: NOW + 2000 });
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
     expect(markUserMessagesSeen).toHaveBeenCalledTimes(1);
   });
 
@@ -156,7 +156,7 @@ describe("useSeenPosition", () => {
     view.rerender({ ...entered, updatedAt: entered.updatedAt + 10 });
     await settle();
     expect(markUserMessagesSeen).toHaveBeenCalledTimes(1);
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
   });
 
   it("publishes the agent as being read exactly while it is open in a visible page", () => {
@@ -182,7 +182,7 @@ describe("useSeenPosition", () => {
     view.rerender({ ...entered, updatedAt: NOW + 61_000 });
     await settle();
     expect(markUserMessagesSeen).toHaveBeenCalledWith(7, { up_to_id: 8 }, expect.any(String));
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
   });
 
   it("on return to a conversation that was left open, decides a reveal only if something new arrived", async () => {
@@ -200,7 +200,7 @@ describe("useSeenPosition", () => {
       updatedAt: NOW + 121_000,
     });
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "11.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "11.0", entrySeenId: 8 });
     expect(markUserMessagesSeen).toHaveBeenLastCalledWith(7, { up_to_id: 11 }, expect.any(String));
   });
 
@@ -221,7 +221,7 @@ describe("useSeenPosition", () => {
   it("still advances when the oldest unseen delivery matches no row", async () => {
     const view = mount({ ...entered, items: [row(8)] });
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "8.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "8.0", entrySeenId: 4 });
     expect(markUserMessagesSeen).toHaveBeenCalledWith(7, { up_to_id: 8 }, expect.any(String));
   });
 
@@ -241,7 +241,7 @@ describe("useSeenPosition", () => {
     view.rerender({ ...props, items: [row(5), row(8)] });
     await settle();
     expect(loadOlder).toHaveBeenCalledTimes(1);
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", olderPages: 1 });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4, olderPages: 1 });
   });
 
   it("stops loading after the page limit and lands on the oldest unseen item it has", async () => {
@@ -258,13 +258,13 @@ describe("useSeenPosition", () => {
     }
     await settle();
     expect(loadOlder).toHaveBeenCalledTimes(REVEAL_MAX_OLDER_PAGES);
-    expect(view.result.current).toEqual({ decided: true, itemId: "8.0", olderPages: REVEAL_MAX_OLDER_PAGES });
+    expect(view.result.current).toEqual({ decided: true, itemId: "8.0", entrySeenId: 4, olderPages: REVEAL_MAX_OLDER_PAGES });
   });
 
   it("holds seen until the timeline shows its opening placement", async () => {
     const view = mount({ ...entered, openingShown: false });
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
     expect(markUserMessagesSeen).not.toHaveBeenCalled();
     view.rerender({ ...entered, openingShown: true });
     await settle();
@@ -278,7 +278,7 @@ describe("useSeenPosition", () => {
     expect(view.result.current).toEqual(UNDECIDED);
     view.rerender({ ...entered, timelineLoading: false });
     await settle();
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", entrySeenId: 4 });
   });
 
   it("decides with no reveal and reads no older page when the conversation opens on a saved place", async () => {
@@ -355,6 +355,6 @@ describe("useSeenPosition", () => {
     view.rerender({ ...other, updatedAt: NOW + 3000 });
     await settle();
     expect(markUserMessagesSeen).toHaveBeenLastCalledWith(9, { up_to_id: 20 }, expect.any(String));
-    expect(view.result.current).toEqual({ decided: true, itemId: "20.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "20.0", entrySeenId: 0 });
   });
 });

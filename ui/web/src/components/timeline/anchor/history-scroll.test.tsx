@@ -577,7 +577,7 @@ describe("first visit and the reveal", () => {
     expect(viewport().scrollTop).toBe(4400);
   });
 
-  it.each([[4400, 0], [900, 900]])("prioritizes the reveal only after leaving at tail (left at %i)", (leftAt, expected) => {
+  it.each([[4400, false], [900, true]])("preserves the reader's position when the reveal points to an old row (left at %i)", (leftAt, showArrow) => {
     useTimelineStore.getState().switchThread(42, items, false);
     const entry = `reveal-returning-${leftAt}`;
     const { rerender } = renderWithBrowser(conversation(42, entry));
@@ -587,8 +587,8 @@ describe("first visit and the reveal", () => {
     top = 0;
     rerender(conversation(42, entry, { decided: true, itemId: "1.0" }));
     resize();
-    expect(viewport().scrollTop).toBe(expected);
-    expect(screen.queryByTestId("scroll-to-bottom")).not.toBeNull();
+    expect(viewport().scrollTop).toBe(leftAt);
+    expect(screen.queryByTestId("scroll-to-bottom") !== null).toBe(showArrow);
   });
 });
 

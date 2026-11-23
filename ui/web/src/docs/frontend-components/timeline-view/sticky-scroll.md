@@ -29,13 +29,16 @@ content or compact coordinate. The search can read up to 5 older pages
 
 A reader who left at the tail keeps a watermark of the last human message or
 visible reply, including a partial reply's text. On return, the fresh entry
-seen cursor identifies the first unread delivery. The watermark can also
-identify a new or extended reply that has yet to be published. The timeline
+seen cursor identifies unread deliveries. When the watermark is loaded, the
+earliest new reply bounds placement. Eligible replies come after the watermark
+or extend the partial reply at it, and are either unpublished or unread at
+entry. A late delivery for an earlier row or the unchanged watermark still
+gets acknowledged after placement. The timeline
 waits for the qualified snapshot on a tail return. The seen acknowledgement
 waits until the opening rows are visible at their destination. A return
 interrupted while loading leaves the old watermark and seen cursor available
-for the next entry. With no new reply or unread delivery the view opens at the tail. A first visit
-with unread deliveries uses the same unread placement. The existing fast path
+for the next entry. With no eligible reply the view opens at the tail. A first
+visit uses the first unread delivery as its boundary. The existing fast path
 opens a known-quiet first visit at the tail.
 
 The boundary includes the previous human prompt when it belongs to the same
