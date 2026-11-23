@@ -88,9 +88,10 @@ export function unreadBoundary(
   const missingDeparture = departure?.last != null && watermark === -1;
   let index = delivery;
   if (departure && !(missingDeparture && delivery >= 0)) {
+    const partialPrefix = departure.partialPayload?.trimEnd();
     index = items.findIndex((item, position) => {
-      const grewAtWatermark = position === watermark && departure.partialPayload !== undefined &&
-        item.payload !== departure.partialPayload && rankOf(item, buffer) === 0;
+      const grewAtWatermark = position === watermark && partialPrefix !== undefined && partialPrefix.length > 0 &&
+        item.payload.startsWith(partialPrefix) && item.payload.trimEnd().length > partialPrefix.length;
       if (position <= watermark && !grewAtWatermark) return false;
       if (position === delivery) return true;
       const publication = item.userDelivery;

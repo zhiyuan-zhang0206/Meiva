@@ -337,7 +337,7 @@ describe("unread boundary", () => {
   });
 
   it("keeps the boundary when a reply visible at departure grew before the return", () => {
-    const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Short" }], null));
+    const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Row" }], null));
     const fx = effects();
     machine.step(inputs({ items: [human, { ...reply, partial: true }] }), fx);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
@@ -371,10 +371,33 @@ describe("unread boundary", () => {
       : TAIL, { hold: false });
   });
 
+  it.each([
+    { suffix: " with new content", opensAtPrompt: true },
+    { suffix: "  \n", opensAtPrompt: false },
+  ])("uses the archived prompt only if the same streaming block appended content (%o)", ({ suffix, opensAtPrompt }) => {
+    const partial = row("6.0", { partial: true, payload: "Short start", source_message_id: "departure" });
+    const archivedPrompt = { ...human, item_id: "s1.boundary.4.0" };
+    const archived = delivered({
+      ...partial, item_id: "s1.boundary.5.0", partial: false, source_block_idx: 0, payload: partial.payload + suffix,
+    }, 1);
+    const machine = machineFor(tailDeparture([human, partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [archivedPrompt, archived],
+      reveal: { decided: true, itemId: archived.item_id, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith(opensAtPrompt
+      ? { kind: "bounded-tail", row: { itemId: archivedPrompt.item_id, rank: 1 } }
+      : TAIL, { hold: false });
+  });
+
   it("recognizes the same streaming block when it finalizes and an older delivery leads the feed", () => {
     const older = delivered(row("0.0"), 1);
-    const finalReply = delivered({ ...reply, source_message_id: "departure", source_block_idx: 0, reading_locator: "loc-final" }, 2);
     const partial = { ...reply, source_message_id: "departure", partial: true, payload: "Short start" };
+    const finalReply = delivered({
+      ...reply, source_message_id: "departure", source_block_idx: 0,
+      reading_locator: "loc-final", payload: partial.payload + " with new content",
+    }, 2);
     const machine = machineFor(tailDeparture([older, human, work, partial], null));
     const fx = effects();
     machine.step(inputs({

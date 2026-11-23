@@ -35,11 +35,11 @@ block and kind when available. These stay stable when compaction re-keys the
 row and moves it to an older rank.
 On return, the entry seen cursor identifies unread deliveries, including those
 that arrive during the opening's older-page reads after an initially empty feed.
-When the watermark is loaded, the
-earliest new reply bounds placement. Eligible replies come after the watermark
-or extend the partial reply at it in the active segment, and are either unpublished or unread at
-entry. A late delivery for an earlier row or the unchanged watermark still
-gets acknowledged after placement. The timeline
+When the watermark is loaded, the earliest eligible reply bounds placement.
+Eligible replies follow the watermark or append non-whitespace text to the
+visible partial reply at it, in either the active segment or an archive. They
+are either unpublished or unread at entry. A late delivery for an earlier
+row or the unchanged watermark still gets acknowledged after placement. The timeline
 waits for the qualified snapshot on a tail return. The seen acknowledgement
 waits until the opening rows are visible at their destination. A return
 interrupted while loading leaves the old watermark and seen cursor available
