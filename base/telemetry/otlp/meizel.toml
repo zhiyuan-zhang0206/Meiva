@@ -11,7 +11,7 @@ exports = ["event_resource_exporter.py", "http_log_exporter.py", "telemetry_otlp
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 
 [roots]
-"telemetry_otlp_sdk.py" = { kinds = ["clock", "environ"], why = "builds the SDK providers, opts into native processor metrics and supplies the monotonic clock that bounds a whole HTTP log batch" }
+"telemetry_otlp_sdk.py" = { kinds = ["environ"], why = "builds the SDK providers and opts into native processor metrics through the public SDK environment setting" }
 
 [purity]
 "__init__.py" = "strict"
