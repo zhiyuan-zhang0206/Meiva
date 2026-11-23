@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
+import math
 import os
 import subprocess
 import sys
@@ -25,7 +27,7 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from functools import partial
-from http.client import HTTPResponse
+from http.client import HTTPException, HTTPResponse
 from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
@@ -90,22 +92,24 @@ def age_from_payload(payload: object) -> float | None:
     # meiva:note
     # An empty Prometheus vector carries no age. The persisted first sighting tells
     # the sentinel whether a missing series was ever established.
-    if not is_json_object(payload):
-        return None
+    if not is_json_object(payload) or payload.get("status") != "success":
+        raise ValueError("expected a successful Prometheus response")
     data = payload.get("data")
-    if not is_json_object(data):
-        return None
+    if not is_json_object(data) or data.get("resultType") != "vector":
+        raise ValueError("expected a Prometheus instant vector")
     result = data.get("result")
-    if not is_json_array(result) or not result:
+    if not is_json_array(result) or len(result) > 1:
+        raise ValueError("expected at most one heartbeat sample")
+    if not result:
         return None
-    first = result[0]
-    if not is_json_object(first):
-        return None
-    value = first.get("value")
-    if not is_json_array(value) or len(value) != 2:
-        return None
-    newest = value[1]
-    return float(newest) if isinstance(newest, str | int | float) else None
+    sample = result[0]
+    value = sample.get("value") if is_json_object(sample) else None
+    if not is_json_array(value) or len(value) != 2 or not isinstance(value[1], str):
+        raise ValueError("expected a Prometheus sample with a numeric value")
+    age = float(value[1])
+    if not math.isfinite(age):
+        raise ValueError("expected a finite heartbeat age")
+    return age
 
 
 class Endpoints(NamedTuple):
@@ -139,6 +143,7 @@ class Sentinel:
         self.home = home
         self.state_path = state_path or home / "ops" / "watchdog-sentinel.state"
         self.log_path = log_path or home / "ops" / "watchdog-sentinel.log"
+        self.diagnostic_path = self.log_path.with_suffix(".diagnostics.log")
         self.prom_url = prom_url
         self.query = query
         self.meiva_bin = meiva_bin or home / "source" / ".venv" / "bin" / "meiva"
@@ -177,12 +182,15 @@ class Sentinel:
 
     def write_state(self, state: dict[str, float]) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(state), encoding="utf-8")
+        staged = self.state_path.with_suffix(".tmp")
+        staged.write_text(json.dumps(state), encoding="utf-8")
+        staged.replace(self.state_path)
 
-    def note(self, line: str) -> None:
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+    def note(self, line: str, *, path: Path | None = None) -> None:
+        target = self.log_path if path is None else path
+        target.parent.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        with self.log_path.open("a", encoding="utf-8") as handle:
+        with target.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} {line}\n")
 
     def age_seconds(self) -> float | None:
@@ -220,24 +228,46 @@ class Sentinel:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as error:
-            self.note(f"ERROR escalation failed: {error}")
+            self.note(f"ERROR escalation failed: {error}", path=self.diagnostic_path)
             return False
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()[:200]
-            self.note(f"ERROR escalation rc={result.returncode}: {detail}")
+            self.note(
+                f"ERROR escalation rc={result.returncode}: {detail}", path=self.diagnostic_path
+            )
             return False
-        self.note("submitted to the agent message queue")
+        self.note("submitted to the agent message queue", path=self.diagnostic_path)
         return True
 
     def tick(self, now: float | None = None) -> int:
-        stamp = time.time() if now is None else now
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.state_path.with_suffix(".lock").open("ab") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.note("skipped overlapping sentinel tick", path=self.diagnostic_path)
+                return 0
+            return self._tick(time.time() if now is None else now)
+
+    def _tick(self, stamp: float) -> int:
         wiring = self.endpoints()
         state = self.read_state()
         try:
             age = wiring.age()
-        except (OSError, ValueError) as error:
-            self.note(f"ERROR prometheus query failed: {error}")
+        except (OSError, ValueError, HTTPException) as error:
+            self.note(f"ERROR prometheus query failed: {error}", path=self.diagnostic_path)
+            self._submit(
+                wiring,
+                state,
+                stamp,
+                receipt="query_failed_last_sent",
+                text=(
+                    "ALERT: the host sentinel could not query Prometheus for the alert heartbeat. "
+                    f"Check Prometheus and the query endpoint. ({type(error).__name__})"
+                ),
+            )
             return 1
+
         if age is None and "first_seen" not in state:
             self.note("unarmed no sample yet")
             return 0
@@ -252,23 +282,36 @@ class Sentinel:
             else f"the newest ingest sample is {int(age)}s old"
         )
         self.note(f"SILENT {reason}")
-        last_sent = state.get("last_sent")
+        return self._submit(
+            wiring,
+            state,
+            stamp,
+            receipt="last_sent",
+            text=(
+                f"ALERT: the alert pipeline is silent ({reason}). "
+                "Check the gateway and Grafana alert engine. (host sentinel, task #6220)"
+            ),
+        )
+
+    def _submit(
+        self, wiring: Endpoints, state: dict[str, float], stamp: float, *, receipt: str, text: str
+    ) -> int:
+        last_sent = state.get(receipt)
         if last_sent is not None and stamp - last_sent < self.repeat_hours * 3600:
             self.write_state(state)
             return 0
-        text = (
-            f"ALERT: the alert pipeline is silent ({reason}). "
-            "Check the gateway and Grafana alert engine. (host sentinel, task #6220)"
-        )
         if self.dry_run:
             print(f"would submit: {text}")
             self.write_state(state)
             return 0
         if not wiring.send(text):
-            self.note("ERROR agent message was not accepted; delivery remains pending")
+            self.note(
+                "ERROR agent message was not accepted; delivery remains pending",
+                path=self.diagnostic_path,
+            )
             self.write_state(state)
             return 1
-        state["last_sent"] = stamp
+        state[receipt] = stamp
         self.write_state(state)
         return 0
 

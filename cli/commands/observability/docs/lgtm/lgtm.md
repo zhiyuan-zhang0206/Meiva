@@ -88,5 +88,4 @@ refuses the absence are in [dashboard provisioning](dashboard-provisioning.md).
 On the observability station, `meiva lgtm status` also compares the UIDs in
 rendered alert provisioning with Grafana's default organization's provisioned
 rule list. It exits nonzero and lists the UIDs present on only one side. After
-a rule removal, converge to install the [tombstone](../../../../../deploy/lgtm/config/grafana/provisioning/alerting/README.md#retired-rules-tombstones)
-and reload Grafana alerting before checking status.
+a rule removal, follow the [provenance-checked cleanup procedure](../../../../../deploy/lgtm/config/grafana/provisioning/alerting/README.md#retired-rules).

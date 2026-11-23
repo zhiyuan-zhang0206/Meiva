@@ -33,18 +33,61 @@ dashboards).
   which are substring searches), so multi-alternative `event_name=~"a|b"`
   matches exact event names.
 
-### Retired rules (tombstones)
+### Retired rules
 
-Grafana does not delete a file-provisioned rule that disappears from
-`rules.yml`; the rule survives as an orphan and keeps evaluating. A rule
-removed here must also be listed in `delete-rules.yml` (a `deleteRules:`
-tombstone): file provisioning deletes the UID on the next alerting reload or
-restart, and entries are idempotent, so tombstones stay after the rule is
-gone. The deletion list is maintained in [delete-rules.yml](delete-rules.yml).
-Keep both the pre-rename and current UIDs when a rule existed under both names.
-Run `meiva lgtm status` on the station after reloading. It reports UIDs found on
-only one side of the comparison between rendered provisioning and Grafana and
-exits nonzero if they differ.
+Grafana keeps file-provisioned rules after their definition is removed.
+Record retired UIDs in the [retirement inventory](../../retired-alert-rules.json),
+including any older names. The inventory lives outside the provisioning tree.
+Grafana's `deleteRules` directive deletes by organization and UID regardless of
+ownership, so routine converge and reload never apply this inventory directly.
+
+To clean the station during a rollout, converge the new release and verify
+that the normal rendered alerting directory carries no `deleteRules` entries.
+Then execute the following maintenance sequence:
+
+1. Stop normal Grafana and back up its database. Use the installed launcher
+   with the same data directory, a fresh temporary provisioning root containing
+   an empty `alerting` directory, and a private loopback listener. Disable
+   anonymous access and evaluation during cleanup. For example, in a private
+   terminal with `staging` and `native` set to those directories:
+
+   ```bash
+   GF_PATHS_PROVISIONING="$staging" GF_SERVER_HTTP_ADDR=127.0.0.1 \
+     GF_SERVER_HTTP_PORT=53004 GF_SERVER_ROOT_URL=http://127.0.0.1:53004 \
+     GF_SERVER_SERVE_FROM_SUB_PATH=false GF_AUTH_ANONYMOUS_ENABLED=false \
+     GF_UNIFIED_ALERTING_EXECUTE_ALERTS=false "$native/grafana/run.sh"
+   ```
+
+2. Keep that maintenance listener exclusive to the operator. From another
+   terminal, fetch the existing rule list with Grafana admin authentication.
+   Select only organization 1 rules whose UID is in the retirement inventory
+   and whose live provenance is `file`. Use the inventory from the new release.
+
+   ```bash
+   curl --fail --silent --show-error --user admin \
+     http://127.0.0.1:53004/api/v1/provisioning/alert-rules > "$staging/live.json"
+   jq --exit-status --slurpfile retired "$inventory" '
+     if type != "array" then error("expected the Grafana rule list") else
+       {apiVersion: 1, deleteRules: [
+         .[] | select(.orgID == 1 and .provenance == "file")
+         | .uid as $uid | select($retired[0] | index($uid))
+         | {orgId: .orgID, uid: $uid}
+       ]}
+     end
+   ' "$staging/live.json" > "$staging/plan.json"
+   ```
+
+3. Inspect the plan. When it has entries, move it into the temporary
+   `alerting` directory as `delete-rules.json`. Reload the maintenance
+   instance with `curl --fail --user admin --request POST http://127.0.0.1:53004/api/admin/provisioning/alerting/reload`.
+   Verify that planned UIDs are gone and that any non-file rule remains.
+   Discard the temporary provisioning root
+   after stopping the maintenance instance and start the normal service.
+   A subsequent normal reload or restart never sees the one-time directives.
+
+Run `meiva lgtm status` on the station after reloading. It exits nonzero
+and lists the UIDs present on only one side of the comparison between
+rendered provisioning and Grafana, including any locally managed rules.
 
 ## Interval collector silence
 
@@ -56,8 +99,8 @@ and failed cycles establish liveness.
 The existing 35-minute window accommodates the current slowest collector's
 30-minute refresh. This is a fleet-wide dead-man signal: one collector still
 emitting prevents the rule from firing. Per-collector freshness requires a
-separate expected-set policy. Restoring this rule removes its tombstone in
-the same change so provisioning keeps it active.
+separate expected-set policy. Restoring this rule removes its UID from the
+retirement inventory in the same change.
 
 ## Where these run (LGTM stack)
 
@@ -359,8 +402,9 @@ Prometheus scrapes Grafana's `grafana_alerting_rule_evaluation_failures_total`
 counter. The meta-alert reports increments within five minutes as one error
 instance, so a datasource outage affecting many rules produces one alert. With
 the station's agent inbox policy installed, this error reaches the on-call agent.
-The rule requires Grafana evaluation and a working Prometheus query path. The
-external sentinel independently checks whether the watchdog heartbeat arrives.
+Grafana gives a query failure a DatasourceError state for this one meta-alert.
+The external sentinel has an independent agent-message path when it cannot
+query Prometheus or when the watchdog heartbeat disappears.
 
 ## The alert pipeline's own dead-man pair
 

@@ -4388,7 +4388,7 @@ groups:
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
-        execErrState: OK
+        execErrState: Error
         labels:
           severity: error
           ruleUID: meiva-ops-grafana-rule-evaluation-failed
