@@ -23,9 +23,11 @@ by `actions/vendor-pg-runtime` (`scripts/ci/vendor_pg_runtime.py`, after the
 Python deps, cached on the pin file's hash) and linked into each session's
 temp home by `tests/fixtures/env_bootstrap.py` via `CI_VENDORED_RUNTIME_ROOT`.
 The native cache warmer seeds the same exact-key runtime cache that CI and
-release pgvector smoke jobs restore. On a cache miss, Zonky fetches try
+release pgvector smoke jobs restore. Only default-branch jobs save this cache.
+On a cache miss, Zonky fetches try
 `repo.maven.apache.org` followed by `repo1.maven.org`, with bounded backoff
-for transient failures and SHA-256 verification before extraction.
+for sources with transient failures and SHA-256 verification before extraction.
+A truncated response falls through to the next source in the same round.
 PGDG keeps only its newest 17.x, so no apt pin could match; the apt
 `postgresql-17` stays for the host tools the vendored tree lacks.
 

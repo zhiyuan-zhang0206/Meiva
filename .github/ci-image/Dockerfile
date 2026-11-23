@@ -162,11 +162,10 @@ RUN set -euo pipefail \
 
 # Layer 4: Vendored Zonky PostgreSQL + pgvector runtime (single source of pins:
 # base/cluster/dataplane/runtime_binaries.py).
-COPY base/cluster/dataplane/runtime_binaries.py /tmp/runtime_binaries.py
+COPY base/cluster/dataplane/runtime_binaries.py base/cluster/dataplane/artifact_fetch.py /tmp/
 
-RUN SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt python3 - <<'PY'
+RUN cd /tmp && SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt python3 -B - <<'PY'
 import ast
-import hashlib
 import io
 import lzma
 import pathlib
@@ -176,6 +175,8 @@ import tarfile
 import time
 import urllib.request
 import zipfile
+
+from artifact_fetch import fetch_verified
 
 source = pathlib.Path("/tmp/runtime_binaries.py").read_text(encoding="utf-8")
 module = ast.parse(source)
@@ -203,29 +204,12 @@ pgvector_artifacts = constants["PGVECTOR_ARTIFACTS"]
 assert isinstance(pg_artifacts, dict) and isinstance(pgvector_artifacts, dict)
 assert isinstance(maven_bases, tuple)
 
-def fetch_verified(urls: tuple[str, ...], expected_sha256: str) -> bytes:
-    last_err: OSError | None = None
-    for attempt in range(1, 6):
-        for url in urls:
-            try:
-                req = urllib.request.Request(url, headers={"User-Agent": "meiva-ci-image-builder/1.0"})
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    blob = resp.read()
-            except OSError as exc:
-                last_err = exc
-                print(f"download source {url} failed: {exc}")
-                continue
-            actual = hashlib.sha256(blob).hexdigest()
-            if actual != expected_sha256:
-                raise RuntimeError(f"sha256 mismatch for {url}: expected {expected_sha256}, got {actual}")
-            return blob
-        if attempt < 5:
-            time.sleep(attempt * 3)
-    raise RuntimeError(f"failed to fetch {', '.join(urls)}: {last_err}") from last_err
-
 artifact, pg_sha = pg_artifacts["linux-x86_64"]
 pg_urls = tuple(f"{base}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar" for base in maven_bases)
-jar_bytes = fetch_verified(pg_urls, pg_sha)
+jar_bytes = fetch_verified(
+    pg_urls, pg_sha, open_url=lambda req, timeout: urllib.request.urlopen(req, timeout=timeout),
+    sleep=time.sleep, report_failure=print,
+)
 
 pg_dir = pathlib.Path("/opt/meiva-vendored-pg/runtime/pg") / pg_version
 pg_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +222,10 @@ with tarfile.open(fileobj=io.BytesIO(txz_bytes), mode="r:xz") as tar:
     tar.extractall(pg_dir, filter="data")
 
 vec_url, vec_sha = pgvector_artifacts["linux-x86_64"]
-deb_bytes = fetch_verified((vec_url,), vec_sha)
+deb_bytes = fetch_verified(
+    (vec_url,), vec_sha, open_url=lambda req, timeout: urllib.request.urlopen(req, timeout=timeout),
+    sleep=time.sleep, report_failure=print,
+)
 if not deb_bytes.startswith(b"!<arch>\n"):
     raise RuntimeError("pgvector artifact is not an ar archive")
 pos = 8
@@ -285,6 +272,7 @@ for binary in (pg_dir / "bin/initdb", pg_dir / "bin/postgres", pg_dir / "bin/pg_
         raise RuntimeError(f"missing shared library for {binary}:\n{out}")
 
 pathlib.Path("/tmp/runtime_binaries.py").unlink()
+pathlib.Path("/tmp/artifact_fetch.py").unlink()
 print(f"vendored Postgres {pg_version} + pgvector {pgvector_version} verified at {pg_dir}")
 PY
 

@@ -9,8 +9,10 @@ import tarfile
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
+from base.cluster.dataplane.artifact_fetch import DOWNLOAD_ERRORS, is_transient_artifact_error
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
@@ -167,13 +169,12 @@ def ensure_pg_binaries(
 
 DOWNLOAD_ATTEMPTS = 4
 _TRANSIENT_HTTP = frozenset({403, 404, 429})
-_DOWNLOAD_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError)
 
 
 def _is_transient_download_error(exc: Exception) -> bool:
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code in _TRANSIENT_HTTP or 500 <= exc.code < 600
-    return isinstance(exc, _DOWNLOAD_ERRORS)
+    return isinstance(exc, DOWNLOAD_ERRORS)
 
 
 def _download_backoff(attempt: int) -> float:
@@ -196,10 +197,15 @@ _DOWNLOAD_POLICY = Policy(
 
 
 def _read_from_sources(
-    urls: tuple[str, ...], *, open_url: UrlOpener, headers: dict[str, str] | None
+    urls: list[str],
+    *,
+    open_url: UrlOpener,
+    headers: dict[str, str] | None,
+    classify: Callable[[Exception], bool],
+    mirrored: bool,
 ) -> bytes:
     download_error: Exception | None = None
-    for url in urls:
+    for url in urls.copy():
         try:
             # meiva:note
             # The sources are pinned HTTPS artifact URLs and the caller verifies SHA-256
@@ -208,11 +214,14 @@ def _read_from_sources(
             with open_url(request, 120.0) as resp:
                 data: bytes = resp.read()
                 return data
-        except _DOWNLOAD_ERRORS as exc:
-            if len(urls) == 1:
+        except DOWNLOAD_ERRORS as exc:
+            if not mirrored:
                 raise
             logger.warning(f"[runtime] download source {url} failed: {exc}")
-            if download_error is None or _is_transient_download_error(exc):
+            transient = classify(exc)
+            if not transient:
+                urls.remove(url)
+            if download_error is None or transient:
                 download_error = exc
     if download_error is None:
         raise ValueError("download requires at least one source")
@@ -225,34 +234,46 @@ def download_with_opener(
     open_url: UrlOpener,
     headers: dict[str, str] | None = None,
     what: str = "vendored Postgres",
-    policy: Policy = _DOWNLOAD_POLICY,
+    policy: Policy | None = None,
     sleep: Callable[[float], None] = retry_sleep,
     fallback_url: str | None = None,
 ) -> bytes:
     attempt = 0
-    urls = (url,) if fallback_url is None else (url, fallback_url)
+    urls = [url] if fallback_url is None else [url, fallback_url]
     sources = ", ".join(urls)
+    mirrored = fallback_url is not None
+
+    download_policy = _DOWNLOAD_POLICY if policy is None else policy
+    if mirrored and policy is None:
+        download_policy = replace(download_policy, classify=is_transient_artifact_error)
 
     def _fetch_once() -> bytes:
         nonlocal attempt
         attempt += 1
         try:
-            return _read_from_sources(urls, open_url=open_url, headers=headers)
-        except _DOWNLOAD_ERRORS as exc:
-            if attempt < DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
-                # meiva:note
-                # `1 << attempt` is 2**attempt: the stubs type `int ** int` as Any, which the Any
-                # rules refuse, so the doubling is written as a shift.
-                delay = 1 << attempt
+            return _read_from_sources(
+                urls,
+                open_url=open_url,
+                headers=headers,
+                classify=download_policy.classify,
+                mirrored=mirrored,
+            )
+        except DOWNLOAD_ERRORS as exc:
+            if (
+                download_policy.idempotent
+                and attempt < download_policy.max_attempts
+                and download_policy.classify(exc)
+            ):
+                delay = f" in {_download_backoff(attempt - 1):g}s" if policy is None else ""
                 logger.warning(
                     f"[runtime] transient error fetching {sources} ({exc}); "
-                    f"retry {attempt}/{DOWNLOAD_ATTEMPTS - 1} in {delay}s"
+                    f"retry {attempt}/{download_policy.max_attempts - 1}{delay}"
                 )
             raise
 
     try:
-        return retry(policy, sleep=sleep)(_fetch_once)
-    except _DOWNLOAD_ERRORS as exc:
+        return retry(download_policy, sleep=sleep)(_fetch_once)
+    except DOWNLOAD_ERRORS as exc:
         raise RuntimeError(f"failed to download {what} from {sources}: {exc}") from exc
 
 
