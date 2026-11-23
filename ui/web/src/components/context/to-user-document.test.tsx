@@ -36,7 +36,7 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
 }
 const HOME = "http://fake.local/?agent_id=7";
 
-function show(value: ToUserDocument, { failure = null }: { failure?: unknown } = {}) {
+function show(value: ToUserDocument | undefined, { failure = null }: { failure?: unknown } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   return renderWithBrowser(
     <WallClockProvider wallNow={() => Date.now()}>
@@ -120,12 +120,12 @@ describe("To user refusals", () => {
   // follows the response's code, never the status (user 2026-10-28).
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   it("tells a permanent refusal from one worth retrying", () => {
-    show({ content: null, version: null, modified_at: null, legacy_html: false }, {
+    show(undefined, {
       failure: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
     });
     expect(screen.getByTestId("document-failure").textContent).toContain("too large to show here");
     cleanup();
-    show({ content: null, version: null, modified_at: null, legacy_html: false }, {
+    show(undefined, {
       failure: new ApiError(503, "unavailable", { code: "http_503", retryable: true }),
     });
     const retryable = screen.getByTestId("document-failure").textContent;

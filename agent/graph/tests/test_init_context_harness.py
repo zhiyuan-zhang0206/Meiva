@@ -108,7 +108,7 @@ def _runtime(
     )
 
 
-@pytest.mark.parametrize("harness", [Harness.ANTIGRAVITY])
+@pytest.mark.parametrize("harness", [Harness.ANTIGRAVITY, Harness.CODEX])
 async def test_external_harness_cold_start_establishes_handoff_and_standing_notes(
     harness: Harness,
     db_conn: psycopg.Connection,
@@ -151,6 +151,9 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         agent_id=tid,
         database_gate=database_gate,
     )
+    workspace = paths.workspace_dir(tid, home=meiva_home())
+    ongoing = "Check the persisted cold-start work."
+    (workspace / "ongoing.md").write_text(f"## Doing\n- {ongoing}")
     command = await init_context_node(AgentState(), runtime, _config(tid))
 
     assert "messages" not in command_update(command)
@@ -163,6 +166,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "meiva.self",
             "pause_heartbeat",
             "# Custom Plugin Section",
+            ongoing,
         )
     )
     reset = await init_context_node(
@@ -181,6 +185,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "Custom plugin standing note.",
         )
     )
+    assert note_texts.count(ongoing) == 1
     first_update = command_update(command)
     assert (
         isinstance(first_update["capabilities"], CapabilitiesState)
@@ -199,6 +204,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     _ = await init_context_node(AgentState(), updated_runtime, _config(tid))
     assert len(handoffs) == 2
     on_disk = instructions_path(paths.workspace_dir(tid, home=meiva_home())).read_text()
+    assert ongoing not in on_disk
     assert "immediately call `meiva.ui.publish(...)` with one concise sentence" in on_disk or (
         "emit one brief `MEIVA_DISPLAY_TO_USER`" in on_disk
     )

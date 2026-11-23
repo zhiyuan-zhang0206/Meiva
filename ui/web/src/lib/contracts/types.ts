@@ -53,6 +53,7 @@ export {
   type DateFormat,
   type NotificationCategoriesResponse,
   type NotificationCategoryItem,
+  type OngoingDocument,
   type ToUserDocument,
   type WorkspaceDirListing,
   type WorkspaceFileResponse,

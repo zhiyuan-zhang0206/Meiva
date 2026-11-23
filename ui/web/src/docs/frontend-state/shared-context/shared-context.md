@@ -109,11 +109,19 @@ active conversation's panel while routing content/raw reads and nested relative
 Markdown links or images to `<id>`'s workspace across machines.
 
 One shallow scanner per ops process polls numeric workspace roots and only their
-immediate `to_user.md` targets, on a worker thread. Creation, atomic replacement
-and deletion broadcast `to_user_changed`; the global fold repairs that agent's
-query prefix and includes it in reconnect repair. It does not recursively watch
-linked directories. Refresh/focus rechecks referenced file stamps, so same-name
+immediate `to_user.md` and `ongoing.md` targets, on a worker thread. Creation,
+atomic replacement and deletion broadcast the corresponding `to_user_changed`
+or `ongoing_changed` event. The global fold invalidates the affected agent's
+document query and refreshes both document queries on reconnect or when a
+runner announces a workspace panel resync after startup. Refresh and
+focus recheck the shared document's referenced file stamps so same-name
 attachment replacements receive new versioned URLs even without a body edit.
+
+The fixed **Ongoing** tab opens the agent's optional workspace-root
+`ongoing.md` using the panel's existing file history. It renders the written
+Markdown and shows a muted dot while the document contains text. Missing or
+blank files show **No ongoing items**. Agents can use its `## Doing` and
+`## Waiting` sections to keep current work and its dependencies in view.
 
 Agent workspaces seed an empty `to_user.md` at boot, so the panel surface exists
 from the agent's first turn; until the agent writes, the document area shows its
@@ -122,9 +130,10 @@ reported as awaiting conversion, never rendered. Agent workspace guidance tells
 agents to rewrite their current shared context into Markdown. Removed stored
 format pins are ignored by the existing config-pin resolver.
 
-A failed read retains an already-cached snapshot quietly without stale banners;
-it never turns a machine failure into an empty file. Cold failures render an
-`InlineError` with Retry. Files must remain available on their source machine.
+A failed refresh keeps the previous document visible with a stale snapshot
+notice and clears the Ongoing content indicator until a successful read. A
+failed initial read shows the error in the document area. Files must remain
+available on their source machine.
 This is not an offline document store or an archival snapshot.
 
 On desktop the home page mounts the panel for every selected agent (the document

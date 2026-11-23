@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 DOCUMENT_FILENAME = "to_user.md"
+ONGOING_FILENAME = "ongoing.md"
 
 # meiva:note
 # Linux refuses a path longer than PATH_MAX, so no document can name a file with a longer name.
@@ -26,6 +27,13 @@ class ToUserResource(BaseModel):
     name: str
     markdown: bool
     version: str | None
+
+
+class OngoingDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str | None
+    version: str | None
+    modified_at: datetime | None
 
 
 class ToUserDocument(BaseModel):

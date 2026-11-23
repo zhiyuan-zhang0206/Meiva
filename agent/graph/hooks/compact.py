@@ -22,7 +22,7 @@ from agent.graph.interrupt import (
 )
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.llm_stream.stream import stream_message
-from agent.graph.prompt.compaction import compact_contract
+from agent.graph.prompt.compaction import ONGOING_COMPACT_REMINDER, compact_contract
 from agent.graph.prompt.live import read_compact_doc
 from agent.hooks import Hook
 from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
@@ -571,6 +571,7 @@ def _reminder_content(
             "render for the user, so detail can live in linked files. Edit in place, "
             "without a separate notification."
         )
+        parts.append(ONGOING_COMPACT_REMINDER)
     questions = reminder_text(open_questions)
     if questions:
         parts.append(questions)

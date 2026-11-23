@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from agent.hooks.history_dump import workspace_section_hint
-from base.agents.to_user import DOCUMENT_FILENAME
+from base.agents.to_user import DOCUMENT_FILENAME, ONGOING_FILENAME
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -381,6 +381,12 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "from the panel. A small task can carry its whole story on the page; as it grows, "
         "keep the page as the user's entry point — current state, decisions, next steps — "
         "and link the detail."
+        f"\n\nFor long-running, multi-step, or coordination work, maintain `{ONGOING_FILENAME}` "
+        "at your workspace root. The Ongoing tab displays it beside your messages. "
+        "Under `## Doing`, write what you are moving forward and remove completed items. "
+        "Under `## Waiting`, write what is paused, what prerequisite or hard constraint you "
+        "are waiting for, and why it prevents progress. Use any Markdown that makes this clear. "
+        "A short, one-step task can leave the file absent."
     )
 
 

@@ -3,7 +3,7 @@
 import { Maximize2, Minimize2, PanelLeft, PanelRight, ScanSearch, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { machineOf, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
+import { isOngoingTab, machineOf, ongoingTab, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
 import { COLUMN_TITLE_BAR_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -28,10 +28,11 @@ const iconButton = "shrink-0 rounded p-1 text-muted-foreground hover:bg-accent h
 // collapsing the panel. Selecting a tab is a history entry like opening a file; Back and Forward
 // are the browser's.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse, onOpenSidebar }: {
+export function PanelBar({ agentId, mobile, inspecting, hasOngoing = false, onInspect, onCollapse, onOpenSidebar }: {
   agentId: number;
   mobile: boolean;
   inspecting: boolean;
+  hasOngoing?: boolean;
   onInspect?: () => void;
   onCollapse?: () => void;
   onOpenSidebar?: () => void;
@@ -44,6 +45,8 @@ export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse, o
   const maximized = useWorkspaceFileStore((s) => s.maximized);
   const { selectTab, closeTab, setMaximized } = useWorkspaceFileStore.getState();
   const shownFile = activeFile?.agentId === agentId ? activeFile : null;
+  const ongoing = ongoingTab(agentId);
+  const showingOngoing = isOngoingTab(shownFile, agentId);
   return (
     <div data-testid="panel-bar" className={cn("shrink-0 items-center gap-1 px-2", COLUMN_TITLE_BAR_CLASS, FLEX)}>
       {onOpenSidebar ? (
@@ -58,8 +61,12 @@ export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse, o
           <button type="button" role="tab" aria-selected={shownFile === null} onClick={() => selectTab(null)} className={tabClass(shownFile === null)}>
             <span className="whitespace-nowrap">{t("filesSharedContext")}</span>
           </button>
+          <button type="button" role="tab" aria-selected={showingOngoing} onClick={() => selectTab(ongoing)} className={tabClass(showingOngoing)}>
+            <span className="whitespace-nowrap">{t("ongoing")}</span>
+            {hasOngoing ? <span role="img" aria-label={t("ongoingPresent")} className="size-1.5 rounded-full bg-current opacity-60" /> : null}
+          </button>
           {tabs.map((tab) => {
-            const active = sameFile(shownFile, tab);
+            const active = !showingOngoing && sameFile(shownFile, tab);
             const name = fileName(tab.path);
             return (
               <div key={`${machineOf(tab)}:${tab.path}`} className={tabClass(active)}>

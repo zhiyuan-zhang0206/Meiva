@@ -725,7 +725,9 @@ def test_workspace_section_needs_an_agent_and_the_gate() -> None:
 
     assert agent_workspace_pointer(gated_off, agent_id=1) == ""
     assert agent_workspace_pointer(gated_on, agent_id=None) == ""
-    assert agent_workspace_pointer(gated_on, agent_id=1).startswith("# Workspace")
+    rendered = agent_workspace_pointer(gated_on, agent_id=1)
+    assert rendered.startswith("# Workspace")
+    assert "## Doing" in rendered and "## Waiting" in rendered
 
 
 # ── activation telemetry (issue #40) ────────────────────────────────────────

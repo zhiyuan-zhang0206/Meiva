@@ -40,15 +40,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("panel bar", () => {
-  it("shows the document first, then each opened file without a type icon, and holds the panel's controls", () => {
+  it("shows the fixed tabs first, then each opened file without a type icon, and holds the panel's controls", () => {
     store().openFile({ agentId: 7, path: "/w/src/main.py" });
     store().openFile({ agentId: 7, path: "/w/notes.md" });
     const inspected: string[] = [];
     renderWithBrowser(<PanelBar agentId={7} mobile={false} inspecting={false} onInspect={() => inspected.push("inspect")} onCollapse={() => inspected.push("collapse")} />, { wrapper: Wrapper });
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context", "main.py", "notes.md"]);
-    expect(tabs[2].getAttribute("aria-selected")).toBe("true");
-    expect(tabs[2].querySelector("svg")).toBeNull();
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context", "Ongoing", "main.py", "notes.md"]);
+    expect(tabs[3].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[3].querySelector("svg")).toBeNull();
     expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 

@@ -78,14 +78,22 @@ factory and authority at their original construction points.
 
 The serving TaskGroup owns `to_user_watch.watch_to_user`. Every 0.5 seconds after
 its preceding scan/publication, outside the maintenance stop window, it snapshots numeric, non-symlink workspace
-directories and only their immediate `to_user.md` entries.
+directories named canonically and only their immediate `to_user.md` and `ongoing.md` entries.
 Scanning runs in a worker thread; it never walks repositories or `node_modules`.
 Each target is identified with `lstat` device, inode, size, nanosecond mtime and
 ctime, including the link itself for a symbolic target. Directory identity uses
 only device and inode, so unrelated workspace writes do not publish events.
 
-The initial snapshot publishes nothing. Later workspace additions/removals and
-target changes publish at most one `ToUserChanged` per agent per scan. Polling
+The initial snapshot triggers a cluster-wide `WorkspacePanelsResync` to refresh
+open panels after edits or deletions during downtime. One owned task publishes
+the resync independently of file scanning and retries with the shared exponential
+backoff when Redis cannot confirm delivery. The 30-second cap limits the interval
+between attempts while keeping extra traffic low during sustained Redis outages.
+A confirmed publish ends the startup retry, including when Redis reports zero
+subscribers. Watcher shutdown cancels the task and waits for its cleanup.
+Later workspace additions/removals and
+shared document changes publish at most one `ToUserChanged` per agent per scan.
+Changes to the optional `ongoing.md` file publish `OngoingChanged` independently. Polling
 coalesces writes between scans; a target created and removed entirely between
 scans has no persistent state to invalidate. Missing entries during a scan are
 normal deletion races, as is a workspace becoming a non-directory; other

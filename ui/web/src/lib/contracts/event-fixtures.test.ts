@@ -57,6 +57,8 @@ const REQUIRED_FIELDS: Record<SystemEvent["role"], readonly string[]> = {
   inbound_committed: ["agent_id", "role", "inbound_id"],
   label_updated: ["agent_id", "role", "label"],
   to_user_changed: ["agent_id", "role"],
+  ongoing_changed: ["agent_id", "role"],
+  workspace_panels_resync: ["agent_id", "role"],
   token_usage: ["agent_id", "role", "input_tokens", "output_tokens", "reasoning_tokens"],
   llm_keepalive: ["agent_id", "role", "msg_idx", "content"],
   llm_done: ["agent_id", "role"],
@@ -119,6 +121,8 @@ function assertSystemEventShape(obj: unknown): asserts obj is SystemEvent {
     case "inbound_committed":
     case "label_updated":
     case "to_user_changed":
+    case "ongoing_changed":
+    case "workspace_panels_resync":
       break;
     case "token_usage":
     case "llm_keepalive":

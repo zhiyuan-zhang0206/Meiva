@@ -40,6 +40,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/to-user"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/ongoing"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/to-user/resource"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/files/content"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/files/raw"): RouteContract(),

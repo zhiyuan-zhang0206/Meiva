@@ -26,6 +26,7 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   AGENT_DIRECTORY_QUERY_KEY,
   AGENT_DETAIL_QUERY_KEY,
   ["to-user"],
+  ["ongoing"],
   ["user-messages"],
   QUESTIONS_QUERY_KEY,
   ATTENTION_COUNTS_KEY,
@@ -88,6 +89,12 @@ export function foldAgainstCache(
 
   if (ev.role === "to_user_changed") {
     invalidations.push({ key: ["to-user", ev.agent_id] });
+  }
+  if (ev.role === "ongoing_changed") {
+    invalidations.push({ key: ["ongoing", ev.agent_id] });
+  }
+  if (ev.role === "workspace_panels_resync") {
+    invalidations.push({ key: ["to-user"] }, { key: ["ongoing"] });
   }
 
   // meiva:note

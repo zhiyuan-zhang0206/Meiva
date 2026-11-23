@@ -209,3 +209,18 @@ async def test_committed_summary_gets_an_ordinary_reply_before_preparation_rearm
     soft = _runtime()
     assert await compact_reminder(state, soft, {}) is None
     assert await compact_reminder(replied, soft, {}) is not None
+
+
+async def test_workspace_reminder_keeps_ongoing_work_current() -> None:
+    state = AgentState(messages=[HumanMessage(content="history " * 200)])
+    result = await compact_reminder(state, _runtime(ExtensionRegistry(())), {})
+    assert result is not None
+    messages = result["messages"]
+    assert is_object_list(messages)
+    [note] = messages
+    assert isinstance(note, HumanMessage)
+    assert isinstance(note.content, str)
+    assert (
+        "If you maintain `ongoing.md`, remove completed items and verify that "
+        "each wait under `## Waiting` still applies." in note.content
+    )

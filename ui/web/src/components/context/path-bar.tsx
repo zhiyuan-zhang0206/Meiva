@@ -115,13 +115,13 @@ function FolderMenu({ agentId, start, onClose }: { agentId: number; start: Folde
 // drop-down, a file opens as a tab) and Escape gives up. The full-page viewer shows the tree on the
 // left instead.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-export function PathBar({ agentId, documentModifiedAt }: { agentId: number; documentModifiedAt: string | null | undefined }) {
+export function PathBar({ agentId, documentModifiedAt, ongoing = false }: { agentId: number; documentModifiedAt: string | null | undefined; ongoing?: boolean }) {
   const t = useTranslations("toUser");
   const client = useApi();
   const now = useWallDate();
   const activeFile = useWorkspaceFileStore((s) => s.activeFile);
   const shown = activeFile?.agentId === agentId ? activeFile : null;
-  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", shown?.machineAgentId ?? agentId);
+  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", shown?.machineAgentId ?? agentId, { preserveExplicit: true });
   const file = useQuery({
     queryKey: ["workspace-file", ownerAgentId, requestPath],
     queryFn: ({ signal }) => client.getWorkspaceFile(ownerAgentId, requestPath, signal),
@@ -180,7 +180,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   };
 
   const segment = "shrink-0 rounded px-0.5 py-0.5 hover:bg-accent hover:text-foreground";
-  const detail = shown === null
+  const detail = shown === null || ongoing
     ? (documentModifiedAt ? t("updated", { time: formatRelative(documentModifiedAt, now) }) : null)
     : (file.data ? formatFileSize(file.data.size) : null);
   const toggle = (at: number, path: string | null, anchor: HTMLElement) => {
