@@ -44,7 +44,8 @@ commits before the caller advances, using a separate transaction where the
 caller has no checkpoint transaction to share. The first committed report owns
 its time, machine and price snapshot. A replay of matching usage acknowledges
 that row. Conflicting provider facts raise. Meiva receipts use the provider and
-its request ID when supplied. Direct callbacks use the LangChain run ID and input
+its request or response ID from `response_metadata`. The graph assigns its own
+message ID separately. Direct callbacks use the LangChain run ID and input
 index. A harness turn uses the provider session, the process generation persisted
 in the session registry, the local turn ID, and the step index. The generation
 advances when the same session resumes in a new process.

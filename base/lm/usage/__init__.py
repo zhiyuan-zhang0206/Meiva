@@ -188,8 +188,12 @@ def log_usage_from_message(
 
 
 def _provider_request_id(msg: AIMessage) -> str | None:
-    request_id = msg.response_metadata.get("request_id")
-    return request_id if isinstance(request_id, str) and request_id else None
+    # meiva:link base/lm/usage/README.md
+    for field in ("request_id", "id"):
+        receipt = msg.response_metadata.get(field)
+        if isinstance(receipt, str) and receipt:
+            return receipt
+    return None
 
 
 def log_usage_fields(
