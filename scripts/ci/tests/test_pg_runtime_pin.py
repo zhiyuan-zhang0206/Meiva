@@ -1,24 +1,43 @@
 from __future__ import annotations
 
+import hashlib
 import re
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import pytest
+
+from base.cluster.dataplane import runtime_binaries as rb
+from base.cluster.dataplane.artifact_fetch import (
+    RUNTIME_PINS_FILENAME,
+    fetch_verified,
+    runtime_pin_manifest,
+)
+from base.cluster.dataplane.runtime_binaries import download_with_opener
+from base.host.net.ports import SYSTEM_URL_OPENER
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from scripts.ci.vendor_pg_runtime import prepare_runtime
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WORKFLOWS = _REPO_ROOT / ".github/workflows"
 _SYNC_MARKERS = ("actions/uv-sync", "uv sync --frozen")
+_VENDOR_ACTION = "./.github/actions/vendor-pg-runtime"
 
 
 def test_every_job_that_installs_the_data_plane_also_vendors_the_postgres_runtime() -> None:
-    mismatched = {
-        workflow.name: (
-            workflow.read_text(encoding="utf-8").count("./.github/actions/install-pg-redis"),
-            workflow.read_text(encoding="utf-8").count("./.github/actions/vendor-pg-runtime"),
-        )
+    install_jobs = [
+        (workflow.name, job)
         for workflow in sorted(_WORKFLOWS.glob("*.yml"))
-        if "./.github/actions/install-pg-redis" in workflow.read_text(encoding="utf-8")
-    }
-    assert mismatched, "no workflow installs the data plane"
-    assert {name: pair for name, pair in mismatched.items() if pair[0] != pair[1]} == {}
+        for job in _job_bodies(workflow)
+        if "./.github/actions/install-pg-redis" in job
+    ]
+    assert install_jobs, "no workflow installs the data plane"
+    assert [name for name, job in install_jobs if _VENDOR_ACTION not in job] == []
+
+
+def _job_bodies(workflow: Path) -> list[str]:
+    return re.split(r"\n  (?=[a-z0-9-]+:\n)", workflow.read_text(encoding="utf-8"))
 
 
 def test_vendored_runtime_action_is_keyed_on_the_pin_file_and_runs_after_deps() -> None:
@@ -26,14 +45,23 @@ def test_vendored_runtime_action_is_keyed_on_the_pin_file_and_runs_after_deps() 
     assert "hashFiles('base/cluster/dataplane/runtime_binaries.py')" in text
     assert 'uv run python scripts/ci/vendor_pg_runtime.py "$GITHUB_ENV"' in text
     for workflow in _WORKFLOWS.glob("*.yml"):
-        body = workflow.read_text(encoding="utf-8")
-        for job in re.split(r"\n  (?=[a-z0-9-]+:\n)", body):
-            if "./.github/actions/vendor-pg-runtime" not in job:
+        for job in _job_bodies(workflow):
+            if _VENDOR_ACTION not in job:
                 continue
             sync = min((job.find(marker) for marker in _SYNC_MARKERS if marker in job), default=-1)
             assert 0 <= sync < job.index("vendor-pg-runtime"), (
                 f"{workflow.name}: vendored runtime built before the Python deps"
             )
+
+
+def test_pgvector_smokes_use_the_cached_runtime() -> None:
+    command = "uv run python scripts/ci/pgvector_runtime_smoke.py"
+    for name in ("ci.yml", "release-gate.yml"):
+        (smoke,) = [job for job in _job_bodies(_WORKFLOWS / name) if command in job]
+        assert "image: &pgvector-smoke-image ghcr.io/" in smoke
+        assert "runner-image: *pgvector-smoke-image" in smoke
+        assert smoke.index(_VENDOR_ACTION) < smoke.index(command)
+        assert 'MEIVA_HOME="$(dirname "$CI_VENDORED_RUNTIME_ROOT")"' in smoke
 
 
 def test_the_session_home_links_the_vendored_runtime_the_job_exports() -> None:
@@ -47,3 +75,142 @@ def test_the_session_home_links_the_vendored_runtime_the_job_exports() -> None:
 def test_ci_no_longer_installs_an_apt_pgvector() -> None:
     text = (_REPO_ROOT / ".github/actions/install-pg-redis/action.yml").read_text(encoding="utf-8")
     assert "postgresql-17-pgvector" not in text
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "image"])
+@pytest.mark.parametrize(
+    ("statuses", "expected_paths"),
+    [
+        ((200, 200), ["/primary", "/fallback"]),
+        ((404, 410), ["/primary", "/fallback"]),
+        ((410, 429, 200), ["/primary", "/fallback", "/fallback"]),
+    ],
+)
+def test_artifact_download_only_retries_transient_sources(
+    implementation: str, statuses: tuple[int, ...], expected_paths: list[str]
+) -> None:
+    responses = iter(statuses)
+    paths: list[str] = []
+    sleeps: list[float] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            paths.append(self.path)
+            status = next(responses, 500)
+            body = b"x" if self.path == "/primary" else b"verified artifact"
+            self.send_response(status)
+            self.send_header("Content-Length", str(101 if self.path == "/primary" else len(body)))
+            self.end_headers()
+            _ = self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    primary, fallback = (f"http://127.0.0.1:{server.server_port}{p}" for p in expected_paths[:2])
+    try:
+
+        def fetch() -> bytes:
+            if implementation == "image":
+                return fetch_verified(
+                    (primary, fallback),
+                    hashlib.sha256(b"verified artifact").hexdigest(),
+                    open_url=SYSTEM_URL_OPENER,
+                    sleep=sleeps.append,
+                    report_failure=lambda _: None,
+                )
+            return download_with_opener(
+                primary, open_url=SYSTEM_URL_OPENER, fallback_url=fallback, sleep=sleeps.append
+            )
+
+        if statuses[-1] == 410:
+            with pytest.raises(RuntimeError, match=r"HTTP Error (404|410)"):
+                _ = fetch()
+        else:
+            assert fetch() == b"verified artifact"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert paths == expected_paths
+    retry_delay = 2 if implementation == "runtime" else 3
+    assert sleeps == ([retry_delay] if len(statuses) == 3 else [])
+
+
+def test_ci_image_copies_and_uses_the_artifact_downloader() -> None:
+    dockerfile = (_REPO_ROOT / ".github/ci-image/Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (_REPO_ROOT / ".github/ci-image/Dockerfile.dockerignore").read_text(
+        encoding="utf-8"
+    )
+    source = "base/cluster/dataplane/artifact_fetch.py"
+    assert f"{source} /tmp/" in dockerfile
+    assert f"!{source}" in dockerignore
+    assert "from artifact_fetch import RUNTIME_PINS_FILENAME, fetch_verified" in dockerfile
+    assert (
+        "runtime_pin_manifest(target_platform, pg_version, pg_sha, pgvector_version, vec_sha)"
+        in dockerfile
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["", "platform", "pg-version", "pg-sha", "vector-version", "vector-sha", "missing"]
+)
+def test_cold_cache_reuses_only_a_pin_matched_image(tmp_path: Path, mismatch: str) -> None:
+    home = tmp_path / "workspace"
+    image = tmp_path / "image/runtime"
+    pg = image / "pg" / rb.PG_VERSION
+    for name in (
+        "bin/initdb",
+        "bin/postgres",
+        "bin/pg_ctl",
+        "lib/postgresql/vector.so",
+        "share/postgresql/extension/vector.control",
+        f"share/postgresql/extension/{rb.PGVECTOR_SQL}",
+    ):
+        path = pg / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    key = "linux-x86_64"
+    fields = [
+        key,
+        rb.PG_VERSION,
+        rb.PG_ARTIFACTS[key][1],
+        rb.PGVECTOR_VERSION,
+        rb.PGVECTOR_ARTIFACTS[key][1],
+    ]
+    for field, index in zip(
+        ("platform", "pg-version", "pg-sha", "vector-version", "vector-sha"), range(5), strict=True
+    ):
+        if mismatch == field:
+            fields[index] = "mismatch"
+    if mismatch != "missing":
+        _ = (image / RUNTIME_PINS_FILENAME).write_text(
+            runtime_pin_manifest(*fields), encoding="ascii"
+        )
+
+    opener = FakeUrlOpener()
+    opener.on("https://repo.maven.apache.org/", Answer(status=429), repeat=True)
+    opener.on("https://repo1.maven.org/", Answer(status=429), repeat=True)
+    sleeps: list[float] = []
+
+    def resolve() -> Path:
+        return prepare_runtime(
+            home=home,
+            system="Linux",
+            machine="x86_64",
+            image_root=image,
+            open_url=opener,
+            sleep=sleeps.append,
+        )
+
+    if mismatch:
+        with pytest.raises(RuntimeError, match="HTTP Error 429"):
+            _ = resolve()
+        assert len(opener.calls) == 2 * rb.DOWNLOAD_ATTEMPTS
+        assert sleeps == [2, 4, 8]
+    else:
+        assert resolve() == image
+        assert opener.calls == []
+        assert sleeps == []
+    assert not rb.runtime_root(home).exists()

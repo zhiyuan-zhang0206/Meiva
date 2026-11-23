@@ -473,7 +473,7 @@
   "base/cluster/dataplane/pooler.py": 10,
   "base/cluster/dataplane/provision_plan.py": 1,
   "base/cluster/dataplane/redis_bridge.py": 4,
-  "base/cluster/dataplane/runtime_binaries.py": 5,
+  "base/cluster/dataplane/runtime_binaries.py": 4,
   "base/cluster/dataplane/tests/test_pg_fixture_log.py": 9,
   "base/cluster/dataplane/tests/test_pg_foreground.py": 8,
   "base/cluster/dataplane/tests/test_pg_plan.py": 2,
