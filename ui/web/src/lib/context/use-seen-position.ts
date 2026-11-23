@@ -75,6 +75,7 @@ export interface SeenFeed {
 export interface SeenReveal {
   decided: boolean;
   itemId: string | null;
+  entrySeenId?: number;
   olderPages?: number;
 }
 
@@ -215,6 +216,7 @@ export function useSeenPosition({
   return session.decided ? {
     decided: true,
     itemId: session.reveal?.itemId ?? null,
+    ...(session.entry !== null ? { entrySeenId: session.entry } : {}),
     ...(session.olderPages > 0 ? { olderPages: session.olderPages } : {}),
   } : UNDECIDED;
 }

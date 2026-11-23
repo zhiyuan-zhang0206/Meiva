@@ -4,12 +4,14 @@ __all_for_meiva__ = ["capture", "kill", "list", "new", "renew", "send", "send_ke
 
 import builtins
 import contextlib
+import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
+from base.host.env.harness_binaries import meiva_python_env
 from base.log import logger
 from base.paths import repo_root
 from base.sessions.backend import PtySessionBackend, get_shell_backend
@@ -178,7 +180,11 @@ def process_environ() -> Mapping[str, str]:
 # The machine facts a new session starts from, read once per creation: this checkout and the environment the session forwards, handed in by the caller.
 def session_host(environ: Mapping[str, str]) -> SessionHost:
     return SessionHost(
-        checkout=repo_root(), forwarded=forward_env_dict(environ, activate_venv=True)
+        checkout=repo_root(),
+        forwarded={
+            **forward_env_dict(environ, activate_venv=True),
+            **meiva_python_env(sys.executable),
+        },
     )
 
 

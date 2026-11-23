@@ -305,6 +305,5 @@ def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
         finally:
             assert pipeline.stop().status is DrainStatus.COMPLETED
 
-    changed = render()
-    assert changed == (native / "config/provisioning/alerting/contact.yml",)
+    assert render() == (native / "config/provisioning/alerting/contact.yml",)
     assert render() == ()

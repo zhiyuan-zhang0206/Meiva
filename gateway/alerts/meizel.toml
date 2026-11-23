@@ -1,7 +1,9 @@
 exports = ["router.py"]
 
 [uses]
-"router.py" = ["schemas.py"]
+"agent_webhook.py" = ["notification_text.py", "schemas.py"]
+"notification_text.py" = ["schemas.py"]
+"router.py" = ["agent_webhook.py", "schemas.py"]
 
 [purity]
 "__init__.py" = "strict"

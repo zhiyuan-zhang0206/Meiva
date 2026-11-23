@@ -10,8 +10,8 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.api_contracts.agent_contract import Harness
-from base.host.env.agent_env import MEIVA_PYTHON_ENV
 from base.host.env.harness_binaries import (
+    meiva_python_env,
     noninteractive_bash_path,
     resolve_harness_binary,
     with_harness_path,
@@ -69,7 +69,7 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
             base["PATH"] = f"{venv_bin}{os.pathsep}{existing}"
     else:
         base["PATH"] = venv_bin
-    base[MEIVA_PYTHON_ENV] = sys.executable
+    base.update(meiva_python_env(sys.executable))
     base["SHELL"] = noninteractive_bash_path()
     return with_harness_path(base)
 
