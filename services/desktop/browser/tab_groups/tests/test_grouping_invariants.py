@@ -69,14 +69,16 @@ async def chrome_factory() -> AsyncIterator[Callable[[dict[str, Any]], Awaitable
 
 # meiva:note
 # The policy the shipped worker must keep, in source form: a browser-wide lookup
-# for `Meiva #<digits>` titles, a keeper chosen deterministically from Chrome's
+# for `M #<digits>` titles, a keeper chosen deterministically from Chrome's
 # state rather than answer order, keeping the keeper anchored in its window, the
 # same convergence on Chrome start and extension update, and no touch of a group
 # this stack did not name.
 # meiva:link services/desktop/browser/docs/tab-groups.md
 def test_worker_converges_one_group_per_agent_across_the_browser() -> None:
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
-    assert "chrome.tabGroups.query({ title })" in source
+    assert "chrome.tabGroups.query({})" in source
+    assert "meivaShortTitle(group.title) === title" in source
+    assert "chrome.tabGroups.update(keeper.id, { title })" in source
     assert "query({ title, windowId })" not in source
     assert "b.size - a.size || a.id - b.id" in source
     assert "meivaConvergeTitle(title)" in source
@@ -84,7 +86,7 @@ def test_worker_converges_one_group_per_agent_across_the_browser() -> None:
     assert "self.meivaConvergeAll" in source
     assert "chrome.runtime.onStartup.addListener" in source
     assert "chrome.runtime.onInstalled.addListener" in source
-    assert "MEIVA_TITLE.test(owner.title)" in source
+    assert "meivaShortTitle(owner.title)" in source
 
 
 async def test_a_merged_duplicate_is_reported_with_agent_window_and_group_ids(
@@ -95,7 +97,7 @@ async def test_a_merged_duplicate_is_reported_with_agent_window_and_group_ids(
         loaded=True,
         worker=SHIPPED_WORKER,
         report={
-            "title": "Meiva #7",
+            "title": "M #7",
             "windowId": 737373,
             "groups": [515151, 626262],
             "kept": 515151,
@@ -113,7 +115,7 @@ async def test_a_merged_duplicate_is_reported_with_agent_window_and_group_ids(
 
     messages = _warnings(loguru_records)
     assert len(messages) == 1, messages
-    for needle in ("agent 7", "737373", "515151", "626262", "Meiva #7"):
+    for needle in ("agent 7", "737373", "515151", "626262", "M #7"):
         assert needle in messages[0], messages[0]
 
 
@@ -143,7 +145,7 @@ async def test_converge_all_reports_every_merged_duplicate_of_every_agent(
         worker=SHIPPED_WORKER,
         converge=[
             {
-                "title": "Meiva #7",
+                "title": "M #7",
                 "windowId": 737373,
                 "groups": [515151, 626262],
                 "kept": 515151,
@@ -151,7 +153,7 @@ async def test_converge_all_reports_every_merged_duplicate_of_every_agent(
                 "moved": 3,
             },
             {
-                "title": "Meiva #8",
+                "title": "M #8",
                 "windowId": 747474,
                 "groups": [717171],
                 "kept": 717171,
@@ -168,7 +170,7 @@ async def test_converge_all_reports_every_merged_duplicate_of_every_agent(
 
     messages = _warnings(loguru_records)
     assert len(messages) == 1, messages
-    for needle in ("Meiva #7", "737373", "515151", "626262"):
+    for needle in ("M #7", "737373", "515151", "626262"):
         assert needle in messages[0], messages[0]
 
 
@@ -197,7 +199,7 @@ async def test_a_malformed_report_warns_and_keeps_the_page(
     model = ChromeModel(
         loaded=True,
         worker=SHIPPED_WORKER,
-        report={"title": "Meiva #7", "windowId": "not a window", "groups": [1], "kept": 1},
+        report={"title": "M #7", "windowId": "not a window", "groups": [1], "kept": 1},
     )
     chrome = await chrome_factory(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
@@ -233,7 +235,7 @@ async def test_release_page_ungroups_the_recorded_target_of_the_agent(
     expressions = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
     assert len(expressions) == 1
     assert '"T2"' in expressions[0]
-    assert "Meiva #42" in expressions[0]
+    assert "M #42" in expressions[0]
 
 
 async def test_release_page_is_a_no_op_for_a_page_it_never_grouped(
@@ -273,7 +275,7 @@ async def test_release_page_wakes_an_idled_out_worker_to_ungroup_the_last_tab(
 
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == loaded_before + 1
     expressions = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
-    assert expressions == ['meivaUngroupLast("T2", "Meiva #42")']
+    assert expressions == ['meivaUngroupLast("T2", "M #42")']
     assert _warnings(loguru_records) == []
 
 
@@ -297,7 +299,7 @@ async def test_release_page_serializes_behind_in_flight_grouping(
 
     calls = [e for e in model.expressions if e.startswith(("meivaGroup(", "meivaUngroupLast("))]
     assert calls == [
-        'meivaGroup("T2", "Meiva #42")',
-        'meivaUngroupLast("T2", "Meiva #42")',
+        'meivaGroup("T2", "M #42")',
+        'meivaUngroupLast("T2", "M #42")',
     ]
     assert _warnings(loguru_records) == []

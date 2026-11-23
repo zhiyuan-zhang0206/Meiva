@@ -1,6 +1,6 @@
 # Browser Tab Groups
 
-The shared Chrome shows at most one open tab group per agent across the browser, titled `Meiva #<id>` (ids are unique, labels are not). It holds every page that agent's browser calls **created**: an explicit `new_page` and the page a page-less first `navigate_page` auto-creates. A page the agent merely selected (a user's tab) is never grouped, nor is a page opened in an isolated browser context (`isolatedContext`): extensions cannot see such tabs (such a page still carries a TTL record). The title carries no TTL and no color; Chrome assigns the color.
+The shared Chrome shows at most one open tab group per agent across the browser, titled `M #<id>` (ids are unique, labels are not). It holds every page that agent's browser calls **created**: an explicit `new_page` and the page a page-less first `navigate_page` auto-creates. A page the agent merely selected (a user's tab) is never grouped, nor is a page opened in an isolated browser context (`isolatedContext`): extensions cannot see such tabs (such a page still carries a TTL record). The title carries no TTL and no color; Chrome assigns the color.
 
 The owning document is [the component doc](../../../../desktop/browser/docs/tab-groups.md); this page is the services-index view of it.
 
@@ -20,7 +20,7 @@ Nothing deletes a group, and a closed group is **not** removed: Chrome keeps a g
 
 ## The page TTL ledger and the groups
 
-The page TTL ledger (`<home>/run/browser-pages.json`, one record per CDP target id, written when a page is created) is the basis for closing a page; the group title only checks that the user has not taken it. A page that Chrome showed in its owner's `Meiva #<id>` group and that is no longer there is left open and loses its record; a page in an agent group with no record is neither adopted nor closed, except by a Chrome-restart inheritance (only when no recorded page survived; unique owner + URL) and a one-time migration when the daemon starts with no ledger file (those pages are closed only by the sweep). An ungrouped record whose page appears in any other group is the user's too. The read is `meivaGroupedTargets()` through `AgentTabGroups.tab_state()`, and the close is `AgentTabGroups.close_target` (`/json/close/<id>`, ungrouping the last tab first, re-checked just before). Owner: [the component doc](../../../../desktop/browser/docs/tab-groups.md).
+The page TTL ledger (`<home>/run/browser-pages.json`, one record per CDP target id, written when a page is created) is the basis for closing a page; the group title only checks that the user has not taken it. A page that Chrome showed in its owner's `M #<id>` group and that is no longer there is left open and loses its record; a page in an agent group with no record is neither adopted nor closed, except by a Chrome-restart inheritance (only when no recorded page survived; unique owner + URL) and a one-time migration when the daemon starts with no ledger file (those pages are closed only by the sweep). An ungrouped record whose page appears in any other group is the user's too. The read is `meivaGroupedTargets()` through `AgentTabGroups.tab_state()`, and the close is `AgentTabGroups.close_target` (`/json/close/<id>`, ungrouping the last tab first, re-checked just before). Owner: [the component doc](../../../../desktop/browser/docs/tab-groups.md).
 
 ## Failure policy
 

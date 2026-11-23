@@ -11,7 +11,7 @@
 # ``meivaGroup(targetId, title)`` function its service worker exposes.
 #
 # The invariant is stated once, here: an agent's pages sit in at most one open
-# tab group across the entire browser, titled ``Meiva #<id>``. Every entry point
+# tab group across the entire browser, titled ``M #<id>``. Every entry point
 # CONVERGES rather than assumes: it re-reads Chrome's open groups by title across
 # all windows, keeps one deterministic group (most tabs, ties to lowest group id),
 # and moves any duplicate groups' tabs into it while keeping the keeper anchored
@@ -150,26 +150,27 @@ _CLOSE_POLL_S = 0.1
 
 
 # meiva:note
-# The tab group title of an agent: `Meiva #<id>`. The title is the group's
+# The tab group title of an agent: `M #<id>`. The title is the group's
 # identity (the worker finds a group by title), so it names the agent by id --
 # labels can repeat, ids cannot. Chrome assigns the color.
 def group_title(agent_id: int) -> str:
-    return f"Meiva #{agent_id}"
+    return f"M #{agent_id}"
 
 
 # meiva:note
-# The inverse of `group_title`: the agent id a tab group title names, or None
-# for any other title (a user's own group, `Meiva #x`, a padded or zero-led id,
-# trailing text). Strict on purpose: it is the proof that a tab belongs to this
-# stack, and only an exact `group_title` round trip counts.
+# Recognize the original title until open Chrome groups are renamed by the worker.
+# Require a canonical id so an unrelated title never becomes proof of ownership.
 def agent_id_of_title(title: object) -> int | None:
-    if not isinstance(title, str) or not title.startswith("Meiva #"):
+    if not isinstance(title, str):
         return None
-    digits = title[len("Meiva #") :]
+    short_title = "M #" + title[len("Meiva #") :] if title.startswith("Meiva #") else title
+    if not short_title.startswith("M #"):
+        return None
+    digits = short_title[len("M #") :]
     if not (digits.isascii() and digits.isdigit()):
         return None
     agent_id = int(digits)
-    return agent_id if group_title(agent_id) == title else None
+    return agent_id if group_title(agent_id) == short_title else None
 
 
 # meiva:note

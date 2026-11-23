@@ -78,7 +78,7 @@ the operating choices below do not redefine either component.
   `<home>/run/browser-pages.json`, keyed by CDP target id and written at creation
   (isolated-context pages too), so a daemon restart (every cluster update, every
   upstream `chrome-devtools-mcp` death) loses none. The record is the basis for
-  closing; the `Meiva #<id>` tab group only checks that the user has not taken the
+  closing; the `M #<id>` tab group only checks that the user has not taken the
   page (a page that was in its owner's group and no longer is stays open and loses its
   record). The first sweep runs 30 s after the daemon starts and closes nothing; later
   sweeps run every 10 minutes and close a page only when two consecutive sweeps found it

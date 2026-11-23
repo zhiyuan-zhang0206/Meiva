@@ -91,7 +91,7 @@ def _chrome_socket(home: Path) -> Path:
 # Best-effort: ask the browser-mcp service of `home` to close this agent's pages.
 #
 # Called after an agent's termination commits so a terminated worker does not
-# leave its tabs (or its `Meiva #<id>` tab group) in the user's shared Chrome.
+# leave its tabs (or its `M #<id>` tab group) in the user's shared Chrome.
 # The service closes every page created by `agent_id` — never another
 # agent's or the user's — and is idempotent.
 # A machine without the browser service (no socket), a daemon that is down

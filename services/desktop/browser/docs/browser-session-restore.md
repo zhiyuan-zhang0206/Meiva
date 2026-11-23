@@ -24,7 +24,7 @@ The recorded pin and group are **re-applied** afterwards by the `browser-mcp`
 daemon (one extension call, `meivaApplyLayout`), because Chrome's own restore is
 not reliable about them — see below. That pass is idempotent and only ever pins
 and groups: it never closes, unpins or ungroups a tab, keeps user-named groups
-in their own windows, and converges `Meiva #<id>` groups to one per agent across
+in their own windows, and converges `M #<id>` groups to one per agent across
 the browser.
 
 ## What was measured (Chrome 156.0.8078.47, macOS)
@@ -81,7 +81,7 @@ recorded pins and grouped tabs are in place".
 
 Restored tabs are new CDP targets, so the page TTL ledger
 (`<home>/run/browser-pages.json`, keyed by target id) does not know them. The
-`Meiva #<id>` groups that the reapply (or Chrome itself) puts back let the page sweep
+`M #<id>` groups that the reapply (or Chrome itself) puts back let the page sweep
 pass the record of a gone target, with its **original deadline**, to the one restored
 page with the same owner and URL, when no recorded page survived the restart, exactly one gone record and one grouped page
 match and no other page in Chrome has that URL; the first sweep runs 30 s after the
@@ -89,7 +89,7 @@ daemon starts, after the reapply has had time to put the groups back. A restored
 that matches nothing, or several tabs with the same URL, is left alone: it is never
 adopted and never closed (it leaks until the user closes it; the leak count is logged).
 
-`meivaApplyLayout` matches tabs by URL in strip order and is unchanged. When a user's
+`meivaApplyLayout` matches tabs by URL in strip order. When a user's
 tab has the same URL as an agent's page, the reapply can file the user's tab into the
 agent's group. The ledger never treats a page in a group as the stack's on that evidence
 alone, so such a tab is not closed; the only residual risk is the one-time migration of

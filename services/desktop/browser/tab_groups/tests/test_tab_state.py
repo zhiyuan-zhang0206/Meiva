@@ -73,15 +73,15 @@ async def test_tab_state_reads_page_targets_and_the_agent_each_grouped_tab_belon
 ) -> None:
     model = GroupedModel(
         [
-            {"targetId": "T1", "title": "Meiva #7"},
+            {"targetId": "T1", "title": "M #7"},
             {"targetId": "T2", "title": "Meiva #405"},
             {"targetId": "T3", "title": "Work"},
-            {"targetId": "T4", "title": "Meiva #07"},
+            {"targetId": "T4", "title": "M #07"},
             {"targetId": "T5", "title": None},
-            {"targetId": "T6", "title": "Meiva #x"},
+            {"targetId": "T6", "title": "M #x"},
             # meiva:note
             # a target /json/list no longer lists
-            {"targetId": "GONE", "title": "Meiva #7"},
+            {"targetId": "GONE", "title": "M #7"},
         ]
     )
     chrome = await chrome_factory(model.handlers())
@@ -111,7 +111,7 @@ def _urls() -> list[str]:
 
 @pytest.mark.parametrize(
     "grouped",
-    [RuntimeError("worker exploded"), [{"targetId": 5, "title": "Meiva #7"}], {"not": "a list"}],
+    [RuntimeError("worker exploded"), [{"targetId": 5, "title": "M #7"}], {"not": "a list"}],
 )
 async def test_tab_state_raises_when_the_extension_cannot_be_read(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
@@ -148,7 +148,7 @@ async def test_close_target_ungroups_the_last_tab_closes_by_target_id_and_sees_i
         assert await _groups(chrome, tasks).close_target(7, "T2", grouped=True) is True
 
     ungroup = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
-    assert len(ungroup) == 1 and '"T2"' in ungroup[0] and "Meiva #7" in ungroup[0]
+    assert len(ungroup) == 1 and '"T2"' in ungroup[0] and "M #7" in ungroup[0]
     # meiva:note
     # the ungroup landed before the close request
     assert model.closes_seen_at_ungroup == [0]

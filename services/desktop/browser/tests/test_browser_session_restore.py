@@ -85,7 +85,7 @@ def _tab(url: str, *, pinned: bool = False, group: str | None = None, index: int
 def test_ledger_round_trips_and_is_private(tmp_path: Path) -> None:
     ledger = _ledger(
         _tab("https://a.example/", pinned=True),
-        _tab("https://b.example/", index=1, group="Meiva #7"),
+        _tab("https://b.example/", index=1, group="M #7"),
     )
     session_restore.write(tmp_path, ledger)
     path = ledger_path(tmp_path)
@@ -169,7 +169,7 @@ async def test_capture_records_pins_and_groups_from_the_worker() -> None:
                     "url": "https://b.example/",
                     "title": "B",
                     "pinned": False,
-                    "group": "Meiva #7",
+                    "group": "M #7",
                 },
             ]
         ]
@@ -178,7 +178,7 @@ async def test_capture_records_pins_and_groups_from_the_worker() -> None:
     assert ledger is not None
     assert [tab.url for tab in ledger.tabs] == ["https://a.example/", "https://b.example/"]
     assert ledger.tabs[0].pinned is True
-    assert ledger.tabs[1].group == "Meiva #7"
+    assert ledger.tabs[1].group == "M #7"
     assert ledger.layout is True
     assert ledger.pending == PENDING_RESTORE
     assert ledger.captured_at == NOW.isoformat(timespec="seconds")
@@ -209,16 +209,17 @@ async def test_capture_without_a_browser_records_nothing() -> None:
 # ── the reapply the flag cannot promise ────────────────────────────────────
 
 
-def test_layout_spec_carries_pins_and_groups_in_recorded_order() -> None:
+def test_layout_spec_preserves_a_legacy_group_and_carries_pins_in_recorded_order() -> None:
+    title = "Meiva #7"
     ledger = _ledger(
         _tab("https://a.example/", pinned=True, index=0),
-        _tab("https://b.example/", index=1, group="Meiva #7"),
-        _tab("https://c.example/", index=2, group="Meiva #7"),
+        _tab("https://b.example/", index=1, group=title),
+        _tab("https://c.example/", index=2, group=title),
         _tab("https://d.example/", index=3),
     )
     assert session_restore.layout_spec(ledger) == {
         "pins": ["https://a.example/"],
-        "groups": [{"title": "Meiva #7", "urls": ["https://b.example/", "https://c.example/"]}],
+        "groups": [{"title": title, "urls": ["https://b.example/", "https://c.example/"]}],
     }
     # meiva:note
     # One pin plus two grouped tabs.
@@ -365,7 +366,7 @@ def test_record_for_stop_writes_a_restorable_ledger(tmp_path: Path) -> None:
                     "url": "https://b.example/",
                     "title": "",
                     "pinned": False,
-                    "group": "Meiva #7",
+                    "group": "M #7",
                 },
             ]
         ]
@@ -481,7 +482,9 @@ def test_the_shipped_worker_reports_and_re_applies_the_layout_without_destroying
     # meiva:note
     # Agent groups converge globally through `meivaConvergeTitle` so a restore
     # cannot produce a second group for an agent, while user groups stay per-window.
-    assert "meivaConvergeTitle(group.title)" in worker
+    restore_worker = worker.split("self.meivaApplyLayout", 1)[1]
+    assert "const title = meivaShortTitle(group.title)" in restore_worker
+    assert "meivaConvergeTitle(title)" in restore_worker
     assert "chrome.tabGroups.query({ title: group.title, windowId })" in worker
     for forbidden in ("tabs.remove", "tabGroups.remove", "pinned: false", "tabs.move"):
         assert forbidden not in worker, forbidden
