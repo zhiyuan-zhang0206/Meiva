@@ -80,6 +80,7 @@ def test_grafana_binds_the_configured_listen_host_and_port(lgtm_unit: LgtmUnit) 
     # The native deployment provisions no preinstalled plugins, so the Grafana 13 background
     # installer must be off: its in-flight work can hold a normal SIGTERM past the unit's
     # shutdown deadline.
+    assert f"plugins = {lgtm_unit.native}/grafana/data/plugins" in grafana_ini
     assert "preinstall_disabled = true" in grafana_ini
 
     lgtm_unit.render(settings=settings_with(lgtm_grafana_listen_host="10.0.0.5"))

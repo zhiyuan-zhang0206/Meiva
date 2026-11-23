@@ -83,6 +83,8 @@ def _h_lgtm(
     runtime = runtime_of(args)
     return cmd_lgtm_status(
         home=runtime.home,
+        repo=runtime.checkout,
+        platform=runtime.host.platform,
         machine=runtime.machine,
         observability=LgtmSettings.from_fields(delivered_config(runtime.config).get_field),
     )

@@ -52,6 +52,15 @@ before extraction, writes each executable or release tree under
 installation cannot reuse its executable markers on Linux. Pinned assets
 support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 
+Converge seals the checksum-verified Grafana release tree, including its bundled
+datasource plugins, under `$MEIVA_HOME/lgtm/native/grafana-home`. A manifest in
+that tree records the archive hash and the installed file hashes and modes.
+Later passes verify the tree and reinstall it if files or permissions drift,
+including on the first converge of an older installation without a manifest.
+Grafana writes its database, installed plugins, and logs outside the release
+tree. `meiva lgtm status` reports the release integrity on the station and
+exits nonzero when it detects drift.
+
 Native templates in `native/config/` are rendered on every converge into
 `$MEIVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
 and launch script. Native backend listen hosts are config

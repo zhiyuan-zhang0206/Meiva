@@ -3,8 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
+from base.native_process.os_platform import Platform
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, backend_urls
+from cli.commands.observability._grafana_release import grafana_release_problem
+from cli.commands.observability._lgtm_assets import load_versions
 from cli.commands.observability._lgtm_provisioning import verify_dashboard_provisioning
+from cli.commands.observability.plans.lgtm.install import platform_tag
 from services.supervision.healthchecks.lgtm import (
     is_lgtm_host,
     lgtm_roles,
@@ -15,7 +19,12 @@ from services.supervision.healthchecks.lgtm import (
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def cmd_lgtm_status(
-    *, home: Path, machine: MachineIdentityReader, observability: LgtmSettings
+    *,
+    home: Path,
+    repo: Path,
+    platform: Platform,
+    machine: MachineIdentityReader,
+    observability: LgtmSettings,
 ) -> int:
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
     if not station:
@@ -23,14 +32,29 @@ def cmd_lgtm_status(
     print_lgtm_status(observability, home=home, station=station)
     if not station:
         return 0
+    native = home / "lgtm" / "native"
+    tag = platform_tag(platform.system, platform.machine)
+    release_problem = (
+        "no pinned release for this platform"
+        if tag is None
+        else grafana_release_problem(
+            native / "grafana-home", archive_sha256=load_versions(repo, tag)["grafana"]["sha256"]
+        )
+    )
+    detail = (
+        f"incomplete ({release_problem})"
+        if release_problem
+        else "complete (pinned release, read-only)"
+    )
+    print(f"  grafana bundled plugins: {detail}")
     problems = verify_dashboard_provisioning(
-        home / "lgtm" / "native", grafana_url=backend_urls(observability)["grafana"]
+        native, grafana_url=backend_urls(observability)["grafana"]
     )
     for problem in problems:
         print(f"  dashboard: {problem}")
     if not problems:
         print("  dashboard: meiva-ops-main served from folder Meiva")
-    return 1 if problems else 0
+    return 1 if problems or release_problem else 0
 
 
 # meiva:note
