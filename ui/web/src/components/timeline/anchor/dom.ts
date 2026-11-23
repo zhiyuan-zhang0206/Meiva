@@ -2,7 +2,8 @@ import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 
 // meiva:note
 // The reader's place is one value: the tail, or a row whose top edge sits `offset` px below the
-// viewport's top edge (negative while a tall row is scrolled into). A row is a timeline item or a
+// viewport's top edge (negative while a tall row is scrolled into), or the tail bounded by an
+// unread row. A row is a timeline item or a
 // whole turn block; the two share the turn's first item id, so `turn` tells them apart.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export interface RowRef {
@@ -13,7 +14,8 @@ export interface RowRef {
 
 export type ViewAnchor =
   | { kind: "tail" }
-  | { kind: "row"; row: RowRef; offset: number };
+  | { kind: "bounded-tail"; row: RowRef }
+  | { kind: "row"; row: RowRef; offset: number; clearTurnHeader?: true };
 
 export const TAIL: ViewAnchor = { kind: "tail" };
 
@@ -65,6 +67,11 @@ export function offsetOf(viewport: HTMLElement, node: HTMLElement): number {
   return node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
+export function expandedTurnHeader(node: HTMLElement): HTMLElement | null {
+  const turn = node.closest('[data-turn-expanded="true"]');
+  return turn && turn !== node ? turn.querySelector<HTMLElement>(":scope > [data-turn-header]") : null;
+}
+
 const READABLE_ROWS = ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]";
 
 // meiva:note
@@ -85,6 +92,8 @@ export function readRowAnchor(
     if (!id || id.startsWith("_")) continue;
     const rect = node.getBoundingClientRect();
     if (rect.bottom <= box.top + BAR_HEIGHT_PX || rect.top >= box.bottom) continue;
+    const header = expandedTurnHeader(node);
+    if (header && rect.bottom <= header.getBoundingClientRect().bottom) continue;
     const collapsedTurn = node.dataset.turnExpanded === "false";
     const anchor: Extract<ViewAnchor, { kind: "row" }> = {
       kind: "row",

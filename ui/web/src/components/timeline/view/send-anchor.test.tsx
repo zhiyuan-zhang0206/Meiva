@@ -83,7 +83,7 @@ describe("a send", () => {
     model.scrollTo(200);
     model.grow("3.0", 1300);
     expect(model.top()).toBe(200);
-    model.scrollTo(model.naturalEnd() - 10);
+    model.scrollTo(model.naturalEnd());
     model.grow("3.0", 1800);
     expect(model.top()).toBe(model.naturalEnd());
     view.unmount();
@@ -107,7 +107,7 @@ describe("a send", () => {
     expect(model.top()).toBe(tail - 8);
     expect(model.writes).toEqual([]);
 
-    model.scrollTo(model.naturalEnd() - 40);
+    model.scrollTo(model.naturalEnd());
     model.grow("3.0", 1200);
     expect(model.top()).toBe(model.naturalEnd());
     view.unmount();

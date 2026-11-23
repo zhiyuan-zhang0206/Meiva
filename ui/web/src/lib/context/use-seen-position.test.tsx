@@ -41,6 +41,7 @@ interface Props {
   items: readonly BackendTimelineItem[];
   updatedAt: number;
   timelineLoading?: boolean;
+  openingShown?: boolean;
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   revealWanted?: boolean;
@@ -74,6 +75,7 @@ function mount(initial: Props = entered, { fetched = true }: { fetched?: boolean
       feed: { seenId: props.seenId, messages: props.messages, updatedAt: props.updatedAt, failed: props.failed },
       items: props.items,
       timelineLoading: props.timelineLoading ?? false,
+      openingShown: props.openingShown ?? true,
       hasMoreOlder: props.hasMoreOlder ?? false,
       loadingOlder: props.loadingOlder ?? false,
       loadOlder,
@@ -239,7 +241,7 @@ describe("useSeenPosition", () => {
     view.rerender({ ...props, items: [row(5), row(8)] });
     await settle();
     expect(loadOlder).toHaveBeenCalledTimes(1);
-    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0", olderPages: 1 });
   });
 
   it("stops loading after the page limit and lands on the oldest unseen item it has", async () => {
@@ -256,7 +258,17 @@ describe("useSeenPosition", () => {
     }
     await settle();
     expect(loadOlder).toHaveBeenCalledTimes(REVEAL_MAX_OLDER_PAGES);
-    expect(view.result.current).toEqual({ decided: true, itemId: "8.0" });
+    expect(view.result.current).toEqual({ decided: true, itemId: "8.0", olderPages: REVEAL_MAX_OLDER_PAGES });
+  });
+
+  it("holds seen until the timeline shows its opening placement", async () => {
+    const view = mount({ ...entered, openingShown: false });
+    await settle();
+    expect(view.result.current).toEqual({ decided: true, itemId: "5.0" });
+    expect(markUserMessagesSeen).not.toHaveBeenCalled();
+    view.rerender({ ...entered, openingShown: true });
+    await settle();
+    expect(markUserMessagesSeen).toHaveBeenCalledWith(7, { up_to_id: 8 }, expect.any(String));
   });
 
   it("does not decide while the timeline is still loading", async () => {

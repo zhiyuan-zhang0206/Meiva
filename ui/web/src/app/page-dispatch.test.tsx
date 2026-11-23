@@ -695,7 +695,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     expect(current?.isLoading).toBe(false);
   });
 
-  it("keeps a reader who left at the tail on the row they left, through the seen advance and newer output", async () => {
+  it("keeps the unread boundary through two returns before a qualified snapshot", async () => {
     const authority = deferred<ConversationSnapshotResponse>();
     const empty: TimelineResponse = { items: [], msg_count: 0, has_more: false };
     const newer: BackendTimelineItem = { ...items[0], item_id: "17.0", payload: "Newer output" };
@@ -704,7 +704,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     let seen = 0;
     let current: ReturnType<typeof useTimeline> | undefined;
     const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
-    const delivery = { id: 1, agent_id: 42, mode: "prefix", source_key: "harness:1.0", content: "Reply 1",
+    const delivery = { id: 1, agent_id: 42, mode: "prefix", source_key: "harness:17.0", content: newer.payload,
       suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false };
     const rig = httpRig({ base: "http://home-readiness.test", keys: sequentialKeys(), now: () => 0, openUpload: noUpload,
       fetch: (input) => {
@@ -728,7 +728,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       const timeline = useTimeline(id, () => undefined);
       current = timeline;
       const props = homePageProps();
-      const agent = makeAgent({ agent_id: id, status: "idling", has_unread_user_messages: unread });
+      const agent = makeAgent({ agent_id: id, status: "idling", has_unread_user_messages: false });
       return <HomePageView {...props} bfcacheId={entry}
         settings={{ settings: { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false }, isLoading: false }}
         agents={{ ...props.agents, activeId: id, activeAgent: agent, agents: [agent] }}
@@ -747,21 +747,25 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     expect(readingOffset("15.0")).toBe(-200);
     view.rerender(surface(43));
     await waitFor(() => expect(current?.sourceReady).toBe(true));
-    expect(hasSavedTimelinePlace(`${entry}:agent:42`, "42", NO_SESSION)).toBe(true);
+    expect(hasSavedTimelinePlace(`${entry}:agent:42`, "42", NO_SESSION)).toBe(false);
     // meiva:note
     // A delivery arrived while the reader was away; the authority read of the return is held.
     unread = true; holdAuthority = true;
-    const frames = recordShownFrames();
     view.rerender(surface(42));
-    frames.sample();
-    expect(rowsShown()).toBe(true);
-    expect(readingOffset("15.0")).toBe(-200);
-    await waitFor(() => expect(client.getQueryData<{ seen_id: number }>(["user-messages", 42])?.seen_id).toBe(1));
+    await waitFor(() => expect(client.getQueryData<UserMessageFeed>(["user-messages", 42])?.items).toHaveLength(1));
     expect(current?.sourceReady).toBe(false);
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
-    expect(readingOffset("15.0")).toBe(-200);
+    expect(rowsShown()).toBe(false);
+    expect(seen).toBe(0);
+
+    view.rerender(surface(43));
+    await waitFor(() => expect(current?.sourceReady).toBe(true));
+    const frames = recordShownFrames();
+    view.rerender(surface(42));
+    expect(rowsShown()).toBe(false);
+    expect(seen).toBe(0);
     act(() => {
-      freshHeight = 5300;
+      freshHeight = 6300;
       authority.resolve(composed({ items: [...items, newer], msg_count: 18, has_more: false }));
     });
     await waitFor(() => expect(current?.sourceReady).toBe(true));
@@ -770,9 +774,10 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     resize();
     frames.sample();
     frames.stop();
-    expect(readingOffset("15.0")).toBe(-200);
+    expect(readingOffset("17.0")).toBe(56);
     expect(atBottom()).toBe(false);
-    expect(new Set(frames.tops)).toEqual(new Set([4400]));
+    expect(new Set(frames.tops)).toEqual(new Set([4744]));
+    await waitFor(() => expect(seen).toBe(1));
   });
 
 });

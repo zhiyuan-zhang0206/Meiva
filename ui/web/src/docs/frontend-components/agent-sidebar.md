@@ -115,8 +115,8 @@ The hover card names the same state with the same mark.
 What the dot means is one number per agent: the **seen position**, the newest delivery
 id (`agent_publications.id`) the reader has seen, stored on the server
 (`agent_publication_seen`, monotonic, never per record). Unread is "a delivery lies past it".
-Opening an agent's conversation in a visible page counts everything delivered as seen,
-wherever the timeline is scrolled, and deliveries arriving while it stays open and
+Once the conversation has opened at its reading position in a visible page, its
+fetched deliveries count as seen. Deliveries arriving while it stays open and
 visible are seen on arrival. A hidden page sees nothing, and its return starts a new
 look. The open, visible agent is `readingAgentId` in the UI store, so its row shows no
 dot at all and a delivery arriving under the reader's eyes never lights it up.
@@ -125,12 +125,11 @@ A question still shows.
 `useSeenPosition` (`lib/context/use-seen-position.ts`) runs each look: it waits for a
 user-messages feed fetched since the look began, keeps the cursor that feed carried
 (`seen_id`, the position on entry), and asks the timeline to reveal the first delivery
-past it (`TimelineView` `reveal`, which rides the bookmark restore: the item lands in the
-upper part of the viewport, and the reader's scrolling takes over afterwards). With
-nothing past the position nothing moves, including on a return to the foreground. When
-that delivery's item is not loaded it loads older pages, at most five, and otherwise
-lands on the oldest unseen item it has (a PREFIX/NAIVE delivery matching no row has none).
-Only then does it advance the cursor, through one idempotent
+past it (`TimelineView` `reveal`). The timeline uses its
+[unread placement](timeline-view/sticky-scroll.md) on entry. When the delivery
+is outside the loaded rows, the feed hook looks for it in up to five older
+pages and otherwise uses the oldest unseen item it has. Once opening placement
+is visible, the hook advances the cursor through one idempotent
 `POST /api/keyed/v1/agents/{id}/user-messages/seen` with the highest id the page has
 fetched; records the page has not received are never claimed. A failed advance is
 retried after 1 s, 3 s and 9 s, then waits for the next trigger (a newer record or a

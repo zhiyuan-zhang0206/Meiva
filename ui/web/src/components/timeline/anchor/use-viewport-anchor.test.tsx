@@ -168,15 +168,20 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(left);
   });
 
-  it("follows again once the reader scrolls back into the bottom zone", () => {
+  it("preserves every 4px manual step from 80px away and follows again at the actual end", () => {
     const view = harness(ids(1, 20));
     view.place(TAIL);
-    view.scrollTo(1500);
-    view.rows(ids(1, 21));
-    expect(view.top()).toBe(1500);
+    const end = view.naturalEnd();
+    view.scrollTo(end - 80);
 
-    view.scrollTo(view.naturalEnd() - 20);
-    expect(view.current()).toEqual(TAIL);
+    for (let distance = 76; distance >= 0; distance -= 4) {
+      const before = view.top();
+      view.scrollTo(end - distance);
+      view.resize();
+      expect(view.top() - before).toBe(4);
+      expect(view.current()?.kind).toBe(distance === 0 ? "tail" : "row");
+    }
+
     view.rows(ids(1, 23));
     expect(view.top()).toBe(view.naturalEnd());
   });
@@ -271,7 +276,7 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(settled);
   });
 
-  it("re-sticks to tail on mobile when scrolling back down into the touch bottom zone or reaching the end", () => {
+  it("follows on mobile only after the touch reaches the natural end", () => {
     const view = harness(ids(1, 20), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
     view.place(TAIL);
     const tail = view.naturalEnd();
@@ -286,6 +291,11 @@ describe("the viewport anchor writer", () => {
     view.touchStart(300);
     view.touchMove(120);
     view.scrollTo(tail - 100);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+    view.touchStart(300);
+    view.touchMove(120);
+    view.scrollTo(tail);
     view.touchEnd();
     expect(view.current()).toEqual(TAIL);
     view.rows(ids(1, 22));

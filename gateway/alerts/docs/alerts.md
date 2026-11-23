@@ -8,13 +8,15 @@ the loop. This router is the only way alerts enter the store: no other process w
 `alerts` (`tests/scripts/test_alert_single_path.py`); every other condition is an
 event plus a Grafana rule
 ([decision](../../../docs/decisions/observability/alerts/2026-10-04-alerting-on-grafana-alerting.md)).
-One row per episode. The store core lives in `base/telemetry/alerts/__init__.py`. Three HTTP surfaces plus one background
+One row per episode. The store core lives in `base/telemetry/alerts/__init__.py`. Four HTTP surfaces plus one background
 reconciler:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
   point, `deploy/lgtm/config/grafana/provisioning/alerting/contact.yml`). Upserts each alert instance
   into `alerts` and publishes it on the SSE channel. It delivers nothing: the IM
   fan-out retired with the IM channels on 2026-11-08.
+- `POST /api/alerts/agents/{agent_id}` — an optional Alertmanager contact point that queues one
+  message per notification group in the selected agent inbox.
 - `GET /api/alerts` — the alert section's unresolved-first history list +
   unresolved count for the top-bar badge.
 - `GET /api/alerts/stream` — SSE tail (channel `meiva:alerts`, broadcast) of
@@ -58,7 +60,7 @@ bypasses the session/bearer middleware and authenticates itself:
 (`MEIVA_ALERTS_WEBHOOK_TOKEN` — constant-time), or a cluster Bearer (the human secret or the active write generation's machine API token, which in-cluster posters present), or — only when no token is
 configured — loopback trust (the single-box default: Grafana is co-located).
 
-Response: `{processed, inserted, updated, notified}`.
+Response: `{processed, inserted, updated}`.
 
 ### Lost-resolution reconciliation
 
@@ -76,24 +78,67 @@ broadcast mode through the same `event_stream` machinery as agent events
 the ingest — the publish is best-effort and the initial fetch covers the
 gap.
 
-### No delivery
+### Alertmanager agent receiver
 
-The gateway delivers alerts nowhere. The IM channels, the native acceptance
-route and the outbound worker were removed on 2026-11-08 (user ruling: the whole
-IM surface goes), so `notified_at` stays NULL, the ingest answers
-`processed`/`inserted`/`updated` only, and the store, the list and the SSE tail
-are the whole of the alert path.
+The built-in Grafana provisioning routes to the alert store. A site can add
+`POST /api/alerts/agents/{agent_id}` as a second contact point. It accepts the
+same webhook authentication as ingest and returns HTTP 204 after inbox
+acceptance. The URL selects the recipient. Use an active on-duty agent so it can
+act on the usual inbox wake. A terminated agent's system message remains queued
+for a later life.
 
-The rendered notification text survives as the transition record: the template
-(severity head + summary + generatorURL + `→ <fleet UI>/insights/alerts`,
-recovery swapping the head for the resolved variant) is frozen into
-`alert_notification_groups` by `base.telemetry.alerts.notify_group_text`, with
-zh/en variants chosen from `user_settings` `display.language` (default zh) by
-`base.telemetry.alerts.display_language` at ingest time. Alert
-labels/annotations are never translated. Reconciliation repairs the durable
-store and the SSE view.
+Copy the [complete example](../../../deploy/lgtm/config/grafana/contact.agent.example.yml)
+to `$MEIVA_HOME/lgtm/alerting/contact.yml` on the Grafana station. Replace
+`1234` with the recipient agent ID and run the normal LGTM converge. Grafana
+loads the rendered file at startup. For a running Grafana, reload it through
+the admin API at `POST /api/admin/provisioning/alerting/reload`.
+[Grafana provisioning reload](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/admin/#reload-provisioning-configurations)
+
+The example uses the station's existing webhook URL and Bearer token environment references.
+Keep the agent route first with `continue: true` to retain the existing ingest
+routes. The example sends error and critical notifications, including resolved
+groups, and inherits the root grouping and timers. The override replaces the
+whole contact and policy file. Use the example's webhook receiver and policy
+structure. Each receiver needs a unique UID, a webhook URL and a named contact
+point. The root policy and any explicit child receiver must reference a
+contact point in the file for the same Grafana organization. Specify routing
+matchers as `object_matchers` triples as shown in the example. Use the common
+Alertmanager regex syntax, including character classes, alternation and ordinary
+repetition. Write policy durations in descending Prometheus units, within the
+signed 64-bit nanosecond range. Write booleans as `true` or `false`, and give
+each mapping key a single definition.
+
+Environment references are scoped to the rendered Grafana runtime values.
+`MEIVA_ALERTS_WEBHOOK_URL` is available in the webhook URL and
+`MEIVA_ALERTS_WEBHOOK_TOKEN` in the authorization credential. Use
+`$__env{NAME}`, `${NAME}`, or `$NAME`. The token can be empty for loopback
+delivery. Routing labels, matchers and timers use literal values. Grafana
+reduces `$$` to one literal dollar. Converge validates the expanded
+values and publishes the original YAML, keeping credential references in the
+provisioned file.
+
+Keep the override as a regular UTF-8 YAML file of at most 256 KiB. The example
+is a few KiB and this bound leaves room for station policies while limiting the
+work before converge can proceed. Converge refuses links in the override path
+and validates its structure before replacing the installed copy or its hash.
+Keep any local changes in the source file and compare it with the shipped
+policy when upgrading.
+
+To stop agent routing, remove the override, converge and reload alerting
+provisioning. Grafana may retain the unused contact point. The restored policy
+routes to ingest only.
+
+The receiver formats the instances in the POST into one message with statuses,
+summaries, diagnostic labels, Grafana rule links and event query commands.
+Auth, validation and inbox failures return non-2xx. The pinned Grafana notifier
+ends a failed attempt, with future sends determined by Alertmanager's subsequent
+group evaluations. An ambiguous replay can duplicate a message because a
+webhook group key also identifies intentional repeats. See the
+[delivery decision](../../../docs/decisions/observability/alerts/2026-11-24-alertmanager-agent-receiver.md).
 
 ### Shadow transition facts
+
+The alert-specific renderer preserves its localized text in the transition group.
 
 The ingest transaction freezes immutable revision/group/member snapshots through
 `base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve

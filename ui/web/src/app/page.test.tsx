@@ -130,6 +130,10 @@ describe("HomePage unseen deliveries", () => {
   it("does nothing while the page is hidden and acts when it returns", async () => {
     transport.getUserMessages.mockReset();
     transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 4, items: [unseen] });
+    transport.markUserMessagesSeen.mockImplementationOnce(() => {
+      transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 9, items: [unseen] });
+      return { seen_id: 9, advanced: true };
+    });
     setVisibility("hidden");
     wrap(<HomePage />);
     await settle();
@@ -137,6 +141,7 @@ describe("HomePage unseen deliveries", () => {
     expect(screen.getByTestId("timeline").getAttribute("data-reveal")).toBe("");
     act(() => setVisibility("visible"));
     await settle();
+    expect(transport.markUserMessagesSeen).toHaveBeenCalledTimes(1);
     expect(transport.markUserMessagesSeen).toHaveBeenCalledWith(5, { up_to_id: 9 }, expect.any(String));
     expect(screen.getByTestId("timeline").getAttribute("data-reveal")).toBe("2.0");
   });
