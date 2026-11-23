@@ -18,6 +18,15 @@ from __future__ import annotations
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 
+def _by_machine(aggregate: str, selection: str, *dimensions: str) -> str:
+    grouping = ", ".join(("machine", *dimensions))
+    legacy = selection.replace('machine!=""', 'machine="", machine_name!=""')
+    return (
+        f"{aggregate} by ({grouping}) ({selection} or on ({grouping}) "
+        f'label_join({legacy}, "machine", "", "machine_name"))'
+    )
+
+
 def core_metrics() -> list[MetricSpec]:
     """This module's core metrics, in registration order."""
     specs: list[MetricSpec] = []
@@ -34,7 +43,8 @@ def core_metrics() -> list[MetricSpec]:
             unit="percentunit",
             panel="timeseries",
             query_type="promql",
-            query='1 - avg by (machine) (system_cpu_utilization_ratio{machine!="", state="idle"})',
+            query="1 - "
+            + _by_machine("avg", 'system_cpu_utilization_ratio{machine!="", state="idle"}'),
             target_names=["{{machine}}"],
             field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
             height=8,
@@ -57,7 +67,7 @@ def core_metrics() -> list[MetricSpec]:
             unit="percentunit",
             panel="timeseries",
             query_type="promql",
-            query='avg by (machine) (system_memory_utilization_ratio{machine!="", state="used"})',
+            query=_by_machine("avg", 'system_memory_utilization_ratio{machine!="", state="used"}'),
             target_names=["{{machine}}"],
             field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
             height=8,
@@ -79,10 +89,10 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             panel="timeseries",
             query_type="promql",
-            query='system_cpu_load_average_1m{machine!=""}',
+            query=_by_machine("max", 'system_cpu_load_average_1m{machine!=""}'),
             targets=[
-                'system_cpu_load_average_5m{machine!=""}',
-                'system_cpu_load_average_15m{machine!=""}',
+                _by_machine("max", 'system_cpu_load_average_5m{machine!=""}'),
+                _by_machine("max", 'system_cpu_load_average_15m{machine!=""}'),
             ],
             target_names=["{{machine}} 1m", "{{machine}} 5m", "{{machine}} 15m"],
             field_defaults={"color": {"mode": "palette-classic"}},
@@ -107,7 +117,9 @@ def core_metrics() -> list[MetricSpec]:
             unit="percentunit",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine, mountpoint) (system_filesystem_utilization_ratio{machine!=""})',
+            query=_by_machine(
+                "max", 'system_filesystem_utilization_ratio{machine!=""}', "mountpoint"
+            ),
             target_names=["{{machine}} {{mountpoint}}"],
             field_defaults={"color": {"mode": "palette-classic"}, "max": 1, "min": 0},
             height=8,
@@ -127,7 +139,9 @@ def core_metrics() -> list[MetricSpec]:
             unit="Bps",
             panel="timeseries",
             query_type="promql",
-            query='sum by (machine, direction) (rate(system_disk_io_bytes_total{machine!=""}[5m]))',
+            query=_by_machine(
+                "sum", 'rate(system_disk_io_bytes_total{machine!=""}[5m])', "direction"
+            ),
             target_names=["{{machine}} {{direction}}"],
             field_defaults={"color": {"mode": "palette-classic"}},
             height=8,
@@ -150,7 +164,9 @@ def core_metrics() -> list[MetricSpec]:
             unit="Bps",
             panel="timeseries",
             query_type="promql",
-            query='sum by (machine, direction) (rate(system_network_io_bytes_total{machine!=""}[5m]))',
+            query=_by_machine(
+                "sum", 'rate(system_network_io_bytes_total{machine!=""}[5m])', "direction"
+            ),
             target_names=["{{machine}} {{direction}}"],
             field_defaults={"color": {"mode": "palette-classic"}},
             height=8,
@@ -173,9 +189,9 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine) (postgresql_backends{machine!=""})',
+            query=_by_machine("max", 'postgresql_backends{machine!=""}'),
             targets=[
-                'max by (machine) (postgresql_connection_max{machine!=""})',
+                _by_machine("max", 'postgresql_connection_max{machine!=""}'),
             ],
             target_names=["{{machine}} backends", "{{machine}} max_connections"],
             field_defaults={"color": {"mode": "palette-classic"}, "min": 0},
@@ -199,9 +215,9 @@ def core_metrics() -> list[MetricSpec]:
             unit="ops",
             panel="timeseries",
             query_type="promql",
-            query='sum by (machine) (rate(postgresql_commits_total{machine!=""}[5m]))',
+            query=_by_machine("sum", 'rate(postgresql_commits_total{machine!=""}[5m])'),
             targets=[
-                'sum by (machine) (rate(postgresql_rollbacks_total{machine!=""}[5m]))',
+                _by_machine("sum", 'rate(postgresql_rollbacks_total{machine!=""}[5m])'),
             ],
             target_names=["{{machine}} commits/s", "{{machine}} rollbacks/s"],
             field_defaults={"color": {"mode": "palette-classic"}},
@@ -225,7 +241,7 @@ def core_metrics() -> list[MetricSpec]:
             unit="bytes",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine) (postgresql_db_size_bytes{machine!=""})',
+            query=_by_machine("max", 'postgresql_db_size_bytes{machine!=""}'),
             target_names=["{{machine}}"],
             field_defaults={"color": {"mode": "palette-classic"}},
             height=8,
@@ -248,9 +264,9 @@ def core_metrics() -> list[MetricSpec]:
             unit="bytes",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine) (redis_memory_used_bytes{machine!=""})',
+            query=_by_machine("max", 'redis_memory_used_bytes{machine!=""}'),
             targets=[
-                'max by (machine) (redis_memory_rss_bytes{machine!=""})',
+                _by_machine("max", 'redis_memory_rss_bytes{machine!=""}'),
             ],
             target_names=["{{machine}} used", "{{machine}} rss"],
             field_defaults={"color": {"mode": "palette-classic"}},
@@ -273,9 +289,9 @@ def core_metrics() -> list[MetricSpec]:
             category="telemetry",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine) (redis_clients_connected{machine!=""})',
+            query=_by_machine("max", 'redis_clients_connected{machine!=""}'),
             targets=[
-                'sum by (machine) (rate(redis_keys_evicted_total{machine!=""}[5m]))',
+                _by_machine("sum", 'rate(redis_keys_evicted_total{machine!=""}[5m])'),
             ],
             target_names=["{{machine}} clients", "{{machine}} evictions/s"],
             field_defaults={"color": {"mode": "palette-classic"}, "min": 0},
@@ -296,7 +312,7 @@ def core_metrics() -> list[MetricSpec]:
             unit="ops",
             panel="timeseries",
             query_type="promql",
-            query='max by (machine) (redis_commands_per_second{machine!=""})',
+            query=_by_machine("max", 'redis_commands_per_second{machine!=""}'),
             target_names=["{{machine}}"],
             field_defaults={"color": {"mode": "palette-classic"}},
             height=8,

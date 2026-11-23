@@ -4297,7 +4297,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "1 - avg by (machine) (system_cpu_utilization_ratio{machine!=\"\", state=\"idle\"})",
+     "expr": "1 - avg by (machine) (system_cpu_utilization_ratio{machine!=\"\", state=\"idle\"} or on (machine) label_join(system_cpu_utilization_ratio{machine=\"\", machine_name!=\"\", state=\"idle\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
@@ -4362,7 +4362,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "avg by (machine) (system_memory_utilization_ratio{machine!=\"\", state=\"used\"})",
+     "expr": "avg by (machine) (system_memory_utilization_ratio{machine!=\"\", state=\"used\"} or on (machine) label_join(system_memory_utilization_ratio{machine=\"\", machine_name!=\"\", state=\"used\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
@@ -4425,7 +4425,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_1m{machine!=\"\"}",
+     "expr": "max by (machine) (system_cpu_load_average_1m{machine!=\"\"} or on (machine) label_join(system_cpu_load_average_1m{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} 1m",
      "queryType": "range",
      "refId": "A"
@@ -4436,7 +4436,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_5m{machine!=\"\"}",
+     "expr": "max by (machine) (system_cpu_load_average_5m{machine!=\"\"} or on (machine) label_join(system_cpu_load_average_5m{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} 5m",
      "queryType": "range",
      "refId": "B"
@@ -4447,7 +4447,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_15m{machine!=\"\"}",
+     "expr": "max by (machine) (system_cpu_load_average_15m{machine!=\"\"} or on (machine) label_join(system_cpu_load_average_15m{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} 15m",
      "queryType": "range",
      "refId": "C"
@@ -4512,7 +4512,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine, mountpoint) (system_filesystem_utilization_ratio{machine!=\"\"})",
+     "expr": "max by (machine, mountpoint) (system_filesystem_utilization_ratio{machine!=\"\"} or on (machine, mountpoint) label_join(system_filesystem_utilization_ratio{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} {{mountpoint}}",
      "queryType": "range",
      "refId": "A"
@@ -4575,7 +4575,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine, direction) (rate(system_disk_io_bytes_total{machine!=\"\"}[5m]))",
+     "expr": "sum by (machine, direction) (rate(system_disk_io_bytes_total{machine!=\"\"}[5m]) or on (machine, direction) label_join(rate(system_disk_io_bytes_total{machine=\"\", machine_name!=\"\"}[5m]), \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} {{direction}}",
      "queryType": "range",
      "refId": "A"
@@ -4638,7 +4638,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine, direction) (rate(system_network_io_bytes_total{machine!=\"\"}[5m]))",
+     "expr": "sum by (machine, direction) (rate(system_network_io_bytes_total{machine!=\"\"}[5m]) or on (machine, direction) label_join(rate(system_network_io_bytes_total{machine=\"\", machine_name!=\"\"}[5m]), \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} {{direction}}",
      "queryType": "range",
      "refId": "A"
@@ -4702,7 +4702,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (postgresql_backends{machine!=\"\"})",
+     "expr": "max by (machine) (postgresql_backends{machine!=\"\"} or on (machine) label_join(postgresql_backends{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} backends",
      "queryType": "range",
      "refId": "A"
@@ -4713,7 +4713,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (postgresql_connection_max{machine!=\"\"})",
+     "expr": "max by (machine) (postgresql_connection_max{machine!=\"\"} or on (machine) label_join(postgresql_connection_max{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} max_connections",
      "queryType": "range",
      "refId": "B"
@@ -4776,7 +4776,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine) (rate(postgresql_commits_total{machine!=\"\"}[5m]))",
+     "expr": "sum by (machine) (rate(postgresql_commits_total{machine!=\"\"}[5m]) or on (machine) label_join(rate(postgresql_commits_total{machine=\"\", machine_name!=\"\"}[5m]), \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} commits/s",
      "queryType": "range",
      "refId": "A"
@@ -4787,7 +4787,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine) (rate(postgresql_rollbacks_total{machine!=\"\"}[5m]))",
+     "expr": "sum by (machine) (rate(postgresql_rollbacks_total{machine!=\"\"}[5m]) or on (machine) label_join(rate(postgresql_rollbacks_total{machine=\"\", machine_name!=\"\"}[5m]), \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} rollbacks/s",
      "queryType": "range",
      "refId": "B"
@@ -4850,7 +4850,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (postgresql_db_size_bytes{machine!=\"\"})",
+     "expr": "max by (machine) (postgresql_db_size_bytes{machine!=\"\"} or on (machine) label_join(postgresql_db_size_bytes{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
@@ -4913,7 +4913,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (redis_memory_used_bytes{machine!=\"\"})",
+     "expr": "max by (machine) (redis_memory_used_bytes{machine!=\"\"} or on (machine) label_join(redis_memory_used_bytes{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} used",
      "queryType": "range",
      "refId": "A"
@@ -4924,7 +4924,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (redis_memory_rss_bytes{machine!=\"\"})",
+     "expr": "max by (machine) (redis_memory_rss_bytes{machine!=\"\"} or on (machine) label_join(redis_memory_rss_bytes{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} rss",
      "queryType": "range",
      "refId": "B"
@@ -4988,7 +4988,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (redis_clients_connected{machine!=\"\"})",
+     "expr": "max by (machine) (redis_clients_connected{machine!=\"\"} or on (machine) label_join(redis_clients_connected{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} clients",
      "queryType": "range",
      "refId": "A"
@@ -4999,7 +4999,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine) (rate(redis_keys_evicted_total{machine!=\"\"}[5m]))",
+     "expr": "sum by (machine) (rate(redis_keys_evicted_total{machine!=\"\"}[5m]) or on (machine) label_join(rate(redis_keys_evicted_total{machine=\"\", machine_name!=\"\"}[5m]), \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}} evictions/s",
      "queryType": "range",
      "refId": "B"
@@ -5062,7 +5062,7 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine) (redis_commands_per_second{machine!=\"\"})",
+     "expr": "max by (machine) (redis_commands_per_second{machine!=\"\"} or on (machine) label_join(redis_commands_per_second{machine=\"\", machine_name!=\"\"}, \"machine\", \"\", \"machine_name\"))",
      "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"

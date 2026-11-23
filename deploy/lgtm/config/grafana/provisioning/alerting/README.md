@@ -149,17 +149,18 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
-own scrapes, labelled `host` (OS hostname / physical identity) and
-`machine_name` (Meiva roster identity). Per the 2026-08-24 user ruling, alerts
-group by `machine_name`, so units on one host remain separate series. These
-thresholds are deployment facts, not framework constants — what counts as
-"too much CPU" depends on box specs and co-tenancy:
+own scrapes carry `host_name` (OS hostname) and `machine` (Meiva roster
+identity). Alerts group by the roster identity. The queries use the old
+`machine_name` label when the same group has no usable sample under
+`machine`. The 24-hour and 5-minute silence windows resolve this independently,
+so an offline older Collector stays in the known set during rollout.
+Thresholds reflect the host capacity and co-tenancy.
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `meiva-ops-host-cpu-saturated` | non-idle CPU | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `meiva-ops-host-memory-pressure` | memory utilization | avg by machine_name > 0.90 (Prometheus) | 15m | warning |
-| `meiva-ops-host-disk-watermark` | filesystem utilization | max by machine_name+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
+| `meiva-ops-host-cpu-saturated` | non-idle CPU | avg by machine > 0.90 (Prometheus) | 15m | warning |
+| `meiva-ops-host-memory-pressure` | memory utilization | avg by machine > 0.90 (Prometheus) | 15m | warning |
+| `meiva-ops-host-disk-watermark` | filesystem utilization | max by machine+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
 | `meiva-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
 | `meiva-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
 | `meiva-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
@@ -172,7 +173,7 @@ monotonic counters:
 
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
-| `meiva-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine_name+exporter+signal | 5m | error |
+| `meiva-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine+exporter+signal | 5m | error |
 | `meiva-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
 | `meiva-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
 

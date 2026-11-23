@@ -27,9 +27,10 @@
 #   `host_name` = the OS hostname (physical identity) and `machine` = the Meiva
 #   roster identity baked from the unit at converge. Per the 2026-08-24 user
 #   ruling, rules group by `machine`, so units on one host remain separate
-#   series. Require a nonempty `machine` so older series without it do not
-#   collapse into one unnamed alert instance. Names below were read off a live
-#   Prometheus 3.13.2, not inferred from the OTLP names.
+#   series. During a rolling upgrade, use `machine_name` when the same alert
+#   grouping has no samples under `machine`. Apply range functions before
+#   choosing a source so a new series without a usable window cannot hide
+#   older samples. Each branch excludes series without a roster identity.
 # - RECEIVER metrics (R24) come from Prometheus's own scrape target and report
 #   too-old sample loss across the whole OTLP intake, without machine labels.
 #
@@ -701,8 +702,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(1 - avg by (machine)
-                (system_cpu_utilization_ratio{machine!="", state="idle"}), 0.001)
+                round(1 - avg by (machine) (
+                  system_cpu_utilization_ratio{machine!="", state="idle"}
+                  or on (machine)
+                  label_join(system_cpu_utilization_ratio{machine="", machine_name!="", state="idle"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -774,8 +778,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(avg by (machine)
-                (system_memory_utilization_ratio{machine!="", state="used"}), 0.001)
+                round(avg by (machine) (
+                  system_memory_utilization_ratio{machine!="", state="used"}
+                  or on (machine)
+                  label_join(system_memory_utilization_ratio{machine="", machine_name!="", state="used"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -867,8 +874,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: &writable-disk >-
-                round(max by (machine, mountpoint)
-                (system_filesystem_utilization_ratio{machine!="", mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                round(max by (machine, mountpoint) (
+                  system_filesystem_utilization_ratio{machine!="", mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}
+                  or on (machine, mountpoint)
+                  label_join(system_filesystem_utilization_ratio{machine="", machine_name!="", mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1308,8 +1318,16 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (machine) (postgresql_backends{machine!=""})
-                / max by (machine) (postgresql_connection_max{machine!=""}), 0.001)
+                round(max by (machine) (
+                  postgresql_backends{machine!=""}
+                  or on (machine)
+                  label_join(postgresql_backends{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
+                / max by (machine) (
+                  postgresql_connection_max{machine!=""}
+                  or on (machine)
+                  label_join(postgresql_connection_max{machine="", machine_name!=""}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1384,7 +1402,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (machine) (redis_memory_used_bytes{machine!=""})
+                max by (machine) (
+                  redis_memory_used_bytes{machine!=""}
+                  or on (machine)
+                  label_join(redis_memory_used_bytes{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:
@@ -1459,10 +1481,16 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (machine, exporter, data_type)
-                (otelcol_exporter_queue_size{machine!=""})
-                / clamp_min(max by (machine, exporter, data_type)
-                (otelcol_exporter_queue_capacity{machine!=""}), 1), 0.001)
+                round(max by (machine, exporter, data_type) (
+                  otelcol_exporter_queue_size{machine!=""}
+                  or on (machine, exporter, data_type)
+                  label_join(otelcol_exporter_queue_size{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
+                / clamp_min(max by (machine, exporter, data_type) (
+                  otelcol_exporter_queue_capacity{machine!=""}
+                  or on (machine, exporter, data_type)
+                  label_join(otelcol_exporter_queue_capacity{machine="", machine_name!=""}, "machine", "", "machine_name")
+                ), 1), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1603,8 +1631,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                sum by (machine, exporter)
-                (increase({machine!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]))
+                sum by (machine, exporter) (
+                  increase({machine!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m])
+                  or on (machine, exporter)
+                  label_join(increase({machine="", machine_name!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]), "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:
@@ -1680,9 +1711,17 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (machine) (max_over_time(otelcol_process_uptime_total{machine!=""}[24h]))
+                max by (machine) (
+                  max_over_time(otelcol_process_uptime_total{machine!=""}[24h])
+                  or on (machine)
+                  label_join(max_over_time(otelcol_process_uptime_total{machine="", machine_name!=""}[24h]), "machine", "", "machine_name")
+                )
                 unless on(machine)
-                max by (machine) (max_over_time(otelcol_process_uptime_total{machine!=""}[5m]))
+                max by (machine) (
+                  max_over_time(otelcol_process_uptime_total{machine!=""}[5m])
+                  or on (machine)
+                  label_join(max_over_time(otelcol_process_uptime_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:

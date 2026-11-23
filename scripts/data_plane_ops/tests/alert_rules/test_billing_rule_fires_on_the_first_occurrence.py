@@ -74,7 +74,9 @@ def test_infra_rule_groups_by_machine(uid: str) -> None:
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
     assert "by (machine)" in expr or "by (machine," in expr
-    assert 'machine!=""' in expr, f"{uid}: mixes unlabelled and machine-labelled series"
+    assert 'machine!=""' in expr, f"{uid}: missing the current-label branch"
+    assert 'machine="", machine_name!=""' in expr, f"{uid}: missing the legacy-label fallback"
+    assert "or on (machine" in expr, f"{uid}: overlapping generations can both count"
     assert "{{ $labels.machine }}" in rules[uid]["annotations"]["summary"]
 
 
@@ -194,6 +196,8 @@ def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
     assert "[5m]" in expr
     assert "unless on(machine)" in expr
     assert "max by (machine)" in expr
+    assert expr.count('machine="", machine_name!=""') == 2
+    assert expr.count("or on (machine)") == 2
     assert rule["for"] == "0m", "the 5m absence window is already the debounce"
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 

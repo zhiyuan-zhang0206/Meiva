@@ -130,7 +130,12 @@ the roster identity in the `meiva.machine` resource attribute. Relays preserve
 the origin. Use `{machine="ubuntu"}` to select new Loki streams,
 `{machine="ubuntu"}` as a matcher on Prometheus series, and
 `{ resource.meiva.machine = "ubuntu" }` in TraceQL. Historical Loki streams and
-Prometheus series keep their ingest-time labels.
+Prometheus series keep their ingest-time labels. Infrastructure dashboards and
+alerts include legacy `machine_name` samples under the same roster identity.
+Within a query window and group they prefer usable samples with `machine`.
+This keeps offline and not-yet-upgraded Collectors visible while the fleet
+rolls forward. Keep the fallback while old samples remain in the retained
+Prometheus window.
 
 In Grafana Explore, select **View trace** on a Loki entry with `trace_id` to
 open Tempo. A span's related logs link queries Loki for the same trace ID
