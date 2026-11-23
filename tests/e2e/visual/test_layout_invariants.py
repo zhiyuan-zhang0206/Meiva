@@ -382,9 +382,44 @@ def test_keyboard_edges_leave_the_shell_intact(
         ctx.close()
 
 
+def _assert_work_header_pins_and_releases(page: Page, turn: Locator, toggle: Locator) -> None:
+    surface = page.get_by_test_id("timeline-surface")
+    header_box = surface.locator("header").bounding_box()
+    assert header_box is not None
+    assert header_box["height"] == pytest.approx(44, abs=1)
+    pin_y = header_box["y"] + header_box["height"]
+
+    assert toggle.evaluate("""el => {
+      const style = getComputedStyle(el);
+      const paint = document.createElement("canvas").getContext("2d");
+      paint.fillStyle = style.backgroundColor;
+      paint.fillRect(0, 0, 1, 1);
+      return style.opacity === "1" && paint.getImageData(0, 0, 1, 1).data[3] === 255;
+    }"""), "the work header must cover scrolling content with an opaque background"
+
+    viewport = surface.locator('[data-slot="scroll-area-viewport"]')
+    for edge, target_y in (("middle", pin_y), ("bottom", pin_y - 16)):
+        block = turn.bounding_box()
+        assert block is not None
+        edge_y = block["y"] + block["height"] * (0.5 if edge == "middle" else 1)
+        viewport.evaluate(
+            "(el, delta) => el.scrollBy({top: delta, behavior: 'instant'})", edge_y - target_y
+        )
+        moved_block = turn.bounding_box()
+        moved_toggle = toggle.bounding_box()
+        assert moved_block is not None and moved_toggle is not None
+        if edge == "middle":
+            assert moved_block["y"] + moved_block["height"] / 2 == pytest.approx(pin_y, abs=1)
+            assert moved_toggle["y"] == pytest.approx(pin_y, abs=1)
+        else:
+            block_bottom = moved_block["y"] + moved_block["height"]
+            assert block_bottom == pytest.approx(target_y, abs=1)
+            assert moved_toggle["y"] + moved_toggle["height"] == pytest.approx(block_bottom, abs=1)
+
+
 @pytest.mark.parametrize("width", [390, 1280])
 @pytest.mark.parametrize("theme", ["light", "dark"])
-def test_expanded_work_block_bounded_scroll_and_no_sticky(
+def test_expanded_work_block_header_sticks_until_block_end(
     width: int, theme: str, playwright_browser: Browser, frontend_target: str
 ) -> None:
     # meiva:link tests/e2e/visual/docs/layout-invariants.md
@@ -414,22 +449,13 @@ def test_expanded_work_block_bounded_scroll_and_no_sticky(
             header.click()
             expect(header).to_have_attribute("aria-expanded", "true")
         row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
-        assert turn_toggle.evaluate("el => getComputedStyle(el).position") != "sticky"
+        assert turn_toggle.evaluate("el => getComputedStyle(el).position") == "sticky"
         assert header.evaluate("el => getComputedStyle(el).position") != "sticky"
         assert turn.locator('[data-testid="turn-scroll-viewport"]').count() == 0
-        outer_vp = page.locator(
-            '[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]'
-        )
-        metrics = outer_vp.evaluate("""el => {
-          el.scrollTop = 120;
-          return {
-            clientHeight: el.clientHeight,
-            scrollHeight: el.scrollHeight,
-            scrollTop: el.scrollTop,
-          };
-        }""")
-        assert metrics["scrollHeight"] > metrics["clientHeight"], metrics
-        assert metrics["scrollTop"] > 0, metrics
+        assert turn.evaluate("""block => ![block, ...block.querySelectorAll("*")].some(el =>
+          ["auto", "scroll"].includes(getComputedStyle(el).overflowY)
+          && el.scrollHeight > el.clientHeight + 1
+        )"""), "the expanded work block must scroll with the timeline"
         for item_id in ("1.1", "1.2"):
             primary_row = page.locator(f'.timeline-item[data-item-id="{item_id}"]')
             assert primary_row.locator('[data-testid="card-toggle"]').count() == 0
@@ -437,6 +463,7 @@ def test_expanded_work_block_bounded_scroll_and_no_sticky(
                 "sticky",
                 "fixed",
             )
+        _assert_work_header_pins_and_releases(page, turn, turn_toggle)
     finally:
         context.close()
 
