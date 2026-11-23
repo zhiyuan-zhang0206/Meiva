@@ -105,8 +105,6 @@ def test_state_alert_gauges_payload_and_metric_dispositions() -> None:
 
     assert payload_keys("trace_recording") == ("disabled",)
     assert METRIC_DISPOSITION[("trace_recording", "disabled")] == "gauge"
-    assert payload_keys("root_diagnostic_state") == ("diagnostic", "ok")
-    assert METRIC_DISPOSITION[("root_diagnostic_state", "ok")] == "gauge"
     assert payload_keys("backup_dump_status") == ("last_run_ok",)
     assert METRIC_DISPOSITION[("backup_dump_status", "last_run_ok")] == "gauge"
     assert payload_keys("recovery_drill_status") == ("drill", "last_run_ok")

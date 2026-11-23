@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.environment_variables import OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
@@ -22,7 +24,6 @@ from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceEx
 from base.telemetry.otlp.telemetry_otlp_metrics import (
     EVENT_LOOP_LAG_BUCKETS_MS,
     LLM_LATENCY_BUCKETS_MS,
-    OTLP_HTTP_TIMEOUT_S,
     metrics_resource_attributes,
     provider_build_plan,
 )
@@ -31,6 +32,7 @@ from base.telemetry.otlp.telemetry_otlp_metrics import (
 # Metrics export cadence (PeriodicExportingMetricReader). 15 s keeps Grafana near-live without a
 # per-batch network round-trip; the reader thread owns the timing, the emitter never waits on it.
 _METRICS_INTERVAL_S = 15
+_OTLP_HTTP_TIMEOUT_S = 10.0
 
 
 # meiva:note
@@ -87,9 +89,10 @@ def build_providers(
     instance_id: str,
 ) -> tuple[LoggerProvider, MeterProvider]:
     install_exporter_drop_observer(mirror_dir=mirror_dir)
+    os.environ.setdefault(OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED, "true")
     plan = provider_build_plan(
         endpoint,
-        http_timeout_s=OTLP_HTTP_TIMEOUT_S,
+        http_timeout_s=_OTLP_HTTP_TIMEOUT_S,
         metrics_interval_s=_METRICS_INTERVAL_S,
     )
     # meiva:note
@@ -102,15 +105,6 @@ def build_providers(
     # process's tail record — stays mirror-only (task #4314 triage / #4320).
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
-    logs = LoggerProvider(shutdown_on_exit=plan.shutdown_on_exit)
-    if keep_logs is not None:
-        keep_logs(logs)
-    log_exporter = EventDimensionResourceExporter(
-        OTLPLogExporter(endpoint=plan.logs_endpoint, timeout=plan.http_timeout_s)
-    )
-    logs.add_log_record_processor(
-        BatchLogRecordProcessor(log_exporter, export_timeout_millis=plan.export_timeout_millis)
-    )
     reader = PeriodicExportingMetricReader(
         OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
         export_interval_millis=plan.metrics_interval_millis,
@@ -126,4 +120,15 @@ def build_providers(
     )
     if keep_metrics is not None:
         keep_metrics(metrics)
+    logs = LoggerProvider(shutdown_on_exit=plan.shutdown_on_exit, meter_provider=metrics)
+    if keep_logs is not None:
+        keep_logs(logs)
+    log_exporter = EventDimensionResourceExporter(
+        OTLPLogExporter(
+            endpoint=plan.logs_endpoint,
+            timeout=plan.http_timeout_s,
+            meter_provider=metrics,
+        )
+    )
+    logs.add_log_record_processor(BatchLogRecordProcessor(log_exporter, meter_provider=metrics))
     return logs, metrics

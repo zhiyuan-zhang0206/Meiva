@@ -106,15 +106,6 @@ class UnderstandingLeafOutOfOrder(TypedDict):
 
 
 # meiva:note
-# understanding_backlog samples the chunk queue once per consumer round: rows waiting, rows in flight, and how long the oldest waiting row has waited. A growing age is a consumer that does not keep up.
-# meiva:link base/events/docs/maintenance-payloads.md
-class UnderstandingBacklog(TypedDict):
-    pending: int
-    running: int
-    oldest_pending_age_seconds: float
-
-
-# meiva:note
 # One agent-watch round: the duties judged, how many were silent, how many messages the ladder sent,
 # and how many readings the host could not take. `blind` is a reading that was not available, never
 # a duty that was healthy; a round that emitted nothing is indistinguishable from a round that
@@ -314,12 +305,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=UnderstandingLeafOutOfOrder,
         tier="anomaly",
         site="base/agents/history/hierarchy/chunks.py:write_group_nodes",
-    ),
-    "understanding_backlog": telemetry_event(
-        "understanding_backlog",
-        "one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age",
-        payload=UnderstandingBacklog,
-        site="services/agent_runner/understanding/chunk_consumer.py:Consumer.emit_backlog",
     ),
     "plugin_collector_cycle": telemetry_event(
         "plugin_collector_cycle",

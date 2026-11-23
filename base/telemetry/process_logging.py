@@ -2,14 +2,13 @@
 
 `base.log.process.start_process_logging` owns the process-level sinks and their
 idempotency guard (stderr, file, stdlib intercept); this module supplies the
-event-pipeline half — the loguru record derivation, the INFO sampling filter, the
-sink registration — and the two entry points that compose them (`init_gateway_process`,
+event-pipeline half — the loguru record derivation, the event filter and sink
+registration — and the two entry points that compose them (`init_gateway_process`,
 `init_cli_process`). `base.log` stays below `base.telemetry`: it never imports this.
 """
 
 from __future__ import annotations
 
-import itertools
 import os
 import traceback as _traceback
 from collections.abc import Callable, Mapping
@@ -33,7 +32,6 @@ __all__ = [
     "init_cli_process",
     "init_gateway_process",
     "release_event_sink",
-    "reset_info_sample_counter",
 ]
 
 # The one host-stall companion whose EVENT level is rewritten: psycopg logs
@@ -202,23 +200,11 @@ def event_sink(
     )
 
 
-# Level-graded sampling for bare INFO `log` records (task #1637).
-_LOG_INFO_SAMPLE_EVERY = 10
-log_info_sample_counter = itertools.count()
-
-
-# meiva:note
-# Reset the bare-INFO sampling counter for deterministic test isolation.
-def reset_info_sample_counter() -> None:
-    global log_info_sample_counter  # noqa: PLW0603
-    log_info_sample_counter = itertools.count()
-
-
 def event_pipeline_filter(record: loguru.Record) -> bool:
     """Which loguru records may enter the unified event pipeline.
 
-    Three families are dropped or thinned (they still reach the stderr /
-    JSONL file sinks, but never or rarely become `events` rows):
+    Eligible INFO-and-above records are forwarded without sampling.
+    These records stay in the stderr and JSONL file sinks:
 
       - the emitter's own failure reports (records carrying the `_no_emitter`
         marker, see `base/telemetry/emitter.py`): a mirror-down process would
@@ -228,10 +214,13 @@ def event_pipeline_filter(record: loguru.Record) -> bool:
         `node_exit` only; death analysis reads the node_enter trail from the
         log files), yet ~15% of the stream's rows. Kept in the log files, out
         of the stream.
-      - bare INFO `log` records: one in `_LOG_INFO_SAMPLE_EVERY` passes; WARNING+ pass.
+      - OTLP HTTP exporter diagnostics, to avoid feeding export failures back
+        through the failing exporter.
     """
     extra = record["extra"]
     if extra.get("_no_emitter") or extra.get("event") == "node_enter":
+        return False
+    if (record.get("name") or "").startswith("opentelemetry.exporter.otlp.proto.http."):
         return False
     # Known artifact of claim_idle_wait_span (base/telemetry/tracing.py): the traceloop
     # LangChain handler sets `gen_ai.task.status` on the claim node span AFTER
@@ -241,12 +230,7 @@ def event_pipeline_filter(record: loguru.Record) -> bool:
     # events row per idle park; keep it in the log-file sinks, drop it from
     # the table. If the handler stops writing to ended spans, the row stops
     # appearing entirely and this sentinel can be removed.
-    if record.get("message") == "Setting attribute on ended span.":
-        return False
-    level = getattr(record.get("level"), "name", "")  # missing level -> "" (unsampled)
-    if level == "INFO" and (extra.get("event") or "log") == "log":
-        return next(log_info_sample_counter) % _LOG_INFO_SAMPLE_EVERY == 0
-    return True
+    return record.get("message") != "Setting attribute on ended span."
 
 
 def add_event_sink(

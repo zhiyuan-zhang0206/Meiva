@@ -77,21 +77,24 @@ def test_endpoint_reachable_non_http_scheme_skips_probe():
     assert telemetry_otlp.OtlpBackend._endpoint_reachable("file:///tmp/x") is True
 
 
-def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
+def test_production_otlp_provider_construction_contract(
+    tmp_path: Path, probe_server: http.server.HTTPServer
+) -> None:
     """Log and metric SDK workers receive the same explicit HTTP deadline, and
     both providers leave the process-exit shutdown to the emitter (task #4320)."""
-    plan = telemetry_otlp_metrics.provider_build_plan("http://127.0.0.1:4318")
-    timeout_s = telemetry_otlp_metrics.OTLP_HTTP_TIMEOUT_S
+    timeout_s = 10.0
+    plan = telemetry_otlp_metrics.provider_build_plan(
+        "http://127.0.0.1:4318", http_timeout_s=timeout_s
+    )
 
     assert plan.logs_endpoint == "http://127.0.0.1:4318/v1/logs"
     assert plan.metrics_endpoint == "http://127.0.0.1:4318/v1/metrics"
     assert plan.http_timeout_s == timeout_s
     assert plan.export_timeout_millis == timeout_s * 1000
-    assert 0 < timeout_s <= 5.0
     assert plan.shutdown_on_exit is False
 
     logs, metrics = telemetry_otlp_sdk.build_providers(
-        "http://127.0.0.1:4318",
+        f"http://127.0.0.1:{probe_server.server_port}",
         mirror_dir=tmp_path,
         home=tmp_path,
         instance_id="test-instance",

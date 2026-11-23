@@ -10,6 +10,9 @@ exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_de
 "telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py", "telemetry_otlp_gauges.py"]
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 
+[roots]
+"telemetry_otlp_sdk.py" = { kinds = ["environ"], why = "builds the SDK providers and opts into SDK internal metrics through the public SDK environment setting before constructing them" }
+
 [purity]
 "__init__.py" = "strict"
 "plans.py" = "strict"

@@ -13,7 +13,6 @@ from base.agents.history.hierarchy.chunks import (
     Chunk,
     ChunkJob,
     GroupNode,
-    backlog,
     claim_job,
     enqueue_chunk,
     finish_job,
@@ -97,29 +96,6 @@ async def test_released_job_waits_out_the_spacing_and_a_lapsed_lease_fails_the_j
     assert await _rows(
         aops_pool, "SELECT status, error FROM understanding_chunk_jobs WHERE id = %s", job.id
     ) == [("failed", "claimer lost: lease expired")]
-
-
-async def test_backlog_counts_pending_and_running_and_ages_the_oldest_pending(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    empty = await backlog(aops_pool)
-    assert (empty.pending, empty.running, empty.oldest_pending_age_seconds) == (0, 0, 0.0)
-    for end in (10, 20):
-        await enqueue_chunk(
-            aops_pool, 1, compact_version=0, chunk=Chunk(0, end), end_msg_id=f"m{end}"
-        )
-    await _rows(
-        aops_pool,
-        "UPDATE understanding_chunk_jobs SET created_at = now() - interval '90 seconds'"
-        " WHERE end_index = 20 RETURNING id",
-    )
-    job = await claim_job(aops_pool)  # the oldest id (10) goes running
-    assert job is not None
-    depth = await backlog(aops_pool)
-    assert (depth.pending, depth.running) == (1, 1)
-    assert 89 < depth.oldest_pending_age_seconds < 120
-    await finish_job(aops_pool, job.id, status="done")
-    assert (await backlog(aops_pool)).running == 0
 
 
 async def test_finish_job_refuses_a_non_terminal_status(aops_pool: AsyncConnectionPool) -> None:

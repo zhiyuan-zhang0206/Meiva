@@ -23,6 +23,8 @@ from base.lm.harness.codex.frames import (
     notification_frame,
     request_frame,
 )
+from base.lm.harness.process import stderr_lines
+from base.log import logger
 
 READ_CHUNK_BYTES = 65536
 
@@ -116,13 +118,15 @@ class StdioAppServer:
         environ: Mapping[str, str],
         request_timeout: float = 120.0,
         stderr: int | None = None,
+        agent_id: int | None = None,
         max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
         self._command = tuple(command)
         self._cwd = str(cwd)
         self._environ = dict(environ)
         self._request_timeout = request_timeout
-        self._stderr = stderr
+        self._agent_id = agent_id
+        self._stderr = asyncio.subprocess.PIPE if agent_id is not None else stderr
         self._max_frame_bytes = max_frame_bytes
         self._process: asyncio.subprocess.Process | None = None
         self._tasks = asyncio.TaskGroup()
@@ -181,6 +185,8 @@ class StdioAppServer:
         await self._tasks.__aenter__()
         self._tasks_entered = True
         self._spawn(self._read_loop())
+        if self._agent_id is not None and self._process.stderr is not None:
+            self._spawn(self._drain_stderr(self._process.stderr, self._agent_id))
 
     async def request(
         self, method: str, params: RequestParams, *, timeout: float | None = None
@@ -245,6 +251,12 @@ class StdioAppServer:
         async with self._write_lock:
             process.stdin.write(payload)
             await process.stdin.drain()
+
+    @staticmethod
+    async def _drain_stderr(stream: asyncio.StreamReader, agent_id: int) -> None:
+        with contextlib.suppress(OSError):
+            async for line in stderr_lines(stream):
+                logger.info("codex stderr: {}", line, agent_id=agent_id, harness="codex")
 
     async def _read_loop(self) -> None:
         if self._process is None or self._process.stdout is None:

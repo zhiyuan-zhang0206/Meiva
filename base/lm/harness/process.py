@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
-from collections.abc import Coroutine, Iterable, Mapping
+from collections.abc import AsyncIterator, Coroutine, Iterable, Mapping
 from typing import Protocol
 
 import psutil
@@ -11,6 +12,31 @@ from base.log import logger
 
 SIGTERM = 15
 SIGKILL = 9
+
+
+async def stderr_lines(stream: asyncio.StreamReader) -> AsyncIterator[str]:
+    oversized = False
+    while True:
+        try:
+            line = await stream.readuntil(b"\n")
+            eof = False
+        except asyncio.LimitOverrunError as exc:
+            await stream.readexactly(exc.consumed)
+            oversized = True
+            continue
+        except asyncio.IncompleteReadError as exc:
+            line = exc.partial
+            eof = True
+        text = (
+            "[stderr line exceeded the pipe reader limit]"
+            if oversized
+            else line.decode("utf-8", errors="replace").rstrip()
+        )
+        if text:
+            yield text
+        if eof:
+            return
+        oversized = False
 
 
 class ChildProbe(Protocol):

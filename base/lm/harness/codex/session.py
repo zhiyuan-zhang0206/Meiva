@@ -159,6 +159,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             cwd=config.cwd,
             environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
+            agent_id=binding.agent_id,
         )
         self._home_environ = dict(environ)
         self._starting = False

@@ -151,7 +151,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         offset = len(self._transcript(resume).rows) if resume else 0
         self._idle_replies = IdleReplies(offset, self.config.max_buffered_events)
         try:
-            await transport.start()
+            await transport.start(agent_id=self.agent_id)
             session_id = await transport.open_session(resume=resume)
         except BaseException:
             await self._close_transport(transport, broken=True)

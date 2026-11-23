@@ -8,6 +8,8 @@ import pytest
 
 from base.lm.harness.codex.frames import JsonObject, JsonRpcError, TransportClosedError, as_object
 from base.lm.harness.codex.transport import StdioAppServer
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 
 SERVER = Path(__file__).with_name("fake_stdio_server.py")
 
@@ -36,6 +38,26 @@ async def test_request_reply_is_correlated_by_id(tmp_path: Path) -> None:
         assert await server.request("echo", {"x": 1}) == {"echo": "echo"}
     finally:
         await server.close()
+
+
+async def test_stderr_drains_oversized_lines_and_logs_following_diagnostics(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    server = StdioAppServer(
+        [sys.executable, str(SERVER)], cwd=tmp_path, environ={}, agent_id=123, request_timeout=5.0
+    )
+    await server.start()
+    try:
+        assert await server.request("stderr_flood", {"bytes": 256 * 1024}) == {}
+    finally:
+        await server.close()
+    rows = [record for record in loguru_records if record["message"].startswith("codex stderr: ")]
+    assert [record["message"] for record in rows] == [
+        "codex stderr: [stderr line exceeded the pipe reader limit]",
+        "codex stderr: startup diagnostic",
+    ]
+    assert all(record["extra"]["agent_id"] == 123 for record in rows)
+    assert all(record["level"].name == "INFO" for record in rows)
 
 
 async def test_notification_reaches_the_handler(tmp_path: Path) -> None:

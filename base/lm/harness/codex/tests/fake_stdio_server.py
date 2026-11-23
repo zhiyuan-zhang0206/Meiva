@@ -77,6 +77,10 @@ def main() -> None:
             size = _bytes_param(message)
             _ = out.write("x" * size)
             out.flush()
+        elif method == "stderr_flood":
+            _ = sys.stderr.write("x" * _bytes_param(message) + "\nstartup diagnostic\n")
+            sys.stderr.flush()
+            send({"jsonrpc": "2.0", "id": request_id, "result": {}})
         elif method == "hang":
             continue
         elif method == "quit":

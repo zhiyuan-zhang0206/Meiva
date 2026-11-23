@@ -8,7 +8,6 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -126,6 +125,9 @@ def test_add_event_sink_registers_at_most_once(
     try:
         _g.configure(extra={"agent_id": "8901"})
         _g.info(f"one record {marker}", event="label_change")
+        for index in range(20):
+            _g.info("bare info {} {}", marker, index)
+        _g.debug("local debug {}", marker)
         _drained()
 
         from base.paths import logs_dir
@@ -133,6 +135,7 @@ def test_add_event_sink_registers_at_most_once(
         day = datetime.now(_UTC).strftime("%Y%m%d")
         path = logs_dir(home=unit_home) / f"events-{day}.jsonl"
         rows: list[dict[str, Any]] = []
+        bare: list[str] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -142,6 +145,9 @@ def test_add_event_sink_registers_at_most_once(
                 msg = obj.get("attributes", {}).get("msg", "")
                 if obj.get("event_name") == "label_change" and marker in msg:
                     rows.append(obj)
+                if obj.get("event_name") == "log" and marker in msg:
+                    bare.append(msg)
+        assert bare == [f"bare info {marker} {index}" for index in range(20)]
         assert len(rows) == 1, f"expected 1 mirror row, got {len(rows)}"
     finally:
         pipeline.stop(timeout=2)
@@ -162,6 +168,9 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     assert f(_rec({}))
     assert not f(_rec({"event": "node_enter"}))
     assert not f(_rec({"_no_emitter": True}))
+    assert not f(
+        cast(Any, dict(_rec({}), name="opentelemetry.exporter.otlp.proto.http._log_exporter"))
+    )
     # The node_enter drop is by event name only, not by message — a record
     # that merely *mentions* node_enter in its message still passes.
     assert f(_rec({"msg": "node_enter handling"}))
@@ -170,39 +179,6 @@ def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     # table; a record merely mentioning the text still passes.
     assert not f(cast(Any, dict(_rec({}), message="Setting attribute on ended span.")))
     assert f(cast(Any, dict(_rec({}), message="Setting attribute on ended span. (context)")))
-
-
-def _rec_level(extra: dict[str, Any], level: str = "INFO") -> Any:
-    """A loguru-Record-shaped dict with a level — the sampling branch reads it."""
-    return {"extra": extra, "level": SimpleNamespace(name=level)}
-
-
-def test_event_pipeline_filter_samples_info_log_one_in_ten() -> None:
-    """Bare INFO `log` records are level-graded-sampled: exactly one in ten
-    passes; the counter is per-process and resettable for tests."""
-    f = slog.event_pipeline_filter
-    slog.reset_info_sample_counter()
-    kept = [f(_rec_level({"event": "log"})) for _ in range(10)]
-    assert kept.count(True) == 1
-    assert kept[0] is True  # the first record of each block is the survivor
-
-
-def test_event_pipeline_filter_keeps_warning_and_named_events() -> None:
-    """WARNING+ bare logs and every named event pass unchanged — the alerts /
-    unresolved surfaces depend on them; only bare INFO logs are sampled."""
-    f = slog.event_pipeline_filter
-    slog.reset_info_sample_counter()
-    assert f(_rec_level({"event": "log"}, "WARNING"))
-    assert f(_rec_level({"event": "log"}, "ERROR"))
-    assert f(_rec_level({"event": "log"}, "CRITICAL"))
-    # named events (node_exit, llm_usage) are not bare logs
-    assert f(_rec_level({"event": "node_exit"}))
-    assert f(_rec_level({"event": "llm_usage"}))
-    # A label is payload metadata and follows the ordinary bare-log sample rate.
-    slog.reset_info_sample_counter()
-    assert sum(f(_rec_level({"label": "exec"})) for _ in range(10)) == 1
-    # a record without a level passes unsampled (test-records / tolerant path)
-    assert f(_rec({}))
 
 
 @pytest.mark.usefixtures("logging_pipeline")

@@ -307,7 +307,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `understanding_call_record_failed` | the audit rows of an understanding call could not be written; the node or group is kept and only the call record is lost | anomaly | agent_id, job_id, error | — | events | — |
 | `understanding_rebuild_failed` | an understanding rebuild failed on its last allowed attempt and was closed as failed | anomaly | agent_id, rebuild_id, attempts, error | — | events | — |
 | `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build | anomaly | agent_id, job_id, span_end | — | events | — |
-| `understanding_backlog` | one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age | observation | pending, running, oldest_pending_age_seconds | — | events | — |
 | `plugin_collector_cycle` | one interval collector finished a refresh cycle, in both outcomes — the only record that says the loop ran at all; three intervals without one is a collector that is alive but producing nothing | observation | collector, outcome, reason, cycle, schedule_id | — | events | — |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
 | `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |
@@ -340,7 +339,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events | — |
 | `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events | — |
 | `root_diagnostic` | root diagnostic sampled a failing verdict (every sample while it persists, WARNING), reached no verdict -- ran out of its observation deadline or could not inspect at all (inconclusive / unavailable, INFO) -- or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
-| `root_diagnostic_state` | latest definitive root diagnostic outcome gauge (ok=1 alive, ok=0 down) | noise | diagnostic, ok | — | events | — |
 | `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
 | `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
 | `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events | — |

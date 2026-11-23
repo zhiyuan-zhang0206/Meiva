@@ -335,6 +335,7 @@ os.environ["MEIVA_PGBOUNCER_ENABLED"] = "false"
 # (base/telemetry/tests/otlp/test_telemetry_otlp.py) re-enable the flag and install
 # in-memory providers where the path is under test.
 os.environ["MEIVA_TELEMETRY_OTLP_ENABLED"] = "false"
+os.environ["OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED"] = "true"
 
 # ── Host-scope identity and telemetry URLs: loopback, like CI ──
 # meiva:note

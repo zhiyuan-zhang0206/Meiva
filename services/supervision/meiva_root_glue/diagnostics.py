@@ -114,7 +114,6 @@ class _State:
     sampled_at: float | None = None
     result: DaemonProbe | None = None
     failures: int = 0
-    last_known_ok: int | None = None
 
 
 class DiagnosticMonitor:
@@ -171,13 +170,7 @@ class DiagnosticMonitor:
         state.sampled_at = self._clock.now().timestamp()
         recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
-        if result.alive:
-            state.last_known_ok = 1
-        elif not result.unknown:
-            state.last_known_ok = 0
         self._report_sample(check, state, result, recovered=recovered)
-        if state.last_known_ok is not None:
-            self._emit_diagnostic_state(check.name, state.last_known_ok)
 
     def _sample(self, check: Diagnostic, report_closed: Event) -> Callable[[], DaemonProbe]:
         """The check's one bounded worker pass: its probe, then its reporter.
@@ -245,25 +238,6 @@ class DiagnosticMonitor:
             detail=result.detail,
             consecutive_failures=state.failures,
         )
-
-    @staticmethod
-    def _emit_diagnostic_state(diagnostic: str, ok: int) -> None:
-        from base import telemetry
-
-        telemetry.emit(
-            "telemetry",
-            "root_diagnostic_state",
-            attributes={"diagnostic": diagnostic, "ok": ok},
-        )
-
-    # meiva:note
-    # Re-publish the latest definitive status gauge for checks with an observed state so OTLP
-    # reconnects restore gauges between long diagnostic intervals.
-    def refresh_state_gauges(self) -> None:
-        for check in self._checks:
-            ok = self._states[check.name].last_known_ok
-            if ok is not None:
-                self._emit_diagnostic_state(check.name, ok)
 
     def health_snapshot(self) -> dict[str, object]:
         return {
@@ -351,7 +325,6 @@ class RootHealthRounds:
 
     async def run_round(self) -> None:
         await asyncio.gather(self._health.run_round(), self._diagnostics.run_round())
-        self._diagnostics.refresh_state_gauges()
         self._emit_trace_recording_state()
         from base.log import logger
 
