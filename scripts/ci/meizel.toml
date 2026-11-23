@@ -5,7 +5,7 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "file_shard_runtime.py" = ["file_shard_shadow.py"]
 "pull_requests" = ["collection_tracebacks.py", "shard_counts.py", "test_selector.py"]
 "test_selector.py" = ["shard_counts.py", "test_impact.py"]
-"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "e2e_scope.py", "file_shard_runtime.py", "file_shard_shadow.py", "host_marks_census.py", "pull_requests", "refresh_test_durations.py", "test_impact.py", "test_selector.py"]
+"tests" = ["cli.py", "collection_tracebacks.py", "coverage_gates.py", "dependency_audit.py", "e2e_scope.py", "file_shard_runtime.py", "file_shard_shadow.py", "host_marks_census.py", "pull_requests", "refresh_test_durations.py", "test_impact.py", "test_selector.py", "vendor_pg_runtime.py"]
 
 [roots]
 "cli.py" = { kinds = ["clock", "environ", "platform", "argv"], why = "pull-request tools entry: its __main__ block builds the process clock from SYSTEM_TIMERS and the host of this process with Host.system(), handing it the process environment, once before calling main(); the __main__ guard reads argv[1:] once and hands it to main" }

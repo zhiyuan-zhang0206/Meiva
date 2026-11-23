@@ -46,8 +46,10 @@ and when an unattended operator stop is reported:
 
 ## Left-behind generations
 
-Root records the pid of every unit process it spawns
-(`units/<unit>.pid`) and clears the pidfile when that process exits. A pidfile
+Root records the native process birth and boot ID of each unit it spawns
+(`units/<unit>.pid`) and clears that receipt when that process exits. Records
+from a previous boot and old files containing only a PID grant no signalling
+authority. An identity receipt
 outlives a root that leaves its tree running — a crash, or the code-version
 gate's hard exit from a pool worker thread, which cannot stop an asynchronous
 tree. The next root reads it before it starts the same unit: a recorded birth
@@ -57,6 +59,12 @@ inside the unit's stop window, then KILL) and only then spawns its own, emitting
 `root_unit_left_behind_reclaimed`. Nothing is adopted: a leftover runs the code
 it started with, and adopting it across a release is the silent drift this
 cleanup exists to end (task #5474).
+
+On upgrade from a PID-only receipt, root checks the PID and command before
+spawning a replacement. A dead or clearly unrelated process leaves a stale
+receipt that root can remove. A live process whose command matches the unit or
+whose identity is uncertain keeps its receipt and blocks the replacement.
+Verify the PID in the startup error and stop the previous unit before retrying.
 
 ## Failure-state signals
 

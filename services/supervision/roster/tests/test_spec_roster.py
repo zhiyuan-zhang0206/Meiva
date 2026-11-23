@@ -28,6 +28,7 @@ _GATEWAY_SESSIONS = {
     "gate",
     "loki",
     "prometheus",
+    "tempo",
     "grafana",
     "gateway",
     "labeler",
@@ -50,6 +51,7 @@ _GATEWAY_SESSIONS = {
 _AGENT_RUNNER_SESSIONS = {
     "loki",
     "prometheus",
+    "tempo",
     "grafana",
     "ops",
     "agent-host",
@@ -168,7 +170,12 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
         host=fake_host(),
         home=unit_home,
     )
-    assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
+    assert {service.session for service, _reason in rows} == {
+        "loki",
+        "prometheus",
+        "tempo",
+        "grafana",
+    }
     assert all(reason is not None for _service, reason in rows)
 
     (unit_home / "lgtm-host").touch()
@@ -182,7 +189,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
             host=fake_host(),
             home=unit_home,
         )
-    } == {"loki", "prometheus", "grafana"}
+    } == {"loki", "prometheus", "tempo", "grafana"}
 
 
 def test_browser_family_is_gated_by_the_platform_when_enabled(

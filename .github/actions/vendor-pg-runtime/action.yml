@@ -2,9 +2,14 @@ name: Vendored Postgres runtime for the test clusters
 description: >
   Builds the pinned zonky Postgres + pgvector tree production vendors and exports
   CI_VENDORED_RUNTIME_ROOT so every pytest session links it (tests/fixtures/env_bootstrap.py).
-  Run after the Python deps install. The tree is cached on the pin file's hash, so a
-  version or checksum change rebuilds it; restore/save are split (as in install-pg-redis)
-  so a failed job never persists a half-built tree.
+  Run after the Python deps install. The exact cache key includes the target platform
+  and the file containing both runtime versions and SHA-256 pins. The native cache
+  warmer and container smoke jobs share the same workspace-relative cache path.
+inputs:
+  runner-image:
+    description: Immutable image reference for the container job.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -12,19 +17,27 @@ runs:
       id: vendored-pg
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ runner.temp }}/meiva-vendored-pg/runtime
-        key: vendored-pg-${{ runner.os }}-${{ hashFiles('base/cluster/dataplane/runtime_binaries.py') }}
+        path: tmp/meiva-vendored-pg/runtime
+        key: vendored-pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('base/cluster/dataplane/runtime_binaries.py') }}
 
-    - name: Build vendored Postgres runtime
+    - name: Resolve vendored Postgres runtime
+      id: resolve
       shell: bash
       env:
-        MEIVA_HOME: ${{ runner.temp }}/meiva-vendored-pg
+        MEIVA_HOME: ${{ github.workspace }}/tmp/meiva-vendored-pg
         MEIVA_CONFIG_FETCH: skip
-      run: uv run python scripts/ci/vendor_pg_runtime.py "$GITHUB_ENV"
+        CI_RUNNER_IMAGE_REF: ${{ inputs.runner-image }}
+      run: |
+        uv run python scripts/ci/vendor_pg_runtime.py "$GITHUB_ENV" \
+          --github-output "$GITHUB_OUTPUT" --image-runtime-root "${CI_VENDORED_RUNTIME_ROOT:-}" \
+          --runner-image "$CI_RUNNER_IMAGE_REF"
 
     - name: Save vendored Postgres runtime
-      if: success() && steps.vendored-pg.outputs.cache-hit != 'true'
+      if: >-
+        success() && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+        && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        && steps.vendored-pg.outputs.cache-hit != 'true' && steps.resolve.outputs.cacheable == 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ runner.temp }}/meiva-vendored-pg/runtime
-        key: vendored-pg-${{ runner.os }}-${{ hashFiles('base/cluster/dataplane/runtime_binaries.py') }}
+        path: tmp/meiva-vendored-pg/runtime
+        key: ${{ steps.vendored-pg.outputs.cache-primary-key }}

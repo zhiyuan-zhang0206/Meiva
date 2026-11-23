@@ -39,6 +39,18 @@ def hold_stderr(path: Path) -> None:
         time.sleep(0.02)
 
 
+def stderr_request(message: dict[str, object]) -> dict[str, object]:
+    if message["method"] != "hold_stderr":
+        write_stderr(message)
+        return {}
+    child = subprocess.Popen(  # noqa: S603
+        [sys.executable, __file__, "--hold-stderr", "release-stderr"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+    )
+    return {"pid": child.pid}
+
+
 def main() -> None:
     out = sys.stdout
 
@@ -52,6 +64,8 @@ def main() -> None:
         request_id = message.get("id")
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": request_id, "result": {"userAgent": "fake-stdio"}})
+        elif method == "trace":
+            send({"jsonrpc": "2.0", "id": request_id, "result": {"trace": message.get("trace")}})
         elif method == "environment":
             send({"jsonrpc": "2.0", "id": request_id, "result": dict(os.environ)})
         elif method == "emit":
@@ -96,16 +110,8 @@ def main() -> None:
             size = _bytes_param(message)
             _ = out.write("x" * size)
             out.flush()
-        elif method in ("stderr_secret", "stderr_flood"):
-            write_stderr(message)
-            send({"jsonrpc": "2.0", "id": request_id, "result": {}})
-        elif method == "hold_stderr":
-            child = subprocess.Popen(  # noqa: S603
-                [sys.executable, __file__, "--hold-stderr", "release-stderr"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-            )
-            send({"jsonrpc": "2.0", "id": request_id, "result": {"pid": child.pid}})
+        elif method in ("stderr_secret", "stderr_flood", "hold_stderr"):
+            send({"jsonrpc": "2.0", "id": request_id, "result": stderr_request(message)})
         elif method == "hang":
             continue
         elif method == "quit":

@@ -70,7 +70,7 @@ from base.telemetry.delivery.reporting import (
     report_sink_failure,
 )
 from base.telemetry.emitter import emit, pipeline_bound
-from base.telemetry.otlp.log_export_deadline import LogExportDeadline
+from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.plans import (
     BASE_METRIC_DISPOSITION,
     select_metric_attributes,

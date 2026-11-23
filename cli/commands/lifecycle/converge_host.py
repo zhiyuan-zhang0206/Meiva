@@ -97,6 +97,7 @@ from cli.database.runtime import CommandRuntime
 from services.desktop.permissions_helper import converge
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.desktop.permissions_helper.lifecycle import BuildEnv, InstallEnv
+from services.supervision.roster.service_spec import ServiceSpec
 
 __all__ = [
     "CONVERGE_STEPS",
@@ -651,6 +652,7 @@ def converge_host(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     partial: bool = False,
+    planned_services: tuple[ServiceSpec, ...] = (),
 ) -> None:
     ctx = ConvergeCtx(
         repo=repo,
@@ -660,6 +662,7 @@ def converge_host(
         machine=command.machine,
         database_factory=database_factory,
         services=services,
+        planned_services=planned_services,
         producer=producer,
         helper=command.helper,
         timers=command.timers,
@@ -683,7 +686,7 @@ def converge_host(
     )
 
 
-def selected_service_names(
+def selected_services(
     roles: MachineRoles | None,
     *,
     only_services: tuple[str, ...],
@@ -692,7 +695,7 @@ def selected_service_names(
     machine: MachineIdentityReader,
     host: Host,
     home: Path,
-) -> frozenset[str]:
+) -> tuple[ServiceSpec, ...]:
     # meiva:note
     # The services an explicit selection names on this host, resolved like `meiva start`'s
     # roster: capability-gated services never count, and nothing is read from an earlier start.
@@ -713,9 +716,7 @@ def selected_service_names(
         excluded=disabled_services,
         all_services=all_services,
     )
-    return frozenset(
-        spec.session for spec, gate in specs if gate is None and spec.session not in skipped
-    )
+    return tuple(spec for spec, gate in specs if gate is None and spec.session not in skipped)
 
 
 # meiva:note
@@ -743,7 +744,7 @@ def cmd_converge(
         f"[meiva converge] cwd = {repo}  roles = {','.join(sorted(roles)) if roles else 'unknown'}"
     )
 
-    services = selected_service_names(
+    services = selected_services(
         roles,
         only_services=only_services,
         disabled_services=disabled_services,
@@ -756,7 +757,8 @@ def cmd_converge(
         repo,
         roles,
         steps=CONVERGE_STEPS,
-        services=services,
+        services=frozenset(spec.session for spec in services),
+        planned_services=services,
         database_factory=database_factory,
         producer=producer,
         command=command,

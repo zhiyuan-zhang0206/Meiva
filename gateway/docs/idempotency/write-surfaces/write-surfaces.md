@@ -18,6 +18,7 @@ Owners:
 |---|---|---|
 | `PATCH /api/agents/{agent_id}` | natural | label patch — CAS update |
 | `POST /api/alerts` | natural | Grafana Alertmanager webhook — upsert per (fingerprint, starts_at) |
+| `POST /api/alerts/agents/{agent_id}` | non-idempotent | One inbox message per accepted webhook, including Alertmanager repeats |
 | `POST /api/auth/login` | natural | login — repeats just mint a fresh cookie |
 | `PUT /api/auth/password` | natural | set the web login password — a repeat stores the same password under a fresh salt and ends the same password sessions |
 | `POST /api/auth/logout` | natural | clear session cookie — idempotent |

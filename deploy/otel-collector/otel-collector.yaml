@@ -40,6 +40,7 @@ receivers:
       http:
         endpoint: $OTLP_RECEIVER_ENDPOINT
 $REMOTE_OTLP_RECEIVER
+$HARNESS_OTLP_RECEIVER
 
   # ── The traditional SRE layer (issue #46) ────────────────────────────────
   # Host metrics come from the collector's own receiver, not a node_exporter
@@ -112,7 +113,7 @@ $REMOTE_OTLP_RECEIVER
         - job_name: meiva-otel-collector
           scrape_interval: 30s
           static_configs:
-            - targets: [localhost:$SELF_METRICS_PORT]
+            - targets: [${SELF_METRICS_HOST}:$SELF_METRICS_PORT]
 
   # ── Session-log tailing ───────────────────────────────────────────────────
   # Agent shell transcripts and service stdout use separate, disjoint
@@ -157,7 +158,91 @@ $REMOTE_OTLP_RECEIVER
     polls_to_archive: 50
     max_concurrent_files: 200
 $DATA_PLANE_RECEIVERS
+$HARNESS_OTLP_CONNECTOR
+
 processors:
+  # The native exporters do not gate every diagnostic field (e.g. raw API
+  # errors). Apply an allowlist before any writes to disk or upstream relays.
+  redaction/harness:
+    summary: silent
+    allowed_keys:
+      - service.name
+      - service.version
+      - service.instance.id
+      - deployment.environment
+      - cluster
+      - host.name
+      - meiva.machine
+      - meiva.agent_id
+      - harness
+      - event.kind
+      - event.sequence
+      - duration_ms
+      - duration.ms
+      - latency_ms
+      - status_code
+      - http.response.status_code
+      - error.type
+      - error_class
+      - error_name
+      - error_category
+      - success
+      - model
+      - gen_ai.request.model
+      - gen_ai.response.model
+      - gen_ai.operation.name
+      - gen_ai.usage.input_tokens
+      - gen_ai.usage.output_tokens
+      - input_tokens
+      - output_tokens
+      - cache_read_tokens
+      - cache_creation_tokens
+      - cached_tokens
+      - reasoning_tokens
+      - type
+      - tool_use_id
+      - gen_ai.tool.call.id
+      - interaction.sequence
+      - parent.source
+      - span.type
+      - thread.id
+      - turn.id
+      - session.id
+  # The redaction allowlist covers attributes. OTLP also has independent
+  # fields for free text, span links and metric exemplars.
+  transform/harness_payload:
+    error_mode: propagate
+    log_statements:
+      - set(scope.name, "harness")
+      - set(scope.version, "")
+      - set(log.event_name, "harness event")
+      - >-
+        set(log.event_name, Concat(["claude_code.", log.attributes["event.name"]], ""))
+        where resource.attributes["service.name"] == "claude-code" and
+        IsMatch(log.attributes["event.name"], "^(user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start|managed_settings_resolved|plugin_loaded|mcp_server_connection)$$")
+      - set(log.body, log.event_name)
+      - set(log.severity_text, "")
+    trace_statements:
+      - context: span
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(span.status.message, "")
+          - set(span.trace_state, "")
+          - set(span.links, nil)
+          - set(span.name, "harness.operation") where not IsMatch(span.name, "^(claude_code[.](interaction|llm_request|llm_request[.]attempt|tool|tool[.]execution|tool[.]blocked_on_user)|turn/start|turn/steer|thread/start|thread/resume|run_turn|agent_turn|app_server[.]request)$$")
+      - context: spanevent
+        statements:
+          - set(spanevent.name, "harness event")
+    metric_statements:
+      - context: metric
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(metric.description, "")
+      - context: datapoint
+        statements:
+          - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # returns retryable backpressure and bounds shedding instead of letting the
   # collector balloon on a 16GB shared box. Because it precedes file/traces,
@@ -180,6 +265,25 @@ processors:
     logs:
       log_record:
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
+  # Stamp origin identity on data collected locally. Remote pipelines preserve
+  # the resource identity the sending collector already attached.
+  resource/meiva_machine:
+    attributes:
+      - key: meiva.machine
+        value: $MACHINE_NAME
+        action: upsert
+  # Loki keeps resource labels under their normalized names. Copy the roster
+  # identity here to expose the same `machine` selector as Prometheus.
+  resource/loki_machine:
+    attributes:
+      - key: machine
+        from_attribute: meiva.machine
+        action: upsert
+  transform/metric_machine:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["machine"], resource.attributes["meiva.machine"])
   # Session-log labeling (filelog receivers; per-file
   # service label): service.name <- the file's session name (strip .out.log),
   # guarded so event logs (no log.file.name) pass through untouched.
@@ -198,16 +302,9 @@ processors:
     send_batch_max_size: 1024
     timeout: 5s
 
-  # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
-  # no host identity of their own, so detection supplies host.name and the
-  # transform puts both identities on every datapoint: `host` is the OS
-  # hostname (physical identity), and `machine_name` is the Meiva roster identity
-  # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
-  # company-mini / ...). One label per meaning; dashboards and alert rules group by
-  # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
-  # transform cannot touch them because it sits on the infra pipeline only.
-  # Datapoint attributes are required: resource attributes land in
-  # Prometheus's `target_info`, where alert expressions cannot select on them.
+  # The infra pipeline detects the physical host and exposes it separately
+  # from the roster identity. Prometheus needs these names on datapoints,
+  # because unpromoted resource attributes are only available in target_info.
   resource_detection/host:
     detectors: [system]
     system:
@@ -224,8 +321,7 @@ processors:
     metric_statements:
       - context: datapoint
         statements:
-          - set(attributes["host"], resource.attributes["host.name"])
-          - set(attributes["machine_name"], $MACHINE_NAME)
+          - set(attributes["host.name"], resource.attributes["host.name"])
           # Interim fix (2026-08-28, #1818): postgresqlreceiver keys its rows by
           # resource attributes; Prometheus 3.x's OTLP receiver keeps resource
           # attrs out of series labels (they land in target_info), so all index
@@ -295,25 +391,31 @@ service:
         - pull:
             exporter:
               prometheus:
-                host: localhost
+                host: $SELF_METRICS_HOST
                 port: $SELF_METRICS_PORT
   extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
+$HARNESS_OTLP_PIPELINES
     traces:
-      receivers: [otlp]
-      processors: [memory_limiter, filter/cluster_allow, batch]
+      receivers: [otlp$HARNESS_OTLP_FORWARD]
+      processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services]
-      processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
+      receivers: [otlp$HARNESS_OTLP_FORWARD, filelog/sessions, filelog/services]
+      processors:
+        - memory_limiter
+        - filter/cluster_allow
+        - resource/meiva_machine
+        - resource/loki_machine
+        - transform/promote_event_labels
+        - transform/filelog_service
+        - batch
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
-      processors: [memory_limiter, filter/cluster_allow, batch]
+      receivers: [otlp$HARNESS_OTLP_FORWARD]
+      processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, transform/metric_machine, batch]
       exporters: [otlphttp/prometheus]
-    # Infra metrics ride their own pipeline so the host-identity processors
-    # touch only them: app metrics already carry `machine`/`agent_id`
-    # datapoint attributes from the emitter and must not be relabelled.
+    # Infra receivers also need OS detection and data-plane dimensions.
     metrics/infra:
       receivers: [host_metrics, prometheus/otelcol$DATA_PLANE_PIPELINE_RECEIVERS]
       processors:
@@ -321,8 +423,10 @@ service:
           memory_limiter,
           resource_detection/host,
           resource/infra,
+          resource/meiva_machine,
+          transform/metric_machine,
           transform/host_label,
           batch,
         ]
       exporters: [otlphttp/prometheus]
-$REMOTE_TRACE_PIPELINE
+$REMOTE_OTLP_PIPELINES

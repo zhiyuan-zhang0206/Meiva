@@ -75,6 +75,8 @@ export interface SeenFeed {
 export interface SeenReveal {
   decided: boolean;
   itemId: string | null;
+  entrySeenId?: number;
+  olderPages?: number;
 }
 
 interface Session {
@@ -107,6 +109,7 @@ export function useSeenPosition({
   loadingOlder,
   loadOlder,
   revealWanted = true,
+  openingShown,
 }: {
   agentId: number | null;
   feed: SeenFeed;
@@ -118,6 +121,7 @@ export function useSeenPosition({
   // meiva:note
   // The conversation opens on a saved place: no reveal is wanted, so no older page is read for one.
   revealWanted?: boolean;
+  openingShown: boolean;
 }): SeenReveal {
   const api = useApi();
   const cache = useQueryClient();
@@ -171,7 +175,7 @@ export function useSeenPosition({
     if (olderPages > 0) loadOlder();
   }, [olderPages, loadOlder]);
 
-  const ready = session !== null && session.agentId === agentId && session.entry !== null;
+  const ready = openingShown && session !== null && session.agentId === agentId && session.entry !== null;
   const newest = newestDeliveryId(messages);
   useEffect(() => {
     if (!ready || seenId === undefined || newest === null || newest <= seenId) return;
@@ -209,7 +213,12 @@ export function useSeenPosition({
 
   if (!open) return NOT_OPEN;
   if (session?.agentId !== agentId) return UNDECIDED;
-  return session.decided ? { decided: true, itemId: session.reveal?.itemId ?? null } : UNDECIDED;
+  return session.decided ? {
+    decided: true,
+    itemId: session.reveal?.itemId ?? null,
+    ...(session.entry !== null ? { entrySeenId: session.entry } : {}),
+    ...(session.olderPages > 0 ? { olderPages: session.olderPages } : {}),
+  } : UNDECIDED;
 }
 
 const NOT_OPEN: SeenReveal = { decided: true, itemId: null };

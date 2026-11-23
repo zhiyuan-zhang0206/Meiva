@@ -20,7 +20,7 @@ from opentelemetry.sdk.resources import Resource
 
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from base.telemetry.otlp.http_log_exporter import BoundedHTTPLogExporter
+from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
 
 _RECEIVER_LIMIT = 20 * 1024 * 1024
 

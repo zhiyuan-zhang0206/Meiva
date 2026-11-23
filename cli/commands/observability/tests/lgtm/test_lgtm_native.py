@@ -52,7 +52,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 __all__ = ["lgtm_unit"]
 
-ALL_BACKENDS = frozenset({"loki", "prometheus", "grafana"})
+ALL_BACKENDS = frozenset({"loki", "prometheus", "tempo", "grafana"})
 DASHBOARD_REL = "config/provisioning/dashboards/meiva-ops-main.json"
 
 
@@ -98,14 +98,21 @@ def assert_installed(native: Path, *, tag: str) -> None:
     # the rendered configs, the launcher and the retained data directories.
     assert (native / "bin/prometheus").stat().st_mode & 0o777 == 0o755
     assert (native / "grafana-home/bin/grafana").is_file()
-    for name, version in (("loki", "3.7.6"), ("prometheus", "3.13.2"), ("grafana", "13.2.3")):
+    for name, version in (
+        ("loki", "3.7.6"),
+        ("prometheus", "3.13.2"),
+        ("tempo", "3.1.1"),
+        ("grafana", "13.2.3"),
+    ):
         assert (native / f"version-{name}").read_text(encoding="utf-8") == version + "\n"
         assert (native / f"platform-{name}").read_text(encoding="utf-8") == tag + "\n"
-    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
+    for name in ("loki.yaml", "prometheus.yml", "tempo.yaml", "grafana.ini", "runtime.env"):
         assert (native / "config" / name).is_file()
     assert (native / "grafana/run.sh").stat().st_mode & 0o777 == 0o755
     assert (native / "data/loki").is_dir()
     assert (native / "data/prom").is_dir()
+    assert (native / "data/tempo").is_dir()
+    assert (native / "bin/tempo").stat().st_mode & 0o777 == 0o755
 
 
 def test_a_clean_station_downloads_verifies_installs_and_renders_every_backend(
@@ -125,6 +132,7 @@ def test_a_clean_station_downloads_verifies_installs_and_renders_every_backend(
         "/grafana.tar.gz",
         "/loki.zip",
         "/prometheus.tar.gz",
+        "/tempo.tar.gz",
     ]
     out = capsys.readouterr().out
     assert "installed loki 3.7.6 (linux_amd64)" in out
@@ -168,7 +176,7 @@ def test_versions_installed_for_another_platform_are_downloaded_again(
         repo = checkout_pinning(lgtm_unit.home / "repo", mirror.pins(served.url))
         ensure(lgtm_unit, repo, host_platform=LINUX_X86, database=operator_database)
 
-    assert len(served.received) == 3
+    assert len(served.received) == 4
     assert (lgtm_unit.native / "platform-loki").read_text(encoding="utf-8") == "linux_amd64\n"
 
 
@@ -195,7 +203,7 @@ def test_only_the_selected_backend_is_downloaded_and_its_siblings_are_left_alone
 def test_a_selection_naming_no_backend_or_a_foreign_service_is_refused(
     lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
 ) -> None:
-    for services in (frozenset[str](), frozenset({"tempo"})):
+    for services in (frozenset[str](), frozenset({"unmanaged"})):
         with pytest.raises(ValueError, match="selected backend names"):
             ensure(lgtm_unit, REPO_ROOT, services=services, database=operator_database)
 
@@ -274,6 +282,7 @@ def test_the_rendered_tree_has_the_fixed_layout_and_the_generated_dashboard(
         "grafana.ini",
         "loki.yaml",
         "prometheus.yml",
+        "tempo.yaml",
         "runtime.env",
         "provisioning",
         "provisioning-hashes.json",
@@ -297,13 +306,16 @@ def test_loki_renders_native_paths_loopback_listeners_and_the_deploy_invariants(
     assert config["common"]["path_prefix"] == f"{lgtm_unit.native}/data/loki"
     assert config["frontend"]["address"] == "127.0.0.1"
     labels = config["distributor"]["otlp_config"]["default_resource_attributes_as_index_labels"]
-    assert {"agent_id", "event_name"} <= set(labels)
-    assert "service.instance.id" not in labels
+    assert {"agent_id", "event_name", "machine"} <= set(labels)
+    assert {"service.instance.id", "trace_id", "span_id", "meiva.machine"}.isdisjoint(labels)
+    assert config["limits_config"]["retention_stream"] == [
+        {"selector": '{stream="archive"}', "priority": 1, "period": "8760h"}
+    ]
     for line in (
         "http_listen_address: 127.0.0.1",
         "grpc_listen_address: 127.0.0.1",
         "instance_addr: 127.0.0.1",
-        "retention_period: 84h",
+        "retention_period: 168h",
         "disk_full_threshold: 0.95",
         "max_query_series: 20000",
         "query_timeout: 50s",
@@ -312,6 +324,10 @@ def test_loki_renders_native_paths_loopback_listeners_and_the_deploy_invariants(
     ):
         assert line in loki
     validate_loki_deploy_config(config)
+
+    labels.remove("machine")
+    with pytest.raises(ValueError, match="index labels must include machine"):
+        validate_loki_deploy_config(config)
 
 
 def scrape_targets(unit: LgtmUnit) -> dict[str, list[str]]:

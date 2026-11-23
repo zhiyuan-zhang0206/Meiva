@@ -13,11 +13,13 @@ gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana
 The collector keeps network retries, backpressure and backend credentials out
 of agent processes: the local receiver is the only endpoint an agent process
 knows. A pure runner relays to one authenticated gateway ingress; the
-unauthenticated Tempo / Loki / Prometheus ports stay loopback-only. The backend
-stack under `deploy/lgtm/` is required serving infrastructure (the gateway's
-ops and inspect endpoints, ops alerting and the events-maintenance rollup read
-from it), not a stop-anytime viewer. Tempo is the only trace viewer
-([why](../../../../../docs/decisions/observability/telemetry/2026-08-11-otel-viewer-selection.md)).
+native Tempo, Loki, and Prometheus endpoints bind to loopback by default.
+`meiva-root` owns Tempo on the observability station. The collector sends
+traces to `MEIVA_TELEMETRY_TEMPO_ENDPOINT` (default loopback port 14318), and
+Grafana and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` (default loopback
+port 3200). The [native backend stack](../../../../../deploy/lgtm/README.md)
+supports gateway ops and inspect endpoints, alerting, and events maintenance.
+Tempo is the cluster's [trace viewer](../../../../../docs/decisions/observability/telemetry/2026-08-11-otel-viewer-selection.md).
 
 ## Why the mirror is JSONL
 

@@ -18,15 +18,16 @@ eagerly is worse than none:
   launched, naming the occupant and the remedy;
 - this unit's own daemon (an idempotent restart), a stray of its own home, and a
   cold port all pass;
-- only the daemon health ports are gated — the gateway, the browser and the
-  frontend are somebody else's problem, and the browser deliberately tolerates
-  another unit's Chrome.
+- the live port probe preserves the browser's ability to tolerate another
+  unit's Chrome. Static checks reject overlapping configured listeners in the
+  selected roster while the ports are still free.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from base import config
 from base.daemon.health import DaemonProbe
 from cli.commands import probe
 from cli.commands.lifecycle.start import refuse_occupied_health_ports
@@ -178,3 +179,64 @@ def test_a_disabled_service_is_not_in_the_roster_the_gate_probes(start_run: Star
 
     assert "labeler" in full
     assert narrowed == full - {"labeler"}
+
+
+def test_a_legacy_tempo_listener_refuses_start_with_a_tempo_specific_stopgap(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    external = "Tempo listeners occupied by external processes at port 14318"
+    tempo = _other_endpoint_spec(
+        "tempo", "http://127.0.0.1:3200/ready", DaemonProbe.port_taken(external)
+    )
+
+    assert refuse_occupied_health_ports((tempo,)) == 1
+    message = capsys.readouterr().err
+    assert external in message
+    assert "--disable-service tempo" in message
+
+
+def test_cold_station_refuses_loki_and_tempo_using_the_same_grpc_bind(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    start_run.declare(gateway=True, agent_runner=False)
+    (start_run.home / "lgtm-host").touch()
+    config.set_field("lgtm_loki_grpc_port", 29096)
+    config.set_field("lgtm_tempo_grpc_port", 29096)
+    roster = start_run.roster(frozenset({"gateway"}))
+    selected = tuple(spec for spec in roster if spec.session in {"loki", "tempo"})
+
+    assert len(selected) == 2
+    assert refuse_occupied_health_ports(selected) == 1
+    assert (
+        "configured bind 127.0.0.1:29096 overlaps tempo at 127.0.0.1:29096"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    ("service", "field", "host", "bind"),
+    [
+        ("gateway", "gateway_port", "localhost", "127.0.0.1:29096"),
+        ("gateway", "gateway_port", "192.0.2.1", "[::]:29096"),
+        ("labeler", "labeler_health_port", "localhost", "127.0.0.1:29096"),
+        ("otel-collector", "otel_collector_metrics_port", "localhost", "127.0.0.1:29096"),
+    ],
+)
+def test_cold_station_refuses_core_service_listener_conflicting_with_tempo(
+    start_run: StartRun,
+    capsys: pytest.CaptureFixture[str],
+    service: str,
+    field: str,
+    host: str,
+    bind: str,
+) -> None:
+    start_run.declare(gateway=True, agent_runner=False)
+    start_run.command.config.set_field("machine_host", host)
+    (start_run.home / "lgtm-host").touch()
+    config.set_field(field, 29096)
+    config.set_field("lgtm_tempo_grpc_port", 29096)
+    selected = start_run.roster(frozenset({"gateway"}), only=(service, "tempo"))
+
+    assert {spec.session for spec in selected} == {service, "tempo"}
+    assert refuse_occupied_health_ports(selected) == 1
+    assert f"configured bind {bind} overlaps tempo at 127.0.0.1:29096" in capsys.readouterr().err

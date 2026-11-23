@@ -218,7 +218,8 @@ def test_the_designated_observability_host_reports_its_backends(
 
     backends = out.split("lgtm (observability backend):\n", 1)[1].split("\n\n", 1)[0].splitlines()
     assert backends
-    assert all(re.match(r"  \w+: \w+ \(.*\)$", line) for line in backends)
+    assert any(line.startswith("  tempo: ") for line in backends)
+    assert all(re.match(r"  \w+: [\w-]+ \(.*\)$", line) for line in backends)
 
 
 # meiva:note

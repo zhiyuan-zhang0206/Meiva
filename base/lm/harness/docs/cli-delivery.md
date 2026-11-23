@@ -16,22 +16,23 @@ back to the process environment.
 session delivery point (`wiring.session_environ`): the host's own entries first,
 then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,
 `~/.bun/bin`, `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`), then the
-system dirs. `wiring.session_environ` also stamps `MEIVA_PYTHON` (`sys.executable`)
-and `_SESSION_DELIVERY_KEYS` preserves it across `ClaudeSession`'s allowlist so
-`"$MEIVA_PYTHON" -c ...` always runs Meiva's interpreter even when a CLI's shell
-tool spawns a login shell (`/bin/zsh -lc`) that reorders `PATH` or works inside a
-repository with a foreign `.venv`. The same binary directory list feeds the probe in
-`base/agents/birth/harness.py` and the `launchd` job PATH in
-`base/host/system/cron/mechanics.py`, so all three agree on where the CLIs live.
+system dirs. `wiring.session_environ` sets `MEIVA_PYTHON` to the absolute path
+of `meiva_python.sh` and pins the host's `sys.executable` in
+`MEIVA_PYTHON_EXECUTABLE`. The Claude session allowlist preserves both
+values. Managed SDK shell sessions pin their own interpreter the same way,
+including sessions created by `meiva.shell.run_background`.
 
-The pinned interpreter fixes which `python` runs, not which code it imports:
-`python -c` puts the working directory first on `sys.path`, so that command run
-inside a clone of this repository imports that clone's `base`/`meiva` and the
-home's ledger refuses the process it then is (`this process runs <cwd>, not the
-home's source checkout <source>`). Run the command outside any checkout
-(`cd /tmp`), or pin `PYTHONSAFEPATH=1` on that one command; never export it, since
-every child inherits it and a checkout's `pytest` imports its own tree from the
-working directory.
+The launcher runs the pinned interpreter with `-P` for `-c`, `-m`, and script
+invocations. Python skips its implicit working-directory or script-directory
+import entry, so running the SDK from a different checkout uses the package
+installed in the pinned interpreter's environment. The launcher leaves
+`PYTHONSAFEPATH` unset in a clean environment, so a child Python process uses
+its usual import behavior. Scripts that need sibling modules must make those
+imports available explicitly.
+
+The same binary directory list feeds the probe in `base/agents/birth/harness.py`
+and the `launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three
+agree on where the CLIs live.
 
 Every unit this repository installs composes its PATH through
 `harness_binaries.harness_unit_path`, which appends the table and then refuses a
@@ -47,3 +48,50 @@ failure names the PATH and every directory that was searched instead of a bare
 the child changes to its workspace, including when PATH contains relative entries.
 The path keeps symlinks intact; it does not resolve their targets. An explicitly
 configured path containing a separator is validated and returned unchanged.
+
+## Native OpenTelemetry
+
+Hosted Codex sessions export metrics and traces. Hosted Claude Code sessions
+export metrics, events and beta traces. The host uses a dedicated loopback
+receiver at `/meiva-harness/v1/*`. Its port is derived from the unit's local
+OTLP port by shifting within the unprivileged range, keeping adjacent unit
+ports distinct. Converge checks for conflicts before replacing the collector
+configuration and recognizes an existing listener owned by the same unit.
+Converge preserves operator edits in `config.yaml` and atomically publishes
+`config-active.yaml`, the Collector's fixed launch path. If the derived port
+is occupied or reserved by another selected service, converge warns and
+removes the harness ingress from the launch copy. The next converge with no
+port conflict copies the source back to the same launch path. A root already
+admitted with the previous release's Collector
+command needs a normal stop before adopting the fixed path.
+When enabling launchers, each existing proxy bypass variable keeps its own
+entries and adds the collector's loopback address. If an explicitly empty
+alias conflicts with a populated alias, the launcher preserves the proxy
+environment and disables native export. Before starting a CLI, the host sends an empty OTLP request
+and verifies the live receiver's redaction marker within a half-second total
+budget. The probe accepts at most 16 response bytes. It logs a warning and starts
+the CLI with export disabled if the probe fails. During collector replacement,
+a CLI that already has the dedicated endpoint can only send to the redacted
+receiver. It enables these exporters
+when `MEIVA_TELEMETRY_OTLP_ENABLED` is on and enables their spans when
+`MEIVA_TRACE_ENABLED` is also on. OTLP resources identify the agent through
+`meiva.agent_id`, `harness` and `service.instance.id`. The per-agent instance
+keeps cumulative Prometheus counters from different agents in distinct series.
+Harness-reported token and cost observations are for diagnostics. Billing and
+product usage continue to come from the existing Meiva usage path.
+
+Codex passes W3C Trace Context in each app-server JSON-RPC request. Its native
+OTLP log exporter is disabled because tool arguments can appear there even
+when prompt and tool-output recording are disabled. Claude Code has per-process
+TRACEPARENT support. The bridge clears it at SDK launch so a persistent process
+can emit independent interaction traces without adding later turns to the first
+Meiva turn. Follow [Claude Agent SDK per-message context support](https://github.com/anthropics/claude-agent-sdk-python/issues/1126)
+for the remaining integration point.
+
+The harnesses' content controls are disabled at launch, and the collector
+applies a diagnostic attribute allowlist to their native signals before local
+storage or relay. The collector also replaces log bodies with an event label
+and clears free-text span status messages.
+
+The privacy filter also normalizes diagnostic names and removes span links,
+trace state and metric exemplars before export.

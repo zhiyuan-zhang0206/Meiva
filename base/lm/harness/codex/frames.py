@@ -64,8 +64,18 @@ def _as_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def request_frame(request_id: int, method: str, params: RequestParams) -> JsonObject:
-    return {"jsonrpc": JSONRPC, "id": request_id, "method": method, "params": dict(params)}
+def request_frame(
+    request_id: int, method: str, params: RequestParams, *, trace: Mapping[str, str] | None = None
+) -> JsonObject:
+    frame: JsonObject = {
+        "jsonrpc": JSONRPC,
+        "id": request_id,
+        "method": method,
+        "params": dict(params),
+    }
+    if trace:
+        frame["trace"] = dict(trace)
+    return frame
 
 
 def notification_frame(method: str, params: RequestParams | None) -> JsonObject:

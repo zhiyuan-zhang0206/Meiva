@@ -8,11 +8,12 @@ from threading import Event, Thread
 
 import pytest
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, use_span
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.codex.frames import JsonObject, JsonRpcError, TransportClosedError, as_object
-from base.lm.harness.codex.transport import StdioAppServer
+from base.lm.harness.codex.transport import MAX_FRAME_BYTES, StdioAppServer
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.otlp.telemetry_otlp import OtlpBackend
@@ -24,16 +25,13 @@ SERVER = Path(__file__).with_name("fake_stdio_server.py")
 def transport(
     tmp_path: Path, *, timeout: float = 5.0, max_frame_bytes: int | None = None
 ) -> StdioAppServer:
-    kwargs: dict[str, int] = (
-        {"max_frame_bytes": max_frame_bytes} if max_frame_bytes is not None else {}
-    )
     return StdioAppServer(
         [sys.executable, str(SERVER)],
         cwd=tmp_path,
         environ={},
         request_timeout=timeout,
         stderr=asyncio.subprocess.DEVNULL,
-        **kwargs,
+        max_frame_bytes=max_frame_bytes if max_frame_bytes is not None else MAX_FRAME_BYTES,
     )
 
 
@@ -147,6 +145,25 @@ async def test_codex_stderr_credentials_are_removed_from_otlp_payload(tmp_path: 
             backend.shutdown()
             receiver.shutdown()
             thread.join()
+
+
+async def test_each_rpc_uses_its_callers_current_trace(tmp_path: Path) -> None:
+    server = StdioAppServer(
+        [sys.executable, str(SERVER)], cwd=tmp_path, environ={}, trace_requests=True
+    )
+    await server.start()
+    try:
+        for parent in (1, 2):
+            span = NonRecordingSpan(
+                SpanContext(parent, parent, False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
+            )
+            with use_span(span):
+                assert await server.request("trace", {}) == {
+                    "trace": {"traceparent": f"00-{parent:032x}-{parent:016x}-01"}
+                }
+        assert await server.request("trace", {}) == {"trace": None}
+    finally:
+        await server.close()
 
 
 async def test_notification_reaches_the_handler(tmp_path: Path) -> None:

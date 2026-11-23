@@ -59,6 +59,7 @@ def observability_config_from_boot(boot: ConfigBoot) -> ObservabilityConfig:
         observability_otlp_port=domain.observability_otlp_port,
         telemetry_otlp_enabled=domain.telemetry_otlp_enabled,
         telemetry_otlp_port=domain.telemetry_otlp_port,
+        harness_otlp_port=domain.harness_otlp_port,
         gateway_otlp_endpoint=domain.gateway_otlp_endpoint,
         telemetry_tempo_endpoint=domain.telemetry_tempo_endpoint,
         telemetry_tempo_query_url=domain.telemetry_tempo_query_url,
@@ -72,6 +73,8 @@ def observability_config_from_boot(boot: ConfigBoot) -> ObservabilityConfig:
         lgtm_grafana_port=domain.lgtm_grafana_port,
         trace_retention_days=domain.trace_retention_days,
         otel_collector_metrics_port=domain.otel_collector_metrics_port,
+        lgtm_tempo_grpc_port=domain.lgtm_tempo_grpc_port,
+        lgtm_tempo_retention_hours=domain.lgtm_tempo_retention_hours,
         lgtm_storage_dir=domain.lgtm_storage_dir,
     )
 

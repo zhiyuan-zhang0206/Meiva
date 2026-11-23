@@ -259,7 +259,7 @@ describe("returning to a conversation in the same page", () => {
   });
 
   it.each(["grows while away", "grows after the return", "grows between a chunk and the switch"])(
-    "saves the row on screen when departing at the tail and does not follow newer output on return (%s)",
+    "returns to the tail when only the layout changed (%s)",
     (when) => {
       const entry = `agent-tail-${when}`;
       const { rerender } = renderWithBrowser(tabs(42, entry));
@@ -269,12 +269,10 @@ describe("returning to a conversation in the same page", () => {
       if (when === "grows while away") act(() => { height = 6000; });
       top = 0;
       rerender(tabs(42, entry));
-      expect(viewport().scrollTop).toBe(4400);
-      expect(readingOffset("15.0")).toBe(-200);
+      expect(viewport().scrollTop).toBe(when === "grows after the return" ? 4400 : 5400);
       act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
-      expect(viewport().scrollTop).toBe(4400);
-      expect(readingOffset("15.0")).toBe(-200);
-      expect(screen.queryByTestId("scroll-to-bottom")).not.toBeNull();
+      expect(viewport().scrollTop).toBe(6400);
+      expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
     },
   );
 
@@ -428,12 +426,12 @@ describe("a toggle reserve and growth below a returned reader", () => {
     expect(viewport().scrollTop).toBe(4400);
   });
 
-  it("follows again once a returned reader scrolls back into the bottom zone", () => {
+  it("follows again once a returned reader reaches the end", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     writeMemoryPlace("history-hold-release", "42", place("3.0", -100));
     renderWithBrowser(conversation(42, "history-hold-release"));
     expect(viewport().scrollTop).toBe(700);
-    readerScroll(4390);
+    readerScroll(4400);
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });
@@ -579,7 +577,7 @@ describe("first visit and the reveal", () => {
     expect(viewport().scrollTop).toBe(4400);
   });
 
-  it.each([4400, 900])("lets a saved place win over the reveal on return (left at %i)", (leftAt) => {
+  it.each([[4400, false], [900, true]])("preserves the reader's position when the reveal points to an old row (left at %i)", (leftAt, showArrow) => {
     useTimelineStore.getState().switchThread(42, items, false);
     const entry = `reveal-returning-${leftAt}`;
     const { rerender } = renderWithBrowser(conversation(42, entry));
@@ -590,7 +588,124 @@ describe("first visit and the reveal", () => {
     rerender(conversation(42, entry, { decided: true, itemId: "1.0" }));
     resize();
     expect(viewport().scrollTop).toBe(leftAt);
-    expect(screen.queryByTestId("scroll-to-bottom") === null).toBe(leftAt === 4400);
+    expect(screen.queryByTestId("scroll-to-bottom") !== null).toBe(showArrow);
+  });
+});
+
+describe("bounded unread return geometry", () => {
+  const history = items[0];
+  const human: BackendTimelineItem = { ...items[1], kind: "inbound_chat", source: "user", payload: "My message" };
+  const reply = items[2];
+  const viewportHeight = 1000;
+  const dockOverlap = 80;
+  const historyHeight = 2000;
+  let replyHeight: number;
+
+  function mountReturn(initialHeight: number) {
+    replyHeight = initialHeight;
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(viewportHeight);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.querySelector('[data-item-id="3.0"]')
+        ? historyHeight + 100 + replyHeight + dockOverlap
+        : historyHeight + 100 + dockOverlap;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      switch (this.dataset.itemId) {
+        case "1.0": return rect(-top, historyHeight);
+        case "2.0": return rect(historyHeight - top, 100);
+        case "3.0": return rect(historyHeight + 100 - top, replyHeight);
+      }
+      if (this.getAttribute("role") === "log") {
+        const total = historyHeight + 100 + (this.querySelector('[data-item-id="3.0"]') ? replyHeight : 0);
+        return rect(-top, total);
+      }
+      return rect(0, viewportHeight);
+    });
+    const entry = `bounded-geometry-${initialHeight}`;
+    const view = renderWithBrowser(host(<TimelineView items={[history, human]} threadKey="42" scrollMemoryKey={entry} bottomOverlayHeight={dockOverlap} />));
+    view.rerender(shell());
+    top = 0;
+    frames.length = 0;
+    view.rerender(host(<TimelineView items={[history, human, reply]} threadKey="42" scrollMemoryKey={entry} bottomOverlayHeight={dockOverlap} />));
+  }
+
+  it.each([false, true])("brings a prompt from an older page into the first visible return (delivered: %s)", (delivered) => {
+    const work: BackendTimelineItem = { ...items[3], item_id: "2.1", kind: "agent_reasoning" };
+    const loadOlder = vi.fn();
+    const entry = `paged-boundary-${delivered}`;
+    const opening = [history, human];
+    const reveal = { decided: true, itemId: delivered ? reply.item_id : null };
+    const presenting = (rows: BackendTimelineItem[], loadingOlder = false) => host(<TimelineView items={rows}
+      threadKey="42" scrollMemoryKey={entry} hasMoreOlder onLoadOlder={loadOlder} loadingOlder={loadingOlder} reveal={reveal} />);
+    const view = renderWithBrowser(host(<TimelineView items={opening} threadKey="42" scrollMemoryKey={entry} />));
+    view.rerender(shell());
+    top = 0;
+    frames.length = 0;
+    view.rerender(presenting([work, reply]));
+    expect(rowsShown()).toBe(false);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    view.rerender(presenting([work, reply], true));
+    view.rerender(presenting([...opening, work, reply]));
+    expect(rowsShown()).toBe(true);
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    expect(shownTops()).toEqual([300 - READING_TOP_PX]);
+  });
+
+  it.each([false, true])("treats reattached standing context as a page edge and respects a real wake (%s)", (wake) => {
+    const system: BackendTimelineItem = { ...history, item_id: "0.0", kind: "system_prompt" };
+    const note: BackendTimelineItem = { ...history, item_id: "0.1", kind: "system_marker", source: "agent_id" };
+    const summary: BackendTimelineItem = { ...history, item_id: "0.2", kind: "inbound_compact_summary" };
+    const scheduled: BackendTimelineItem = { ...history, item_id: "2.1", kind: "inbound_chat", source: "schedule:2" };
+    const work: BackendTimelineItem = { ...history, item_id: "2.2", kind: "agent_reasoning" };
+    const partial = { ...reply, partial: true, payload: reply.payload.slice(0, 2) };
+    const head = [system, note, summary];
+    const suffix = [...(wake ? [scheduled] : []), work];
+    const latest = [...head, ...suffix, reply];
+    const loadOlder = vi.fn();
+    const entry = `paged-standing-boundary-${wake}`;
+    const view = renderWithBrowser(host(<TimelineView items={[...latest.slice(0, -1), partial]}
+      threadKey="42" scrollMemoryKey={entry} />));
+    view.rerender(shell());
+    top = 0;
+    const present = (rows: BackendTimelineItem[]) => host(<TimelineView items={rows}
+      threadKey="42" scrollMemoryKey={entry} hasMoreOlder onLoadOlder={loadOlder} />);
+    view.rerender(present(latest));
+    expect(loadOlder).toHaveBeenCalledTimes(wake ? 0 : 1);
+    if (!wake) {
+      expect(rowsShown()).toBe(false);
+      view.rerender(present([...head, history, human, ...suffix, reply]));
+    }
+    expect(rowsShown()).toBe(true);
+    expect(readingOffset(wake ? reply.item_id : human.item_id)).toBe(READING_TOP_PX);
+    expect(loadOlder).toHaveBeenCalledTimes(wake ? 0 : 1);
+  });
+
+  it("opens a 1500px reply with the 100px prompt at the safe top of a 1000px viewport", () => {
+    mountReturn(1500);
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
+    expect(readingOffset(reply.item_id)).toBe(READING_TOP_PX + 100);
+    expect(shownTops()).toEqual([historyHeight - READING_TOP_PX]);
+  });
+
+  it("fits a 100px prompt and 100px reply above the dock and stops following at the safe top as the reply grows", () => {
+    mountReturn(100);
+    expect(readingOffset(reply.item_id)! + 100).toBe(viewportHeight - dockOverlap);
+    expect(readingOffset(human.item_id)).toBe(viewportHeight - dockOverlap - 200);
+    replyHeight = 500;
+    resize();
+    expect(readingOffset(reply.item_id)! + replyHeight).toBe(viewportHeight - dockOverlap);
+    replyHeight = 1500;
+    resize();
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
+    replyHeight = 2000;
+    resize();
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
+    readerScroll(top + 150);
+    expect(viewport().hasAttribute("data-unread-bounded")).toBe(false);
+    replyHeight = 2500;
+    resize();
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX - 150);
   });
 });
 

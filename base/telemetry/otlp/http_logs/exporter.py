@@ -22,7 +22,7 @@ from urllib3.util import Timeout as SocketTimeout
 
 from base.host.boundary.untyped import object_of
 from base.telemetry.delivery.reporting import report_no_pipeline
-from base.telemetry.otlp.log_export_deadline import LogExportDeadline, LogExportSocketWatcher
+from base.telemetry.otlp.http_logs.deadline import LogExportDeadline, LogExportSocketWatcher
 
 MAX_LOG_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024

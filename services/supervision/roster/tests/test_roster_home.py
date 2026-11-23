@@ -15,7 +15,7 @@ from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.machine.tests.identity import set_machine_identity as set_machine_identity
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import otel_collector_binary, otel_collector_config
+from base.paths import otel_collector_active_config, otel_collector_binary
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, service_argv
 from services.desktop.browser.profile import profile_dir
 from services.supervision.healthchecks.gate import probe as gate_probe
@@ -40,8 +40,27 @@ def test_the_roster_binds_the_probes_and_paths_of_the_home_it_is_built_for(tmp_p
     assert isinstance(browser, partial)
     assert browser.args[1] == profile_dir(other)
     assert str(otel_collector_binary(other)) in collector.cmd
-    assert str(otel_collector_config(other)) in collector.cmd
-    assert collector.config_inputs == (otel_collector_config(other),)
+    assert str(otel_collector_active_config(other)) in collector.cmd
+    assert collector.config_inputs == (otel_collector_active_config(other),)
+
+
+def test_the_collector_launch_command_is_stable_as_converge_updates_its_active_config(
+    tmp_path: Path,
+) -> None:
+    active = otel_collector_active_config(tmp_path)
+    active.parent.mkdir()
+    before = _service(tmp_path, "otel-collector")
+    active.write_text("receivers: {}")
+
+    collector = _service(tmp_path, "otel-collector")
+
+    assert shlex.split(collector.cmd) == [
+        str(otel_collector_binary(tmp_path)),
+        "--config",
+        str(active),
+    ]
+    assert collector.cmd == before.cmd
+    assert collector.config_inputs == before.config_inputs == (active,)
 
 
 def test_a_marker_in_the_handed_home_makes_it_the_observability_station(
@@ -94,7 +113,8 @@ def test_the_lgtm_backends_run_from_the_home_the_roster_is_built_for(tmp_path: P
     other.mkdir()
 
     for name in BACKENDS:
-        assert _service(other, name).cmd == shlex.join(
+        prefix = "exec " if name == "tempo" else ""
+        assert _service(other, name).cmd == prefix + shlex.join(
             service_argv(other, name, LgtmSettings.from_fields(config.get_field))
         )
 
@@ -152,3 +172,22 @@ def test_the_collector_runs_on_the_home_of_a_station_unit(
     )
 
     assert reason is None
+
+
+def test_runner_ignores_an_unused_tempo_intake_url(
+    tmp_path: Path, set_machine_identity: MachineIdentitySetter
+) -> None:
+    machine = set_machine_identity(role="agent-runner")
+    config.set_field("telemetry_tempo_endpoint", "http://ignored.invalid:unused")
+
+    declared = composition.build_services(home=tmp_path)
+    assert any(service.session == "tempo" for service in declared)
+    active = spec.services_for_capabilities(
+        frozenset({"agent-runner"}),
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(),
+        home=tmp_path,
+    )
+    assert {"agent-host", "otel-collector"} <= {service.session for service in active}
+    assert all(service.session != "tempo" for service in active)

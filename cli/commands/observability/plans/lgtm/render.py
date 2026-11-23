@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from cli.commands.observability.plans.authority import (
     has_loopback_hostname,
+    host_port,
     is_specific_non_loopback_listen,
     url_host_port,
 )
@@ -32,7 +34,7 @@ __all__ = [
 
 # meiva:note
 # The templates rendered into the native `config` directory, in the order they are written.
-CONFIG_TEMPLATES = ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env")
+CONFIG_TEMPLATES = ("loki.yaml", "prometheus.yml", "tempo.yaml", "grafana.ini", "runtime.env")
 
 
 # meiva:note
@@ -48,6 +50,10 @@ class NativeRenderValues:
     provisioning_path: str
     repo: str
     tempo_query_url: str
+    tempo_http_port: int
+    tempo_otlp_port: int
+    tempo_grpc_port: int
+    tempo_retention_hours: int
     loki_url: str
     prometheus_url: str
     pg_url: str
@@ -70,6 +76,14 @@ def _substitutions(values: NativeRenderValues) -> dict[str, str]:
         "MEIVA_PROVISIONING_PATH": values.provisioning_path,
         "GRAFANA_PROVISIONING_PATH": f"{values.provisioning_path}/dashboards",
         "MEIVA_TEMPO_QUERY_URL": values.tempo_query_url,
+        "TEMPO_LISTEN_HOST": json.dumps(values.listen_host.removeprefix("[").removesuffix("]"))[
+            1:-1
+        ],
+        "TEMPO_OTLP_ADDRESS": json.dumps(host_port(values.listen_host, values.tempo_otlp_port))[
+            1:-1
+        ],
+        "TEMPO_RETENTION": f"{values.tempo_retention_hours}h",
+        "TEMPO_DATA_PATH": json.dumps(f"{values.storage_dir}/tempo", ensure_ascii=False)[1:-1],
         "LOKI_URL": values.loki_url,
         "PROMETHEUS_URL": values.prometheus_url,
         "PG_URL": values.pg_url,
@@ -114,6 +128,10 @@ def render_config(name: str, template: str, values: NativeRenderValues) -> str:
             "MEIVA_GRAFANA_SCRAPE_TARGET": url_host_port(values.telemetry_grafana_url),
         }
     content = _fill(template, substitutions)
+    if name == "tempo.yaml":
+        return content.replace("__TEMPO_HTTP_PORT__", str(values.tempo_http_port)).replace(
+            "__TEMPO_GRPC_PORT__", str(values.tempo_grpc_port)
+        )
     content = content.replace("__LGTM_LISTEN_HOST__", values.listen_host)
     content = content.replace("__LGTM_LOKI_PORT__", str(values.loki_port))
     return content.replace("__LGTM_LOKI_GRPC_PORT__", str(values.loki_grpc_port))

@@ -165,6 +165,7 @@ class Mirror:
             "/prometheus.tar.gz": tar_bytes(
                 {f"prometheus-3.13.2.{self.asset_tag}/prometheus": b"#!/bin/sh\n"}
             ),
+            "/tempo.tar.gz": tar_bytes({"tempo": b"#!/bin/sh\n"}),
             "/grafana.tar.gz": tar_bytes({"grafana-13.2.3/bin/grafana": b"#!/bin/sh\n"}),
         }
 
@@ -187,6 +188,7 @@ class Mirror:
                 "version": "3.13.2",
                 "assets": {self.asset_tag: asset("/prometheus.tar.gz")},
             },
+            "tempo": {"version": "3.1.1", "assets": {self.asset_tag: asset("/tempo.tar.gz")}},
             "grafana": {
                 "version": "13.2.3",
                 "assets": {self.asset_tag: asset("/grafana.tar.gz")},

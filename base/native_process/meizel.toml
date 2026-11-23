@@ -9,7 +9,7 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "os_platform.py" = ["untyped.py"]
 "ownership.py" = ["kernel_identity.py", "os_platform.py", "pidfd.py"]
 "pidfd.py" = ["os_platform.py", "untyped.py"]
-"root_control" = ["os_platform.py", "ownership.py", "untyped.py"]
+"root_control" = ["kernel_identity.py", "os_platform.py", "ownership.py", "untyped.py"]
 "tests" = ["child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
 

@@ -21,8 +21,8 @@ from opentelemetry.sdk.resources import Resource
 
 from base.telemetry.delivery.loss import install_exporter_drop_observer
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
-from base.telemetry.otlp.http_log_exporter import BoundedHTTPLogExporter
-from base.telemetry.otlp.log_export_deadline import LogExportDeadline
+from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
+from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
 from base.telemetry.otlp.telemetry_otlp_metrics import (
     EVENT_LOOP_LAG_BUCKETS_MS,
     LLM_LATENCY_BUCKETS_MS,

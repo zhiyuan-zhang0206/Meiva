@@ -9,7 +9,11 @@ import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from base.host.env.agent_env import MACOS_GNU_BIN_DIRS
+from base.host.env.agent_env import (
+    MACOS_GNU_BIN_DIRS,
+    MEIVA_PYTHON_ENV,
+    MEIVA_PYTHON_EXECUTABLE_ENV,
+)
 from base.paths.home import user_home
 
 # meiva:note
@@ -34,6 +38,14 @@ NONINTERACTIVE_BASH_SCRIPT = Path(__file__).parent / "harness" / "noninteractive
 
 def noninteractive_bash_path() -> str:
     return str(NONINTERACTIVE_BASH_SCRIPT.resolve())
+
+
+def meiva_python_env(executable: str) -> dict[str, str]:
+    script = Path(__file__).parent / "harness" / "meiva_python.sh"
+    return {
+        MEIVA_PYTHON_ENV: str(script.resolve()),
+        MEIVA_PYTHON_EXECUTABLE_ENV: executable,
+    }
 
 
 _SYSTEM_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")

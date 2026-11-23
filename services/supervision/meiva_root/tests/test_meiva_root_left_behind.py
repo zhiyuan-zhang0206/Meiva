@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import psutil
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root import unit_ledger
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.stopping import SupervisorConfig
@@ -22,10 +25,15 @@ from services.supervision.meiva_root.tests.slices import system_clock
 _CHILD = Path(__file__).with_name("child_unit.py")
 
 
-def _root(run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2) -> Supervisor:
+def _root(
+    run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2, shell_exec: bool = False
+) -> Supervisor:
+    argv = (sys.executable, "-u", str(_CHILD), *scenario)
+    if shell_exec:
+        argv = ("/bin/sh", "-c", f"cd {shlex.quote(str(run_dir))} && exec {shlex.join(argv)}")
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-u", str(_CHILD), *scenario),
+        argv,
         RestartPolicy.ALWAYS,
         "root",
     )
@@ -48,7 +56,7 @@ def _leftover(*scenario: str) -> subprocess.Popen[bytes]:
 
 
 def _record(run_dir: Path, process: subprocess.Popen[bytes]) -> None:
-    unit_ledger.write(run_dir, "worker", process.pid)
+    unit_ledger.write(run_dir, "worker", OwnedProcess.capture(psutil.Process(process.pid)))
 
 
 def _row(status: dict[str, object]) -> dict[str, object]:
@@ -78,7 +86,7 @@ async def test_recorded_leftover_is_stopped_before_the_replacement_spawns(tmp_pa
             assert row["pid"] != leftover.pid
             record = unit_ledger.read(tmp_path, "worker")
             assert record is not None
-            assert record == row["pid"]
+            assert record.pid == row["pid"]
         finally:
             await owner.shutdown()
     finally:
@@ -134,7 +142,7 @@ async def test_a_record_whose_process_is_gone_is_dropped(tmp_path: Path) -> None
         assert row["state"] == "running"
         record = unit_ledger.read(tmp_path, "worker")
         assert record is not None
-        assert record == row["pid"]
+        assert record.pid == row["pid"]
     finally:
         await owner.shutdown()
 
@@ -156,11 +164,11 @@ async def test_the_record_is_cleared_when_its_generation_exits(tmp_path: Path) -
 def test_a_late_clear_from_an_older_generation_keeps_the_newer_record(tmp_path: Path) -> None:
     head = _leftover("sleep")
     try:
-        unit_ledger.write(tmp_path, "worker", head.pid)
-        unit_ledger.clear(tmp_path, "worker", pid=999999)
-        kept = unit_ledger.read(tmp_path, "worker")
-        assert kept is not None and kept == head.pid
-        unit_ledger.clear(tmp_path, "worker", pid=head.pid)
+        identity = OwnedProcess.capture(psutil.Process(head.pid))
+        unit_ledger.write(tmp_path, "worker", identity)
+        unit_ledger.clear(tmp_path, "worker", identity=replace(identity, birth=identity.birth - 1))
+        assert unit_ledger.read(tmp_path, "worker") == identity
+        unit_ledger.clear(tmp_path, "worker", identity=identity)
         assert unit_ledger.read(tmp_path, "worker") is None
     finally:
         if head.poll() is None:
@@ -181,3 +189,67 @@ def test_an_unreadable_record_is_dropped_rather_than_trusted(tmp_path: Path, bod
     path.write_text(body)
     assert unit_ledger.read(tmp_path, "worker") is None
     assert not path.exists()
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+async def test_root_drops_a_record_for_a_reused_pid_without_signalling(
+    tmp_path: Path, legacy: bool
+) -> None:
+    bystander = subprocess.Popen(["/bin/sleep", "60"]) if legacy else _leftover("sleep")
+    try:
+        if legacy:
+            path = unit_ledger.pidfile_path(tmp_path, "worker")
+            path.parent.mkdir()
+            path.write_text(f"{bystander.pid}\n")
+        else:
+            identity = OwnedProcess.capture(psutil.Process(bystander.pid))
+            stale = replace(
+                identity,
+                birth=identity.birth - 1,
+                starttime=None if identity.starttime is None else identity.starttime + 1,
+            )
+            unit_ledger.write(tmp_path, "worker", stale)
+        owner = _root(tmp_path, "sleep")
+        await owner.start()
+        try:
+            assert bystander.poll() is None
+            current = unit_ledger.read(tmp_path, "worker")
+            assert current is not None and current.pid != bystander.pid
+        finally:
+            await owner.shutdown()
+        assert bystander.poll() is None
+    finally:
+        if bystander.poll() is None:
+            bystander.kill()
+        bystander.wait(timeout=5)
+
+
+@pytest.mark.parametrize("shell_exec", [False, True])
+async def test_live_legacy_receipt_blocks_a_duplicate_and_survives(
+    tmp_path: Path, shell_exec: bool
+) -> None:
+    leftover = _leftover("sleep")
+    try:
+        path = unit_ledger.pidfile_path(tmp_path, "worker")
+        path.parent.mkdir()
+        receipt = f"{leftover.pid}\n"
+        path.write_text(receipt)
+        owner = _root(tmp_path, "sleep", shell_exec=shell_exec)
+        with pytest.raises(RuntimeError, match=rf"cannot start worker: .*live PID {leftover.pid}"):
+            await owner.start()
+        assert _row(await owner.status())["pid"] is None
+        assert leftover.poll() is None
+        assert path.read_text() == receipt
+
+        leftover.terminate()
+        leftover.wait(timeout=5)
+        await owner.start()
+        try:
+            current = unit_ledger.read(tmp_path, "worker")
+            assert isinstance(current, OwnedProcess) and current.pid != leftover.pid
+        finally:
+            await owner.shutdown()
+    finally:
+        if leftover.poll() is None:
+            leftover.kill()
+            leftover.wait(timeout=5)

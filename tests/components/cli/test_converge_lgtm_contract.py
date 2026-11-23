@@ -102,6 +102,8 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
             home, "prometheus", LocalLgtmSettings.from_fields(config.get_field)
         )
         assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
+        assert "--storage.tsdb.retention.time=7d" in prometheus_argv
+        assert "--storage.tsdb.retention.size=8GB" in prometheus_argv
 
         # A non-loopback setting flows through to the rendered listeners.
         _render_configs(

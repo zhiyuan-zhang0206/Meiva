@@ -39,25 +39,19 @@ binary per machine is the whole point of the sidecar architecture.
 
 ## Labels
 
-The infra receivers ride `metrics/infra`, a pipeline of their own, so the
-host-identity processors never touch app metrics (which already carry
-`machine` / `agent_id` datapoint attributes from the emitter):
+The collector stamps locally collected signals with the `meiva.machine`
+resource attribute from the unit's roster identity at converge. For both
+`metrics` and `metrics/infra`, `transform/metric_machine` copies it to the
+`machine` datapoint attribute so Prometheus queries and alert rules can use it
+directly. Authenticated relays preserve the sender's identity.
 
-- `resource_detection/host` supplies the OS `host.name` (physical identity);
-- `resource/infra` pins `service.name=meiva-infra`, which Prometheus's OTLP
-  receiver turns into `job="meiva-infra"` — without it the series would land
-  under a synthesized unknown-service job;
-- `transform/host_label` copies `host.name` onto every datapoint as `host` and
-  stamps `machine_name` from the unit's Meiva roster identity baked into the
-  config at converge. A *resource* attribute would land in Prometheus's
-  `target_info` instead of on the series, where no alert expression can select
-  on it.
+The infra receivers use their own pipeline for extra dimensions:
 
-One label has one meaning: `host` is the OS hostname (physical identity) and
-`machine_name` is the Meiva roster identity (`macmini` / `macbook-air` /
-`company-mini` / ...). Per the 2026-08-24 user ruling, dashboards and alert
-rules group by `machine_name`, so units on one host remain separate series. App metrics keep their existing `machine` / `agent_id`
-attributes because the transform sits only on `metrics/infra`.
+- `resource_detection/host` supplies the physical OS hostname as `host.name`.
+- `resource/infra` sets `service.name=meiva-infra`, which Prometheus maps to
+  `job="meiva-infra"`.
+- `transform/host_label` copies `host.name` to datapoints. Prometheus exposes it
+  as `host_name`, alongside `machine`.
 
 Cardinality is filtered at the source, not in Prometheus: synthetic mounts
 (`/System/Volumes/*`, devfs, autofs …) and macOS's ~30 virtual interfaces

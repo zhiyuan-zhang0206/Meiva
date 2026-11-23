@@ -40,6 +40,15 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
                 }
             },
         },
+        "tempo": {
+            "version": "3.1.1",
+            "assets": {
+                "darwin-arm64": {
+                    "url": "https://github.com/grafana/tempo/releases/download/v3.1.1/tempo_3.1.1_darwin_arm64.tar.gz",
+                    "sha256": "41fdfef960383fde3980f91bb850ab39573a3821e776cbc1c93bdb0fd122a75c",
+                }
+            },
+        },
         "grafana": {
             "version": "13.2.3",
             "assets": {
@@ -67,4 +76,5 @@ def test_the_executable_members_name_the_platform_they_were_pinned_for() -> None
 
     assert linux["loki"]["member"] == "loki-linux-amd64"
     assert linux["prometheus"]["member"].endswith(".linux-amd64/prometheus")
+    assert linux["tempo"]["member"] == "tempo"
     assert linux["grafana"]["member"] == ""

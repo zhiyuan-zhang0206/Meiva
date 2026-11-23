@@ -142,3 +142,37 @@ def test_bind_addrs_ignores_the_ambient_cluster_secret(
 ) -> None:
     machine_identity.set(host="localhost")
     assert port_preflight.bind_addrs(machine=machine_identity) == ["127.0.0.1"]
+
+
+@pytest.mark.requires_host("linux")
+def test_a_listener_on_another_loopback_address_does_not_overlap() -> None:
+    with socket.socket() as neighbour:
+        neighbour.bind(("127.0.0.2", 0))
+        neighbour.listen()
+        port = neighbour.getsockname()[1]
+        assert port_preflight.listeners_at(listener_plan.TcpBind("127.0.0.1", port)) == []
+        assert port_preflight.listeners_at(listener_plan.TcpBind("127.0.0.2", port)) == [
+            (listener_plan.TcpBind("127.0.0.2", port), os.getpid())
+        ]
+
+
+@pytest.mark.requires_host("linux")
+@pytest.mark.parametrize("ipv6_only", [0, 1])
+def test_ipv6_wildcard_observes_the_kernels_ipv4_overlap(ipv6_only: int) -> None:
+    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as wildcard:
+        wildcard.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, ipv6_only)
+        wildcard.bind(("::", 0))
+        wildcard.listen()
+        port = wildcard.getsockname()[1]
+        matches = port_preflight.listeners_at(listener_plan.TcpBind("127.0.0.1", port))
+        assert matches == ([] if ipv6_only else [(listener_plan.TcpBind("::", port), os.getpid())])
+
+
+def test_lsof_retains_the_family_and_pid_for_wildcard_sockets() -> None:
+    binds = port_preflight.lsof_bound_sockets(
+        9096, "p101\nf10\ntIPv6\nn*:9096\np102\nf11\ntIPv4\nn*:9096\n"
+    )
+    assert binds == [
+        (listener_plan.TcpBind("::", 9096), 101),
+        (listener_plan.TcpBind("0.0.0.0", 9096), 102),  # noqa: S104
+    ]

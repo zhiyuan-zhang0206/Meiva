@@ -1,13 +1,12 @@
-exports = ["event_resource_exporter.py", "http_log_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
+exports = ["collector_listeners.py", "event_resource_exporter.py", "http_logs", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
 
 [uses]
-"http_log_exporter.py" = ["log_export_deadline.py"]
-"telemetry_otlp.py" = ["log_export_deadline.py", "plans.py", "telemetry_otlp_barrier.py", "telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py"]
+"telemetry_otlp.py" = ["http_logs", "plans.py", "telemetry_otlp_barrier.py", "telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py"]
 "telemetry_otlp_defer.py" = ["telemetry_otlp_barrier.py"]
 "telemetry_otlp_logs.py" = ["telemetry_otlp_worker.py"]
 "telemetry_otlp_exporting.py" = ["telemetry_otlp.py"]
 "telemetry_otlp_metrics.py" = ["plans.py"]
-"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "http_log_exporter.py", "log_export_deadline.py", "telemetry_otlp_metrics.py"]
+"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "http_logs", "telemetry_otlp_metrics.py"]
 "telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py", "telemetry_otlp_gauges.py"]
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 
@@ -15,6 +14,7 @@ exports = ["event_resource_exporter.py", "http_log_exporter.py", "telemetry_otlp
 "telemetry_otlp_sdk.py" = { kinds = ["environ"], why = "builds the SDK providers and opts into native processor metrics through the public SDK environment setting" }
 
 [purity]
+"collector_listeners.py" = "strict"
 "__init__.py" = "strict"
 "plans.py" = "strict"
 "telemetry_otlp_barrier.py" = "strict"

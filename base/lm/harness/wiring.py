@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
@@ -9,9 +10,11 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
+
 from base.api_contracts.agent_contract import Harness
-from base.host.env.agent_env import MEIVA_PYTHON_ENV
 from base.host.env.harness_binaries import (
+    meiva_python_env,
     noninteractive_bash_path,
     resolve_harness_binary,
     with_harness_path,
@@ -34,6 +37,7 @@ from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution, refreshes_for
 from base.lm.harness.registration import HANDLE_ENV, CallerRegistry, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
+from base.log import logger
 
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
@@ -69,7 +73,7 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
             base["PATH"] = f"{venv_bin}{os.pathsep}{existing}"
     else:
         base["PATH"] = venv_bin
-    base[MEIVA_PYTHON_ENV] = sys.executable
+    base.update(meiva_python_env(sys.executable))
     base["SHELL"] = noninteractive_bash_path()
     return with_harness_path(base)
 
@@ -88,6 +92,21 @@ def cli_timezone(environ: Mapping[str, str]) -> tzinfo | None:
     return datetime.now().astimezone().tzinfo
 
 
+def _with_collector_bypass(environ: Mapping[str, str]) -> dict[str, str] | None:
+    keys = tuple(key for key in ("NO_PROXY", "no_proxy") if key in environ)
+    values = tuple(environ[key] for key in keys)
+    if len(values) == 2 and bool(values[0].strip()) != bool(values[1].strip()):
+        return None
+    if any(value != value.strip() and value.strip() in ("", "*") for value in values):
+        return None
+    result = dict(environ)
+    for key in keys or ("NO_PROXY",):
+        value = result.get(key, "")
+        if value != "*":
+            result[key] = ",".join(filter(None, (value, "127.0.0.1")))
+    return result
+
+
 def open_session(
     harness: Harness,
     *,
@@ -101,27 +120,47 @@ def open_session(
     skip_permissions: bool = True,
     unsolicited: UnsolicitedSink | None = None,
     fork_source_agent_id: int | None = None,
+    otlp_endpoint: str | None = None,
+    trace_enabled: bool = False,
 ) -> HarnessSession:
+    if harness is Harness.CLAUDE_CODE:
+        environ = {**dict.fromkeys(process_environment(), ""), **session_environ(environ)}
+    if otlp_endpoint is not None:
+        bypass = _with_collector_bypass(environ)
+        if bypass is None:
+            logger.warning("Native harness OTLP disabled: ambiguous proxy bypass environment")
+            otlp_endpoint = None
+            trace_enabled = False
+        else:
+            environ = bypass
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
-        claude_env = session_environ(environ)
         claude_config = BridgeConfig(
             cwd=cwd,
+            agent_id=agent_id,
             cron_timezone=cli_timezone(environ),
             reasoning_effort=reasoning_effort,
-            cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
+            otlp_endpoint=otlp_endpoint,
+            trace_enabled=trace_enabled,
+            cli_path=resolve_harness_binary("claude", path_env=environ.get("PATH")),
         )
         if model is not None:
             claude_config = replace(claude_config, model=model)
         return ClaudeSession(
             claude_config,
-            environ={**dict.fromkeys(process_environment(), ""), **claude_env},
+            environ=environ,
             binding=binding,
             clock=clock,
         )
     if harness is Harness.CODEX:
         return CodexSession(
-            CodexConfig(cwd=cwd, model=model, reasoning_effort=reasoning_effort),
+            CodexConfig(
+                cwd=cwd,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                otlp_endpoint=otlp_endpoint,
+                trace_enabled=trace_enabled,
+            ),
             environ=environ,
             binding=binding,
             clock=clock,
@@ -205,6 +244,38 @@ def handoff_for(
 _handoff_for = handoff_for
 
 
+@dataclass(frozen=True)
+class HarnessOtlp:
+    endpoint: str
+    traces: bool
+
+    async def available(self) -> bool:
+        try:
+            async with (
+                asyncio.timeout(0.5),
+                httpx.AsyncClient(trust_env=False) as client,
+                client.stream(
+                    "POST",
+                    f"{self.endpoint}/v1/traces",
+                    content=b"",
+                    headers={"Content-Type": "application/x-protobuf"},
+                ) as response,
+            ):
+                if (
+                    not response.is_success
+                    or response.headers.get("X-Meiva-Harness-Redaction") != "1"
+                ):
+                    return False
+                size = 0
+                async for chunk in response.aiter_raw():
+                    size += len(chunk)
+                    if size > 16:
+                        return False
+        except (TimeoutError, httpx.HTTPError):
+            return False
+        return True
+
+
 # meiva:note
 # What the host root read once for the bridges it builds: the clock their turns and
 # registrations read, the controller pid a registration names, and the generator the session
@@ -218,6 +289,7 @@ class BridgeRootValues:
     own_turn: Callable[[int], None]
     timestamp_prefix: Callable[[], str]
     caller_registry: CallerRegistry | None = None
+    telemetry: HarnessOtlp | None = None
 
 
 # meiva:note
@@ -260,7 +332,13 @@ def bridge_for(
     )
     refreshes = refreshes_for(contributions_tuple, harness=harness)
 
-    def factory(handle: str) -> HarnessSession:
+    async def factory(handle: str) -> HarnessSession:
+        telemetry = root.telemetry if harness in (Harness.CLAUDE_CODE, Harness.CODEX) else None
+        if telemetry is not None and not await telemetry.available():
+            logger.warning(
+                "Native harness OTLP disabled: the local redaction receiver is unavailable"
+            )
+            telemetry = None
         return open_session(
             harness,
             agent_id=agent_id,
@@ -273,6 +351,8 @@ def bridge_for(
             skip_permissions=skip_permissions,
             unsolicited=unsolicited,
             fork_source_agent_id=fork_source_agent_id,
+            otlp_endpoint=telemetry.endpoint if telemetry is not None else None,
+            trace_enabled=telemetry is not None and telemetry.traces,
         )
 
     return HarnessBridge(

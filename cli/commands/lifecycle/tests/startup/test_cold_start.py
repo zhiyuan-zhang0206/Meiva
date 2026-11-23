@@ -14,18 +14,22 @@
 from __future__ import annotations
 
 import dataclasses
+import socket
 from pathlib import Path
 
 import psycopg
 import pytest
 
+from base import config
 from base.deploy import start_trace
+from base.deploy.release.collector import plan as collector_plan
+from base.host.db_authority.api import ensure_telemetry_token
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
-from base.paths import meiva_home
+from base.paths import meiva_home, otel_collector_active_config, otel_collector_dir
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.converge.steps import ensure_meiva_home_dirs
-from cli.commands.lifecycle.converge_host import live_root_steps
+from cli.commands.lifecycle.converge_host import CONVERGE_STEPS, live_root_steps
 from cli.commands.lifecycle.start.cold_start import (
     ColdStart,
     live_schema_behind,
@@ -185,6 +189,74 @@ def test_a_live_root_start_reports_an_advisory_failure_and_leaves_out_the_omitte
     assert "converge finished with warnings" in captured.err
     assert "bat is not installed" in captured.err
     assert "✓ $MEIVA_HOME dir skeleton" in captured.out
+
+
+def _cold_with_collector(run: StartRun) -> ColdStart:
+    cold, _ = _cold(run)
+    relative = Path("deploy/otel-collector/otel-collector.yaml")
+    template = cold.repo / relative
+    template.parent.mkdir(parents=True)
+    template.write_bytes((Path(__file__).resolve().parents[5] / relative).read_bytes())
+    dest_dir = otel_collector_dir(run.home)
+    dest_dir.mkdir(parents=True)
+    (dest_dir / collector_plan.BINARY_NAME).write_bytes(b"pinned collector fixture")
+    (dest_dir / collector_plan.VERSION_MARKER).write_text(collector_plan.OTELCOL_CONTRIB_VERSION)
+    ensure_telemetry_token(run.home, "test-collector-telemetry-bearer")
+    step = next(step for step in CONVERGE_STEPS if step.name == "otel collector sidecar")
+    run.command.machine.set(host="127.0.0.1")
+    run.command.config.set_field("gateway_otlp_endpoint", "http://10.0.0.10:4318")
+    return dataclasses.replace(cold, converge_steps=(*cold.converge_steps, step))
+
+
+def test_optional_harness_otlp_conflict_does_not_block_cold_or_live_start(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    cold = _cold_with_collector(run)
+    with socket.socket() as occupant:
+        occupant.bind(("127.0.0.1", 0))
+        occupant.listen()
+        occupied = occupant.getsockname()[1]
+        ordinary = 1024 + (occupied - 1024 - 16_384) % (65_536 - 1024)
+        run.command.config.set_field("telemetry_otlp_port", ordinary)
+        assert run.command.config.view.observability.harness_otlp_port == occupied
+        roster = run.roster(RUNNER, only=("pty-sessions", "otel-collector"))
+        assert prepare_cold_start(cold, roster, retained_children=run.children) == 0
+        before = otel_collector_active_config(run.home).read_bytes()
+        assert b"otlp/harness" not in before
+        assert f"endpoint: 127.0.0.1:{ordinary}".encode() in before
+        assert prepare_live_start(cold, roster) == 0
+        assert otel_collector_active_config(run.home).read_bytes() == before
+        with socket.create_connection(("127.0.0.1", occupied)):
+            accepted, _ = occupant.accept()
+            accepted.close()
+    warning = f"harness OTLP disabled: port {occupied}"
+    assert capsys.readouterr().err.count(warning) == 2
+
+
+def test_cold_start_reserves_the_selected_tempo_port_before_either_process_binds(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    cold = _cold_with_collector(run)
+    (run.home / "lgtm-host").touch()
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    ordinary = 1024 + (port - 1024 - 16_384) % (65_536 - 1024)
+    for config_owner in (config, run.command.config):
+        config_owner.set_field("telemetry_otlp_port", ordinary)
+        config_owner.set_field("telemetry_tempo_endpoint", f"http://127.0.0.1:{port}")
+    roster = run.roster(RUNNER, only=("tempo", "otel-collector"))
+    assert {spec.session for spec in roster} == {"tempo", "otel-collector"}
+    assert prepare_cold_start(cold, roster, retained_children=run.children) == 0
+    active = otel_collector_active_config(run.home)
+    assert b"otlp/harness:" not in active.read_bytes()
+    assert f"endpoint: 127.0.0.1:{ordinary}".encode() in active.read_bytes()
+    assert f"port {port} conflicts with selected service tempo" in capsys.readouterr().err
+
+    assert prepare_live_start(cold, run.roster(RUNNER, only=("otel-collector",))) == 0
+    assert b"otlp/harness:" in active.read_bytes()
 
 
 _SKILL = """---

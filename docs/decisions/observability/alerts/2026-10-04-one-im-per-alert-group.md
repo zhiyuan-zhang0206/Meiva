@@ -27,3 +27,5 @@ stall burst) paged as many messages as instances. The user asked for like alerts
 - A group's message names at most three instances; the rest are a count, the list is the alerts view.
 - An instance that joins an already-announced group arrives as its own group message, at the
   policy's `group_interval`.
+
+Forward: [Alertmanager can route a notification group to an agent inbox](2026-11-24-alertmanager-agent-receiver.md).

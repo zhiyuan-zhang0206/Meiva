@@ -89,8 +89,12 @@ def test_a_gateway_or_station_accepts_remote_relays_only_on_its_reachable_addres
     pipelines = mapping_at(config, "service", "pipelines")
     assert sequence_at(pipelines, "traces/remote", "exporters") == ["otlphttp/tempo"]
     assert sequence_at(pipelines, "traces", "exporters") == ["otlphttp/tempo", "file/traces"]
-    assert "otlp/remote" in sequence_at(pipelines, "logs", "receivers")
-    assert "otlp/remote" in sequence_at(pipelines, "metrics", "receivers")
+    for signal in ("logs", "metrics", "traces"):
+        assert "otlp/remote" not in sequence_at(pipelines, signal, "receivers")
+        assert sequence_at(pipelines, f"{signal}/remote", "receivers") == ["otlp/remote"]
+        processors = sequence_at(pipelines, f"{signal}/remote", "processors")
+        assert "resource/meiva_machine" not in processors
+        assert "transform/metric_machine" not in processors
     for exporter_id, endpoint in (
         ("otlphttp/tempo", "http://127.0.0.1:14318"),
         ("otlphttp/loki", "http://127.0.0.1:3100/otlp"),

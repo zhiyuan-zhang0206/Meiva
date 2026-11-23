@@ -10,6 +10,7 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel
 
+from base.cluster.listener_plan import TcpBind
 from base.cluster.machine import MachineRole, MachineRoles
 from base.daemon.health import DaemonProbe
 from base.host.env.health_ports import DEFAULT_PORTS
@@ -144,6 +145,7 @@ class ServiceSpec:
     health_name: str | None = None
     home_healthz: bool = False
     plugin_config: tuple[str, BaseModel] | None = None
+    listen_binds: Callable[[], tuple[TcpBind, ...]] | None = None
 
     def __post_init__(self) -> None:
         if self.plugin_config is not None:

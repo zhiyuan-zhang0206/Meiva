@@ -241,13 +241,13 @@ def test_the_pass_auto_heals_unpriced_observations_using_archive_pricing(
 def test_loop_components_report_fresh_loops_as_ok() -> None:
     liveness = LivenessGroup(clock=system_clock())
     liveness.register("dispatch", timeout_s=15.0)
-    liveness.register("escalation", timeout_s=20.0)
+    liveness.register("registry_gauge", timeout_s=20.0)
 
     assert daemon.loop_components(
-        liveness, {"dispatch": 15.0, "escalation": 20.0}, now=time.time()
+        liveness, {"dispatch": 15.0, "registry_gauge": 20.0}, now=time.time()
     ) == [
         {"name": "dispatch", "status": "ok", "progress": "idle"},
-        {"name": "escalation", "status": "ok", "progress": "idle"},
+        {"name": "registry_gauge", "status": "ok", "progress": "idle"},
     ]
 
 
@@ -342,7 +342,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
         await asyncio.gather(service, return_exceptions=True)
 
     assert status == 200
-    expected = ["dispatch", "registry_gauge", "escalation"]
+    expected = ["dispatch", "registry_gauge"]
     assert component_names(body) == expected + (["alert_reconciliation"] if credential else [])
     await assert_released(pool_probe, tmp_path / "run" / "events_maintenance.pid", port)
 

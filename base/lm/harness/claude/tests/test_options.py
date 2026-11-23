@@ -84,6 +84,30 @@ def test_the_child_environment_is_the_allowlist_built_from_what_the_caller_hands
     assert env["ANTHROPIC_API_KEY"] == ""
 
 
+def test_native_export_overrides_content_and_frozen_parent_settings(tmp_path: Path) -> None:
+    values = option_values(
+        BridgeConfig(
+            cwd=tmp_path,
+            otlp_endpoint="http://127.0.0.1:20703/meiva-harness",
+            trace_enabled=True,
+            agent_id=42,
+        ),
+        environ={"OTEL_LOG_TOOL_CONTENT": "1", "TRACEPARENT": "stale"},
+        cli_path=None,
+        option_fields=("extra_args", "system_prompt"),
+        resume="session",
+    )
+    env = values["env"]
+    assert isinstance(env, dict)
+    assert env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == "http://127.0.0.1:20703/meiva-harness/v1/logs"
+    assert env["OTEL_LOG_TOOL_CONTENT"] == "0"
+    assert env["OTEL_TRACES_EXPORTER"] == "otlp"
+    assert env["TRACEPARENT"] == env["TRACESTATE"] == ""
+    assert env["OTEL_RESOURCE_ATTRIBUTES"] == (
+        "meiva.agent_id=42,harness=claude_code,service.instance.id=meiva-agent-42"
+    )
+
+
 def test_the_two_conditional_options_ride_only_when_they_are_supported(tmp_path: Path) -> None:
     without = option_values(
         BridgeConfig(cwd=tmp_path),

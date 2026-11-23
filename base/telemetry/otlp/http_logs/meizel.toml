@@ -1,0 +1,4 @@
+exports = ["deadline.py", "exporter.py"]
+
+[uses]
+"exporter.py" = ["deadline.py"]
