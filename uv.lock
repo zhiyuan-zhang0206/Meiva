@@ -2006,7 +2006,7 @@ requires-dist = [
 dev = [
     { name = "basedpyright", specifier = ">=1.40.2" },
     { name = "beautifulsoup4", specifier = ">=4.12.3" },
-    { name = "meizel", git = "https://github.com/zhiyuan-zhang0206/meizel?rev=73bf553a7b893c99ceb63b4eb0d5d151fa880394" },
+    { name = "meizel", git = "https://github.com/zhiyuan-zhang0206/meizel?rev=645438a7565bace670de9b1c51274602ed336979" },
     { name = "mutmut", specifier = ">=3.5.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=9.0.3" },
@@ -2022,8 +2022,8 @@ dev = [
 
 [[package]]
 name = "meizel"
-version = "0.13.0"
-source = { git = "https://github.com/zhiyuan-zhang0206/meizel?rev=73bf553a7b893c99ceb63b4eb0d5d151fa880394#73bf553a7b893c99ceb63b4eb0d5d151fa880394" }
+version = "0.13.1"
+source = { git = "https://github.com/zhiyuan-zhang0206/meizel?rev=645438a7565bace670de9b1c51274602ed336979#645438a7565bace670de9b1c51274602ed336979" }
 
 [[package]]
 name = "multidict"
