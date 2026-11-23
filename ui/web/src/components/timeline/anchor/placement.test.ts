@@ -345,7 +345,7 @@ describe("unread boundary", () => {
 
   it("opens on the first unread reply when compaction reused the partial departure's row id", () => {
     const partial = row("6.0", { partial: true, payload: "Short start", source_message_id: "departure" });
-    const archived = { ...partial, item_id: "s1.boundary.5.0", partial: false, payload: "Completed before compaction" };
+    const archived = { ...partial, item_id: "s1.boundary.5.0", partial: false, payload: "Completed before compaction", source_block_idx: 0 };
     const reused = row("6.0", { source_message_id: "different-reply", source_block_idx: 0 });
     const secondPrompt = { ...human, item_id: "5.0" };
     const machine = machineFor(tailDeparture([partial], null));
@@ -355,6 +355,20 @@ describe("unread boundary", () => {
       reveal: { ...showReply, entrySeenId: 0 },
     }), fx);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }, { hold: false });
+  });
+
+  it.each([false, true])("recognizes an archived streaming watermark whose delivery arrived later (new reply: %s)", (hasNewReply) => {
+    const partial = row("6.1", { partial: true, payload: "Full reply text", source_message_id: "departure" });
+    const otherBlock = row("s1.boundary.5.0", { source_message_id: "departure", source_block_idx: 0 });
+    const archived = delivered({ ...partial, item_id: "s1.boundary.5.1", partial: false, source_block_idx: 1 }, 1);
+    const machine = machineFor(tailDeparture([partial], null));
+    const fx = effects();
+    const items = hasNewReply ? [otherBlock, archived, human, work, delivered(reply, 2)] : [otherBlock, archived];
+    machine.step(inputs({ items, reveal: { decided: true, itemId: archived.item_id, entrySeenId: 0 } }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(hasNewReply
+      ? { kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }
+      : TAIL, { hold: false });
   });
 
   it("recognizes the same streaming block when it finalizes and an older delivery leads the feed", () => {

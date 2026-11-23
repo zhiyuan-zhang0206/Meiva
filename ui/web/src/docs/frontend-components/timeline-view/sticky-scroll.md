@@ -29,14 +29,15 @@ content or compact coordinate. The search can read up to 5 older pages
 
 A reader who left at the tail keeps a watermark of the last human message or
 visible reply, including a partial reply's text. If native compaction archives
-that row, its epoch and message or inbound identity with block still locate it.
-Before a streaming row has a locator, a match on rank and row id also checks
-the departure's source message id when known. The row id includes the block.
+a row with a locator, its epoch and message or inbound identity with block
+still locate it. A streaming row without a locator uses its source message,
+block and kind when available. These stay stable when compaction re-keys the
+row and moves it to an older rank.
 On return, the entry seen cursor identifies unread deliveries, including those
 that arrive during the opening's older-page reads after an initially empty feed.
 When the watermark is loaded, the
 earliest new reply bounds placement. Eligible replies come after the watermark
-or extend the partial reply at it, and are either unpublished or unread at
+or extend the partial reply at it in the active segment, and are either unpublished or unread at
 entry. A late delivery for an earlier row or the unchanged watermark still
 gets acknowledged after placement. The timeline
 waits for the qualified snapshot on a tail return. The seen acknowledgement

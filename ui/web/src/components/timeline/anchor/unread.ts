@@ -1,6 +1,6 @@
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { isReattachedTimelineContext, standingHeadNoteIds } from "@/lib/timeline/timeline";
+import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 
 import { isSilentTimelineItem } from "../model/runs";
 import type { RowRef } from "./dom";
@@ -9,6 +9,7 @@ import type { TailDeparture } from "./saved";
 
 const isHumanMessage = (item: BackendTimelineItem) => item.kind === "inbound_chat" && item.source === "user";
 const isReply = (item: BackendTimelineItem) => item.kind === "agent_chat" && item.user_facing !== false && item.payload.length > 0;
+const sourceBlock = (item: BackendTimelineItem) => item.source_block_idx ?? parseItemIdParts(item.item_id)?.block;
 const refOf = (item: BackendTimelineItem, buffer: CompactTransitionBuffer | null): RowRef => ({
   itemId: item.item_id,
   rank: rankOf(item, buffer),
@@ -19,7 +20,7 @@ export function tailDeparture(items: readonly BackendTimelineItem[], buffer: Com
   return last ? {
     last: identify(refOf(last, buffer), items, buffer),
     ...(last.partial ? { partialPayload: last.payload } : {}),
-    ...(last.source_message_id ? { sourceMessageId: last.source_message_id } : {}),
+    ...(last.source_message_id ? { sourceMessage: { id: last.source_message_id, block: sourceBlock(last) } } : {}),
   } : { last: null };
 }
 
@@ -61,15 +62,19 @@ function archivedDepartureIndex(items: readonly BackendTimelineItem[], locator: 
 function departureIndex(
   items: readonly BackendTimelineItem[], departure: TailDeparture, buffer: CompactTransitionBuffer | null,
 ): number {
-  const { last, partialPayload, sourceMessageId } = departure;
+  const { last, partialPayload, sourceMessage } = departure;
   if (last === null) return -1;
   if (last.locator) {
     const exact = items.findIndex((item) => item.reading_locator === last.locator);
     return exact >= 0 ? exact : archivedDepartureIndex(items, last.locator);
   }
+  if (sourceMessage) {
+    if (sourceMessage.block === undefined) return -1;
+    return items.findIndex((item) => item.source_message_id === sourceMessage.id &&
+      item.kind === last.content?.kind && sourceBlock(item) === sourceMessage.block);
+  }
   return items.findIndex((item) => item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
-    item.kind === last.content?.kind && (sourceMessageId === undefined || item.source_message_id === sourceMessageId) &&
-    (partialPayload !== undefined || item.payload === last.content.payload));
+    item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
 }
 
 export function unreadBoundary(
@@ -85,7 +90,7 @@ export function unreadBoundary(
   if (departure && !(missingDeparture && delivery >= 0)) {
     index = items.findIndex((item, position) => {
       const grewAtWatermark = position === watermark && departure.partialPayload !== undefined &&
-        item.payload !== departure.partialPayload;
+        item.payload !== departure.partialPayload && rankOf(item, buffer) === 0;
       if (position <= watermark && !grewAtWatermark) return false;
       if (position === delivery) return true;
       const publication = item.userDelivery;
