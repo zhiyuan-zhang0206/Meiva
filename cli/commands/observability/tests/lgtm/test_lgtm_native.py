@@ -299,7 +299,9 @@ def test_loki_renders_native_paths_loopback_listeners_and_the_deploy_invariants(
     labels = config["distributor"]["otlp_config"]["default_resource_attributes_as_index_labels"]
     assert {"agent_id", "event_name", "machine"} <= set(labels)
     assert {"service.instance.id", "trace_id", "span_id", "meiva.machine"}.isdisjoint(labels)
-    assert "retention_stream" not in config["limits_config"]
+    assert config["limits_config"]["retention_stream"] == [
+        {"selector": '{stream="archive"}', "priority": 1, "period": "8760h"}
+    ]
     for line in (
         "http_listen_address: 127.0.0.1",
         "grpc_listen_address: 127.0.0.1",

@@ -109,8 +109,15 @@ limits_config:
   # Truncate instead of reject (identifier marks the cut).
   max_line_size_truncate: true
   retention_period: 168h
+  retention_stream:
+    - selector: '{stream="archive"}'
+      priority: 1
+      period: 8760h
   # Reject samples more than two weeks old as a clock-drift guard.
   reject_old_samples_max_age: 336h
+  # The archive spans ~83 days (05-23 -> 08-12); Loki's default
+  # max_query_length (30d1h) would reject any whole-span parity/read query.
+  max_query_length: 2160h
   # Kill a query that runs longer than this server-side. Deliberately just
   # under a client's 60s httpx timeout: a hung
   # query then dies here with a clean error instead of holding a querier
