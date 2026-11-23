@@ -321,15 +321,20 @@ def test_known_sdk_shutdown_failure_is_isolated_but_not_claimed_complete(
     def close() -> None:
         raise RuntimeError("named optional exporter cleanup failure")
 
-    backend, _logs, metrics = _backend(tmp_path, logs=FakeProvider(on_shutdown=close))
-    assert backend._ensure()
-    assert backend.shutdown().status is DrainStatus.UNFINISHED
-    assert backend._worker is not None
-    assert backend._worker.finished.is_set()
-    assert not backend._worker._thread.is_alive()
-    assert any("otlp logs shutdown" in r["message"] for r in loguru_records)
-    assert metrics.closed.is_set()
-    assert backend.shutdown().status is DrainStatus.UNFINISHED
+    for _ in range(2):
+        loguru_records.clear()
+        backend, _logs, metrics = _backend(tmp_path, logs=FakeProvider(on_shutdown=close))
+        assert backend._ensure()
+        assert backend.shutdown().status is DrainStatus.UNFINISHED
+        assert backend._worker is not None
+        assert backend._worker.finished.is_set()
+        assert not backend._worker._thread.is_alive()
+        assert (
+            "OTLP observation degraded; exporter work remains unfinished"
+            in loguru_records.messages("WARNING")
+        )
+        assert metrics.closed.is_set()
+        assert backend.shutdown().status is DrainStatus.UNFINISHED
 
 
 def test_deferral_completion_in_flight_cannot_close_providers_under_replay(tmp_path: Path) -> None:
