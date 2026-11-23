@@ -1,15 +1,22 @@
 import asyncio
 import os
 import stat
+from itertools import count
+from math import ceil
 from pathlib import Path
 from threading import Event
+from typing import Protocol
 
 from base.agents.to_user.models import DOCUMENT_FILENAME, ONGOING_FILENAME
-from base.events.live.bus import EventBus
 from base.events.live.projection import OngoingChanged, ToUserChanged, WorkspacePanelsResync
+from base.host.net.resilience import ExponentialBackoff
 
 type FileStamp = tuple[int, int, int, int, int]
 type WorkspaceStamp = tuple[int, int, FileStamp | None]
+
+
+class _Publisher(Protocol):
+    async def publish_best_effort(self, payload: str, *, context: str) -> int | None: ...
 
 
 def _file_stamp(path: Path) -> FileStamp | None:
@@ -56,18 +63,29 @@ def _changed[Stamp](previous: dict[int, Stamp], current: dict[int, Stamp]) -> li
     )
 
 
-async def watch_to_user(root: Path, bus: EventBus) -> None:
+async def watch_to_user(root: Path, bus: _Publisher) -> None:
 
     await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
     stopped = Event()
+    scan_period_s = 0.5
     try:
         previous_to_user, previous_ongoing = await asyncio.to_thread(_snapshot, root, stopped)
-        await bus.publish_best_effort(
-            WorkspacePanelsResync().model_dump_json(), context="workspace_panels_resync"
-        )
-
-        while True:
-            await asyncio.sleep(0.5)
+        pending_resync: str | None = WorkspacePanelsResync().model_dump_json()
+        backoff = ExponentialBackoff()
+        next_resync_scan = retry_attempt = 0
+        for scan in count():
+            if pending_resync is not None and scan >= next_resync_scan:
+                published = await bus.publish_best_effort(
+                    pending_resync, context="workspace_panels_resync"
+                )
+                if published is not None:
+                    pending_resync = None
+                else:
+                    delay = backoff(retry_attempt)
+                    next_resync_scan = scan + ceil(delay / scan_period_s)
+                    if delay < backoff.cap:
+                        retry_attempt += 1
+            await asyncio.sleep(scan_period_s)
             to_user, ongoing = await asyncio.to_thread(_snapshot, root, stopped)
             for agent_id in _changed(previous_to_user, to_user):
                 await bus.publish_best_effort(

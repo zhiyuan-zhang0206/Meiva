@@ -143,6 +143,44 @@ async def test_runner_restart_resyncs_after_an_edit_and_removal_while_stopped(
 
 
 @pytest.mark.asyncio
+async def test_resync_retries_once_after_a_transient_failure(tmp_path: Path) -> None:
+    published: asyncio.Queue[PanelEvent] = asyncio.Queue()
+    first_failed = asyncio.Event()
+
+    class RecoveringPublisher:
+        attempts = 0
+
+        async def publish_best_effort(self, payload: str, *, context: str) -> int | None:
+            event = PANEL_EVENT.validate_json(payload)
+            if isinstance(event, WorkspacePanelsResync):
+                assert context == "workspace_panels_resync"
+                self.attempts += 1
+                if self.attempts == 1:
+                    first_failed.set()
+                    return None
+            published.put_nowait(event)
+            return 0
+
+    bus = RecoveringPublisher()
+    workspace = tmp_path / "7"
+    workspace.mkdir()
+    async with asyncio.TaskGroup() as group:
+        watcher = group.create_task(watch_to_user(tmp_path, bus))
+        try:
+            await asyncio.wait_for(first_failed.wait(), timeout=5)
+            _ = (workspace / "ongoing.md").write_text("Changed while resync was pending")
+            assert await next_event(published) == OngoingChanged(agent_id=7)
+            assert await next_event(published) == WorkspacePanelsResync()
+            for content in ("first", "second", "third"):
+                _ = (workspace / "ongoing.md").write_text(content)
+                assert await next_event(published) == OngoingChanged(agent_id=7)
+            assert bus.attempts == 2
+            assert published.empty()
+        finally:
+            _ = watcher.cancel()
+
+
+@pytest.mark.asyncio
 async def test_ignores_noncanonical_workspace_aliases(tmp_path: Path, event_bus: EventBus) -> None:
     canonical = tmp_path / "7"
     canonical.mkdir()

@@ -84,8 +84,13 @@ Each target is identified with `lstat` device, inode, size, nanosecond mtime and
 ctime, including the link itself for a symbolic target. Directory identity uses
 only device and inode, so unrelated workspace writes do not publish events.
 
-The initial snapshot publishes one cluster-wide `WorkspacePanelsResync` to refresh
-open panels after edits or deletions during downtime. Later workspace additions/removals and
+The initial snapshot triggers a cluster-wide `WorkspacePanelsResync` to refresh
+open panels after edits or deletions during downtime. If Redis cannot confirm
+the publish, the watcher keeps scanning and retries with the shared exponential
+backoff on scan boundaries. The 30-second cap bounds the recovery delay while
+keeping extra traffic low during sustained Redis outages. A confirmed publish
+ends the startup retry, including when Redis reports zero subscribers.
+Later workspace additions/removals and
 shared document changes publish at most one `ToUserChanged` per agent per scan.
 Changes to the optional `ongoing.md` file publish `OngoingChanged` independently. Polling
 coalesces writes between scans; a target created and removed entirely between
