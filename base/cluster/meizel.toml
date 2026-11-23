@@ -1,4 +1,4 @@
-exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "frontend_build.py", "machine", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "record.py", "transport_encryption.py"]
+exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "frontend_build.py", "listener_plan.py", "machine", "machines.py", "ownership.py", "port_preflight.py", "ports.py", "postgres.py", "provision.py", "rate_limit.py", "record.py", "transport_encryption.py"]
 
 [uses]
 "__init__.py" = ["derive.py", "ports.py", "provision.py", "record.py", "redis_acl.py"]

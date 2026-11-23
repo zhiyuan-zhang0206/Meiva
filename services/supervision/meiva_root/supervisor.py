@@ -720,11 +720,12 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
         # meiva:note
-        # The pidfile is what lets a later root name this process after this one is
+        # The receipt is what lets a later root name this process after this one is
         # gone; it is written before the watch starts so no exit path can leave a
         # live process nobody recorded.
         # meiva:link services/supervision/meiva_root/docs/meiva_root.md
-        unit_ledger.write(self._run_dir, manifest.id, proc.pid)
+        if identity is not None:
+            unit_ledger.write(self._run_dir, manifest.id, identity)
         watch = asyncio.create_task(self._watch(runtime, generation))
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
@@ -745,7 +746,10 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                     runtime.generation = None
                     if not generation.closing:
                         runtime.last_error = f"unexpected exit: {runtime.last_exit}"
-                    unit_ledger.clear(self._run_dir, runtime.manifest.id, pid=generation.proc.pid)
+                    if generation.identity is not None:
+                        unit_ledger.clear(
+                            self._run_dir, runtime.manifest.id, identity=generation.identity
+                        )
                 generation.exited.set()
 
     # meiva:note

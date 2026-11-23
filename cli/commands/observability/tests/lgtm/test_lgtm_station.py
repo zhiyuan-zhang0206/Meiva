@@ -20,9 +20,9 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from base.host.system.tests.fake_commands import DARWIN_ARM64
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import BACKENDS
+from base.telemetry.lgtm_local import BACKENDS, LgtmSettings
 from cli.commands.converge.spec import ConvergeCtx
-from cli.commands.observability import lgtm_native
+from cli.commands.observability import lgtm, lgtm_native
 from cli.commands.observability.tests.lgtm.lgtm_harness import (
     LgtmUnit,
     host_on,
@@ -33,6 +33,7 @@ from cli.commands.observability.tests.lgtm.lgtm_harness import (
 )
 from cli.commands.observability.tests.lgtm.test_lgtm_native import install_loki_stub
 from cli.commands.observability.tests.observability_inputs import REPO_ROOT, lgtm_settings
+from cli.commands.observability.tests.scripted_http import serve
 from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -87,7 +88,7 @@ def test_a_home_declaring_the_station_capability_prepares_the_full_native_set_wi
     lgtm_native.ensure_lgtm_native_step(ctx)
 
     native = lgtm_unit.native
-    for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env"):
+    for name in ("loki.yaml", "prometheus.yml", "tempo.yaml", "grafana.ini", "runtime.env"):
         assert (native / "config" / name).is_file()
     assert (native / "grafana/run.sh").is_file()
     assert (native / "data/loki").is_dir()
@@ -215,3 +216,30 @@ def test_the_storage_root_expands_a_tilde_against_the_home_the_session_read(
     assert (session_home / "obs-data" / "loki").is_dir()
     assert (session_home / "obs-data" / "prom").is_dir()
     assert not (lgtm_unit.native / "data").exists()
+
+
+def test_lgtm_status_reports_tempo_listener_conflicts(
+    lgtm_unit: LgtmUnit, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lgtm_unit.home.mkdir(exist_ok=True)
+    (lgtm_unit.home / "lgtm-host").touch()
+    with serve({}) as foreign:
+        port = int(foreign.url.rsplit(":", 1)[-1])
+        settings = LgtmSettings(
+            loki_port=port,
+            prometheus_port=port,
+            grafana_port=port,
+            listen_host="127.0.0.1",
+            grafana_listen_host="127.0.0.1",
+            storage_dir_setting="",
+            loki_grpc_port=1,
+            tempo_query_url=foreign.url,
+            tempo_intake_url="http://127.0.0.1:1",
+            tempo_grpc_port=2,
+        )
+        lgtm.cmd_lgtm_status(home=lgtm_unit.home, machine=lgtm_unit.machine, observability=settings)
+
+    assert (
+        "tempo: port-taken (Tempo listeners occupied by external processes"
+        in capsys.readouterr().out
+    )

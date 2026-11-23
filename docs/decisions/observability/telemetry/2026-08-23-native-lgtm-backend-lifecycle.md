@@ -15,3 +15,6 @@ assets. Restoring the prior compose and backend configs from git, then running
 `docker compose up -d`, restores the container path without deleting history.
 
 Update: superseded by [native LGTM production alignment](2026-08-23-native-lgtm-prod-alignment.md), which records the completed cutover and Promtail retirement.
+
+The later [native Tempo decision](2026-11-24-native-tempo.md) completes
+repository ownership of the four LGTM backends under `meiva-root`.

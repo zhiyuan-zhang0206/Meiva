@@ -675,10 +675,13 @@ def test_heavy_linux_jobs_run_in_digest_pinned_ghcr_runner_container() -> None:
         )
         assert container["options"] == "--init --shm-size=2g", job_name
         assert job["defaults"]["run"]["shell"] == "bash", job_name
+        uses_vendored_cache = any(
+            step.get("uses") == "./.github/actions/vendor-pg-runtime" for step in job["steps"]
+        )
+        assert uses_vendored_cache == (job_name == "backend-pgvector-smoke"), job_name
         for step in job["steps"]:
             uses = str(step.get("uses", ""))
             assert "./.github/actions/install-pg-redis" not in uses
-            assert "./.github/actions/vendor-pg-runtime" not in uses
             assert "./.github/actions/install-playwright-deps" not in uses
             assert "astral-sh/setup-uv" not in uses
             assert "actions/setup-node" not in uses

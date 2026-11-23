@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from base.config.base import EnvSettings
+from base.config.domains.observability.tempo import TempoSettings
 
 # The standard OTLP/HTTP ingress port. Single source for every hardcoded 4318
 # in the telemetry path: the sidecar receiver endpoint, the gateway's
@@ -22,7 +22,7 @@ from base.config.base import EnvSettings
 _OTLP_INGRESS_PORT_DEFAULT = 4318
 
 
-class ObservabilitySettings(EnvSettings):
+class ObservabilitySettings(TempoSettings):
     sdk_call_sampling_enabled: bool = Field(
         title="Sample SDK call events",
         default=False,
@@ -303,44 +303,6 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
-    telemetry_tempo_endpoint: str = Field(
-        title="Tempo trace ingestion endpoint",
-        default="http://127.0.0.1:14318",
-        alias="MEIVA_TELEMETRY_TEMPO_ENDPOINT",
-        description=(
-            "Tempo OTLP/HTTP base URL. The single-box default is the host "
-            "loopback. A cluster's Tempo may be remote through a host-scope "
-            "MEIVA_TELEMETRY_TEMPO_ENDPOINT override, as configured on the "
-            "production cluster. A pure runner ignores this URL and relays "
-            "through the gateway."
-        ),
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
-    telemetry_tempo_query_url: str = Field(
-        title="Tempo query URL",
-        default="http://127.0.0.1:3200",
-        alias="MEIVA_TELEMETRY_TEMPO_QUERY_URL",
-        description=(
-            "Tempo query/metrics base URL for the Grafana Tempo datasource and "
-            "Prometheus scrape of the trace backend. The OTLP intake endpoint is "
-            "MEIVA_TELEMETRY_TEMPO_ENDPOINT on a different port."
-        ),
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     telemetry_loki_url: str = Field(
         title="Loki event history URL",
         default="http://127.0.0.1:3100",
@@ -385,8 +347,8 @@ class ObservabilitySettings(EnvSettings):
         default="127.0.0.1",
         alias="MEIVA_LGTM_LISTEN_HOST",
         description=(
-            "Host/IP the native Loki and Prometheus listeners bind to on the LGTM "
-            "host (Loki HTTP+gRPC, Prometheus web API). The loopback default keeps "
+            "Host/IP the native Loki, Prometheus and Tempo listeners bind to on the LGTM "
+            "host (Loki HTTP+gRPC, Prometheus web API, Tempo HTTP+gRPC and OTLP/HTTP). The loopback default keeps "
             "the unauthenticated backend APIs host-local; 0.0.0.0 or a tailnet IP is "
             "the external-migration form. Rendered into the native configs and the "
             "launchd plist at converge; applies on the next LGTM restart."
@@ -490,7 +452,7 @@ class ObservabilitySettings(EnvSettings):
         alias="MEIVA_LGTM_STORAGE_DIR",
         description=(
             "Base directory for the native LGTM observation data on the "
-            "observability-station host (Loki filesystem store + Prometheus TSDB). "
+            "observability-station host (Loki filesystem store, Prometheus TSDB and Tempo trace store). "
             "Empty (default) = `$MEIVA_HOME/lgtm/native/data`, byte-identical to the "
             "historical layout. A non-empty value moves the data volume to a "
             "per-machine path (e.g. a dedicated data volume), rendered into the "

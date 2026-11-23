@@ -94,7 +94,8 @@ def test_the_lgtm_backends_run_from_the_home_the_roster_is_built_for(tmp_path: P
     other.mkdir()
 
     for name in BACKENDS:
-        assert _service(other, name).cmd == shlex.join(
+        prefix = "exec " if name == "tempo" else ""
+        assert _service(other, name).cmd == prefix + shlex.join(
             service_argv(other, name, LgtmSettings.from_fields(config.get_field))
         )
 
@@ -152,3 +153,22 @@ def test_the_collector_runs_on_the_home_of_a_station_unit(
     )
 
     assert reason is None
+
+
+def test_runner_ignores_an_unused_tempo_intake_url(
+    tmp_path: Path, set_machine_identity: MachineIdentitySetter
+) -> None:
+    machine = set_machine_identity(role="agent-runner")
+    config.set_field("telemetry_tempo_endpoint", "http://ignored.invalid:unused")
+
+    declared = composition.build_services(home=tmp_path)
+    assert any(service.session == "tempo" for service in declared)
+    active = spec.services_for_capabilities(
+        frozenset({"agent-runner"}),
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(),
+        home=tmp_path,
+    )
+    assert {"agent-host", "otel-collector"} <= {service.session for service in active}
+    assert all(service.session != "tempo" for service in active)

@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.parse
+from dataclasses import replace
 from pathlib import Path
 
+import psutil
 import pytest
 
 from base import config
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.cluster.listener_plan import TcpBind
 from base.cluster.machine import MachineFacts, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.native_process.ownership import OwnedProcess
 from base.paths.tests.homes import unit_home as unit_home
-from base.telemetry.lgtm_local import LgtmSettings, backend_urls
+from base.telemetry.lgtm_local import LgtmSettings, backend_binds, backend_urls
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
@@ -226,3 +231,43 @@ def test_the_roles_lgtm_decides_on_are_none_only_while_no_capability_is_configur
         hc.lgtm_roles(invalid)
     machine_identity.set(role="observability-station")
     assert hc.lgtm_roles(machine_identity) == frozenset({"observability-station"})
+
+
+def test_tempo_refuses_external_listeners_even_if_they_answer_ready(tmp_path: Path) -> None:
+    with BackendStub() as legacy_tempo:
+        observability = replace(
+            LgtmSettings.from_fields(config.get_field), tempo_query_url=legacy_tempo.url
+        )
+        verdict = hc.probe_tempo(home=tmp_path, observability=observability)
+
+    assert verdict.terminal
+    assert not verdict.alive
+    assert f":{observability.tempo.http} (PID {os.getpid()})" in verdict.detail
+    assert "disable the tempo-pulse timer" in verdict.detail
+
+
+def test_tempo_ready_requires_all_ports_owned_and_an_http_success(tmp_path: Path) -> None:
+    identity = OwnedProcess.capture(psutil.Process(os.getpid()))
+    with BackendStub() as tempo:
+        observability = replace(
+            LgtmSettings.from_fields(config.get_field), tempo_query_url=tempo.url
+        )
+        binds = backend_binds("tempo", observability)
+        listeners = {bind: [(bind, identity.pid)] for bind in binds}
+
+        def probe() -> hc.DaemonProbe:
+            return hc.probe_tempo(
+                home=tmp_path,
+                observability=observability,
+                listeners=listeners.__getitem__,
+                identity_at=lambda _: identity,
+            )
+
+        assert probe().alive
+        tempo.script.ready = (503, b"")
+        assert not probe().alive
+        tempo.script.ready = (200, b"")
+        listeners[binds[1]] = [(TcpBind("127.0.0.1", binds[1].port), identity.pid + 1)]
+        assert probe().terminal
+        listeners[binds[1]] = []
+        assert not probe().alive

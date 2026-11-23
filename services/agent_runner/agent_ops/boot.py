@@ -27,6 +27,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.clock import Timers
 from base.cluster.machine import GatewayAccess, MachineIdentityReader, accepted_digests
+from base.cluster.machine.application_listeners import ops_address
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -129,9 +130,7 @@ def ops_bind_host(*, machine: MachineIdentityReader) -> str:
     served on the same port and stays reachable via localhost (unauthenticated —
     it leaks no secret).
     """
-    if serves_off_box(machine=machine):
-        return "0.0.0.0"  # noqa: S104 — inbound ops port; authenticated, the gateway is the trust boundary
-    return "127.0.0.1"
+    return ops_address(off_box=serves_off_box(machine=machine))
 
 
 # meiva:note

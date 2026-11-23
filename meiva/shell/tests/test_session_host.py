@@ -4,6 +4,9 @@
 # a partial context fails at first use instead of guessing one.
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from base.agents.context import MeivaContext
@@ -54,3 +57,5 @@ def test_the_session_host_forwards_the_mapping_it_is_handed() -> None:
     host = session_host({"PATH": "/only-the-caller/bin"})
     assert host.forwarded["PATH"].endswith("/only-the-caller/bin")
     assert "VIRTUAL_ENV" in host.forwarded
+    assert Path(host.forwarded["MEIVA_PYTHON"]).name == "meiva_python.sh"
+    assert host.forwarded["MEIVA_PYTHON_EXECUTABLE"] == sys.executable

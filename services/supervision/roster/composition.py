@@ -14,6 +14,10 @@ from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
 )
+from base.cluster.listener_plan import LOOPBACK_ALIASES, TcpBind
+from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.machine.application_listeners import gateway_bind_host, ops_address
+from base.cluster.port_preflight import resolve_go_tcp_bind
 from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
@@ -25,12 +29,15 @@ from services.supervision.roster import plugin_services
 from services.supervision.roster.field_values import optional_text, real, text, texts, whole
 from services.supervision.roster.gate_plan import GateSettings
 from services.supervision.roster.healthz import healthz_daemon
+from services.supervision.roster.listeners import collector_binds
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 
 # meiva:note
 # After uvicorn drains connections, gateway lifespan cleanup still joins admitted
 # work and closes its pools before the interpreter exits. Root must allow that tail.
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
+
+_TEMPO_STOP_CEILING_S = 45.0
 
 
 # meiva:note
@@ -115,6 +122,8 @@ def build_services(
     plugins: tuple[ServiceSpec, ...] | None = None,
     plugin_dirs: Mapping[str, Path] | None = None,
     home: Path,
+    machine: MachineIdentityReader | None = None,
+    roles: MachineRoles | None = None,
 ) -> tuple[ServiceSpec, ...]:
 
     from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
@@ -131,6 +140,7 @@ def build_services(
 
     endpoints = ServiceEndpoints.from_fields(get_field, runtime=run_dir(home))
     _fe_port = app_port()
+    _entry_port = entry_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)
     gateway_health_url = text(setting("gateway_health_url"), "gateway_health_url")
@@ -151,13 +161,25 @@ def build_services(
     telemetry_otlp_port = whole(setting("telemetry_otlp_port"), "telemetry_otlp_port")
     probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
+    def machine_host() -> str:
+        if machine is not None:
+            return machine.host()
+        return text(setting("machine_host"), "machine_host").strip() or "localhost"
+
+    def gateway_binds() -> tuple[TcpBind, ...]:
+        host = gateway_bind_host(
+            serves_gateway=True, off_box=machine_host() not in LOOPBACK_ALIASES
+        )
+        return (TcpBind(host or "::", gateway_port),)
+
     gateway_services = (
         ServiceSpec(
             session="gate",
             cmd=".venv/bin/python -m services.entrypoints.gate.daemon",
             capabilities=GATEWAY,
             requires_db=False,
-            curl_url=f"http://127.0.0.1:{entry_port()}/__meiva/healthz",
+            curl_url=f"http://127.0.0.1:{_entry_port}/__meiva/healthz",
+            listen_binds=lambda: (TcpBind("0.0.0.0", _entry_port),),  # noqa: S104
             identity_probe=partial(probe_gate, home=home),
             healthcheck_module="services.supervision.healthchecks.gate",
             # meiva:note
@@ -174,6 +196,7 @@ def build_services(
             # Gateway reload can fork a serving worker whose pid differs from the recorded
             # pidfile. Bind readiness to the answering home's HTTP identity instead.
             curl_url=gateway_health_url,
+            listen_binds=gateway_binds,
             identity_probe=partial(gateway_probe_at, gateway_health_url, home=home),
             healthcheck_module="services.supervision.healthchecks.gateway",
             # meiva:note
@@ -257,6 +280,7 @@ def build_services(
             # The numpy backend keeps an in-memory matrix and npz store. A Postgres
             # outage must not block the memory-search service that uses that backend.
             tcp_port=memory_search_port,
+            listen_binds=lambda: (TcpBind("127.0.0.1", memory_search_port),),
             identity_probe=partial(
                 memory_search_probe,
                 uri=memory_search_uri,
@@ -281,6 +305,7 @@ def build_services(
             # Next.js reaches data through the gateway HTTP API. It can remain up during
             # a database outage to show that outage to the operator.
             curl_url=_fe_url,
+            listen_binds=lambda: (TcpBind("127.0.0.1", _fe_port),),
             identity_probe=partial(frontend_probe, _fe_port),
             healthcheck_module="services.supervision.healthchecks.frontend",
         ),
@@ -302,6 +327,7 @@ def build_services(
             capabilities=GATEWAY,
             requires_db=False,
             identity_probe=partial(probe_relay, _bridge_host, _bridge_port),
+            listen_binds=lambda: (TcpBind(_bridge_host, _bridge_port),) if _bridge_port else (),
             healthcheck_module="services.supervision.healthchecks.redis_bridge",
         ),
     )
@@ -337,6 +363,7 @@ def build_services(
             module="services.agent_runner.agent_ops.daemon",
             capabilities=AGENT_RUNNER,
             requires_db=True,
+            bind_host=lambda: ops_address(off_box=machine_host() not in LOOPBACK_ALIASES),
             # meiva:note
             # SIGTERM drains requests agent_ops.in_flight already admitted before closing.
             # Root must wait for that same bounded drain budget.
@@ -355,6 +382,7 @@ def build_services(
             # Headed Chrome has no database dependency. Root must keep reviving it during
             # a database outage, when the browser may be needed for recovery.
             curl_url=f"http://127.0.0.1:{browser_cdp_port}/json/version",
+            listen_binds=lambda: (TcpBind("127.0.0.1", browser_cdp_port),),
             identity_probe=partial(browser_probe, browser_cdp_port, browser_profile),
             healthcheck_module="services.supervision.healthchecks.browser",
         ),
@@ -437,6 +465,15 @@ def build_services(
             # The observer posts a valid empty OTLP ExportTraceServiceRequest: a listening
             # TCP port alone does not prove the collector protocol is ready.
             tcp_port=telemetry_otlp_port,
+            listen_binds=lambda: collector_binds(
+                home=home,
+                roles=roles,
+                host=machine_host(),
+                ingress_port=telemetry_otlp_port,
+                metrics_port=whole(
+                    setting("otel_collector_metrics_port"), "otel_collector_metrics_port"
+                ),
+            ),
             identity_probe=partial(probe_collector_at, telemetry_otlp_port),
             healthcheck_module="services.supervision.healthchecks.otel_collector",
         ),
@@ -446,24 +483,36 @@ def build_services(
         BACKENDS,
         HEALTH_PATHS,
         LgtmSettings,
+        backend_binds,
         backend_urls,
         service_argv,
         service_input_paths,
     )
-    from services.supervision.healthchecks.lgtm import probe_backend
+    from services.supervision.healthchecks.lgtm import probe_backend, probe_tempo
 
     observability = LgtmSettings.from_fields(get_field)
     urls = backend_urls(observability)
+
+    def native_binds(name: str) -> tuple[TcpBind, ...]:
+        return tuple(resolve_go_tcp_bind(bind) for bind in backend_binds(name, observability))
+
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(home, name, observability)),
+            cmd=("exec " if name == "tempo" else "")
+            + shlex.join(service_argv(home, name, observability)),
             config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
-            curl_url=urls[name] + HEALTH_PATHS[name],
-            identity_probe=partial(probe_backend, name, urls=urls),
+            curl_url=None if name == "tempo" else urls[name] + HEALTH_PATHS[name],
+            listen_binds=partial(native_binds, name),
+            identity_probe=(
+                partial(probe_tempo, home=home, observability=observability)
+                if name == "tempo"
+                else partial(probe_backend, name, urls=urls)
+            ),
             healthcheck_module="services.supervision.healthchecks.lgtm",
+            stop_ceiling_s=_TEMPO_STOP_CEILING_S if name == "tempo" else None,
         )
         for name in BACKENDS
     )

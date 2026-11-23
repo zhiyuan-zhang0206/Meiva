@@ -33,3 +33,5 @@ and `converge_file_overwritten` after the 2026-10-17 rename left the rendered
 retired `checkpoint_blobs` rules kept evaluating, and nothing said so (task #5322).
 
 Parent: [CLI Command Modules](../../docs/commands.md).
+
+The station may provide a full alert receiver and policy file at `$MEIVA_HOME/lgtm/alerting/contact.yml`. Converge validates its YAML and uses the usual guarded write for the provisioned copy. [Alertmanager receiver setup](../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)

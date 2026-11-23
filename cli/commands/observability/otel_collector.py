@@ -252,6 +252,7 @@ def generate_config(
 ) -> str:
     from base.cluster import home_label
     from base.host.db_authority.unit import telemetry_bearer
+    from base.telemetry.otlp.collector_listeners import LOCAL_INGRESS_HOST
 
     obs = settings.observability
     bearer = telemetry_bearer(meiva_home.resolve())
@@ -269,7 +270,7 @@ def generate_config(
         prom_base=bases[1],
         retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
-        local_ingress_endpoint=host_port("127.0.0.1", obs.telemetry_otlp_port),
+        local_ingress_endpoint=host_port(LOCAL_INGRESS_HOST, obs.telemetry_otlp_port),
         data_plane_receivers=receivers,
         data_plane_pipeline=pipeline,
         exporters=_exporters(

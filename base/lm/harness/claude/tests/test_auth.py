@@ -36,14 +36,16 @@ def test_the_registration_handle_reaches_the_cli() -> None:
         {
             "MEIVA_HARNESS_HANDLE": "handle-1",
             "MEIVA_HOME": "/home",
-            "MEIVA_PYTHON": "/opt/meiva/.venv/bin/python",
+            "MEIVA_PYTHON": "/opt/meiva/base/host/env/harness/meiva_python.sh",
+            "MEIVA_PYTHON_EXECUTABLE": "/opt/meiva/.venv/bin/python",
         },
         AuthConfig(),
         host={},
     )
     assert env["MEIVA_HARNESS_HANDLE"] == "handle-1"
     assert env["MEIVA_HOME"] == "/home"
-    assert env["MEIVA_PYTHON"] == "/opt/meiva/.venv/bin/python"
+    assert env["MEIVA_PYTHON"].endswith("/meiva_python.sh")
+    assert env["MEIVA_PYTHON_EXECUTABLE"] == "/opt/meiva/.venv/bin/python"
 
 
 def test_api_key_mode_passes_exactly_one_secret() -> None:

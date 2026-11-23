@@ -5170,7 +5170,7 @@ groups:
           team: meiva-ops
         annotations:
           summary: 'Tempo trace backend unreachable - up{job="tempo"}=0 for 1h (trace store down)'
-          description: 'The Prometheus scrape target for the Tempo trace store (the native systemd user unit com.meiva.tempo.meiva-578ca0ec.service on the observability station host ubuntu - 127.0.0.1:3200 queries, 127.0.0.1:14318 OTLP) has been down for over an hour. Its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - a silent 7-day outage happened before this alert existed (2026-09-07..14, task #3330). Triage: on the station host (ubuntu) run systemctl --user status com.meiva.tempo.meiva-578ca0ec.service and restart it when needed with systemctl --user restart com.meiva.tempo.meiva-578ca0ec.service. Verify here: up{job="tempo"}=1 and 127.0.0.1:14318 answers (404 on a bare GET is normal for the OTLP receiver).'
+          description: 'The Tempo trace store scrape has failed for over an hour. On the observability station, run meiva lgtm status and inspect the Tempo unit log at $MEIVA_HOME/run/meiva-root/logs/tempo/output.log. Check for listener conflicts or unavailable storage. Verify recovery with up{job="tempo"}=1 and a trace query through the Grafana Tempo datasource.'
         data:
           - refId: A
             datasourceUid: prometheus

@@ -19,6 +19,7 @@ class RouteContract:
     note: str = ""
 
 
+ALERT_AGENT_WEBHOOK_PATH = "/api/alerts/agents/{agent_id:int}"
 MACHINE_ENDPOINTS_PATH = "/api/cluster/machine-endpoints"
 
 
@@ -51,6 +52,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/alerts"): RouteContract(
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at)",
+    ),
+    ("POST", ALERT_AGENT_WEBHOOK_PATH): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="Alertmanager webhook — one inbox message per accepted POST",
     ),
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
     ("PUT", "/api/auth/password"): RouteContract(

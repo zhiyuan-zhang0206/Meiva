@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from string import Template
 
+from base.telemetry.otlp.collector_listeners import SELF_METRICS_HOST
 from cli.commands.observability.plans.collector.remote import RemoteFragments
 
 __all__ = ["CollectorValues", "render_collector_config"]
@@ -47,6 +48,7 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "LOKI_BASE": values.loki_base,
         "PROM_BASE": values.prom_base,
         "RETENTION_DAYS": str(values.retention_days),
+        "SELF_METRICS_HOST": SELF_METRICS_HOST,
         "SELF_METRICS_PORT": str(values.self_metrics_port),
         "OTLP_RECEIVER_ENDPOINT": values.local_ingress_endpoint,
         "DATA_PLANE_RECEIVERS": values.data_plane_receivers,

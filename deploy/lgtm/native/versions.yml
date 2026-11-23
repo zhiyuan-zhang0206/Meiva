@@ -28,3 +28,12 @@ grafana:
     darwin-arm64:
       url: https://dl.grafana.com/oss/release/grafana-13.2.3.darwin-arm64.tar.gz
       sha256: 248a51bcfacdb1ec642006cee46b4de44a34bcf41ddea88d96a4605e2e9d808c
+tempo:
+  version: 3.1.1
+  assets:
+    linux-amd64:
+      url: https://github.com/grafana/tempo/releases/download/v3.1.1/tempo_3.1.1_linux_amd64.tar.gz
+      sha256: cc7efc370d2e5cfdf93792060da4ea9d6c2a3aae348ccc95cbaaaf3393e1d339
+    darwin-arm64:
+      url: https://github.com/grafana/tempo/releases/download/v3.1.1/tempo_3.1.1_darwin_arm64.tar.gz
+      sha256: 41fdfef960383fde3980f91bb850ab39573a3821e776cbc1c93bdb0fd122a75c
