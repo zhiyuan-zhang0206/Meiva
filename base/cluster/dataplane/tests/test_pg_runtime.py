@@ -190,7 +190,7 @@ def test_supported_platform_provisions_the_pinned_tree_whatever_is_installed(
         "linux-x86_64": (vec_url, hashlib.sha256(deb).hexdigest()),
     }
     opener = FakeUrlOpener()
-    opener.on("https://repo1.maven.org/", Answer(body=jar))
+    opener.on("https://repo.maven.apache.org/", Answer(body=jar))
     opener.on(vec_url, Answer(body=deb))
 
     pg_runtime.ensure_pg_runtime(
