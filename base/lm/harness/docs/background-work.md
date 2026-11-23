@@ -63,9 +63,14 @@ per-(agent, harness) file) whenever the set changes. After a process is gone —
 restart, an update, a same-harness restart, a forced eviction, an Antigravity respawn, a
 switch away and back — the next session reads the list back as lost
 (`take_lost_background`), and `HarnessBridge._opening_input` prepends one system note to
-the first input, listing each item by its description. The record is cleared when the note
-is taken, so it is told once. Items whose own end time has passed (a wakeup that already
-fired) are left out. The agent decides whether to recreate anything. The note is the outermost
+the first input, listing each item by its description. An Antigravity input waiting
+for a timer can span an ACP process replacement. Its opening context is prepared
+after the new process loads the conversation and before the prompt is written,
+so it carries work lost during that wait. The bridge retries the note when the
+opening input is refused and clears it on `InputInContext`. Items already expired
+when they are discovered are left out. Work known to be pending when the adapter
+retires a process stays reportable past its former deadline. The agent decides
+whether to recreate anything. The note is the outermost
 part of the opening input: it comes before the handoff (or the compaction reminder), which comes
 before the input's own text, and after a restart that text can be the graph's resume note for a
 reconciled input (`reconciled-resume-…`, see `delivery.md`).

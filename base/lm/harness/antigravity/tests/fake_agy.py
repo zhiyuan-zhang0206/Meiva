@@ -99,8 +99,33 @@ def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
 
 def finish_steer(request: int, transcript: Path) -> None:
     record(transcript, planner_row("ORIGINAL_DONE\nSTEER_DONE"))
-    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    if "--test-early-command-result" not in sys.argv:
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     message("ORIGINAL_DONE\n")
+    message("STEER_DONE")
+    result(request)
+
+
+def finish_timer_steer(request: int, transcript: Path) -> None:
+    if "--test-terminal-before-steer" in sys.argv:
+        record(transcript, {**planner_row("STEER_DONE", tokens=25), "output_tokens": 4})
+        message("STEER_DONE")
+        frame(
+            {
+                "id": request,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        **USAGE,
+                        "inputTokens": 25,
+                        "outputTokens": 4,
+                    },
+                },
+            }
+        )
+        return
+    finish_background(transcript, early_notice=True, early_planner=False)
+    record(transcript, planner_row("STEER_DONE"))
     message("STEER_DONE")
     result(request)
 
@@ -147,7 +172,15 @@ def trigger_background(transcript: Path) -> None:
         background_notice(transcript)
     if early_planner:
         record(transcript, planner_row("BACKGROUND", tokens=237))
-    update("tool_call_update", toolCallId="timer", status="completed")
+    if "--test-four-minute-timer" in sys.argv:
+        update(
+            "tool_call_update",
+            toolCallId="timer",
+            status="completed",
+            rawOutput="Timer cancelled early: its early-termination condition (any) was met by a message from user.",
+        )
+    else:
+        update("tool_call_update", toolCallId="timer", status="completed")
     after_release(
         Path("release"), lambda: finish_background(transcript, early_notice, early_planner)
     )
@@ -368,6 +401,26 @@ def foreground_with_preamble(transcript: Path, request: int) -> None:
     )
 
 
+def fresh_prompt(transcript: Path, request: int, command: str) -> None:
+    case, reason = command.split(":", 1)
+    if case == "fresh-tool":
+        record(
+            transcript,
+            {
+                **planner_row(None),
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 8"}}],
+            },
+        )
+        beginning_of_tool()
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    if case == "fresh-textless":
+        record(transcript, {**planner_row(None), "output_tokens": 0})
+    else:
+        record(transcript, planner_row("ACTUAL_FRESH", tokens=210))
+        message("ACTUAL_FRESH")
+    result(request, reason, usage=False)
+
+
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command in {"resumed-command-completion", "unresolved-attribution"}:
         resumed_command_completion(transcript, request, command)
@@ -461,7 +514,7 @@ def foreground_first(transcript: Path, request: int) -> None:
     if "--test-multi-planner" in sys.argv:
         foreground_multiple(transcript, request)
         return
-    hold_prompt(transcript, "hold")
+    hold_prompt(transcript, "hold", request)
     update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     record(transcript, planner_row("FOREGROUND"))
     split = {"--test-interleaved-chunks", "--test-truncated-foreground"}
@@ -482,7 +535,11 @@ def foreground_first(transcript: Path, request: int) -> None:
     )
 
 
-def hold_prompt(transcript: Path, command: str) -> None:
+def hold_prompt(transcript: Path, command: str, request: int) -> None:
+    if "--test-terminal-before-steer" in sys.argv:
+        record(transcript, planner_row("FIRST_DONE"))
+        message("FIRST_DONE")
+        return
     if "--test-child" in sys.argv:
         child = subprocess.Popen(("/bin/sleep", "120"), start_new_session=True)
         _ = Path("child.pid").write_text(str(child.pid))
@@ -494,6 +551,11 @@ def hold_prompt(transcript: Path, command: str) -> None:
         },
     )
     beginning_of_tool()
+    if "--test-fault-held-prompt" in sys.argv:
+        after_release(
+            Path("release-fault"),
+            lambda: frame({"id": request, "error": {"code": -32603, "message": "provider fault"}}),
+        )
     if command == "reactive":
         message("Parked until the tool completes")
         update("usage_update", used=50, size=1000)
@@ -506,6 +568,41 @@ def exit_peer() -> None:
         child = subprocess.Popen(("/bin/sleep", "120"), start_new_session=True)
         _ = Path("child.pid").write_text(str(child.pid))
     sys.exit(0)
+
+
+def arm_background(transcript: Path, request: int) -> None:
+    params = (
+        {"DurationSeconds": 240, "Prompt": "timer prompt", "TimerCondition": "any"}
+        if "--test-four-minute-timer" in sys.argv
+        else {"DurationSeconds": 5, "Prompt": "timer prompt"}
+    )
+    update("tool_call", toolCallId="timer", name="schedule", status="in_progress", rawInput=params)
+    if "--test-two-timers" in sys.argv:
+        update(
+            "tool_call",
+            toolCallId="second-timer",
+            name="schedule",
+            status="in_progress",
+            rawInput={"DurationSeconds": 600, "Prompt": "keep checking the long-running build"},
+        )
+    message("TIMER_SET")
+    result(request)
+    after_release(Path("release-tool"), lambda: trigger_background(transcript))
+
+
+def complete_steer(transcript: Path, request: int) -> None:
+    if "--test-early-command-result" in sys.argv:
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    gate = "release-steer" if "--test-overlap" in sys.argv else "release"
+    finish = finish_timer_steer if "--test-timer-before-steer" in sys.argv else finish_steer
+    after_release(Path(gate), lambda: finish(request, transcript))
+
+
+def regular_prompt(transcript: Path, request: int, command: str) -> None:
+    if command.startswith("fresh-"):
+        fresh_prompt(transcript, request, command)
+    else:
+        plain_prompt(transcript, request, command)
 
 
 def handle_prompt(
@@ -525,27 +622,17 @@ def handle_prompt(
         assert original is not None
         result(original)
         original = None
-        gate = "release-steer" if "--test-overlap" in sys.argv else "release"
-        after_release(Path(gate), lambda: finish_steer(request, transcript))
+        complete_steer(transcript, request)
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
     if command == "steer":
         return original, permission_prompt
     if command in {"hold", "reactive", "hold-no-stdin"}:
-        hold_prompt(transcript, command)
+        hold_prompt(transcript, command, request)
         return request, permission_prompt
     if command == "background":
-        update(
-            "tool_call",
-            toolCallId="timer",
-            name="schedule",
-            status="in_progress",
-            rawInput={"DurationSeconds": 5, "Prompt": "timer prompt"},
-        )
-        message("TIMER_SET")
-        result(request)
-        after_release(Path("release-tool"), lambda: trigger_background(transcript))
+        arm_background(transcript, request)
     elif command == "overlap-first":
         after_release(Path("release-foreground"), lambda: foreground_first(transcript, request))
     elif command == "permission":
@@ -575,7 +662,7 @@ def handle_prompt(
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
-        plain_prompt(transcript, request, command)
+        regular_prompt(transcript, request, command)
     return original, permission_prompt
 
 
@@ -602,6 +689,11 @@ def setup_session(method: str, request: int) -> None:
     if method == "session/load":
         if "--test-stall-load" in sys.argv:
             threading.Event().wait()
+        if "--test-gate-load" in sys.argv:
+            gate = threading.Event()
+            after_release(Path("release-load"), gate.set)
+            Path("load-waiting").touch()
+            gate.wait()
         message("REPLAYED_OLD_TEXT")
         update("usage_update", used=1, size=10)
     frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})
@@ -609,6 +701,20 @@ def setup_session(method: str, request: int) -> None:
         message("REPLAYED_OLD_TEXT")
         message("MEIVA_DISPLAY_TO_USER\nOld native reply")
         update("usage_update", used=2, size=10)
+    if method == "session/load" and "--test-timer-replay-on-load" in sys.argv:
+        replay_timer_on_load()
+
+
+def replay_timer_on_load() -> None:
+    update(
+        "tool_call",
+        toolCallId="old-timer-command",
+        name="run_command",
+        status="completed",
+        rawInput={"CommandLine": "echo old timer"},
+    )
+    message("LATE_TIMER")
+    update("usage_update", used=3, size=10)
 
 
 def main() -> None:

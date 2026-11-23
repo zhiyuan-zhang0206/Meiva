@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Awaitable, Collection, Mapping, Seque
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from base.lm.harness.delivery import HarnessInput, Reconciliation
+from base.lm.harness.delivery import HarnessInput, InputPreparation, Reconciliation
 from base.lm.harness.events import BridgeEvent, TurnCompleted, Usage
 
 
@@ -86,6 +86,13 @@ class HarnessSession(Protocol):
     # faked 0 is indistinguishable from a clean exit forever after.
     @property
     def exit_code(self) -> int | None: ...
+
+
+@runtime_checkable
+class DeferredInputDelivery(Protocol):
+    def deliver_with_opening(
+        self, inputs: Sequence[HarnessInput], prepare: InputPreparation
+    ) -> Awaitable[None]: ...
 
 
 # meiva:note

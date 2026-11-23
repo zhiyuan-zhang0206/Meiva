@@ -6,6 +6,7 @@ import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
+from base.lm.harness.events import ToolResult, ToolUse
 from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 
 # meiva:note
@@ -58,6 +59,24 @@ class Schedules:
     reply_wait_seconds: float = BACKGROUND_REPLY_SECONDS
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
+    expired_replies: tuple[tuple[str, str | None], ...] = ()
+
+    def observe_tool(self, event: ToolUse | ToolResult, *, now: float, mono: float) -> Schedules:
+        if isinstance(event, ToolUse):
+            return self.tool_used(
+                event.tool_use_id,
+                event.name,
+                event.tool_input,
+                turn_id=event.turn_id,
+                monotonic_now=mono,
+            )
+        return self.tool_returned(
+            event.tool_use_id,
+            is_error=event.is_error,
+            now=now,
+            content=event.content,
+            monotonic_now=mono,
+        )
 
     def tool_used(
         self,
@@ -113,7 +132,8 @@ class Schedules:
         params = calls.pop(tool_use_id, None)
         if params is None:
             return self
-        remaining = self._finish_detached(tool_use_id, now=now, is_error=is_error)
+        task_id = _extract_task_id(content)
+        remaining = self._finish_detached(tool_use_id, now=now, is_error=is_error, task_id=task_id)
         remaining = replace(remaining, calls=tuple(calls.items()))
         if is_error:
             return replace(
@@ -123,7 +143,7 @@ class Schedules:
             timers = _arm_timer(
                 self.timers,
                 tool_use_id=tool_use_id,
-                task_id=_extract_task_id(content),
+                task_id=task_id,
                 monotonic_now=monotonic_now,
             )
             return replace(remaining, timers=timers)
@@ -131,12 +151,18 @@ class Schedules:
         item = BackgroundItem(BackgroundKind.SCHEDULE, _schedule_label(params), until=until)
         return replace(remaining, items=(*self.items, item))
 
-    def _finish_detached(self, tool_id: str, *, now: float, is_error: bool) -> Schedules:
+    def _finish_detached(
+        self, tool_id: str, *, now: float, is_error: bool, task_id: str | None
+    ) -> Schedules:
         pending = tuple(timer for timer in self.background_timers if timer.tool_id != tool_id)
         if is_error or len(pending) == len(self.background_timers):
             return replace(self, background_timers=pending)
         replies = (
-            replace(timer, work=replace(timer.work, until=now + self.reply_wait_seconds))
+            replace(
+                timer,
+                work=replace(timer.work, until=now + self.reply_wait_seconds),
+                task_id=task_id or timer.task_id,
+            )
             for timer in self.background_timers
             if timer.tool_id == tool_id
         )
@@ -214,19 +240,69 @@ class Schedules:
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
-    def reply_finished(self, sender: str, prompt: str | None) -> Schedules:
+    def expire_replies(self, now: float) -> tuple[Schedules, int]:
+        expired = tuple(
+            timer
+            for timer in (*self.background_timers, *self.replies)
+            if not timer.work.pending_at(now)
+        )
+        if not expired:
+            return self, 0
+        remaining = self._remove_detached({timer.tool_id for timer in expired})
+        identities = (*self.expired_replies, *((timer.prompt, timer.task_id) for timer in expired))
+        return replace(remaining, expired_replies=identities), len(expired)
+
+    def reply_finished(self, sender: str, prompt: str | None, *, now: float) -> Schedules:
         if prompt is None:
             return self
-        for reply in (*self.replies, *self.background_timers):
-            if reply.task_id == sender or (reply.task_id is None and reply.prompt == prompt):
-                return replace(
-                    self,
-                    replies=tuple(timer for timer in self.replies if timer is not reply),
-                    background_timers=tuple(
-                        timer for timer in self.background_timers if timer is not reply
-                    ),
-                )
-        return self
+        pending = (*self.replies, *self.background_timers)
+        for timer in pending:
+            if timer.task_id == sender:
+                return self._remove_detached({timer.tool_id})
+        if (seen := self._consume_expired_reply(sender, prompt, pending, now=now)) is not None:
+            return seen
+        candidates = tuple(
+            timer
+            for timer in pending
+            if timer.task_id is None
+            and timer.prompt == prompt
+            and (timer in self.replies or timer.due <= now)
+        )
+        return self._remove_detached({candidates[0].tool_id}) if len(candidates) == 1 else self
+
+    def _consume_expired_reply(
+        self, sender: str, prompt: str, pending: tuple[_DetachedTimer, ...], *, now: float
+    ) -> Schedules | None:
+        for index, (_, task_id) in enumerate(self.expired_replies):
+            if task_id == sender:
+                return self._forget_expiration(index)
+        key = (prompt, None)
+        if key not in self.expired_replies:
+            return None
+        if any(
+            timer.prompt == prompt
+            and timer.task_id is None
+            and (timer in self.replies or timer.due <= now)
+            for timer in pending
+        ):
+            return self
+        return self._forget_expiration(self.expired_replies.index(key))
+
+    def _forget_expiration(self, index: int) -> Schedules:
+        return replace(
+            self,
+            expired_replies=(*self.expired_replies[:index], *self.expired_replies[index + 1 :]),
+        )
+
+    def _remove_detached(self, tool_ids: set[str]) -> Schedules:
+        return replace(
+            self,
+            calls=tuple(call for call in self.calls if call[0] not in tool_ids),
+            background_timers=tuple(
+                timer for timer in self.background_timers if timer.tool_id not in tool_ids
+            ),
+            replies=tuple(timer for timer in self.replies if timer.tool_id not in tool_ids),
+        )
 
     def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
         if not turn_ids or not self.timers:

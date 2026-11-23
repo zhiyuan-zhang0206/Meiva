@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Sequence
 from dataclasses import replace
@@ -8,7 +9,21 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness import FileSessionRegistry, HarnessInput, InputRejected, SessionRecord
+from base.api_contracts.agent_contract import Harness
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
+from base.lm.harness import (
+    FileSessionRegistry,
+    HarnessBridge,
+    HarnessInput,
+    InputRejected,
+    SessionRecord,
+    ToolResult,
+    UnsolicitedOutput,
+)
+from base.lm.harness.antigravity.tests.support import make_session
+from base.lm.harness.registration import SecureRandom
 from base.lm.harness.session import (
     BackgroundItem,
     BackgroundKind,
@@ -219,3 +234,81 @@ async def test_the_lost_note_comes_before_the_handoff_and_the_input_text() -> No
     assert text.startswith("System note: the claude_code CLI process")
     assert text.index("sleep 100") < text.index(rendered) < text.index("resume note")
     assert text.endswith("\n\nresume note")
+
+
+async def _complete_short_timer(bridge: HarnessBridge, root: Path) -> None:
+    subscription = await bridge.subscribe()
+    try:
+        (root / "release-tool").touch()
+        async with asyncio.timeout(5):
+            while (event := await subscription.get()) is not None:
+                if isinstance(event, ToolResult) and event.tool_use_id == "timer":
+                    return
+        raise AssertionError("the short timer's tool completion was not delivered")
+    finally:
+        subscription.close()
+
+
+def _prompt_texts(root: Path) -> list[str]:
+    frames = [json.loads(line) for line in (root / "frames.jsonl").read_text().splitlines()]
+    return [
+        frame["params"]["prompt"][0]["text"]
+        for frame in frames
+        if frame.get("method") == "session/prompt"
+    ]
+
+
+async def _send_during_timer_expiry(bridge: HarnessBridge, root: Path, wall: ManualTimers) -> None:
+    async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+        queued = tasks.create_task(run_turn(bridge, "continue", key="first-after-expiry"))
+        await asyncio.sleep(0)
+        assert not queued.done() and len(_prompt_texts(root)) == 1
+        wall.advance(31)
+        while not (root / "load-waiting").exists():
+            await asyncio.sleep(0.005)
+        assert len(_prompt_texts(root)) == 1
+        wall.advance(610)
+        (root / "release-load").touch()
+    assert queued.result().text == "OK"
+
+
+async def test_first_waiting_agy_prompt_reports_other_work_lost_during_timer_recycle(
+    tmp_path: Path,
+) -> None:
+    wall = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=wall.now)
+    wakes: list[bool] = []
+    unsolicited: list[UnsolicitedOutput] = []
+    session = make_session(
+        tmp_path,
+        clock=clock,
+        extra_args=("--test-two-timers", "--test-gate-load"),
+        unsolicited=unsolicited.append,
+    )
+    bridge = HarnessBridge(
+        Harness.ANTIGRAVITY,
+        1,
+        lambda _: session,
+        timestamp_prefix=lambda: "",
+        registration_ttl_seconds=3600,
+        clock=clock,
+        handle_rng=SecureRandom(seeded_rng(1)),
+        controller_pid=1,
+        own_turn=lambda: wakes.append(True),
+    )
+    try:
+        _ = await run_turn(bridge, "background", key="start-timers")
+        assert len(bridge.background_work().items) == 2
+        old_pid = session.cli_pid
+        await _complete_short_timer(bridge, tmp_path)
+        await _send_during_timer_expiry(bridge, tmp_path, wall)
+        assert session.cli_pid is not None and session.cli_pid != old_pid
+        assert session.generation == 2
+        _ = await run_turn(bridge, "next", key="second-after-expiry")
+        _, first, second = _prompt_texts(tmp_path)
+        assert "background work below was still pending and is lost" in first
+        assert first.count("keep checking the long-running build") == 1
+        assert "keep checking the long-running build" not in second
+        assert wakes == [] and unsolicited == []
+    finally:
+        await bridge.close()

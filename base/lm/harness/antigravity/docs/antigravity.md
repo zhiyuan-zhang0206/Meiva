@@ -93,7 +93,7 @@ native notice. Available planner usage stays on its own turn, and incomplete
 counts are marked uncertain. A current textless terminal row can close a
 prompt despite unmatched replay. Cancellation settles proved foreground
 evidence immediately, preserving recorded text and usage. At the attribution
-deadline, a successful ACP response with its current input marker in the
+deadline, a terminal ACP response with its current input marker in the
 transcript can settle with only attributed foreground output. The adapter logs
 `agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
 planner rows quarantined for native attribution. A pending notice from a
@@ -110,7 +110,10 @@ the same interleaved chunk matcher as live projection. A sole terminal must
 account for all remaining text with its own span. When independent terminals
 exist, other planner rows can account for skipped chunks in either order.
 Above the subset limit, only the whole span is tested. The notice remains
-pending for a separate native reply. Missing input evidence retains
+pending for a separate native reply. A steer can verify multiple foreground
+terminals through unique receipt matches scoped to the individual input
+markers. Shared ACP text and tool frames need independent attribution
+evidence when a timer overlaps the foreground. Missing input evidence retains
 the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
@@ -127,11 +130,28 @@ native notice and reply offsets and planner usage when available. Both buffered
 and live starts point the graph to the exact reply row, even when the timeline
 reader has already passed it. The graph presents the transcript and applies the
 normal reply visibility policy.
-A future timer still allows foreground input.
-A due or triggered timer holds new dispatch and keeps the process alive, and
-an unverified reply at its deadline retires the generation. Cron-like
-calls retain the existing one-day bound. Timers also supply the foreground
-watchdog's silence floor while a prompt is active. See
+A future timer still allows foreground input. A due or triggered timer keeps
+the process alive and can hold the start of a new prompt until its reply
+deadline. Steering an active prompt continues during that wait. Unanswered
+timer notices stay provisional across steer markers so planner rows on
+either side can be assigned by receipt and transcript evidence. A successful
+schedule tool result can also represent an early provider cancellation. When
+a deadline passes without a verified reply, the adapter removes expired
+timers from keepalive and logs `agy_acp_timer_reply_expired`. It lets the
+active prompt and its steers settle. Once idle, it detaches and closes the
+old ACP process without emitting a session failure or delivering a wake.
+Any other pending work on that process is recorded as lost through the
+existing background-work path. A waiting or later prompt waits for the
+process close, then loads the same conversation on a new ACP generation.
+The new stream starts with a pre-load transcript fence and an empty tool and
+timer state.
+
+While the old process is still handling the active prompt, a verified timer
+reply first matches by task ID. A prompt can release one eligible unidentified
+timer when the identity is distinct from expired candidates. A verified late
+reply consumes an expired identity when it is distinguishable from live
+timers. Cron-like calls retain the existing one-day bound. Timers also
+supply the foreground watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
 
 The local, read-only `GetCascadeTrajectory` RPC remains the source of live

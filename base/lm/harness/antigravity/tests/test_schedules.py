@@ -55,10 +55,94 @@ def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> N
     work = work.tool_returned("timer", is_error=False, now=NOW + 8)
     assert work.pending_at(NOW + 14)
     assert work.reply_deadline(NOW + 14) == NOW + 38
-    assert work.reply_finished("session/task-1", "unrelated") is work
-    work = work.reply_finished("session/task-2", "ping")
+    assert work.reply_finished("session/task-1", "unrelated", now=NOW + 14) is work
+    work = work.reply_finished("session/task-2", "ping", now=NOW + 14)
     assert not work.pending_at(NOW + 14)
     assert work.reply_deadline(NOW + 14) is None
+
+
+def test_expiring_one_detached_timer_keeps_other_timers_and_ignores_its_late_completion() -> None:
+    work = Schedules()
+    for tool_id, duration in (("expired", 5), ("live", 60)):
+        work = work.tool_used(
+            tool_id,
+            "schedule",
+            {"DurationSeconds": duration, "Prompt": tool_id},
+            turn_id="turn",
+            monotonic_now=100,
+        )
+    work = work.finish_turn("turn", now=NOW, monotonic_now=100)
+
+    remaining, expired = work.expire_replies(NOW + 35)
+    assert expired == 1
+    assert remaining.has_detached and remaining.reply_deadline(NOW + 35) is None
+    [item] = remaining.pending_at(NOW + 35)
+    assert item.until == NOW + 90
+    assert remaining.tool_returned("expired", is_error=False, now=NOW + 40) is remaining
+    assert remaining.expire_replies(NOW + 40) == (remaining, 0)
+
+
+def test_late_reply_for_an_expired_timer_does_not_clear_a_new_timer_with_the_same_prompt() -> None:
+    work = Schedules().tool_used(
+        "old", "schedule", {"DurationSeconds": 5, "Prompt": "ping"}, turn_id="a", monotonic_now=0
+    )
+    work = work.finish_turn("a", now=NOW, monotonic_now=0)
+    work, expired = work.expire_replies(NOW + 35)
+    assert expired == 1
+    work = work.tool_used(
+        "new", "schedule", {"DurationSeconds": 600, "Prompt": "ping"}, turn_id="b", monotonic_now=40
+    ).finish_turn("b", now=NOW + 40, monotonic_now=40)
+    original_work = work.pending_at(NOW + 45)
+    seen = work.reply_finished("conv/task-1", "ping", now=NOW + 45)
+    assert seen.pending_at(NOW + 45) == original_work
+
+    anonymous = work.tool_returned("new", is_error=False, now=NOW + 640)
+    assert anonymous.reply_finished("conv/task-1", "ping", now=NOW + 641) is anonymous
+    work = work.tool_returned("new", is_error=False, now=NOW + 640, content="task id: conv/task-2")
+    seen = work.reply_finished("conv/task-1", "ping", now=NOW + 641)
+    assert seen.pending_at(NOW + 641) == work.pending_at(NOW + 641)
+    assert not seen.expired_replies
+    assert not seen.reply_finished("conv/task-2", "ping", now=NOW + 642).has_detached
+
+
+def test_resolved_expired_timer_leaves_no_conflict_for_a_new_anonymous_timer() -> None:
+    work = (
+        Schedules()
+        .tool_used(
+            "old",
+            "schedule",
+            {"DurationSeconds": 5, "Prompt": "ping"},
+            turn_id="a",
+            monotonic_now=0,
+        )
+        .finish_turn("a", now=NOW, monotonic_now=0)
+    )
+    work, expired = work.expire_replies(NOW + 35)
+    assert expired == 1
+    work = work.reply_finished("conv/task-1", "ping", now=NOW + 40)
+    assert not work.expired_replies
+    work = work.tool_used(
+        "new", "schedule", {"DurationSeconds": 600, "Prompt": "ping"}, turn_id="b", monotonic_now=45
+    ).finish_turn("b", now=NOW + 45, monotonic_now=45)
+    work = work.tool_returned("new", is_error=False, now=NOW + 645)
+    assert work.reply_deadline(NOW + 646) == NOW + 675
+    work = work.reply_finished("conv/task-2", "ping", now=NOW + 647)
+    assert not work.has_detached and work.reply_deadline(NOW + 647) is None
+
+
+def test_killed_detached_timer_without_a_callback_releases_keepalive_at_its_deadline() -> None:
+    work = Schedules().tool_used(
+        "timer", "schedule", {"DurationSeconds": 5, "Prompt": "ping"}, turn_id="a", monotonic_now=0
+    )
+    work = work.finish_turn("a", now=NOW, monotonic_now=0)
+    work = work.tool_used(
+        "kill", "manage_task", {"Action": "kill", "TaskId": "conv/task-1"}, turn_id="b"
+    )
+    work = work.tool_returned("kill", is_error=False, now=NOW + 1)
+    assert work.reply_deadline(NOW + 5) == NOW + 35
+    work, expired = work.expire_replies(NOW + 35)
+    assert expired == 1
+    assert not work.has_detached and not work.pending_at(NOW + 35)
 
 
 def test_a_failed_or_other_tool_call_schedules_nothing() -> None:

@@ -37,6 +37,11 @@ class AgyAcpAttributionDegraded(TypedDict):
     pending_frames: int
 
 
+class AgyAcpTimerReplyExpired(TypedDict):
+    timer_count: int
+    foreground_active: bool
+
+
 class NodeExitEntry(TypedDict):
     """One node's exit inside an aggregated per-turn `node_exit` event."""
 
@@ -219,6 +224,12 @@ EVENTS: dict[str, EventSpec] = {
         "an Antigravity ACP prompt reached its attribution deadline after completion and settled "
         "with only attributed output",
         payload=AgyAcpAttributionDegraded,
+        tier="anomaly",
+    ),
+    "agy_acp_timer_reply_expired": telemetry_event(
+        "agy_acp_timer_reply_expired",
+        "Antigravity detached timers reached their reply deadlines and released process keepalive",
+        payload=AgyAcpTimerReplyExpired,
         tier="anomaly",
     ),
     "harness_input_requeued": telemetry_event(
