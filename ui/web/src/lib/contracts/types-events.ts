@@ -166,6 +166,10 @@ export interface ToUserChangedEvent extends BaseEvent {
   role: "to_user_changed";
 }
 
+export interface OngoingChangedEvent extends BaseEvent {
+  readonly role: "ongoing_changed";
+}
+
 export interface TimelineSnapshotEvent extends BaseEvent {
   readonly role: "timeline_snapshot";
   readonly items: readonly BackendTimelineItem[];
@@ -221,6 +225,7 @@ export type SystemEvent =
   | InboundCommittedEvent
   | LabelUpdatedEvent
   | ToUserChangedEvent
+  | OngoingChangedEvent
   | TokenUsageEvent
   | LLMKeepaliveEvent
   | LLMDoneEvent

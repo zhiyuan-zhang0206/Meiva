@@ -401,6 +401,7 @@ same origin as persistent events but uses an independent schema.
 | `llm_done` | — |
 | `llm_keepalive` | — |
 | `notification` | ✓ |
+| `ongoing_changed` | ✓ |
 | `question_asked` | ✓ |
 | `question_resolved` | ✓ |
 | `reasoning_delta` | — |

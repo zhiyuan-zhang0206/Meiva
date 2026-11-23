@@ -121,3 +121,11 @@ it("repairs only the changed agent's shared context and repairs it after reconne
   expect(ctx.invalidateQueries.mock.calls).toEqual([[["to-user", 17]]]);
   expect(RECONNECT_QUERY_KEYS).toContainEqual(["to-user"]);
 });
+
+it("refreshes only the changed agent's Ongoing document and refreshes it after reconnect", async () => {
+  const { RECONNECT_QUERY_KEYS } = await import("./index");
+  const ctx = { getQueryData: () => undefined, setQueryData: vi.fn(), invalidateQueries: vi.fn() };
+  applyEvent(ctx, { role: "ongoing_changed", agent_id: 17 });
+  expect(ctx.invalidateQueries.mock.calls).toEqual([[["ongoing", 17]]]);
+  expect(RECONNECT_QUERY_KEYS).toContainEqual(["ongoing"]);
+});

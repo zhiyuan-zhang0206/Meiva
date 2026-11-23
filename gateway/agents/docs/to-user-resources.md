@@ -29,6 +29,16 @@ Audio, PDFs and other binary files use the workspace download view. The raw reso
 endpoint continues to serve passive media, PDFs and inert text inline under the
 passive CSP.
 
+## Ongoing document
+
+`GET /api/agents/{id}/ongoing` reads `ongoing.md` from the agent's workspace
+root on the owning runner. It returns the Markdown as `content`, its
+`modified_at` timestamp and a content hash as `version`. Whitespace-only
+documents return null content with file metadata. Missing documents return
+null for all three fields. An unknown agent returns 404. Authorized tools
+can list live agents and read this endpoint for each agent to inspect current
+work across the cluster.
+
 ## Workspace file reads
 
 `GET /api/agents/{id}/files/content` and `GET /api/agents/{id}/files/raw` serve

@@ -6,10 +6,11 @@ import threading
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.to_user import ToUserReadRequest
+from base.agents.to_user import ToUserLimits, ToUserReadRequest, read_ongoing
 from base.agents.to_user.limits import to_user_limits_from_read_model
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -34,11 +35,36 @@ from ops.rpc_schemas import (
     ShellKillPayload,
     ShellProbePayload,
 )
-from ops.to_user import read_failure_payload, read_to_user
+from ops.to_user import owned_workspace, read_failure_payload, read_to_user
 from ops.upload_delivery import ReceiverConfig, copy_batch
 from services.agent_runner.agent_ops.ops_plan import unknown_kind
 
 _state_write_lock = threading.Lock()
+
+
+def _read_panel_document(
+    kind: Literal["to_user_read", "ongoing_read"],
+    request: ToUserReadRequest,
+    *,
+    pool: ConnectionPool,
+    machine: str,
+    home: Path,
+    limits: ToUserLimits,
+) -> tuple[OpStatus, dict[str, object]]:
+    try:
+        if kind == "ongoing_read":
+            workspace = owned_workspace(pool, request.agent_id, machine, home=home)
+            document = read_ongoing(workspace, limits=limits)
+        else:
+            document = read_to_user(
+                pool, request.agent_id, machine, files=request.files, home=home, limits=limits
+            )
+    except (OSError, ValueError) as exc:
+        # meiva:note
+        # The failure's class is what the gateway turns into the panel's words.
+        # meiva:link gateway/agents/docs/to-user-read-failures.md
+        return OpStatus.FAILED, read_failure_payload(exc)
+    return OpStatus.COMPLETED, document.model_dump(mode="json")
 
 
 def dispatch_sync(
@@ -59,26 +85,17 @@ def dispatch_sync(
 ) -> tuple[OpStatus, dict[str, object]]:
 
     match kind:
-        case "to_user_read":
-            request = ToUserReadRequest.model_validate(payload)
+        case "to_user_read" | "ongoing_read":
             if pool is None:
-                raise RuntimeError("To user requires the native DB pool")
-            try:
-                document = read_to_user(
-                    pool,
-                    request.agent_id,
-                    local_machine.name(),
-                    files=request.files,
-                    home=home,
-                    limits=to_user_limits_from_read_model(authority),
-                )
-            except (OSError, ValueError) as exc:
-                # meiva:note
-                # A refused read is the answer, not a crash: the class it carries is
-                # what the gateway turns into the panel's words.
-                # meiva:link gateway/agents/docs/to-user-read-failures.md
-                return OpStatus.FAILED, read_failure_payload(exc)
-            return OpStatus.COMPLETED, document.model_dump(mode="json")
+                raise RuntimeError("Workspace document reads require the native DB pool")
+            return _read_panel_document(
+                kind,
+                ToUserReadRequest.model_validate(payload),
+                pool=pool,
+                machine=local_machine.name(),
+                home=home,
+                limits=to_user_limits_from_read_model(authority),
+            )
         case "upload-receive-v2":
             return _upload_arm(payload, pool, receiver=receiver)
         case "status_probe":

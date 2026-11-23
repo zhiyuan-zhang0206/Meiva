@@ -125,6 +125,36 @@ async def test_a_refused_document_read_reports_its_class(
     assert gone["result"]["reason"] == "gone"
 
 
+async def test_ongoing_op_reads_only_the_workspace_root(
+    ops: Ops, agent_id: int, unit_home: Path
+) -> None:
+    workspace = workspace_path(unit_home, agent_id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "project").mkdir()
+    (workspace / "project" / "ongoing.md").write_text("Nested document")
+    (workspace / "to_user.md").write_text("Shared context")
+    request = {"kind": "ongoing_read", "payload": {"agent_id": agent_id}}
+
+    _, missing = await ops.route(request)
+    assert missing["status"] == "completed"
+    assert missing["result"] == {"content": None, "version": None, "modified_at": None}
+
+    ongoing = workspace / "ongoing.md"
+    ongoing.write_text(" \n")
+    _, blank = await ops.route(request)
+    assert blank["status"] == "completed"
+    assert blank["result"]["content"] is None
+    assert blank["result"]["modified_at"]
+    assert blank["result"]["version"]
+
+    content = "## Waiting\n- Approval from the maintainer\n"
+    ongoing.write_text(content)
+    _, present = await ops.route(request)
+    assert present["status"] == "completed"
+    assert present["result"]["content"] == content
+    assert present["result"]["version"] != blank["result"]["version"]
+
+
 # meiva:note
 # The runner's real `/to-user/workspace-file` listener for one agent on `source-host`, behind the
 # daemon transport and its bearer check; yields an authorized client and the agent's id. The

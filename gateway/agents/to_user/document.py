@@ -16,6 +16,7 @@ from pydantic import BaseModel, ValidationError
 from starlette.background import BackgroundTask
 
 from base.agents.to_user import (
+    OngoingDocument,
     ToUserDocument,
     ToUserReadFailure,
     ToUserReadRequest,
@@ -113,12 +114,18 @@ def resource_request(agent_id: int, files: list[str], *, max_depth: int) -> ToUs
         raise HTTPException(422, "Invalid document file name") from exc
 
 
-async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
+async def _read_snapshot[Document: BaseModel](
+    request: Request,
+    query: ToUserReadRequest,
+    machine: str,
+    kind: Literal["to_user_read", "ongoing_read"],
+    document_type: type[Document],
+) -> Document:
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
             gateway_state(request).db,
             target_machine=machine,
-            kind="to_user_read",
+            kind=kind,
             payload=query.model_dump(),
             timeout_s=3,
             retries=0,
@@ -129,10 +136,25 @@ async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str
         try:
             failure = ToUserReadFailure(exc.result.get("reason"))
         except ValueError:
-            _log.warning("to_user_read failed without a known reason: %s", exc.result.get("error"))
+            _log.warning("%s failed without a known reason: %s", kind, exc.result.get("error"))
             failure = ToUserReadFailure.UNREADABLE
         raise PanelReadFailed(failure) from exc
-    return ToUserDocument.model_validate(result)
+    return document_type.model_validate(result)
+
+
+async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
+    return await _read_snapshot(request, query, machine, "to_user_read", ToUserDocument)
+
+
+@router.get("/api/agents/{agent_id}/ongoing", response_model=OngoingDocument)
+async def get_ongoing(agent_id: int, request: Request) -> OngoingDocument | JSONResponse:
+    machine = await asyncio.to_thread(home_machine, request, agent_id)
+    try:
+        return await _read_snapshot(
+            request, ToUserReadRequest(agent_id=agent_id), machine, "ongoing_read", OngoingDocument
+        )
+    except PanelReadFailed as failed:
+        return failed.response(request)
 
 
 @router.get("/api/agents/{agent_id}/to-user", response_model=ToUserDocument)

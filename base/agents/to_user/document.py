@@ -3,7 +3,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base.agents.to_user.limits import ToUserLimits
-from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserDocument
+from base.agents.to_user.models import (
+    DOCUMENT_FILENAME,
+    ONGOING_FILENAME,
+    OngoingDocument,
+    ToUserDocument,
+)
 from base.agents.to_user.resources import (
     read_regular_file,
     resolve_file,
@@ -44,6 +49,19 @@ def read_document(
         version=revision.hexdigest(),
         modified_at=datetime.fromtimestamp(info.st_mtime, UTC),
         resources=resources,
+    )
+
+
+def read_ongoing(workspace: Path, *, limits: ToUserLimits) -> OngoingDocument:
+    try:
+        raw, info = read_regular_file(workspace / ONGOING_FILENAME, limits.document_bytes)
+    except FileNotFoundError:
+        return OngoingDocument(content=None, version=None, modified_at=None)
+    content = raw.decode("utf-8")
+    return OngoingDocument(
+        content=content if content.strip() else None,
+        version=hashlib.sha256(raw).hexdigest(),
+        modified_at=datetime.fromtimestamp(info.st_mtime, UTC),
     )
 
 

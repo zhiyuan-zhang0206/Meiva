@@ -21,3 +21,15 @@ export function useToUser(agentId: number | null, files: string[] = []) {
     refetchOnWindowFocus: "always",
   });
 }
+
+export function useOngoing(agentId: number) {
+  const client = useApi();
+  return useQuery({
+    queryKey: ["ongoing", agentId],
+    queryFn: ({ signal }) => client.getOngoing(agentId, signal),
+    staleTime: Infinity,
+    retry: false,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+}

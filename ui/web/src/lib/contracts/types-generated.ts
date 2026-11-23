@@ -239,6 +239,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/ongoing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_ongoing_api_agents__agent_id__ongoing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/to-user": {
         parameters: {
             query?: never;
@@ -3317,6 +3333,11 @@ export interface components {
             sha256: string;
             content_type: string;
         };
+        OngoingDocument: {
+            content: string | null;
+            version: string | null;
+            modified_at: string | null;
+        };
         OpenQuestion: {
             id: number;
             title: string;
@@ -4572,6 +4593,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BornChainResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ongoing_api_agents__agent_id__ongoing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OngoingDocument"];
                 };
             };
             422: {

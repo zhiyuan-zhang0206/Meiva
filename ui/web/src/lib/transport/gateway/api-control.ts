@@ -49,6 +49,7 @@ import type {
   SystemStatus,
   TerminateAgentResponse,
   ToUserDocument,
+  OngoingDocument,
   UiContributionsResponse,
   UserSettingListResponse,
   UserSettingRow,
@@ -110,6 +111,9 @@ export function createControlApi(http: Http) {
     getToUser: (agentId: number, signal?: AbortSignal, files: string[] = []): Promise<ToUserDocument> => {
       return f(toUserPath(agentId, files), { signal }).then(ok<ToUserDocument>);
     },
+
+    getOngoing: (agentId: number, signal?: AbortSignal): Promise<OngoingDocument> =>
+      f(`/api/agents/${agentId}/ongoing`, { signal }).then(ok<OngoingDocument>),
 
     getWorkspaceFile: (
       agentId: number,

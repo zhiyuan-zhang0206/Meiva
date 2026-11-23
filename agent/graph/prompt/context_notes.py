@@ -14,7 +14,12 @@ from base.agents.context import MeivaContext
 from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.agents.to_user import ToUserLimits, read_document, to_user_limits_from_agent
+from base.agents.to_user import (
+    ToUserLimits,
+    read_document,
+    read_ongoing,
+    to_user_limits_from_agent,
+)
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
@@ -217,11 +222,16 @@ def machine_clause(ctx: MeivaContext) -> str | None:
 def workspace_facts(workspace: Path, home: Path, *, limits: ToUserLimits) -> Workspace:
 
     display = workspace_display(workspace, home)
+    ongoing = None
+    try:
+        ongoing = read_ongoing(workspace, limits=limits).content
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read ongoing work in {}: {}", workspace, exc)
     try:
         document = read_document(workspace, limits=limits)
     except (OSError, ValueError) as exc:
-        return Workspace(display, None, str(exc))
-    return Workspace(display, document.content, None)
+        return Workspace(display, None, str(exc), ongoing)
+    return Workspace(display, document.content, None, ongoing)
 
 
 def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:

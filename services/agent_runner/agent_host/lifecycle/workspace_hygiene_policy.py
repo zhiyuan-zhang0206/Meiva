@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from base.agents.messages.kwargs import NoteTag
+from base.agents.to_user.models import DOCUMENT_FILENAME, ONGOING_FILENAME
 
 __all__ = [
     "MAX_REPORTED_DIRS",
@@ -56,6 +57,8 @@ ROOT_EXCLUDED_NAMES: frozenset[str] = frozenset(
         "memory",
         "uploads",
         "meiva_instructions.md",
+        DOCUMENT_FILENAME,
+        ONGOING_FILENAME,
     }
 )
 

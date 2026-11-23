@@ -25,6 +25,30 @@ from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 # meiva:note
 # The route asks the cluster client for the read, so the test provides that one
 # collaborator and leaves the route itself untouched.
+class _OngoingRunnerRpc:
+    async def dispatch_to_machine(
+        self,
+        db: object,
+        target_machine: str,
+        kind: str,
+        payload: dict[str, object],
+        *,
+        timeout_s: float | None = None,
+        retries: int | None = None,
+    ) -> dict[str, object]:
+        assert target_machine == "company-mini"
+        assert kind == "ongoing_read"
+        assert payload == {"agent_id": self.agent_id, "files": []}
+        return {
+            "content": "## Doing\n- Review results",
+            "modified_at": "2026-11-23T08:30:00Z",
+            "version": "runner-version",
+        }
+
+    def __init__(self, agent_id: int) -> None:
+        self.agent_id = agent_id
+
+
 class _RefusingRpc:
     def __init__(self, outcome: Exception) -> None:
         self.outcome = outcome
@@ -100,6 +124,25 @@ def test_a_failure_without_a_reason_is_the_unreadable_class(
     response = client.get(f"/api/agents/{agent}/to-user")
     assert response.status_code == 422
     assert response.json()["code"] == "to_user_document_unreadable"
+
+
+def test_ongoing_routes_to_the_owning_runner(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent_id = _home_machine_agent(db_conn, "company-mini")
+    client.app.state.rpc = _OngoingRunnerRpc(agent_id)
+    response = client.get(f"/api/agents/{agent_id}/ongoing")
+    assert response.status_code == 200
+    assert response.json() == {
+        "content": "## Doing\n- Review results",
+        "modified_at": "2026-11-23T08:30:00Z",
+        "version": "runner-version",
+    }
+
+
+def test_ongoing_unknown_agent_is_404(client: GatewayTestClient) -> None:
+    response = client.get("/api/agents/9999999/ongoing")
+    assert response.status_code == 404
 
 
 def test_get_workspace_file_text_success(

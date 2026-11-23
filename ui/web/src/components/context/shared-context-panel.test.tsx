@@ -91,6 +91,7 @@ beforeEach(() => {
   transport.getSettings.mockImplementation(() => new Promise(() => undefined));
   transport.putSetting.mockImplementation(() => new Promise(() => undefined));
   transport.getToUser.mockImplementation(() => new Promise(() => undefined));
+  transport.getOngoing.mockResolvedValue({ content: null, version: null, modified_at: null });
   transport.getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
   transport.getAgentInspectLive.mockImplementation(() => new Promise(() => undefined));
   transport.getAgentInspectStatistics.mockImplementation(() => new Promise(() => undefined));
@@ -110,8 +111,40 @@ it("shows the document as the first file tab and keeps the inspector out of the 
   expect(screen.getByText("No content")).toBeTruthy();
   expect(screen.queryByTestId("shared-inspector")).toBeNull();
   const tabs = screen.getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context"]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context", "Ongoing"]);
   expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+});
+
+it.each([false, true])("shows Ongoing as a fixed tab and refreshes the Markdown (mobile=%s)", async (mobile) => {
+  renderPanelView({ mobile });
+  fireEvent.click(screen.getByRole("tab", { name: "Ongoing" }));
+  expect(await screen.findByText("No ongoing items")).toBeTruthy();
+
+  transport.getOngoing.mockResolvedValue({
+    content: "## Doing\n- Review results",
+    version: "review",
+    modified_at: null,
+  });
+  await act(() => qc.invalidateQueries({ queryKey: ["ongoing", 7] }));
+  expect(await screen.findByRole("heading", { name: "Doing" })).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Has ongoing items" })).toBeTruthy();
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  if (!mobile) {
+    fireEvent.click(screen.getByRole("button", { name: "Fill the page" }));
+    expect(await screen.findByRole("heading", { name: "Doing" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the side panel" }));
+  }
+
+  fireEvent.click(screen.getByRole("tab", { name: "Shared context" }));
+  expect(screen.getByText("No content")).toBeTruthy();
+});
+
+it("shows an error when the Ongoing document could not be read", async () => {
+  transport.getOngoing.mockRejectedValue(new Error("Offline"));
+  renderPanelView();
+  fireEvent.click(screen.getByRole("tab", { name: "Ongoing" }));
+  expect(await screen.findByText("Document unavailable. Try again later.")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Has ongoing items" })).toBeNull();
 });
 
 it("renders WorkspaceFileView when activeFile is set for this agent", async () => {

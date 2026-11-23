@@ -65,7 +65,13 @@ function plain(target: WorkspaceFileTarget): WorkspaceFileTarget {
   return { agentId: target.agentId, path: target.path, ...(target.lineRange ? { lineRange: target.lineRange } : {}) };
 }
 
+export const ongoingTab = (agentId: number): WorkspaceFileTarget => ({
+  agentId,
+  path: `~/.meiva/workspaces/${agentId}/ongoing.md`,
+});
+
 function withTab(tabs: Record<number, WorkspaceFileTarget[]>, target: WorkspaceFileTarget) {
+  if (sameFile(target, ongoingTab(target.agentId))) return tabs;
   const list = tabs[target.agentId] ?? [];
   const index = list.findIndex((tab) => sameFile(tab, target));
   const next = index < 0 ? [...list, target] : list.map((tab, i) => (i === index ? target : tab));

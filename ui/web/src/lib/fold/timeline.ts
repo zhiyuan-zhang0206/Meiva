@@ -572,6 +572,7 @@ export function applySystemEvent(
     case "label_updated":
       // sidebar behavior — useAgentsCacheSync merges into the agents query cache.
     case "to_user_changed":
+    case "ongoing_changed":
     case "agent_spawned":
     case "agent_updated":
       // sidebar behavior — useAgentsCacheSync merges the snapshot into the

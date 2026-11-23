@@ -590,6 +590,45 @@
         }
       }
     },
+    "/api/agents/{agent_id}/ongoing": {
+      "get": {
+        "summary": "Get Ongoing",
+        "operationId": "get_ongoing_api_agents__agent_id__ongoing_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OngoingDocument"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{agent_id}/to-user": {
       "get": {
         "summary": "Get To User",
@@ -14645,6 +14684,52 @@
           "content_type"
         ],
         "title": "Object"
+      },
+      "OngoingDocument": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "modified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content",
+          "version",
+          "modified_at"
+        ],
+        "title": "OngoingDocument"
       },
       "OpenQuestion": {
         "properties": {

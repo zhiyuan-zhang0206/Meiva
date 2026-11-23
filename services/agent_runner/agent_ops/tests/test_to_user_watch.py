@@ -13,18 +13,22 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from pydantic import TypeAdapter
 from redis.asyncio.client import PubSub
 
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
-from base.events.live.projection import ToUserChanged
+from base.events.live.projection import OngoingChanged, ToUserChanged
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
+
+type PanelEvent = ToUserChanged | OngoingChanged
+PANEL_EVENT = TypeAdapter[PanelEvent](ToUserChanged | OngoingChanged)
 
 
 # meiva:note
 # Forward live events from the Redis pub/sub channel into an in-memory queue so assertions stay non-blocking.
-async def _pump_events(subscriber: PubSub, events: asyncio.Queue[ToUserChanged]) -> None:
+async def _pump_events(subscriber: PubSub, events: asyncio.Queue[PanelEvent]) -> None:
     while True:
         message = cast(
             "dict[str, Any] | None",
@@ -33,12 +37,12 @@ async def _pump_events(subscriber: PubSub, events: asyncio.Queue[ToUserChanged])
         if message:
             payload = message["data"]
             assert isinstance(payload, (str, bytes))
-            events.put_nowait(ToUserChanged.model_validate(json.loads(payload)))
+            events.put_nowait(PANEL_EVENT.validate_python(json.loads(payload)))
 
 
 @asynccontextmanager
-async def subscribed(bus: EventBus) -> AsyncGenerator[asyncio.Queue[ToUserChanged]]:
-    events: asyncio.Queue[ToUserChanged] = asyncio.Queue()
+async def subscribed(bus: EventBus) -> AsyncGenerator[asyncio.Queue[PanelEvent]]:
+    events: asyncio.Queue[PanelEvent] = asyncio.Queue()
     async with (
         bus.open_async_redis() as client,
         PubSub(client.connection_pool) as subscriber,
@@ -54,11 +58,11 @@ async def subscribed(bus: EventBus) -> AsyncGenerator[asyncio.Queue[ToUserChange
                 await pump
 
 
-async def next_event(events: asyncio.Queue[ToUserChanged]) -> ToUserChanged:
+async def next_event(events: asyncio.Queue[PanelEvent]) -> PanelEvent:
     return await asyncio.wait_for(events.get(), timeout=5)
 
 
-async def recorded_event(events: asyncio.Queue[ToUserChanged]) -> int:
+async def recorded_event(events: asyncio.Queue[PanelEvent]) -> int:
     return (await next_event(events)).agent_id
 
 
@@ -84,6 +88,28 @@ async def test_changes_atomic_replacement_and_new_workspace(
             await asyncio.sleep(0.2)
             (tmp_path / "8" / "to_user.md").write_text("updated")
             assert (await next_event(events)).agent_id == 8
+        finally:
+            watcher.cancel()
+
+
+@pytest.mark.asyncio
+async def test_ongoing_edits_publish_only_their_own_event(
+    tmp_path: Path, event_bus: EventBus
+) -> None:
+    workspace = tmp_path / "7"
+    workspace.mkdir()
+    ongoing = workspace / "ongoing.md"
+    async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
+        watcher = group.create_task(watch_to_user(tmp_path, event_bus))
+        try:
+            await asyncio.sleep(0.7)
+            ongoing.write_text("## Doing")
+            assert await next_event(events) == OngoingChanged(agent_id=7)
+            ongoing.write_text("## Waiting")
+            assert await next_event(events) == OngoingChanged(agent_id=7)
+            ongoing.unlink()
+            assert await next_event(events) == OngoingChanged(agent_id=7)
+            assert not ongoing.exists()
         finally:
             watcher.cancel()
 

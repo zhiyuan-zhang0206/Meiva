@@ -428,6 +428,7 @@ OpKind = Literal[
     "harness_probe",
     "upload-receive-v2",
     "to_user_read",
+    "ongoing_read",
     "harness_timeline_read",
     "workspace_transfer_prepare",
     "workspace_transfer_import",

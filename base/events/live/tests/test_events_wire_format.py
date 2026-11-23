@@ -26,6 +26,7 @@ from base.events.live.projection import (
     LabelUpdated,
     LLMDone,
     LLMKeepalive,
+    OngoingChanged,
     QuestionAsked,
     QuestionResolved,
     ReasoningDelta,
@@ -36,6 +37,7 @@ from base.events.live.projection import (
 
 FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (ToUserChanged, "to_user_changed", {}),
+    (OngoingChanged, "ongoing_changed", {}),
     (AgentSpawned, "agent_spawned", {}),
     (AgentUpdated, "agent_updated", {}),
     (
@@ -169,6 +171,7 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "agent_updated",
         "label_updated",
         "to_user_changed",
+        "ongoing_changed",
         "question_asked",
         "question_resolved",
         "notification",

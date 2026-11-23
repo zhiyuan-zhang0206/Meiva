@@ -229,6 +229,25 @@ def test_note_states_the_workspace_when_the_section_is_on(
 
 
 @pytest.mark.usefixtures("labelled_agent")
+@pytest.mark.parametrize("text", ["## Doing\n- Prepare results\n", " \n", None])
+def test_note_includes_only_nonempty_ongoing_work(
+    clients: ClientSet, unit_home: Path, text: str | None
+) -> None:
+    workspace = unit_home / "workspaces" / "29"
+    workspace.mkdir(parents=True)
+    if text is not None:
+        (workspace / "ongoing.md").write_text(text)
+
+    enabled = _content(agent_id_note(_context(clients, workspace=True)))
+    disabled = _content(agent_id_note(_context(clients, workspace=False)))
+    assert "ongoing.md" not in disabled
+    if text and text.strip():
+        assert enabled.endswith(f"Current ongoing work from `ongoing.md`:\n{text}")
+    else:
+        assert "ongoing.md" not in enabled
+
+
+@pytest.mark.usefixtures("labelled_agent")
 @pytest.mark.parametrize(
     ("meiva_under_user_home", "shown"),
     [(True, "~/elsewhere/workspaces/29"), (False, None)],
