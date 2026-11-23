@@ -270,6 +270,7 @@ def generate_config(
         retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port("127.0.0.1", obs.telemetry_otlp_port),
+        harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
         data_plane_receivers=receivers,
         data_plane_pipeline=pipeline,
         exporters=_exporters(

@@ -59,6 +59,7 @@ def observability_config_from_boot(boot: ConfigBoot) -> ObservabilityConfig:
         observability_otlp_port=domain.observability_otlp_port,
         telemetry_otlp_enabled=domain.telemetry_otlp_enabled,
         telemetry_otlp_port=domain.telemetry_otlp_port,
+        harness_otlp_port=domain.harness_otlp_port,
         gateway_otlp_endpoint=domain.gateway_otlp_endpoint,
         telemetry_tempo_endpoint=domain.telemetry_tempo_endpoint,
         telemetry_tempo_query_url=domain.telemetry_tempo_query_url,

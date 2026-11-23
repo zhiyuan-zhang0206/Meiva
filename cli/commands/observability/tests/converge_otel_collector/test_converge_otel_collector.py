@@ -71,7 +71,10 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
     values = collector_settings_from_boot(command_runtime.config)
 
     for group, expected in (
-        (values.observability, dict(view.observability)),
+        (
+            values.observability,
+            {**dict(view.observability), "harness_otlp_port": view.observability.harness_otlp_port},
+        ),
         (
             values.data_plane,
             {**dict(view.data_plane), "is_remote": view.data_plane.is_remote},
@@ -279,7 +282,31 @@ def test_the_shipped_template_is_fully_consumed_for_every_role_shape(
         roles, observability=observability(gateway_otlp_endpoint=GATEWAY_INGRESS)
     )
 
-    assert set(config) == {"receivers", "processors", "extensions", "exporters", "service"}
+    assert set(config) == {
+        "receivers",
+        "processors",
+        "extensions",
+        "exporters",
+        "service",
+        "connectors",
+    }
+
+
+@pytest.mark.parametrize("signal", ["logs", "metrics", "traces"])
+def test_harness_redaction_precedes_every_export(
+    collector_unit: CollectorUnit,
+    signal: str,
+) -> None:
+    config = collector_unit.render(GATEWAY)
+    receiver = mapping_at(config, "receivers", "otlp/harness", "protocols", "http")
+    assert receiver[f"{signal}_url_path"] == f"/meiva-harness/v1/{signal}"
+    assert receiver["response_headers"] == {"X-Meiva-Harness-Redaction": "1"}
+    pipelines = mapping_at(config, "service", "pipelines")
+    assert sequence_at(pipelines, f"{signal}/harness", "receivers") == ["otlp/harness"]
+    assert "redaction/harness" in sequence_at(pipelines, f"{signal}/harness", "processors")
+    assert sequence_at(pipelines, f"{signal}/harness", "exporters") == ["forward/harness"]
+    assert "forward/harness" in sequence_at(pipelines, signal, "receivers")
+    assert "redaction/harness" not in sequence_at(pipelines, signal, "processors")
 
 
 def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
@@ -457,7 +484,11 @@ def test_the_host_identity_processors_sit_on_the_infra_pipeline_only(
 ) -> None:
     pipelines = mapping_at(collector_unit.render(GATEWAY), "service", "pipelines")
 
-    assert sequence_at(pipelines, "metrics", "receivers") == ["otlp", "otlp/remote"]
+    assert sequence_at(pipelines, "metrics", "receivers") == [
+        "otlp",
+        "forward/harness",
+        "otlp/remote",
+    ]
     assert "transform/host_label" not in sequence_at(pipelines, "metrics", "processors")
     assert "transform/host_label" in sequence_at(pipelines, "metrics/infra", "processors")
     assert "resource_detection/host" in sequence_at(pipelines, "metrics/infra", "processors")
@@ -538,6 +569,7 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
     logs = mapping_at(config, "service", "pipelines", "logs")
     assert sequence_at(logs, "receivers") == [
         "otlp",
+        "forward/harness",
         "otlp/remote",
         "filelog/sessions",
         "filelog/services",

@@ -35,7 +35,7 @@ from base.lm.harness.handoff import HarnessContribution
 from base.lm.harness.process import CloseResidueError
 from base.lm.harness.registration import RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
-from base.lm.harness.wiring import BridgeRootValues, bridge_for
+from base.lm.harness.wiring import BridgeRootValues, HarnessOtlp, bridge_for
 from base.lm.registry import resolve_available_model
 from base.log import logger
 from base.paths import workspace_dir
@@ -140,6 +140,7 @@ class HostPolicy:
     browser_authority: BrowserAuthority | None = None
     workspace_hygiene: WorkspaceHygienePolicy = field(default_factory=WorkspaceHygienePolicy)
     personal_dream: PersonalDreamPolicy = field(default_factory=PersonalDreamPolicy)
+    harness_otlp: HarnessOtlp | None = None
 
     def resolve_slices(
         self,

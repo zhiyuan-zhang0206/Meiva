@@ -482,6 +482,7 @@ class AgentHost:
                 clock=self._policy.clock_factory(),
                 controller_pid=self._policy.pid,
                 caller_registry=self._policy.browser_authority,
+                telemetry=self._policy.harness_otlp,
                 handle_rng=self._policy.rng,
                 own_turn=self._wake_resumed,
                 timestamp_prefix=lambda: self._handoff_stamping.policy().prefix(),

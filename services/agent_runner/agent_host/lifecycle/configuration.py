@@ -16,6 +16,7 @@ from base.host.boundary.untyped import object_of
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.registration import SecureRandom
+from base.lm.harness.wiring import HarnessOtlp
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.telemetry.process_logging import init_gateway_process
@@ -62,7 +63,16 @@ def host_policy(
     python: Path,
 ) -> HostPolicy:
     daemon = config.view.daemon
+    observability = config.view.observability
     return HostPolicy(
+        harness_otlp=(
+            HarnessOtlp(
+                f"http://127.0.0.1:{observability.harness_otlp_port}/meiva-harness",
+                traces=observability.trace_enabled,
+            )
+            if observability.telemetry_otlp_enabled
+            else None
+        ),
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
         harness_environ=child_env(config.process_environment()),

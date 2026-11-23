@@ -47,3 +47,34 @@ failure names the PATH and every directory that was searched instead of a bare
 the child changes to its workspace, including when PATH contains relative entries.
 The path keeps symlinks intact; it does not resolve their targets. An explicitly
 configured path containing a separator is validated and returned unchanged.
+
+## Native OpenTelemetry
+
+Hosted Codex sessions export metrics and traces. Hosted Claude Code sessions
+export metrics, events and beta traces. The host uses a dedicated loopback
+receiver at `/meiva-harness/v1/*`. Its port is derived from the unit's local
+OTLP port by shifting within the unprivileged range, keeping adjacent unit
+ports distinct. Before starting a CLI, the host sends an empty OTLP request
+and verifies the live receiver's redaction marker. It logs a warning and starts
+the CLI with export disabled if the probe fails. During collector replacement,
+a CLI that already has the dedicated endpoint can only send to the redacted
+receiver. It enables these exporters
+when `MEIVA_TELEMETRY_OTLP_ENABLED` is on and enables their spans when
+`MEIVA_TRACE_ENABLED` is also on. OTLP resources identify the agent through
+`meiva.agent_id`, `harness` and `service.instance.id`. The per-agent instance
+keeps cumulative Prometheus counters from different agents in distinct series.
+Harness-reported token and cost observations are for diagnostics. Billing and
+product usage continue to come from the existing Meiva usage path.
+
+Codex passes W3C Trace Context in each app-server JSON-RPC request. Its native
+OTLP log exporter is disabled because tool arguments can appear there even
+when prompt and tool-output recording are disabled. Claude Code has per-process
+TRACEPARENT support. The bridge clears it at SDK launch so a persistent process
+can emit independent interaction traces without adding later turns to the first
+Meiva turn. Follow [Claude Agent SDK per-message context support](https://github.com/anthropics/claude-agent-sdk-python/issues/1126)
+for the remaining integration point.
+
+The harnesses' content controls are disabled at launch, and the collector
+applies a diagnostic attribute allowlist to their native signals before local
+storage or relay. The collector also replaces log bodies with an event label
+and clears free-text span status messages.

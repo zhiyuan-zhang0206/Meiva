@@ -33,6 +33,7 @@ class CollectorValues:
     data_plane_pipeline: str
     exporters: str
     remote: RemoteFragments
+    harness_ingress_endpoint: str
 
 
 # meiva:note
@@ -49,6 +50,7 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "RETENTION_DAYS": str(values.retention_days),
         "SELF_METRICS_PORT": str(values.self_metrics_port),
         "OTLP_RECEIVER_ENDPOINT": values.local_ingress_endpoint,
+        "HARNESS_OTLP_RECEIVER_ENDPOINT": values.harness_ingress_endpoint,
         "DATA_PLANE_RECEIVERS": values.data_plane_receivers,
         "DATA_PLANE_PIPELINE_RECEIVERS": values.data_plane_pipeline,
         "OTLP_EXPORTERS": values.exporters,

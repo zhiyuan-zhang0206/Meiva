@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,8 @@ class CodexConfig:
     startup_timeout_seconds: float = 120.0
     cancel_settle_seconds: float = 5.0
     max_buffered_events: int = 256
+    otlp_endpoint: str | None = None
+    trace_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.sandbox not in SANDBOX_MODES:
@@ -62,4 +65,38 @@ class CodexConfig:
             raise ValueError("max_buffered_events must be at least 1")
 
     def command(self, binary: str | None = None) -> tuple[str, ...]:
-        return (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)
+        command = (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)
+        if self.otlp_endpoint is None:
+            return (
+                *command,
+                "-c",
+                'otel.exporter="none"',
+                "-c",
+                'otel.trace_exporter="none"',
+                "-c",
+                'otel.metrics_exporter="none"',
+            )
+        return (*command, *self._otel_args(self.otlp_endpoint.rstrip("/")))
+
+    def _otel_args(self, endpoint: str) -> tuple[str, ...]:
+        metrics = _http_exporter(endpoint, "metrics")
+        traces = _http_exporter(endpoint, "traces") if self.trace_enabled else '"none"'
+        return (
+            "-c",
+            'otel.exporter="none"',
+            "-c",
+            f"otel.trace_exporter={traces}",
+            "-c",
+            f"otel.metrics_exporter={metrics}",
+            "-c",
+            "otel.log_user_prompt=false",
+            "-c",
+            "otel.log_agent_responses=false",
+            "-c",
+            "otel.log_guardian_assessments=false",
+        )
+
+
+def _http_exporter(endpoint: str, signal: str) -> str:
+    url = json.dumps(f"{endpoint}/v1/{signal}")
+    return f'{{otlp-http = {{endpoint = {url}, protocol = "binary"}}}}'
