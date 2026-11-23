@@ -1,7 +1,6 @@
 # meiva:note
 # The alert store and its three HTTP surfaces (webhook ingest, unresolved-first list,
-# SSE tail); this router is the only writer of `alerts` and delivers an alert nowhere
-# else. The auth split between the Grafana webhook and the UI/SDK callers is stated in
+# SSE tail) and the separate Alertmanager inbox webhook. Ingest owns writes to `alerts`. The auth split between the Grafana webhook and the UI/SDK callers is stated in
 # the document this site links.
 # meiva:link gateway/alerts/docs/alerts.md
 
@@ -27,6 +26,7 @@ from base.telemetry.alerts import (
     upsert_alert,
 )
 from base.telemetry.alerts.shadow import AlertShadowBatch
+from gateway.alerts.agent_webhook import router as agent_webhook_router
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertsListMeta,
@@ -47,6 +47,7 @@ from ops.alerts import (
 )
 
 router = APIRouter()
+router.include_router(agent_webhook_router)
 
 
 _log = logging.getLogger(__name__)
@@ -87,8 +88,7 @@ def ingest_authorized(request: Request) -> bool:
 # meiva:note
 # Alertmanager webhook endpoint: the body is the standard webhook payload (`status` +
 # `alerts[]`). One row per (fingerprint, starts_at); re-sends while firing update the row,
-# resolution flips status and sets ends_at. Every ingested row is published to the SSE stream;
-# nothing delivers it elsewhere.
+# resolution flips status and sets ends_at. Ingest publishes rows to the SSE stream.
 def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestResult:
     if not ingest_authorized(request):
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")

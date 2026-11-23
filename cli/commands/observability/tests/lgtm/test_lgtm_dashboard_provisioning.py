@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from base.agents.context.clients import DatabaseHandle
 from base.clock.tests.fakes import system_clock
@@ -48,12 +49,22 @@ def _repo(tmp_path: Path, reference: Any = _REFERENCE) -> Path:
     return tmp_path / "repo"
 
 
-def _render(repo: Path, native: Path, dashboard: DashboardOutcome = _BROKEN) -> list[Any]:
+def _render(
+    repo: Path,
+    native: Path,
+    dashboard: DashboardOutcome = _BROKEN,
+    *,
+    alert_contact_override: Path | None = None,
+) -> list[Any]:
     written: list[Any] = []
     pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
     try:
         provisioning.render_provisioning(
-            repo, native, dashboard=dashboard, producer=lambda: pipeline
+            repo,
+            native,
+            dashboard=dashboard,
+            producer=lambda: pipeline,
+            alert_contact_override=alert_contact_override,
         )
     finally:
         assert pipeline.stop().status is DrainStatus.COMPLETED
@@ -287,11 +298,16 @@ def test_converge_drops_sidecar_entries_with_no_rendered_file(
 # meiva:note
 # The render answers the destinations whose contents it moved, so the seal warning names one run
 # and an unchanged re-render stays silent (task #6403).
-def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
+def test_site_alert_policy_falls_back_and_renders_changes_idempotently(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     source = repo / "deploy/lgtm/config/grafana/provisioning"
     (source / "alerting").mkdir()
-    (source / "alerting/contact.yml").write_text("contactPoints: []\n", encoding="utf-8")
+    grafana = REPO_ROOT / "deploy/lgtm/config/grafana"
+    default = (grafana / "provisioning/alerting/contact.yml").read_text(encoding="utf-8")
+    example = (grafana / "contact.agent.example.yml").read_text(encoding="utf-8")
+    (source / "alerting/contact.yml").write_text(default, encoding="utf-8")
+    override = tmp_path / "site/contact.yml"
+    override.parent.mkdir()
     native = tmp_path / "native"
     dashboard = RenderedDashboard(_json(_REFERENCE), ())
 
@@ -300,11 +316,70 @@ def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
         pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
         try:
             return provisioning.render_provisioning(
-                repo, native, dashboard=dashboard, producer=lambda: pipeline
+                repo,
+                native,
+                dashboard=dashboard,
+                producer=lambda: pipeline,
+                alert_contact_override=override,
             )
         finally:
             assert pipeline.stop().status is DrainStatus.COMPLETED
 
-    changed = render()
-    assert changed == (native / "config/provisioning/alerting/contact.yml",)
+    destination = native / "config/provisioning/alerting/contact.yml"
+    assert render() == (destination,)
+    assert destination.read_text(encoding="utf-8") == default
     assert render() == ()
+
+    override.write_text(example, encoding="utf-8")
+    assert render() == (destination,)
+    assert destination.read_text(encoding="utf-8") == example
+    assert render() == ()
+
+    changed = example.replace("/agents/1234", "/agents/4321")
+    override.write_text(changed, encoding="utf-8")
+    assert render() == (destination,)
+    assert destination.read_text(encoding="utf-8") == changed
+
+    override.unlink()
+    assert render() == (destination,)
+    assert destination.read_text(encoding="utf-8") == default
+    assert render() == ()
+
+
+@pytest.mark.parametrize(
+    "invalid", ("policies: [", "", "apiVersion: 1\ncontactPoints: []\npolicies: []\n")
+)
+def test_invalid_alert_policy_preserves_the_last_provisioned_file(
+    tmp_path: Path, invalid: str
+) -> None:
+    native = tmp_path / "native"
+    destination = native / "config/provisioning/alerting/contact.yml"
+    override = tmp_path / "contact.yml"
+    _render(REPO_ROOT, native)
+    previous_content = destination.read_bytes()
+    previous_hashes = _hashes(native)
+
+    override.write_text(invalid, encoding="utf-8")
+    with pytest.raises(ValueError, match="Grafana alerting override"):
+        _render(REPO_ROOT, native, alert_contact_override=override)
+
+    assert destination.read_bytes() == previous_content
+    assert _hashes(native) == previous_hashes
+
+
+def test_agent_policy_example_preserves_the_ingest_policy() -> None:
+    grafana = REPO_ROOT / "deploy/lgtm/config/grafana"
+    default = yaml.safe_load(
+        (grafana / "provisioning/alerting/contact.yml").read_text(encoding="utf-8")
+    )
+    example = yaml.safe_load((grafana / "contact.agent.example.yml").read_text(encoding="utf-8"))
+    agent_receiver = example["contactPoints"].pop()
+    (receiver,) = agent_receiver["receivers"]
+    assert receiver["disableResolveMessage"] is False
+    assert receiver["settings"]["url"] == "$__env{MEIVA_ALERTS_WEBHOOK_URL}/agents/1234"
+    assert example["policies"][0]["routes"].pop(0) == {
+        "receiver": agent_receiver["name"],
+        "object_matchers": [["severity", "=~", "critical|error"]],
+        "continue": True,
+    }
+    assert example == default

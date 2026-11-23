@@ -62,3 +62,5 @@ code, and needs its own decision.
   POST to a route that no longer exists and log a failure for every alert.
 - Drop the tables in the same change: a running old daemon reads them, and a
   failed rollout would then have lost its data with no way back.
+
+Forward: [Alertmanager can route a notification group to an agent inbox](../../observability/alerts/2026-11-24-alertmanager-agent-receiver.md).

@@ -501,7 +501,11 @@ def render_configs(
         changed.append(rendered_run_script)
     rendered_run_script.chmod(0o755)
     return tuple(changed) + render_provisioning(
-        repo, native_dir, dashboard=dashboard, producer=producer
+        repo,
+        native_dir,
+        dashboard=dashboard,
+        producer=producer,
+        alert_contact_override=meiva_home / "lgtm/alerting/contact.yml",
     )
 
 

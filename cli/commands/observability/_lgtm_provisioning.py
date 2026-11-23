@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import TypeGuard, assert_never
 
 import httpx
+import yaml
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
@@ -230,9 +232,41 @@ def record_rendered_hash(
     hashes_path.write_text(json.dumps(update, indent=2) + "\n", encoding="utf-8")
 
 
+_ALERT_CONTACT_PATH = Path("alerting/contact.yml")
+
+
+def _alert_contact_override(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        document = object_of(yaml.safe_load, content)
+    except yaml.YAMLError:
+        raise ValueError(f"Grafana alerting override {path} contains invalid YAML") from None
+    if (
+        not _is_object_dict(document)
+        or document.get("apiVersion") != 1
+        or not all(
+            _is_object_list(entries)
+            and entries
+            and all(_is_object_dict(entry) for entry in entries)
+            for entries in (document.get("contactPoints"), document.get("policies"))
+        )
+    ):
+        raise ValueError(
+            f"Grafana alerting override {path} must define apiVersion: 1, "
+            "nonempty contactPoints and policies"
+        )
+    return content
+
+
 # meiva:note
 # Every provisioning file is copied verbatim, and the checkout owns the tree: a
-# rendered copy that drifted from its recorded hash is restored and reported as
+# site may replace the alert contact and policy file as one unit. A rendered copy that
+# drifted from its recorded hash is restored and reported as
 # converge_file_overwritten rather than preserved. The datasource and webhook
 # URLs stay Grafana-native $__env{} references resolved from runtime.env, and
 # Grafana reads the rendered tree through MEIVA_PROVISIONING_PATH, so a rollout
@@ -249,10 +283,12 @@ def render_provisioning(
     *,
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
+    alert_contact_override: Path | None = None,
 ) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     if not source_dir.is_dir():
         return ()
+    site_contact = _alert_contact_override(alert_contact_override)
     dest_dir = native_dir / "config" / "provisioning"
     hashes_path = native_dir / "config" / "provisioning-hashes.json"
     rendered_relative: set[str] = set()
@@ -266,7 +302,11 @@ def render_provisioning(
         if rel.as_posix() == RENDERED_DASHBOARD_REL:
             continue
         rendered_relative.add(rel.as_posix())
-        content = source.read_text(encoding="utf-8")
+        content = (
+            site_contact
+            if rel == _ALERT_CONTACT_PATH and site_contact is not None
+            else source.read_text(encoding="utf-8")
+        )
         dest = dest_dir / rel
         if not dest.is_file() or dest.read_text(encoding="utf-8") != content:
             changed.append(dest)
