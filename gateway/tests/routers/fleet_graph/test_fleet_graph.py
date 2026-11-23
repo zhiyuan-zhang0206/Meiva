@@ -75,6 +75,17 @@ def _usage(
             json.dumps({"in_total": in_total, "out_total": out_total}),
         ),
     )
+    if event == "llm_usage":
+        db_conn.execute(
+            """
+            INSERT INTO llm_usage_ledger
+                (call_id, occurred_at, agent_id, machine, cluster, billing, usage_kind,
+                 model, calls, complete, tokens_in, tokens_out, price_snapshot)
+            VALUES (%s, now() - (%s * interval '1 hour'), %s, 'test', 'c', 'api', 'test',
+                    'test', 1, TRUE, %s, %s, '{}')
+            """,
+            (str(uuid.uuid4()), age_hours, agent, in_total, out_total),
+        )
     db_conn.commit()
 
 

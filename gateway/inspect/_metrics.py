@@ -1,11 +1,4 @@
-"""SQL-only Inspector statistics over persisted observations and historical days.
-
-New observations own dates at/after the collection's UTC cutover day. Earlier
-full days prefer the existing family ledger; raw observations fill missing days
-and partial-day edges. The two sources never add the same family's day twice.
-Exact quantiles retain their observations; their DB work scales with the selected
-turns. Source loss remains explicit and is never repaired by a synchronous log scan.
-"""
+# meiva:link gateway/inspect/docs/inspect.md
 
 from __future__ import annotations
 
@@ -31,16 +24,6 @@ from gateway.inspect.schemas import (
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
 _SUM_FIELDS = (
-    "usage_calls",
-    "unpriced_calls",
-    "tokens_in",
-    "tokens_out",
-    "tokens_cached",
-    "tokens_cache_input",
-    "tokens_reasoning",
-    "cost_usd",
-    "cost_usd_subscription",
-    "unpriced_calls_subscription",
     "turn_total",
     "turn_ok",
     "turn_duration_sum",
@@ -151,7 +134,6 @@ def _observed_days(
     # Fixed column vocabulary, never request-derived SQL identifiers.
     expressions = {
         "turn_duration_sum": "turn_duration_seconds",
-        "tokens_cache_input": "coalesce(tokens_cache_input, tokens_in)",
     }
     sums = ", ".join(
         f"COALESCE(sum({expressions.get(name, name)}),0) AS {name}" for name in _SUM_FIELDS
@@ -172,39 +154,46 @@ def _observed_days(
     return {_as_day(row["day"]): row for row in days}
 
 
-def _legacy_days(
+def _ledger_costs(conn: Connection, agent_id: int, start: datetime, end: datetime) -> Row:
+    return _rows(
+        conn,
+        """
+        SELECT count(*) AS reports, count(*) FILTER (WHERE NOT complete) AS incomplete_reports,
+          bool_or(call_id LIKE 'legacy:%%') AS imported_history,
+          COALESCE(sum(calls), 0) AS usage_calls,
+          COALESCE(sum(calls) FILTER (WHERE cost_usd IS NULL), 0) AS unpriced_calls,
+          COALESCE(sum(calls) FILTER (
+              WHERE cost_usd IS NULL AND billing = 'subscription'), 0) AS unpriced_calls_subscription,
+          COALESCE(sum(tokens_in), 0) AS tokens_in,
+          COALESCE(sum(tokens_out), 0) AS tokens_out,
+          COALESCE(sum(tokens_in) FILTER (WHERE cache_read IS NOT NULL), 0) AS tokens_cache_input,
+          COALESCE(sum(cache_read), 0) AS tokens_cached,
+          COALESCE(sum(tokens_reasoning), 0) AS tokens_reasoning,
+          COALESCE(sum(cost_usd), 0) AS cost_usd,
+          COALESCE(sum(cost_usd) FILTER (WHERE billing = 'subscription'), 0) AS cost_usd_subscription
+        FROM llm_usage_ledger
+        WHERE agent_id = %s AND occurred_at >= %s AND occurred_at < %s
+        """,
+        (agent_id, start, end),
+    )[0]
+
+
+def _legacy_turns(
     conn: Connection,
     agent_id: int,
     start: datetime,
     end: datetime,
     cutover: date,
-) -> tuple[dict[date, Row], dict[date, Row]]:
-    """Read historical evidence without allowing the old writer to own new dates."""
-    params = (agent_id, start.date(), min(end.date(), cutover))
-    costs = _rows(
-        conn,
-        "SELECT day, sum(llm_calls) AS usage_calls, sum(unpriced_calls) AS unpriced_calls, "
-        "sum(unpriced_calls_subscription) AS unpriced_calls_subscription, "
-        "sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out, "
-        "sum(tokens_in) AS tokens_cache_input, "
-        "sum(tokens_cached) AS tokens_cached, sum(tokens_reasoning) AS tokens_reasoning, "
-        "sum(cost_usd) AS cost_usd, sum(cost_usd_subscription) AS cost_usd_subscription "
-        "FROM agent_model_tokens_daily "
-        "WHERE agent_id=%s AND day>=%s AND day<%s GROUP BY day",
-        params,
-    )
-    turns = _rows(
+) -> dict[date, Row]:
+    rows = _rows(
         conn,
         "SELECT day, turn_total, turn_ok, turn_dur_sum AS turn_duration_sum, "
         "turn_dur_min AS turn_duration_min, turn_dur_max AS turn_duration_max, "
         "turn_dur_hist, exec_ok, exec_failed FROM agent_metrics_daily "
         "WHERE agent_id=%s AND day>=%s AND day<%s",
-        params,
+        (agent_id, start.date(), min(end.date(), cutover)),
     )
-    return (
-        {_as_day(row["day"]): row for row in costs if _full_day(_as_day(row["day"]), start, end)},
-        {_as_day(row["day"]): row for row in turns if _full_day(_as_day(row["day"]), start, end)},
-    )
+    return {_as_day(row["day"]): row for row in rows if _full_day(_as_day(row["day"]), start, end)}
 
 
 def _evidence(
@@ -277,6 +266,7 @@ def inspect_snapshot(
 @dataclass
 class _Totals:
     usage_calls: int = 0
+    incomplete_reports: int = 0
     unpriced_calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
@@ -296,30 +286,25 @@ class _Totals:
 
 
 def _sum_days(
-    observed: dict[date, Row], costs: dict[date, Row], turns: dict[date, Row]
+    observed: dict[date, Row], cost: Row, turns: dict[date, Row]
 ) -> tuple[_Totals, list[float]]:
-    """Choose one cost and turn source per day before additive reduction."""
-    totals = _Totals()
+    totals = _Totals(
+        usage_calls=_as_int(cost["usage_calls"]),
+        incomplete_reports=_as_int(cost["incomplete_reports"]),
+        unpriced_calls=_as_int(cost["unpriced_calls"]),
+        tokens_in=_as_int(cost["tokens_in"]),
+        tokens_out=_as_int(cost["tokens_out"]),
+        tokens_cached=_as_int(cost["tokens_cached"]),
+        tokens_cache_input=_as_int(cost["tokens_cache_input"]),
+        tokens_reasoning=_as_int(cost["tokens_reasoning"]),
+        cost_usd=Decimal(str(cost["cost_usd"])),
+        cost_usd_subscription=Decimal(str(cost["cost_usd_subscription"])),
+        unpriced_calls_subscription=_as_int(cost["unpriced_calls_subscription"]),
+    )
     extrema: list[float] = []
-    for day in observed.keys() | costs.keys() | turns.keys():
+    for day in observed.keys() | turns.keys():
         raw = observed.get(day, {})
-        cost_row = costs.get(day, raw)
         turn_row = turns.get(day, raw)
-        totals.usage_calls += _as_int(cost_row.get("usage_calls", 0))
-        totals.unpriced_calls += _as_int(cost_row.get("unpriced_calls", 0))
-        totals.tokens_in += _as_int(cost_row.get("tokens_in", 0))
-        totals.tokens_out += _as_int(cost_row.get("tokens_out", 0))
-        totals.tokens_cached += _as_int(cost_row.get("tokens_cached", 0))
-        cache_input = cost_row.get("tokens_cache_input", 0)
-        totals.tokens_cache_input += _as_int(
-            cost_row["tokens_in"] if cache_input is None else cache_input
-        )
-        totals.tokens_reasoning += _as_int(cost_row.get("tokens_reasoning", 0))
-        totals.cost_usd += Decimal(str(cost_row.get("cost_usd", 0)))
-        totals.cost_usd_subscription += Decimal(str(cost_row.get("cost_usd_subscription", 0)))
-        totals.unpriced_calls_subscription += _as_int(
-            cost_row.get("unpriced_calls_subscription", 0)
-        )
         totals.turn_total += _as_int(turn_row.get("turn_total", 0))
         totals.turn_ok += _as_int(turn_row.get("turn_ok", 0))
         totals.turn_duration_sum += _as_float(turn_row.get("turn_duration_sum", 0))
@@ -407,6 +392,7 @@ def _cost_and_turns(
             unpriced_calls_api=totals.unpriced_calls - totals.unpriced_calls_subscription,
             unpriced_calls_subscription=totals.unpriced_calls_subscription,
             llm_calls=totals.usage_calls,
+            incomplete_usage_reports=totals.incomplete_reports,
             tokens_in=totals.tokens_in,
             tokens_out=totals.tokens_out,
             tokens_cached=totals.tokens_cached,
@@ -521,17 +507,16 @@ def read_snapshot(
     # Birth cannot have observations before itself; its first partial UTC day
     # is therefore a complete lifetime ledger day without estimating an edge.
     legacy_start = _midnight(start) if start == spawned_at else start
-    costs, turns = _legacy_days(
-        conn, agent_id, legacy_start, end, collection.astimezone(UTC).date()
-    )
+    costs = _ledger_costs(conn, agent_id, start, end)
+    turns = _legacy_turns(conn, agent_id, legacy_start, end, collection.astimezone(UTC).date())
     totals, extrema = _sum_days(observed, costs, turns)
     distribution, precision = _duration_distribution(conn, agent_id, start, end, observed, turns)
     durations_known = sum(count for _, count in distribution) == totals.turn_total
     historical = max(start, spawned_at) < collection
     cost_evidence = _evidence(
-        historical=historical,
-        present=bool(costs) or any(row["usage_calls"] for row in observed.values()),
-        sources=["observations", *(["historical_daily_costs"] if costs else [])],
+        historical=historical or bool(costs["imported_history"]),
+        present=bool(costs["reports"]),
+        sources=["usage_ledger"],
     )
     turn_evidence = _turn_evidence(
         historical=historical,

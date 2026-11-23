@@ -59,6 +59,42 @@ def _agent(conn: psycopg.Connection, born: datetime) -> int:
     return agent_id
 
 
+def _write_facts(rows: list[MetricObservation], *, db: psycopg.Connection) -> None:
+    write_observations([row for row in rows if row.kind != "usage"], db=db)
+    for row in rows:
+        if row.kind != "usage":
+            continue
+        cost = row.cost_usd if not row.unpriced_calls else None
+        subscription = bool(row.cost_usd_subscription or row.unpriced_calls_subscription)
+        measured_cache = bool(row.tokens_cache_input) or (
+            row.tokens_cache_input is None and bool(row.tokens_cached)
+        )
+        db.execute(
+            """
+            INSERT INTO llm_usage_ledger
+                (call_id, occurred_at, agent_id, machine, cluster, billing, usage_kind,
+                 model, calls, complete, tokens_in, tokens_out, tokens_reasoning, cache_read,
+                 cost_usd, price_source, price_snapshot)
+            VALUES (%s, %s, %s, 'test', 'test', %s, 'test', %s, %s, TRUE,
+                    %s, %s, %s, %s, %s, %s, '{}')
+            """,
+            (
+                f"api:{row.event_id}",
+                row.occurred_at,
+                row.agent_id,
+                "subscription" if subscription else "api",
+                row.model or "",
+                row.usage_calls,
+                row.tokens_in,
+                row.tokens_out,
+                row.tokens_reasoning,
+                row.tokens_cached if measured_cache else None,
+                cost,
+                "live" if cost is not None else None,
+            ),
+        )
+
+
 def _read(
     conn: psycopg.Connection,
     agent_id: int,
@@ -83,7 +119,7 @@ def test_numeric_facts_are_agent_scoped_and_prices_are_never_recomputed(
     start = end - timedelta(hours=1)
     aid = _agent(db_conn, start)
     other = _agent(db_conn, start)
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1,
@@ -137,7 +173,7 @@ def test_cost_splits_into_api_and_subscription_buckets(db_conn: psycopg.Connecti
     # day-summary path, and the assertion is about the split, not about "now".
     day = datetime(2026, 9, 15, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
     aid = _agent(db_conn, day - timedelta(days=2))
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1, aid, day + timedelta(hours=1), "usage", usage_calls=1, cost_usd=Decimal("0.25")
@@ -179,7 +215,7 @@ def test_half_open_window_has_exact_float_quantiles(db_conn: psycopg.Connection)
     end = datetime.now(UTC)
     start = end - timedelta(hours=1)
     aid = _agent(db_conn, start)
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1, aid, start, "turn", turn_total=1, turn_ok=1, turn_duration_seconds=0.1
@@ -204,7 +240,7 @@ def test_half_open_window_has_exact_float_quantiles(db_conn: psycopg.Connection)
     assert snapshot.metadata.turns.duration_precision == "exact"
 
 
-def test_legacy_and_observed_days_never_double_count_and_backfill_fills_gaps(
+def test_historical_turns_and_ledger_usage_use_one_source_per_family(
     db_conn: psycopg.Connection,
 ) -> None:
     midnight = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
@@ -220,7 +256,7 @@ def test_legacy_and_observed_days_never_double_count_and_backfill_fills_gaps(
         'VALUES (%s,%s,2,1,2.4,0.8,1.6,\'{"0":1,"1":1}\')',
         (aid, old.date()),
     )
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1,
@@ -264,7 +300,7 @@ def test_legacy_and_observed_days_never_double_count_and_backfill_fills_gaps(
     result = _read(db_conn, aid, old, midnight, collection=midnight)
     assert result.cost is not None and result.stats is not None
     assert result.cost.cost_usd == 10
-    assert result.cost.llm_calls == 3
+    assert result.cost.llm_calls == 2
     assert result.cost.tokens_out == 120
     assert result.stats.turn_total == 3
     assert result.stats.turn_min_seconds == 0.8
@@ -281,7 +317,7 @@ def test_partial_old_day_does_not_include_whole_day_ledger(db_conn: psycopg.Conn
         "INSERT INTO agent_model_tokens_daily(agent_id,day,model,llm_calls,cost_usd) VALUES (%s,%s,'old',100,999)",
         (aid, old.date()),
     )
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1, aid, old + timedelta(hours=3), "usage", usage_calls=1, cost_usd=Decimal("2")
@@ -305,7 +341,7 @@ def test_new_days_ignore_old_rollup_writer(db_conn: psycopg.Connection) -> None:
         "INSERT INTO agent_model_tokens_daily(agent_id,day,model,llm_calls,cost_usd) VALUES (%s,%s,'stale',100,999)",
         (aid, start.date()),
     )
-    write_observations(
+    _write_facts(
         [MetricObservation(1, aid, start, "usage", usage_calls=1, cost_usd=Decimal("3"))],
         db=db_conn,
     )
@@ -334,7 +370,7 @@ def test_state_intervals_exclude_terminated_gaps(db_conn: psycopg.Connection) ->
         "INSERT INTO agent_lifecycle_intervals(agent_id,started_at,ended_at) VALUES (%s,%s,%s),(%s,%s,NULL)",
         (aid, start, start + timedelta(minutes=10), aid, start + timedelta(minutes=40)),
     )
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1, aid, start + timedelta(minutes=5), "activity", active_seconds=60, exec_seconds=20
@@ -394,7 +430,7 @@ def test_recent_window_for_old_agent_preserves_activity_and_lm_throughput(
         "INSERT INTO agent_lifecycle_intervals(agent_id,started_at) VALUES (%s,%s)",
         (aid, collection),
     )
-    write_observations(
+    _write_facts(
         [
             MetricObservation(1, aid, start, "activity", active_seconds=120),
             MetricObservation(2, aid, start, "usage", usage_calls=1, tokens_out=100),
@@ -415,7 +451,7 @@ def test_missing_duration_is_unknown_throughput_not_zero(db_conn: psycopg.Connec
     end = datetime.now(UTC)
     start = end - timedelta(hours=1)
     aid = _agent(db_conn, start)
-    write_observations(
+    _write_facts(
         [
             MetricObservation(1, aid, start, "usage", usage_calls=1, tokens_out=100),
             MetricObservation(2, aid, start, "turn", turn_total=1),
@@ -435,7 +471,7 @@ def test_large_integer_counters_do_not_round_through_float(db_conn: psycopg.Conn
     start = end - timedelta(hours=1)
     aid = _agent(db_conn, start)
     exact = 2**53 + 1
-    write_observations(
+    _write_facts(
         [MetricObservation(1, aid, start, "usage", usage_calls=1, tokens_out=exact)], db=db_conn
     )
     result = _read(db_conn, aid, start, end)
@@ -452,7 +488,7 @@ def test_replayed_turns_with_missing_duration_cannot_replace_historical_histogra
         'INSERT INTO agent_metrics_daily(agent_id,day,turn_total,turn_ok,turn_dur_sum,turn_dur_min,turn_dur_max,turn_dur_hist) VALUES (%s,%s,2,2,6,2,4,\'{"2":1,"4":1}\')',
         (aid, old.date()),
     )
-    write_observations(
+    _write_facts(
         [
             MetricObservation(1, aid, old, "turn", turn_total=1, turn_duration_seconds=2),
             MetricObservation(2, aid, old, "turn", turn_total=1),
@@ -473,7 +509,7 @@ def test_observed_cache_rate_uses_only_metered_calls(
     start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     end = start + timedelta(days=1) if full_day else start + timedelta(hours=1)
     aid = _agent(db_conn, start)
-    write_observations(
+    _write_facts(
         [
             MetricObservation(
                 1,

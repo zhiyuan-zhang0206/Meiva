@@ -277,6 +277,8 @@ class StatsDashboard(BaseModel):
     tokens: StatsTokens
     cost_usd: float = Field(ge=0)
     subscription_cost_usd: float = Field(ge=0)
+    usage_unpriced_calls: NonNegativeInt = 0
+    usage_incomplete_reports: NonNegativeInt = 0
     openai_cost_usd: float | None = Field(default=None, ge=0)
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     google_cost_usd: float | None = Field(default=None, ge=0)

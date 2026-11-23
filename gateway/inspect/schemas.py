@@ -17,20 +17,14 @@ from ops.rpc_schemas import ShellInfo
 
 
 class AgentCost(BaseModel):
-    """LLM spend + token usage for one agent over the requested window (whole
-    life = historical daily evidence + persisted observed facts; every `llm_usage` event under its
-    agent_id — the agent's "session", which spans restarts/resurrects since
-    agent_id is stable). `cost_usd` sums the rows' usage-time price snapshots
-    only — never re-priced against the current registry. Calls without a
-    snapshot (unpriced model) contribute 0 to cost and are counted in
-    `unpriced_calls`. `cache_hit_pct` uses only input with cache metering;
-    nonzero input with no cache metering produces null. input=0
-    degrades to 0."""
+    """Usage-time price and reported tokens for one agent over the requested window."""
 
     model_config = ConfigDict(frozen=True)
 
     cost_usd: float = Field(ge=0)
-    cost_usd_api: float = Field(ge=0, description="Metered spend: money the account is billed for.")
+    cost_usd_api: float = Field(
+        ge=0, description="API calls valued at their usage-time USD list prices."
+    )
     cost_usd_subscription: float = Field(
         ge=0,
         description=(
@@ -47,6 +41,7 @@ class AgentCost(BaseModel):
         ),
     )
     llm_calls: NonNegativeInt
+    incomplete_usage_reports: NonNegativeInt = 0
     tokens_in: NonNegativeInt
     tokens_out: NonNegativeInt
     tokens_cached: NonNegativeInt

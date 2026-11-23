@@ -2358,6 +2358,7 @@ export interface components {
             unpriced_calls_api: number;
             unpriced_calls_subscription: number;
             llm_calls: number;
+            incomplete_usage_reports: number;
             tokens_in: number;
             tokens_out: number;
             tokens_cached: number;
@@ -2443,6 +2444,10 @@ export interface components {
             label: string | null;
             events: number;
             cost_usd: number;
+            cost_usd_api: number;
+            cost_usd_subscription: number;
+            usage_incomplete_reports: number;
+            usage_unpriced_calls: number;
             llm_calls: number;
             tokens_in: number;
             tokens_out: number;
@@ -3935,6 +3940,8 @@ export interface components {
             tokens: components["schemas"]["StatsTokens"];
             cost_usd: number;
             subscription_cost_usd: number;
+            usage_unpriced_calls: number;
+            usage_incomplete_reports: number;
             openai_cost_usd?: number | null;
             anthropic_cost_usd?: number | null;
             google_cost_usd?: number | null;

@@ -21,6 +21,10 @@ class _AgentMetrics(BaseModel):
     label: str | None
     events: int
     cost_usd: float
+    cost_usd_api: float | None = None
+    cost_usd_subscription: float = 0
+    usage_incomplete_reports: int = 0
+    usage_unpriced_calls: int = 0
     llm_calls: int
     tokens_in: int
     tokens_out: int
@@ -65,7 +69,10 @@ def cmd_metrics_agents(
         render_table(
             (
                 "agent",
-                "cost_usd",
+                "api_usd",
+                "virtual_usd",
+                "incomplete",
+                "unpriced",
                 "calls",
                 "tokens_in",
                 "tokens_out",
@@ -79,7 +86,10 @@ def cmd_metrics_agents(
             [
                 (
                     str(row.agent_id),
-                    f"{row.cost_usd:.2f}",
+                    f"{row.cost_usd_api if row.cost_usd_api is not None else row.cost_usd:.2f}",
+                    f"{row.cost_usd_subscription:.2f}",
+                    str(row.usage_incomplete_reports),
+                    str(row.usage_unpriced_calls),
                     str(row.llm_calls),
                     str(row.tokens_in),
                     str(row.tokens_out),
@@ -140,6 +150,8 @@ class _StatsDashboard(BaseModel):
     tokens: _Tokens
     cost_usd: float
     subscription_cost_usd: float
+    usage_unpriced_calls: int = 0
+    usage_incomplete_reports: int = 0
     openai_cost_usd: float | None
     anthropic_cost_usd: float | None
     google_cost_usd: float | None = None
@@ -182,8 +194,13 @@ def cmd_stats(access: GatewayAccess, *, hours: int | None, as_json: bool) -> int
     print(
         f"cost (usd):    api {stats.cost_usd:.2f} (openai {_usd(stats.openai_cost_usd)}, "
         f"anthropic {_usd(stats.anthropic_cost_usd)}, google {_usd(stats.google_cost_usd)}), "
-        f"subscription {stats.subscription_cost_usd:.2f}"
+        f"subscription (virtual) {stats.subscription_cost_usd:.2f}"
     )
+    if stats.usage_unpriced_calls or stats.usage_incomplete_reports:
+        print(
+            f"usage coverage: {stats.usage_unpriced_calls} calls without price, "
+            f"{stats.usage_incomplete_reports} incomplete reports"
+        )
     print(
         f"alerts:        {stats.alerts.unresolved} unresolved "
         f"({stats.alerts.critical} critical, {stats.alerts.error} error, "
