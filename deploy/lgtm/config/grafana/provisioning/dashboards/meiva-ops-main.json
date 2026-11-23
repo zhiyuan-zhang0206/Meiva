@@ -5893,10 +5893,10 @@
   },
   {
    "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
+    "type": "loki",
+    "uid": "loki"
    },
-   "description": "Ready-for-review to merge latency by complete cluster-tz day \u2014 median and p90 seconds, sampled by the daily PR-flow export job (scripts/ci/pull_requests/pr_flow_export.py) into the meiva_pr_flow_daily_ready_to_merge_median_seconds / _p90_seconds gauges. One row per day; a day leaves the table once its last sample ages past the 26h lookback (a missed run shows as a gap).",
+   "description": "Ready-for-review to merge latency by complete cluster-tz day \u2014 median and p90 seconds from the daily PR-flow export job (scripts/ci/pull_requests/pr_flow_export.py). One row per day, using the latest report in the 26h lookback.",
    "fieldConfig": {
     "defaults": {
      "thresholds": {
@@ -5927,50 +5927,35 @@
    "targets": [
     {
      "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
+      "type": "loki",
+      "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "max by (day) (last_over_time(meiva_pr_flow_daily_ready_to_merge_median_seconds[26h]))",
-     "format": "table",
-     "instant": true,
-     "legendFormat": "median",
-     "range": false,
+     "expr": "last_over_time({service_name=\"unknown_service\", event_name=\"pr_flow_daily\"} | json day=\"attributes.day\", cluster=\"cluster\", category=\"category\", seconds=\"attributes.ready_to_merge_median_seconds\" | cluster=\".meiva\" | category=\"telemetry\" | label_format percentile=\"median\" | unwrap seconds | __error__=\"\" [26h]) by (day, percentile) or last_over_time({service_name=\"unknown_service\", event_name=\"pr_flow_daily\"} | json day=\"attributes.day\", cluster=\"cluster\", category=\"category\", seconds=\"attributes.ready_to_merge_p90_seconds\" | cluster=\".meiva\" | category=\"telemetry\" | label_format percentile=\"p90\" | unwrap seconds | __error__=\"\" [26h]) by (day, percentile)",
+     "legendFormat": "{{percentile}}",
+     "queryType": "instant",
      "refId": "A"
-    },
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(meiva_pr_flow_daily_ready_to_merge_p90_seconds[26h]))",
-     "format": "table",
-     "instant": true,
-     "legendFormat": "p90",
-     "range": false,
-     "refId": "B"
     }
    ],
    "title": "PR ready to merged \u2014 median / p90 (by day)",
    "transformations": [
     {
-     "id": "joinByField",
+     "id": "labelsToFields",
+     "options": {}
+    },
+    {
+     "id": "groupingToMatrix",
      "options": {
-      "byField": "day",
-      "mode": "outer"
+      "columnField": "percentile",
+      "rowField": "day",
+      "valueField": "Value #A"
      }
     },
     {
      "id": "organize",
      "options": {
-      "excludeByName": {
-       "Time 1": true,
-       "Time 2": true
-      },
       "renameByName": {
-       "Value #A": "median",
-       "Value #B": "p90"
+       "day\\percentile": "day"
       }
      }
     }

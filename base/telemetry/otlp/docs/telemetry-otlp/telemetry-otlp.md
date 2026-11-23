@@ -37,10 +37,9 @@ are specified in [Telemetry cluster isolation](cluster-isolation.md).
   when set) as attributes; trace_id / span_id ride the LogRecord fields, so Loki
   rows correlate with Tempo spans.
   Severity mapping: debug 5 / info 9 / warning 13 / error 17 / critical 21.
-- **Metrics** (`_record_metrics`) — telemetry-category events only: numeric
-  payload fields become Prometheus series via a per-field disposition, a
-  per-process Resource, and latency-shaping Views — the full mapping contract
-  is its own node: [OTLP metrics mapping](metrics-mapping.md).
+- **Metrics** (`_record_metrics`) — declared telemetry fields produce
+  Prometheus series through the [explicit OTLP metrics mapping](metrics-mapping.md).
+  The source collector adds the roster machine label.
 - **Traces** — exported with the cluster Resource to the sidecar's `/v1/traces`
   (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar's
   file exporter mirrors each batch to `$MEIVA_HOME/traces/spans.jsonl`

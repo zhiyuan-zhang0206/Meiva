@@ -77,13 +77,8 @@ def report_loss(
     except Exception as exc:
         _stderr(f"ERROR: Telemetry loss log for queue {queue_name} failed: {exc!r}")
     if record_metric is not None:
-        metric_report = report
-        if queue_name == "emitter":
-            attributes = dict(report.attributes)
-            attributes.pop("n", None)
-            metric_report = replace(report, attributes=attributes)
         try:
-            record_metric(metric_report)
+            record_metric(report)
         except Exception as exc:
             _stderr(f"ERROR: Telemetry loss metric for queue {queue_name} failed: {exc!r}")
     return report

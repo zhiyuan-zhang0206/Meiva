@@ -18,15 +18,9 @@ first hop is still its own sidecar. Three signals:
   Loki can index them without mixing event types in one resource batch;
   ``trace_id`` / ``span_id`` fill the LogRecord fields so logs correlate with
   Tempo spans.
-- **metrics** — telemetry-category events become OTLP metrics (Prometheus).
-  Each numeric payload field maps to one instrument named
-  ``meiva_<event_name>_<field>``: int -> Counter, float -> Histogram, with
-  explicitly declared absolute-state fields exported as Observable Gauges
-  (see ``_record_metrics`` for the rules); datapoint attributes are the
-  process dimensions + declared payload scalars only (never loguru decoration
-  extras — a per-event msg string would split every counter into its own
-  series). Log/audit events produce no metrics: they are the event stream,
-  not a measurement.
+- **metrics** — selected telemetry fields become OTLP instruments (Prometheus)
+  through the explicit mapping in `plans.py`. The source collector stamps the
+  machine dimension. The event stream still carries the full payload.
 - **traces** — NOT exported here. ``base/telemetry/tracing.py`` exports them to the same
   local collector, whose file exporter writes the standard OTLP/JSON mirror.
   ``meiva trace ship`` is the separate recovery replay: gateway units dial Tempo
@@ -72,8 +66,11 @@ from base.telemetry.delivery.reporting import (
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.plans import (
-    BASE_METRIC_DISPOSITION,
+    LOSS_ONLY_PROCESSES,
     select_metric_attributes,
+)
+from base.telemetry.otlp.plans import (
+    METRIC_DISPOSITION as METRIC_DISPOSITION,
 )
 from base.telemetry.otlp.telemetry_otlp_barrier import QueueItem
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
@@ -85,13 +82,9 @@ from base.telemetry.otlp.telemetry_otlp_gauges import (
 )
 from base.telemetry.otlp.telemetry_otlp_logs import emit_log_record
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    EVENT_LOOP_LAG_BUCKETS_MS as EVENT_LOOP_LAG_BUCKETS_MS,
-)
-from base.telemetry.otlp.telemetry_otlp_metrics import (
     LLM_LATENCY_BUCKETS_MS as LLM_LATENCY_BUCKETS_MS,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    numeric_fields,
     strip_unit_suffix,
     unit_for,
 )
@@ -133,8 +126,6 @@ _QUEUE_MAXSIZE = 2048
 # every five minutes, not on every batch, so a missing sidecar cannot turn event
 # volume into connection-probe volume.
 COLLECTOR_RETRY_INTERVAL_S = 300
-
-METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {**BASE_METRIC_DISPOSITION}
 
 
 def endpoint_reachable(endpoint: str) -> bool:
@@ -607,58 +598,41 @@ class OtlpBackend:
             raise RuntimeError("the OTLP log provider is not initialized")
         emit_log_record(logs, event)
 
-    # meiva:note
-    # Map a telemetry event's numeric payload fields to OTLP instruments: telemetry category only;
-    # int -> Counter, float -> Histogram, overridden by `METRIC_DISPOSITION` (e.g. `cost_usd`
-    # Counter, `agent_registry` ObservableGauge, `price_*` skipped); bool/short-str become
-    # attributes; None values are skipped.
     def _record_metrics(self, event: Event) -> None:
         if event.category != "telemetry":
             return
-        attrs = self._metric_attributes(event)
-        for key, value in numeric_fields(event.attributes):
-            default_kind = "counter" if isinstance(value, int) else "histogram"
-            kind = METRIC_DISPOSITION.get((event.event_name, key), default_kind)
-            if kind is None:
+        if event.process in LOSS_ONLY_PROCESSES and event.event_name != "event_log_drop":
+            return
+        fields = METRIC_DISPOSITION.get(event.event_name)
+        if not fields:
+            return
+        attrs = select_metric_attributes(event.event_name, event.process, event.attributes)
+        for field, kind in fields.items():
+            value = event.attributes.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
-            if kind == "counter":
-                counter = self._counter(event.event_name, key)
-                if counter is not None:
-                    counter.add(value, attrs)
-            elif kind == "histogram":
-                histogram = self._histogram(event.event_name, key)
-                if histogram is not None:
-                    histogram.record(value, attrs)
-            elif self._gauge(event.event_name, key) is not None:
-                record_gauge(
-                    self._gauge_values,
-                    self._gauge_lock,
-                    (event.event_name, key),
-                    value,
-                    attrs,
-                    max_only=(event.event_name, key) == ("event_log_drop", "last_dropped_at"),
-                )
+            self._record_metric(event.event_name, field, kind, value, attrs)
 
-    def _metric_attributes(self, event: Event) -> MetricAttributes:
-        """The datapoint attribute set: process dimensions + declared payload
-        scalars that pass the content/cardinality guard.
-
-        Only payload-declared keys (`base.events.contract.payload_keys`)
-        become attributes — loguru decoration extras (msg, cache_pct,
-        reason_pct, ...) are content, not dimensions: a per-event unique
-        string (msg) would split every event into its own series, and a
-        counter split into single-sample series reads as zero increments
-        (increase() cannot see them). An event with no declared payload
-        contributes no extra attributes."""
-        from base.events.contract import payload_keys
-
-        return select_metric_attributes(
-            machine=event.machine,
-            process=event.process,
-            agent_id=event.agent_id,
-            attributes=event.attributes,
-            allowed_keys=payload_keys(event.event_name),
-        )
+    def _record_metric(
+        self, event_name: str, field: str, kind: str, value: int | float, attrs: MetricAttributes
+    ) -> None:
+        if kind == "counter":
+            counter = self._counter(event_name, field)
+            if counter is not None:
+                counter.add(value, attrs)
+        elif kind == "histogram":
+            histogram = self._histogram(event_name, field)
+            if histogram is not None:
+                histogram.record(value, attrs)
+        elif self._gauge(event_name, field) is not None:
+            record_gauge(
+                self._gauge_values,
+                self._gauge_lock,
+                (event_name, field),
+                value,
+                attrs,
+                max_only=event_name == "event_log_drop",
+            )
 
     # meiva:note
     # Lazily create (and cache in `cache`) the instrument for one (event, field).

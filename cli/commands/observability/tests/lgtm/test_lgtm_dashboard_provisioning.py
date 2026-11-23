@@ -307,3 +307,60 @@ def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
 
     assert render() == (native / "config/provisioning/alerting/contact.yml",)
     assert render() == ()
+
+
+@pytest.mark.parametrize(
+    ("live_uids", "expected"),
+    [
+        (["first", "second"], []),
+        (["second", "orphan"], ["only in Grafana: orphan", "only in rendered provisioning: first"]),
+        ([], ["only in rendered provisioning: first, second"]),
+    ],
+)
+def test_verify_alert_rules_compares_rendered_and_loaded_uids(
+    tmp_path: Path, live_uids: list[str], expected: list[str]
+) -> None:
+    alerting = tmp_path / "config/provisioning/alerting"
+    alerting.mkdir(parents=True)
+    for uid in ("first", "second"):
+        (alerting / f"{uid}.yml").write_text(
+            f"groups:\n  - orgId: 1\n    rules:\n      - uid: {uid}\n", encoding="utf-8"
+        )
+    (alerting / "delete-rules.yml").write_text(
+        "deleteRules:\n  - orgId: 1\n    uid: retired\n", encoding="utf-8"
+    )
+
+    with serve(
+        {"/api/v1/provisioning/alert-rules": _json_reply([{"uid": uid} for uid in live_uids])}
+    ) as grafana:
+        assert (
+            provisioning.verify_alert_rule_provisioning(tmp_path, grafana_url=grafana.url)
+            == expected
+        )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (_json_reply({}, status=403), "Grafana answered 403 for alert rules"),
+        (_json_reply([{"title": "Missing UID"}]), "Grafana returned an invalid alert rule list"),
+    ],
+)
+def test_verify_alert_rules_reports_failed_or_invalid_response(
+    tmp_path: Path, reply: Reply, expected: str
+) -> None:
+    alerting = tmp_path / "config/provisioning/alerting"
+    alerting.mkdir(parents=True)
+    (alerting / "rules.yml").write_text("groups: [{rules: [{uid: example}]}]\n", encoding="utf-8")
+
+    with serve({"/api/v1/provisioning/alert-rules": reply}) as grafana:
+        assert provisioning.verify_alert_rule_provisioning(tmp_path, grafana_url=grafana.url) == [
+            expected
+        ]
+
+
+def test_verify_alert_rules_requires_a_rendered_rule_set(tmp_path: Path) -> None:
+    with serve({"/api/v1/provisioning/alert-rules": _json_reply([])}) as grafana:
+        [problem] = provisioning.verify_alert_rule_provisioning(tmp_path, grafana_url=grafana.url)
+
+    assert "could not read rendered alert rules" in problem

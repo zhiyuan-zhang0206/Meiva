@@ -18,7 +18,7 @@
 
 Exactly one layer owns a call's row. The factory owns it by default. A caller that emits the row itself — with its own `usage_kind`, `source` or agent id — builds with `meter=False`, or strips the meter from an injected build with `unmeter(model)`. The meter also stamps `msg.additional_kwargs["meiva_usage"]`, and `log_usage_from_message` refuses a message that already carries the stamp, so a caller that logs the same response cannot produce a second row.
 
-`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). A database failure or conflicting replay emits a warning and increments the failure counter before propagating as a failed step.
+`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). Each exhausted ledger write or conflicting replay emits one `llm_usage_ledger_write_failed` warning before propagating as a failed step. The OTLP logs lane sends the full event to Loki. Count exhausted writes and replay conflicts in Grafana with LogQL `sum(count_over_time({event_name="llm_usage_ledger_write_failed"}[5m]))` and inspect `reason`, `error_type`, and `call_id` in the event payload. It is a log-derived count under the explicit metric allowlist.
 
 ## Notes
 

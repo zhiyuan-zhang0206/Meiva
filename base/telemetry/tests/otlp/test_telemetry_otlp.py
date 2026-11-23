@@ -4,12 +4,14 @@ import json
 import random
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
+from opentelemetry.metrics import Observation
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
@@ -19,6 +21,7 @@ from base.config import settings
 from base.db import Database
 from base.paths import meiva_home
 from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
+from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.receipts import Category, Event, Level
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_sdk
 from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
@@ -105,10 +108,6 @@ def collected_metrics(metric_reader: Any) -> dict[str, Any]:
             for m in sm.metrics:
                 out[m.name] = m
     return out
-
-
-def _attrs_of(dp: Any) -> dict[str, Any]:
-    return dict(dp.attributes)
 
 
 def _assert_log_record_severity_and_correlation(r: Any) -> None:
@@ -206,100 +205,130 @@ def test_flush_groups_each_event_name_under_its_matching_resource(
                 )
 
 
-def _assert_int_payload_maps_to_counter_without_body_label(metrics: dict[str, Any]) -> None:
-    counter = metrics["meiva_llm_usage_in_total"]
-    assert counter.unit == "1"
-    assert len(counter.data.data_points) == 1
-    dp = counter.data.data_points[0]
-    assert dp.value == 100
-    a = _attrs_of(dp)
-    assert a["model"] == "claude-sonnet"
-    assert "ok" not in a
-    assert a["agent_id"] == AGENT
-    assert a["machine"] == "test-mac"
-    assert "body" not in a
-
-
-def _assert_float_payload_maps_to_histogram_with_unit(metrics: dict[str, Any]) -> None:
-    hist = metrics["meiva_llm_usage_latency"]
-    assert hist.unit == "ms"
-    assert hist.data.data_points[0].count == 1
-    assert hist.data.data_points[0].sum == 42.5
-    assert "meiva_llm_usage_latency_ms" not in metrics
-
-
-def _assert_bool_payload_is_attribute_not_metric(metrics: dict[str, Any]) -> None:
-    assert "meiva_turn_end_ok" not in metrics
-    turn = _attrs_of(metrics["meiva_turn_end_duration"].data.data_points[0])
-    assert metrics["meiva_turn_end_duration"].unit == "s"
-    assert turn["ok"] is True
-
-    assert "meiva_llm_usage_ok" not in metrics
-
-
-def test_metric_mapping_int_counter_float_histogram(otlp_backend: OtlpFixture) -> None:
-    backend, _, metric_reader = otlp_backend
+def test_only_explicit_metrics_export_with_fixed_kinds(otlp_backend: OtlpFixture) -> None:
+    backend, log_exporter, metric_reader = otlp_backend
     backend.export_batch(
         [
             otlp_test_event(
                 event_name="llm_usage",
                 attributes={
-                    "model": "claude-sonnet",
+                    "model": "custom-model",
+                    "latency_ms": 42,
+                    "calls": 1,
                     "in_total": 100,
                     "out_total": 50,
-                    "latency_ms": 42.5,
-                    "ok": True,
-                    "body": "x" * 500,
+                    "cost_usd": 0.125,
+                    "unpriced": 0,
+                    "price_miss": 3.0,
+                    "cache_read": 90,
+                    "reasoning": 10,
                 },
             ),
             otlp_test_event(
                 event_name="turn_end",
-                attributes={"ok": True, "duration_seconds": 4.0},
+                attributes={"ok": True, "duration_seconds": 4, "thread_id": "uuid"},
+            ),
+            otlp_test_event(
+                event_name="gateway_latency",
+                attributes={"count": 3, "p95_ms": 42.5, "route": "/agents/42"},
+            ),
+            otlp_test_event(
+                event_name="delta_message_suffix",
+                attributes={"fetched_rows": 5, "checkpoint_id": "uuid"},
             ),
         ]
     )
     backend.flush()
+
     metrics = collected_metrics(metric_reader)
+    assert set(metrics) == {
+        "meiva_llm_usage_latency",
+        "meiva_turn_end_duration",
+        "meiva_gateway_latency_count",
+    }
+    llm = metrics["meiva_llm_usage_latency"]
+    assert llm.unit == "ms"
+    assert llm.data.data_points[0].sum == 42
+    turn = metrics["meiva_turn_end_duration"]
+    assert turn.unit == "s"
+    assert turn.data.data_points[0].sum == 4
+    gateway = metrics["meiva_gateway_latency_count"]
+    assert gateway.data.is_monotonic
+    assert gateway.data.data_points[0].value == 3
+    assert all(not metric.data.data_points[0].attributes for metric in metrics.values())
+    logs = log_exporter.get_finished_logs()
+    assert len(logs) == 4
+    usage = logs[0].log_record
+    assert isinstance(usage.body, str)
+    assert json.loads(usage.body)["attributes"]["cost_usd"] == 0.125
 
-    _assert_int_payload_maps_to_counter_without_body_label(metrics)
-    _assert_float_payload_maps_to_histogram_with_unit(metrics)
-    _assert_bool_payload_is_attribute_not_metric(metrics)
 
-
-def test_compaction_completed_maps_size_samples_and_frequency_counter(
+def test_usage_ledger_failure_keeps_the_loki_event_without_a_metric(
     otlp_backend: OtlpFixture,
 ) -> None:
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [
-            otlp_test_event(
-                event_name="compaction_completed",
-                attributes={
-                    "compact_kind": "auto",
-                    "reminder_shown": True,
-                    "compactions": 1,
-                    "history_chars": 5000,
-                    "summary_chars": 1500,
-                    "summary_history_ratio": 0.3,
-                },
-            )
-        ]
+    backend, log_exporter, metric_reader = otlp_backend
+    event = otlp_test_event(
+        event_name="llm_usage_ledger_write_failed",
+        level="warning",
+        attributes={
+            "call_id": "api:receipt",
+            "reason": "database",
+            "error_type": "QueryCanceled",
+            "failures": 1,
+        },
+    )
+    backend.export_batch([event])
+    backend.flush()
+
+    [record] = log_exporter.get_finished_logs()
+    assert (record.log_record.attributes or {})["event_name"] == event.event_name
+    _assert_canonical_log_body(record, event)
+    assert collected_metrics(metric_reader) == {}
+
+
+@pytest.mark.parametrize("process", ["agent-exec", "sdk", "schedule-runner", "cli-health-probe"])
+def test_short_lived_process_reports_queue_loss_on_the_metrics_lane(
+    otlp_backend: OtlpFixture, process: str
+) -> None:
+    backend, log_exporter, metric_reader = otlp_backend
+    event = otlp_test_event(attributes={"latency_ms": 250.0})
+    backend.export_batch([replace(event, process=process)])
+    backend.flush()
+
+    assert collected_metrics(metric_reader) == {}
+    assert len(log_exporter.get_finished_logs()) == 1
+
+    now = system_clock().now()
+    report_loss(
+        replace(event, process=process), 3, "emitter", now=now, record_metric=backend.record_loss
     )
     backend.flush()
 
     metrics = collected_metrics(metric_reader)
-    count = metrics["meiva_compaction_completed_compactions"].data.data_points[0]
-    assert count.value == 1
-    assert _attrs_of(count)["compact_kind"] == "auto"
-    assert _attrs_of(count)["reminder_shown"] is True
-    assert "meiva_compaction_completed_reminder_shown" not in metrics
-    for field, value in (("history_chars", 5000), ("summary_chars", 1500)):
-        sample = metrics[f"meiva_compaction_completed_{field}"].data.data_points[0]
-        assert sample.count == 1
-        assert sample.sum == value
-    ratio = metrics["meiva_compaction_completed_summary_history_ratio"].data.data_points[0]
-    assert ratio.count == 1
-    assert ratio.sum == 0.3
+    assert set(metrics) == {"meiva_event_log_drop_last_dropped_at"}
+    point = metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0]
+    assert point.value == now.timestamp()
+    assert dict(point.attributes) == {"process": process, "queue": "emitter"}
+    assert len(log_exporter.get_finished_logs()) == 1
+
+
+def test_short_lived_metric_view_exports_only_queue_loss() -> None:
+    from opentelemetry.sdk.metrics import MeterProvider
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views("sdk"))
+    try:
+        meter = provider.get_meter("meiva.telemetry")
+        meter.create_counter("otel.sdk.exporter.log.exported").add(2)
+        meter.create_histogram("meiva_llm_usage_latency").record(250.0)
+        assert reader.get_metrics_data() is None
+        meter.create_observable_gauge(
+            "meiva_event_log_drop_last_dropped_at",
+            callbacks=[lambda _: [Observation(123)]],
+        )
+        assert set(collected_metrics(reader)) == {"meiva_event_log_drop_last_dropped_at"}
+    finally:
+        provider.shutdown()
 
 
 def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
@@ -372,146 +401,20 @@ def test_root_health_gauges_keep_separate_home_identity_and_expected_only(
     assert {point.attributes["home_id"] for point in ticks.data.data_points} == {"a" * 64}
 
 
-def test_metric_disposition_cost_counter_price_excluded(otlp_backend: OtlpFixture) -> None:
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [
-            otlp_test_event(
-                event_name="llm_usage",
-                attributes={
-                    "model": "claude-sonnet",
-                    "calls": 1,
-                    "in_total": 10,
-                    "cost_usd": 0.125,
-                    "price_miss": 3.0,
-                    "price_hit": 0.3,
-                    "price_out": 15.0,
-                },
-            ),
-            otlp_test_event(
-                event_name="llm_usage",
-                attributes={"model": "claude-sonnet", "calls": 1, "cost_usd": 0.375},
-            ),
-        ]
-    )
-    backend.flush()
-    metrics = collected_metrics(metric_reader)
-
-    cost = metrics["meiva_llm_usage_cost_usd"]
-    assert cost.data.is_monotonic
-    assert abs(cost.data.data_points[0].value - 0.5) < 1e-9
-    assert metrics["meiva_llm_usage_calls"].data.data_points[0].value == 2
-    for excluded in ("price_miss", "price_hit", "price_out"):
-        assert f"meiva_llm_usage_{excluded}" not in metrics
-
-
-def test_metric_views_shape_latency_histograms() -> None:
+def test_metric_view_keeps_the_llm_latency_tail() -> None:
     from opentelemetry.sdk.metrics import MeterProvider
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views())
+    provider = MeterProvider(
+        metric_readers=[reader], views=telemetry_otlp_sdk.metric_views("agent_host")
+    )
     meter = provider.get_meter("meiva.telemetry")
     hist = meter.create_histogram("meiva_llm_usage_latency", unit="ms")
-    hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
+    hist.record(45000.0)
 
     dp = collected_metrics(reader)["meiva_llm_usage_latency"].data.data_points[0]
     assert list(dp.explicit_bounds) == list(telemetry_otlp.LLM_LATENCY_BUCKETS_MS)
-    assert "agent_id" not in _attrs_of(dp)
-    assert _attrs_of(dp)["model"] == "m"
-
-
-def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
-    from opentelemetry.sdk.metrics import MeterProvider
-
-    reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views())
-    meter = provider.get_meter("meiva.telemetry")
-    hist = meter.create_histogram("meiva_gateway_event_loop_lag", unit="ms")
-    hist.record(45000.0, {"machine": "x", "process": "gateway"})
-
-    dp = collected_metrics(reader)["meiva_gateway_event_loop_lag"].data.data_points[0]
-    assert list(dp.explicit_bounds) == list(telemetry_otlp.EVENT_LOOP_LAG_BUCKETS_MS)
-
-
-def test_gateway_runtime_and_sse_absolute_metrics_use_gauges(otlp_backend: OtlpFixture) -> None:
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [
-            otlp_test_event(
-                event_name="sse",
-                attributes={"mode": "filtered", "active_connections": 2, "opened": 1},
-            ),
-            otlp_test_event(
-                event_name="sse",
-                attributes={"mode": "filtered", "active_connections": 1, "closed": 1},
-            ),
-            otlp_test_event(
-                event_name="gateway_process",
-                attributes={
-                    "cpu_percent": 12.5,
-                    "rss_bytes": 268_435_456,
-                    "fd_count": 23,
-                },
-            ),
-            otlp_test_event(
-                event_name="gateway_event_loop",
-                attributes={"lag_ms": 250.0, "slow_ticks": 1},
-            ),
-        ]
-    )
-    backend.flush()
-
-    metrics = collected_metrics(metric_reader)
-    active = metrics["meiva_sse_active_connections"].data.data_points[0]
-    assert active.value == 1.0
-    assert _attrs_of(active)["mode"] == "filtered"
-    assert metrics["meiva_sse_opened"].data.data_points[0].value == 1
-    assert metrics["meiva_sse_closed"].data.data_points[0].value == 1
-    assert metrics["meiva_gateway_process_cpu_percent"].data.data_points[0].value == 12.5
-    assert metrics["meiva_gateway_process_rss_bytes"].data.data_points[0].value == 268_435_456
-    assert metrics["meiva_gateway_process_fd_count"].data.data_points[0].value == 23
-    lag = metrics["meiva_gateway_event_loop_lag"].data.data_points[0]
-    assert lag.count == 1
-    assert lag.sum == 250.0
-    assert metrics["meiva_gateway_event_loop_slow_ticks"].data.data_points[0].value == 1
-
-
-def test_metric_mapping_skips_long_string_attributes(otlp_backend: OtlpFixture) -> None:
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [otlp_test_event(event_name="llm_usage", attributes={"model": "m" * 100, "in_total": 1})]
-    )
-    backend.flush()
-    dp = collected_metrics(metric_reader)["meiva_llm_usage_in_total"].data.data_points[0]
-    assert "model" not in _attrs_of(dp)
-
-
-def test_metric_mapping_excludes_loguru_decoration_extras(otlp_backend: OtlpFixture) -> None:
-    backend, _, metric_reader = otlp_backend
-    backend.export_batch(
-        [
-            otlp_test_event(
-                event_name="llm_usage",
-                attributes={
-                    "model": "deepseek-v4-flash",
-                    "in_total": 100,
-                    "out_total": 50,
-                    "cache_read": 90,
-                    "reasoning": 10,
-                    "msg": "[llm usage] in=100 cached=90 (90%)  out=50 reason=10 (20%)",
-                    "cache_pct": " (90%)",
-                    "reason_pct": " (20%)",
-                },
-            )
-        ]
-    )
-    backend.flush()
-    dp = collected_metrics(metric_reader)["meiva_llm_usage_in_total"].data.data_points[0]
-    a = _attrs_of(dp)
-    assert a["model"] == "deepseek-v4-flash"
-    assert "msg" not in a
-    assert "cache_pct" not in a
-    assert "reason_pct" not in a
+    assert dp.bucket_counts[list(dp.explicit_bounds).index(60000)] == 1
 
 
 def test_non_telemetry_events_produce_no_metrics(otlp_backend: OtlpFixture) -> None:

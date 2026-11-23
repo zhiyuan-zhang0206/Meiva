@@ -16,15 +16,16 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.environment_variables import OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+from opentelemetry.sdk.metrics.view import DropAggregation, ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 
 from base.telemetry.delivery.loss import install_exporter_drop_observer
+from base.telemetry.delivery.state import process_name
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
+from base.telemetry.otlp.plans import LOSS_ONLY_PROCESSES
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    EVENT_LOOP_LAG_BUCKETS_MS,
     LLM_LATENCY_BUCKETS_MS,
     metrics_resource_attributes,
     provider_build_plan,
@@ -39,28 +40,20 @@ _LOGS_HTTP_TIMEOUT_S = 3.5
 
 
 # meiva:note
-# Shape long LLM latencies and recovered gateway event-loop stalls.
-# LLM percentiles are read per model/fleet, never per agent, so dropping `agent_id` removes the
-# per-(agent, model) histogram fan-out. Event-loop lag retains minute-scale stalls that the OTel
-# 10s default clips. Views match the INSTRUMENT name (unit suffix already stripped).
-def metric_views() -> list[View]:
-    llm_aggregation = ExplicitBucketHistogramAggregation(list(LLM_LATENCY_BUCKETS_MS))
-    views = [
+# Keep the queue-loss gauge independent of the log queue. Short-lived roles suppress all
+# other instruments, including the SDK's own export metrics, so only actual loss creates series.
+def metric_views(process: str) -> list[View]:
+    if process in LOSS_ONLY_PROCESSES:
+        return [
+            View(instrument_name="*", aggregation=DropAggregation()),
+            View(instrument_name="meiva_event_log_drop_last_dropped_at"),
+        ]
+    return [
         View(
-            instrument_name=name,
-            aggregation=llm_aggregation,
-            attribute_keys={"machine", "process", "model"},
+            instrument_name="meiva_llm_usage_latency",
+            aggregation=ExplicitBucketHistogramAggregation(list(LLM_LATENCY_BUCKETS_MS)),
         )
-        for name in ("meiva_llm_usage_latency", "meiva_llm_usage_decode")
     ]
-    views.append(
-        View(
-            instrument_name="meiva_gateway_event_loop_lag",
-            aggregation=ExplicitBucketHistogramAggregation(list(EVENT_LOOP_LAG_BUCKETS_MS)),
-            attribute_keys={"machine", "process"},
-        )
-    )
-    return views
 
 
 # meiva:note
@@ -120,7 +113,7 @@ def build_providers(
         shutdown_on_exit=plan.shutdown_on_exit,
         metric_readers=[reader],
         resource=metrics_resource(home=home, instance_id=instance_id),
-        views=metric_views(),
+        views=metric_views(process_name()),
     )
     if keep_metrics is not None:
         keep_metrics(metrics)

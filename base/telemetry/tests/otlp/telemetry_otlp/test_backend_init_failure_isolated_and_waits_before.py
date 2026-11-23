@@ -239,7 +239,7 @@ def test_pipeline_exports_to_otlp(otlp_backend: Any) -> None:
     assert attrs["event_name"] == "llm_usage"
 
     metrics = collected_metrics(metric_reader)
-    assert metrics["meiva_llm_usage_in_total"].data.data_points[0].value == 7
+    assert "meiva_llm_usage_in_total" not in metrics
     assert metrics["meiva_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
@@ -390,8 +390,10 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
         assert len(drop_rows) == 1
         assert drop_rows[0]["attributes"]["n"] == 2
         metrics = collected_metrics(reader)
-        assert metrics["meiva_event_log_drop_n"].data.data_points[0].value == 2
-        assert metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0].value > 0
+        assert "meiva_event_log_drop_n" not in metrics
+        drop = metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0]
+        assert drop.value > 0
+        assert dict(drop.attributes) == {"process": "test-proc", "queue": "otlp"}
     finally:
         release.set()
         backend.shutdown()
@@ -452,4 +454,4 @@ def test_delayed_loss_summary_cannot_rewind_newer_loss_metric(otlp_backend: Any)
         )
     metrics = collected_metrics(reader)
     assert metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0].value == 2000.0
-    assert metrics["meiva_event_log_drop_n"].data.data_points[0].value == 2
+    assert "meiva_event_log_drop_n" not in metrics

@@ -1,17 +1,9 @@
 # meiva:note
-# PR flow exporter — samples the Meiva repo's merge flow into OTLP gauges.
+# PR flow exporter — samples the Meiva repo's merge flow into Loki events.
 #
 # Runs once a day on macmini (the registered machine that holds the `gh`
-# session), recomputes the trailing window of the fleet's pull-request
-# pipeline, and publishes it to Prometheus + Loki through the unified telemetry
-# pipeline as ``pr_flow_daily``: one event per complete day in the trailing
-# window, re-emitted on every run so the whole window stays visible inside
-# Prometheus's retention. Fields: ``merged_count`` plus (when the day has
-# samples) ``ready_to_merge_median_seconds`` / ``ready_to_merge_p90_seconds``.
-#
-# Every numeric payload field is dispositioned as an ObservableGauge in
-# ``base/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
-# sums, and re-emission must replace them rather than accrue them.
+# session) and emits one ``pr_flow_daily`` event per complete day in the trailing
+# window. The Grafana table reads the latest event for each day.
 #
 # Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
 #
@@ -44,7 +36,7 @@
 # comfortably inside the account's 5000/hour budget.
 #
 # Failure policy: the PR list is the authoritative population, so a failed
-# list fetch aborts the run (exit 1, no emission — old Prometheus values stay).
+# list fetch aborts the run (exit 1, no emission).
 # Timeline failures degrade to cached or partial records and are counted in
 # ``stats``.
 # meiva:link scripts/ci/docs/ci.md
@@ -574,7 +566,7 @@ def emit_events(
 
 def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
     parser = argparse.ArgumentParser(
-        description="Sample the repository's pull-request merge flow into OTLP gauges."
+        description="Sample the repository's daily pull-request merge flow into telemetry events."
     )
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(

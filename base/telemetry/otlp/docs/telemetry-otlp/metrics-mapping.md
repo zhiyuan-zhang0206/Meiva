@@ -1,91 +1,44 @@
 # OTLP metrics mapping
 
-`_record_metrics` (in `base/telemetry/otlp/telemetry_otlp.py`) maps telemetry-category
-events to OTLP instruments; log/audit events are the event stream, not a
-measurement, and produce no metrics.
+`METRIC_DISPOSITION` in `base/telemetry/otlp/plans.py` lists each event field
+that produces an application metric. A new event or payload field requires an
+explicit entry and a Grafana consumer to produce a metric. The event stream
+keeps the full payload, including LLM token and cost observations, precomputed
+gateway latency percentiles, and calendar dates.
 
-## Instrument naming
+Each entry sets the instrument kind independently of whether the numeric
+sample arrived as an integer or float. The instrument name is
+`meiva_<event_name>_<field-minus-unit-suffix>`. The OTel unit is `ms` for
+`_ms`, `s` for `_seconds`, and `1` for dimensionless fields. Prometheus
+translates units and instrument kinds into suffixes, for example
+`meiva_llm_usage_latency_milliseconds_bucket` and `meiva_gateway_latency_count_total`.
+The LLM latency histogram uses explicit boundaries from 250 ms to 300 s.
 
-Each numeric payload field maps to one instrument named
-`meiva_<event_name>_<field-minus-unit-suffix>` (`_strip_unit_suffix`): the OTel
-unit supplies the suffix on export, so `latency_ms` + unit `ms` renders as
-`meiva_llm_usage_latency_milliseconds_*` in Prometheus — the unit stated once.
-Unit comes from the field name (`_unit_for`): `_ms` -> ms, `_seconds` /
-`duration` / `latency` -> s, else the dimensionless "1".
+## Series identity
 
-## Disposition
+The source collector stamps the roster `machine` label. Application
+datapoints carry only dimensions consumed by the rules:
 
-Default rule: int -> Counter (things you sum), float -> Histogram (things
-you percentile). Emit sites cast duration-style fields to explicit ints
-(task #4011) so a field's kind cannot flip with its caller.
-`_METRIC_DISPOSITION` overrides per (event, field):
+- The queue-loss timestamp gauge keeps the process and the known queue names
+  `emitter`, `otlp`, and `otel-sdk`. Delayed loss summaries cannot rewind it.
+- Recovery status keeps the declared `logical_dump` drill.
+- Root expectation and tick gauges keep the process and a fixed `home_id`
+  hash for each configured root unit home. The freshness rule joins expected
+  and observed rounds on `machine`, `home_id`, and `process`. Keeping the
+  home dimension prevents a healthy root from satisfying another same-host
+  root's expectation, including when two homes share a basename.
 
-- `llm_usage.price_miss/price_hit/price_out` -> **no metric**. The
-  usage-time price snapshot is a RATE (USD per 1M tokens), not a
-  measurement; as default-bucket histograms they minted ~50 series per
-  (agent, model) with a meaningless distribution. The fields stay in the
-  Loki/JSONL event body — exclusion here never touches the event stream.
-- `llm_usage.cost_usd` -> **float Counter** (`meiva_llm_usage_cost_usd_total`).
-  Money is summed, never percentiled; `increase(...)` over any window is the
-  exact spend at usage-time rates.
-- `root_health_tick.last_tick_timestamp_seconds` -> **ObservableGauge**
-  (`meiva_root_health_tick_last_tick_timestamp_seconds`). It holds the wall-clock
-  time of the most recently completed root health round, independently of its
-  verdicts. `root_health_expected.expected_since_timestamp_seconds` is also a
-  gauge, emitted at observer startup before any completed round. The freshness
-  alert compares the expected and observed sets per `machine`, `home_id`, and `process`,
-  covering a root that starts but never produces its first sample.
-- `compaction_completed.history_chars` and `.summary_chars` -> **Histogram**.
-  They are independent source/replacement size samples; the explicit
-  `.compactions=1` field remains the Counter for completion frequency, and
-  the float `.summary_history_ratio` uses the default Histogram disposition.
-- `sse.active_connections` -> **ObservableGauge** by stream mode; opened and
-  closed remain Counters.
-- `gateway_process.cpu_percent/rss_bytes/fd_count` -> **ObservableGauge**;
-  each 60-second process sample replaces the previous absolute values.
+Other application datapoints use only their resource identity and the
+collector's machine label. The resource carries `service.name=meiva-<process>`,
+`service.namespace=meiva`, `service.version`, the cluster label, and one
+`service.instance.id` per process. The instance keeps concurrent cumulative
+streams distinct. The four short-lived roles `agent-exec`, `sdk`,
+`schedule-runner`, and `cli-health-probe` export their events as logs and
+retain the independent queue-loss timestamp gauge. Their metric views
+drop all other instruments, including SDK diagnostics. In the absence
+of queue loss, these roles create no Prometheus series.
 
-`llm_usage.calls` (constant 1) exists so the int rule mints
-`meiva_llm_usage_calls_total` — the per-agent/per-model call counter (histogram
-counts cannot serve this: the Views below drop `agent_id`).
-`llm_usage.unpriced` (1 exactly when the price snapshot is absent) mints
-`meiva_llm_usage_unpriced_total` so unpriced call volume is countable.
-
-## Attributes
-
-Declared payload scalars (bool / str <= 64 chars) become datapoint
-attributes, plus the process dimensions (machine / process / agent_id);
-`body` and longer strings never do (content / cardinality guard); None
-values are skipped (an absent optional metric is not zero).
-
-## Resource
-
-The MeterProvider's Resource carries `service.name=meiva-<process>` (the
-bounded process dimension, `base/telemetry/delivery/state.py:process_name`), a
-per-instance `service.instance.id` (uuid4) and
-`service.version`, plus the home-derived `cluster` label. Without the service
-identity every series landed as
-job="unknown_service" and two same-named processes exporting the same
-counter collided into ONE series with interleaved cumulative values.
-Metrics only: the logs Resource is deliberately default — Loki
-index-label-promotes resource attributes, so a per-process-unique id there
-would mint a new stream per process start.
-
-## Views
-
-`telemetry_otlp_sdk.metric_views()` shapes `meiva_llm_usage_latency` / `meiva_llm_usage_decode` with
-explicit LLM-scale buckets (250 ms .. 300 s — the OTel defaults top out at
-10 s, clipping every slower call into +Inf and flatlining ops p95 at exactly
-10 s) and an attribute keep-list of {machine, process, model}. `agent_id`
-comes off because latency percentiles are read per model/fleet, and the key
-multiplied every (agent, model) into its own 17-series histogram. It also shapes
-`meiva_gateway_event_loop_lag` with explicit 1 ms .. 300 s buckets, retaining a
-recovered minute-scale gateway freeze instead of folding it into +Inf.
-
-## Export
-
-`PeriodicExportingMetricReader`, 15 s interval (`_METRICS_INTERVAL_S`), to
-the sidecar's `/v1/metrics`.
-
-Root observation events carry a fixed-length SHA-256 `home_id` of the resolved
-home path. Freshness grouping retains it so another cluster on the same host
-cannot mask missing rounds; the event body also carries the full home path.
+The periodic metric reader sends OTLP to the local sidecar every 15 seconds.
+The PR flow table and the standalone per-agent turn latency diagnostic query
+Loki for day and agent dimensions. Fleet turn p95 and the gateway heartbeat
+use Prometheus.

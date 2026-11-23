@@ -31,7 +31,8 @@ class DebtSweepDaily(TypedDict):
 
 
 # meiva:note
-# PrFlowDaily is one event per complete cluster-tz day in the trailing window, re-emitted on every run so the whole window stays inside Prometheus retention; every numeric field is absolute per-day state (an ObservableGauge), never a sum, and fields are absent when the day has no such sample (no merges -> no percentiles).
+# PrFlowDaily carries a complete cluster-local day's snapshot. The exporter re-emits its trailing
+# window for the Loki table. A day without merges has no latency percentiles.
 # meiva:link base/events/docs/maintenance-payloads.md
 class PrFlowDaily(TypedDict):
     day: str
