@@ -386,7 +386,7 @@ webhook shape) — one alert instance = one row. It is the only writer of that t
 
 For an agent inbox destination, start with the [complete site policy example](../../contact.agent.example.yml).
 Copy it to `$MEIVA_HOME/lgtm/alerting/contact.yml`, replace the example agent ID, and converge the
-station. Its error/critical route continues to the existing ingest rules. The built-in policy is
+station, then reload Grafana alerting provisioning. Its error/critical route continues to the existing ingest rules. The built-in policy is
 ingest-only. [Receiver setup](../../../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)
 
 A planned outage is a silence, not a gate in the services: `meiva update down` creates

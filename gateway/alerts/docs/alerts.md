@@ -89,17 +89,21 @@ for a later life.
 
 Copy the [complete example](../../../deploy/lgtm/config/grafana/contact.agent.example.yml)
 to `$MEIVA_HOME/lgtm/alerting/contact.yml` on the Grafana station. Replace
-`1234` with the recipient agent ID and run the normal LGTM converge. The example
-uses the station's existing webhook URL and Bearer token environment references.
+`1234` with the recipient agent ID and run the normal LGTM converge. Grafana
+loads the rendered file at startup. For a running Grafana, reload it through
+the admin API at `POST /api/admin/provisioning/alerting/reload`.
+[Grafana provisioning reload](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/admin/#reload-provisioning-configurations)
+
+The example uses the station's existing webhook URL and Bearer token environment references.
 Keep the agent route first with `continue: true` to retain the existing ingest
 routes. The example sends error and critical notifications, including resolved
 groups, and inherits the root grouping and timers. The override replaces the
 whole contact and policy file. Keep any local changes in that source file and
 check it against the shipped policy when upgrading.
 
-To stop agent routing, remove the override and converge to restore the shipped
-policy. Grafana may retain the now-unused contact point. The restored policy has
-no route to it.
+To stop agent routing, remove the override, converge and reload alerting
+provisioning. Grafana may retain the unused contact point. The restored policy
+routes to ingest only.
 
 The receiver formats the instances in the POST into one message with statuses,
 summaries, diagnostic labels, Grafana rule links and event query commands.
