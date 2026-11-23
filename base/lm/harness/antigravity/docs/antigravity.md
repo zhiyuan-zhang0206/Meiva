@@ -86,7 +86,9 @@ DONE afterward.
 
 A completed planner reply whose native ownership is proven can be delivered
 before its ACP text arrives. Its notice row identifies the reply for delivery
-within the generation. An unresolved native notice stays in the projection
+within the generation. The projection keeps the native reply's attribution
+evidence until its ACP text has been matched, including when it arrives during
+the next foreground prompt. An unresolved native notice stays in the projection
 across foreground settlement. When a prompt omits ACP usage, a terminal
 planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete

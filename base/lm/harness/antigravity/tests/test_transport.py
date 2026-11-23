@@ -371,10 +371,12 @@ async def _assert_reused_prompt(
     if native_timing.startswith("before-marker"):
         if native_timing.endswith("-with-tool"):
             harness.release("include-native-tool")
+            harness.release("delay-native-frame")
         harness.release("release-native")
         await harness.wait_for_marker("native-written")
     followup = {
         "after-marker": "late-native",
+        "before-marker-with-tool": "next-with-delayed-native-frame",
         "tool-after-marker": "tool-then-foreground",
         "delayed-planner": "delayed-planner",
         "delayed-planner-early": "delayed-planner-early",

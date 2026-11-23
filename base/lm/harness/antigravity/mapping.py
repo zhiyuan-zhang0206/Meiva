@@ -367,6 +367,8 @@ class OutputProjection:
     def has_pending_reply(
         self, rows: Sequence[Frame], session_id: str | None, subagents: ChildLookup
     ) -> bool:
+        if any((index, "content", 0) not in self.seen for index in self._answered_at.values()):
+            return True
         notice = None
         for event in _attribution_events(
             rows[self.offset :],
@@ -661,6 +663,12 @@ class IdleReplies:
     def bind(self, session_id: str, *, home: Path | None) -> None:
         if not self.offset:
             self.offset = len(TranscriptSnapshot.for_session(session_id, home=home).rows)
+
+    def note_text(self, frame: Frame, projection: OutputProjection | None) -> None:
+        self.pending = True
+        if projection is not None:
+            projection.pending.append(frame)
+            self._signature = None
 
     def changed(
         self, session_id: str | None, *, home: Path | None, projecting: bool

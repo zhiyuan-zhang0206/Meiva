@@ -281,8 +281,9 @@ def send_late_native(transcript: Path, *, with_tool: bool = False) -> None:
     if with_tool:
         record_native_tool(transcript)
     record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
-    message("LATE NATIVE REPLY")
-    update("usage_update", used=2, size=10)
+    if not Path("delay-native-frame").exists():
+        message("LATE NATIVE REPLY")
+        update("usage_update", used=2, size=10)
     Path("native-written").touch()
 
 
@@ -436,6 +437,9 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         return
     if command == "child-seed":
         _ = declare_child(transcript)
+    if command == "next-with-delayed-native-frame":
+        message("LATE NATIVE REPLY")
+        update("usage_update", used=2, size=10)
     if command == "late-native":
         send_late_native(transcript)
     if command == "tool-then-foreground":

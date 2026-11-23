@@ -10,7 +10,6 @@ import argparse
 import json
 import math
 import sys
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,6 +30,7 @@ from usage_budget import (
     positive_id,
 )
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.boundary.fields import (
@@ -147,7 +147,7 @@ def _agent_id(row: object) -> int:
 
 # meiva:note
 # Read the usage report each round inside one read-only snapshot, print it as JSON, and let `next_step` decide: a reminder goes to the named peers once and ends the run, a polling run waits and reads again. The window's end is the clock at each round unless `--end` fixed it.
-def main(argv: Sequence[str], *, database: Database) -> None:
+def main(argv: Sequence[str], *, database: Database, timers: Timers) -> None:
     parsed = parse_args(argv)
     while True:
         with database.connect() as conn:
@@ -174,7 +174,7 @@ def main(argv: Sequence[str], *, database: Database) -> None:
         if isinstance(step, Finish):
             return
         if isinstance(step, Sleep):
-            time.sleep(step.seconds)
+            timers.sleep(step.seconds)
         else:
             assert_never(step)
 
@@ -190,4 +190,4 @@ def process_database() -> Database:
 
 if __name__ == "__main__":
     parse_args(sys.argv[1:])
-    main(sys.argv[1:], database=process_database())
+    main(sys.argv[1:], database=process_database(), timers=SYSTEM_TIMERS)

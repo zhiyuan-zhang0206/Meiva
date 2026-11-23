@@ -473,7 +473,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 self._flush_text(turn)
             self.request_timing_refresh()
         elif kind == "agent_message_chunk" and turn is None:
-            self._idle_replies.pending = True
+            self._idle_replies.note_text(update, projection)
         elif kind in (
             "agent_message_chunk",
             "agent_thought_chunk",

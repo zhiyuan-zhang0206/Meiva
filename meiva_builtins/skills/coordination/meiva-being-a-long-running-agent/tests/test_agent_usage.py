@@ -2,7 +2,6 @@
 
 import importlib
 import json
-import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,6 +9,8 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -226,6 +227,7 @@ def test_cli_reads_a_real_window_and_sends_one_reminder(
             str(root),
         ],
         database=database,
+        timers=SYSTEM_TIMERS,
     )
 
     result = json.loads(capsys.readouterr().out)
@@ -250,6 +252,7 @@ def test_a_single_read_below_the_limit_prints_the_report_and_notifies_nobody(
     usage.main(
         ["--agent-id", str(root), "--start", start.isoformat(), "--usd-limit", "1"],
         database=database,
+        timers=SYSTEM_TIMERS,
     )
 
     assert len(capsys.readouterr().out.splitlines()) == 1
@@ -269,39 +272,36 @@ def test_polling_reads_each_round_until_the_budget_is_breached(
     db_conn.commit()
     _peer(wire, 2)
 
-    def breach() -> None:
-        with psycopg.connect(db_url) as conn:
-            event(conn, root, datetime.now(UTC), {"in_total": 1, "cost_usd": 0.1})
+    class BreachDuringWait(ManualTimers):
+        def sleep(self, seconds: float) -> None:
+            super().sleep(seconds)
+            with psycopg.connect(db_url) as conn:
+                event(conn, root, start + timedelta(seconds=2), {"in_total": 1, "cost_usd": 0.1})
 
-    timer = threading.Timer(0.3, breach)
-    timer.start()
-    try:
-        usage.main(
-            [
-                "--agent-id",
-                str(root),
-                "--start",
-                start.isoformat(),
-                "--usd-limit",
-                "0.1",
-                "--notify-agent",
-                "2",
-                "--poll-seconds",
-                "0.02",
-            ],
-            database=database,
-        )
-    finally:
-        timer.cancel()
-        timer.join()
+    timers = BreachDuringWait()
+    usage.main(
+        [
+            "--agent-id",
+            str(root),
+            "--start",
+            start.isoformat(),
+            "--usd-limit",
+            "0.1",
+            "--notify-agent",
+            "2",
+            "--poll-seconds",
+            "0.02",
+        ],
+        database=database,
+        timers=timers,
+    )
 
     costs = [
         json.loads(line)["totals"]["recorded_cost_usd"]
         for line in capsys.readouterr().out.splitlines()
     ]
-    assert costs[0] == 0.05
-    assert len(costs) > 1
-    assert costs[-1] == pytest.approx(0.15)
+    assert timers.sleeps == [0.02]
+    assert costs == [0.05, pytest.approx(0.15)]
     [(method, path, _body)] = _messages(wire)
     assert (method, path) == ("POST", "/api/agents/2/messages")
 
