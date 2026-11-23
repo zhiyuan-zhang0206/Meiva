@@ -94,20 +94,33 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
     )
 
 
-def test_occupied_harness_port_never_rewrites_the_collector_config(
-    collector_unit: CollectorUnit,
+def test_occupied_harness_port_renders_only_the_ordinary_receivers(
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _ = collector_unit.install_pinned_binary()
     collector_unit.ensure(GATEWAY)
     path = otel_collector_config(collector_unit.home)
-    current = path.read_bytes()
+    current = config_of(path.read_text())
     with socket.socket() as occupant:
         occupant.bind(("127.0.0.1", 0))
         occupant.listen()
         port = occupant.getsockname()[1]
-        with pytest.raises(RuntimeError, match=r"Harness OTLP port .* config was preserved"):
-            collector_unit.ensure(GATEWAY, observability=observability(harness_otlp_port=port))
-    assert path.read_bytes() == current
+        settings = observability(harness_otlp_port=port)
+        collector_unit.ensure(GATEWAY, observability=settings)
+        fallback = config_of(path.read_text())
+        assert "otlp/harness" not in mapping_at(fallback, "receivers")
+        assert "connectors" not in fallback
+        for signal in ("logs", "metrics", "traces"):
+            assert f"{signal}/harness" not in mapping_at(fallback, "service", "pipelines")
+            assert "otlp" in sequence_at(fallback, "service", "pipelines", signal, "receivers")
+            assert "forward/harness" not in sequence_at(
+                fallback, "service", "pipelines", signal, "receivers"
+            )
+        assert mapping_at(fallback, "receivers", "otlp") == mapping_at(current, "receivers", "otlp")
+        assert occupant.getsockname()[1] == port
+    assert f"harness OTLP disabled: port {port} is unavailable" in capsys.readouterr().err
+    collector_unit.ensure(GATEWAY, observability=settings)
+    assert "otlp/harness" in mapping_at(config_of(path.read_text()), "receivers")
 
 
 def test_harness_processor_removes_non_attribute_payloads(
@@ -118,6 +131,10 @@ def test_harness_processor_removes_non_attribute_payloads(
     allowed = sequence_at(processors, "redaction/harness", "allowed_keys")
     assert all(key not in allowed for key in ("tool_name", "tool", "gen_ai.tool.name"))
     transform = mapping_at(processors, "transform/harness_payload")
+    assert sequence_at(config, "service", "pipelines", "logs/harness", "processors") == [
+        "transform/harness_payload",
+        "redaction/harness",
+    ]
     assert "set(span.links, nil)" in sequence_at(transform, "trace_statements")
     assert any(
         isinstance(statement, str) and statement.startswith("set(datapoint.exemplars, nil)")

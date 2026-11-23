@@ -40,15 +40,7 @@ receivers:
       http:
         endpoint: $OTLP_RECEIVER_ENDPOINT
 $REMOTE_OTLP_RECEIVER
-  otlp/harness:
-    protocols:
-      http:
-        endpoint: $HARNESS_OTLP_RECEIVER_ENDPOINT
-        traces_url_path: /meiva-harness/v1/traces
-        logs_url_path: /meiva-harness/v1/logs
-        metrics_url_path: /meiva-harness/v1/metrics
-        response_headers:
-          X-Meiva-Harness-Redaction: "1"
+$HARNESS_OTLP_RECEIVER
 
   # ── The traditional SRE layer (issue #46) ────────────────────────────────
   # Host metrics come from the collector's own receiver, not a node_exporter
@@ -166,8 +158,7 @@ $REMOTE_OTLP_RECEIVER
     polls_to_archive: 50
     max_concurrent_files: 200
 $DATA_PLANE_RECEIVERS
-connectors:
-  forward/harness: {}
+$HARNESS_OTLP_CONNECTOR
 
 processors:
   # The native exporters do not gate every diagnostic field (e.g. raw API
@@ -224,9 +215,12 @@ processors:
     log_statements:
       - set(scope.name, "harness")
       - set(scope.version, "")
-      - set(log.body, log.event_name) where IsMatch(log.event_name, "^claude_code[.](user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start)$$")
-      - set(log.body, "harness event") where not IsMatch(log.event_name, "^claude_code[.](user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start)$$")
-      - set(log.event_name, log.body)
+      - set(log.event_name, "harness event")
+      - >-
+        set(log.event_name, Concat(["claude_code.", log.attributes["event.name"]], ""))
+        where resource.attributes["service.name"] == "claude-code" and
+        IsMatch(log.attributes["event.name"], "^(user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start|managed_settings_resolved|plugin_loaded|mcp_server_connection)$$")
+      - set(log.body, log.event_name)
       - set(log.severity_text, "")
     trace_statements:
       - set(scope.name, "harness")
@@ -382,28 +376,17 @@ service:
                 port: $SELF_METRICS_PORT
   extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
-    traces/harness:
-      receivers: [otlp/harness]
-      processors: [redaction/harness, transform/harness_payload]
-      exporters: [forward/harness]
-    logs/harness:
-      receivers: [otlp/harness]
-      processors: [redaction/harness, transform/harness_payload]
-      exporters: [forward/harness]
-    metrics/harness:
-      receivers: [otlp/harness]
-      processors: [redaction/harness, transform/harness_payload]
-      exporters: [forward/harness]
+$HARNESS_OTLP_PIPELINES
     traces:
-      receivers: [otlp, forward/harness]
+      receivers: [otlp$HARNESS_OTLP_FORWARD]
       processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp, forward/harness$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services]
+      receivers: [otlp$HARNESS_OTLP_FORWARD$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services]
       processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp, forward/harness$REMOTE_OTLP_PIPELINE_RECEIVER]
+      receivers: [otlp$HARNESS_OTLP_FORWARD$REMOTE_OTLP_PIPELINE_RECEIVER]
       processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/prometheus]
     # Infra metrics ride their own pipeline so the host-identity processors

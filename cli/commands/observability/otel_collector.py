@@ -253,6 +253,7 @@ def generate_config(
     settings: CollectorSettings,
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
+    harness_enabled: bool = True,
 ) -> str:
     from base.cluster import home_label
     from base.host.db_authority.unit import telemetry_bearer
@@ -274,7 +275,9 @@ def generate_config(
         retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port("127.0.0.1", obs.telemetry_otlp_port),
-        harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
+        harness_ingress_endpoint=(
+            host_port("127.0.0.1", obs.harness_otlp_port) if harness_enabled else None
+        ),
         data_plane_receivers=receivers,
         data_plane_pipeline=pipeline,
         exporters=_exporters(
@@ -309,19 +312,18 @@ def write_config(path: Path, rendered: str) -> bool:
     return (path.read_bytes() if path.exists() else None) != before
 
 
-def _require_harness_port(home: Path, obs: ObservabilityConfig) -> None:
+def _harness_port_problem(home: Path, obs: ObservabilityConfig) -> str | None:
     port = obs.harness_otlp_port
     if port in (obs.telemetry_otlp_port, obs.otel_collector_metrics_port):
-        raise RuntimeError(f"Harness OTLP port {port} conflicts with this collector's listeners")
-    address = ("127.0.0.1", port)
+        return f"port {port} conflicts with this collector's other listeners"
     try:
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            probe.bind(address)
+            probe.bind(("127.0.0.1", port))
             probe.listen()
-        return
+        return None
     except OSError as exc:
-        failure = exc
+        failure = str(exc)
 
     binary = otel_collector_dir(home) / collector_plan.BINARY_NAME
     config = otel_collector_config(home)
@@ -329,19 +331,14 @@ def _require_harness_port(home: Path, obs: ObservabilityConfig) -> None:
         listeners = strict_listeners_on(port)
         if len(listeners) == 1:
             process = psutil.Process(listeners[0])
-            args = process.cmdline()
-            if Path(process.exe()).resolve() == binary.resolve() and args[1:] == [
+            if Path(process.exe()).resolve() == binary.resolve() and process.cmdline()[1:] == [
                 "--config",
                 str(config),
             ]:
-                return
-    except (psutil.Error, ListenerDiscoveryError):
-        raise RuntimeError(
-            f"Cannot verify ownership of harness OTLP port {port}; collector config was preserved"
-        ) from failure
-    raise RuntimeError(
-        f"Harness OTLP port {port} is unavailable; collector config was preserved"
-    ) from failure
+                return None
+    except (psutil.Error, ListenerDiscoveryError) as exc:
+        return f"cannot verify ownership of port {port}: {exc}"
+    return f"port {port} is unavailable: {failure}"
 
 
 # meiva:note
@@ -379,7 +376,9 @@ def ensure_otel_collector(
     if isinstance(plan, SkipUnsupportedPlatform):
         print(plan.warning(), file=sys.stderr)
         return
-    _require_harness_port(meiva_home, settings.observability)
+    harness_problem = _harness_port_problem(meiva_home, settings.observability)
+    if harness_problem is not None:
+        print(f"  ! otel-collector: harness OTLP disabled: {harness_problem}", file=sys.stderr)
     dest_dir.mkdir(parents=True, exist_ok=True)
     version = collector_plan.OTELCOL_CONTRIB_VERSION
     match plan:
@@ -407,6 +406,7 @@ def ensure_otel_collector(
             settings=settings,
             database_factory=database_factory,
             machine=machine,
+            harness_enabled=harness_problem is None,
         ),
     )
     if wrote:

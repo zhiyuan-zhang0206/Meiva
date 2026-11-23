@@ -92,6 +92,16 @@ def cli_timezone(environ: Mapping[str, str]) -> tzinfo | None:
     return datetime.now().astimezone().tzinfo
 
 
+def _with_collector_bypass(environ: Mapping[str, str]) -> dict[str, str]:
+    result = dict(environ)
+    populated = tuple(key for key in ("NO_PROXY", "no_proxy") if result.get(key))
+    for key in populated or ("no_proxy" if "no_proxy" in environ else "NO_PROXY",):
+        value = result.get(key, "")
+        if value != "*":
+            result[key] = ",".join(filter(None, (value, "127.0.0.1")))
+    return result
+
+
 def open_session(
     harness: Harness,
     *,
@@ -109,14 +119,7 @@ def open_session(
     trace_enabled: bool = False,
 ) -> HarnessSession:
     if otlp_endpoint is not None:
-        proxy_exceptions = (
-            environ.get("NO_PROXY", "").split(",")
-            + environ.get("no_proxy", "").split(",")
-            + ["127.0.0.1"]
-        )
-        entries = dict.fromkeys(entry.strip() for entry in proxy_exceptions if entry.strip())
-        bypass = "*" if "*" in entries else ",".join(entries)
-        environ = {**environ, "NO_PROXY": bypass, "no_proxy": bypass}
+        environ = _with_collector_bypass(environ)
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)

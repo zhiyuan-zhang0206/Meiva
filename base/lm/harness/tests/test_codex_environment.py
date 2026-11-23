@@ -145,17 +145,23 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
 @pytest.mark.parametrize(
     ("proxy_env", "expected"),
     [
-        ({"NO_PROXY": "127.0.0.2"}, "127.0.0.2,127.0.0.1"),
-        ({"no_proxy": ".test.invalid"}, ".test.invalid,127.0.0.1"),
+        ({}, {"NO_PROXY": "127.0.0.1"}),
+        ({"NO_PROXY": "127.0.0.2"}, {"NO_PROXY": "127.0.0.2,127.0.0.1"}),
+        ({"no_proxy": ".test.invalid"}, {"no_proxy": ".test.invalid,127.0.0.1"}),
         (
             {"NO_PROXY": "127.0.0.2", "no_proxy": ".test.invalid"},
-            "127.0.0.2,.test.invalid,127.0.0.1",
+            {"NO_PROXY": "127.0.0.2,127.0.0.1", "no_proxy": ".test.invalid,127.0.0.1"},
         ),
-        ({"NO_PROXY": "*"}, "*"),
+        ({"NO_PROXY": "*"}, {"NO_PROXY": "*"}),
+        (
+            {"NO_PROXY": "*", "no_proxy": ".test.invalid"},
+            {"NO_PROXY": "*", "no_proxy": ".test.invalid,127.0.0.1"},
+        ),
+        ({"NO_PROXY": "*", "no_proxy": ""}, {"NO_PROXY": "*", "no_proxy": ""}),
     ],
 )
 async def test_native_otlp_preserves_proxy_exceptions(
-    tmp_path: Path, proxy_env: dict[str, str], expected: str
+    tmp_path: Path, proxy_env: dict[str, str], expected: dict[str, str]
 ) -> None:
     binary = Path(_stub_codex(tmp_path / "bin"))
     receipt = tmp_path / "environment.json"
@@ -177,7 +183,7 @@ async def test_native_otlp_preserves_proxy_exceptions(
         await session.start()
         observed = json.loads(receipt.read_text())
         for child in (observed["environment"], observed["descendant"]):
-            assert child["NO_PROXY"] == child["no_proxy"] == expected
+            assert {key: child[key] for key in ("NO_PROXY", "no_proxy") if key in child} == expected
     finally:
         await session.close()
 
