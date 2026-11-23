@@ -131,7 +131,7 @@ def test_the_mirror_replay_applies_the_same_judgment() -> None:
             "machine": "m",
             "cluster": "c",
             "process": "p",
-            "category": category_for_kind(name),
+            "category": "telemetry",
             "event_name": name,
             "level": level,
             "source": "system",
@@ -141,7 +141,13 @@ def test_the_mirror_replay_applies_the_same_judgment() -> None:
         return json.dumps(row).encode()
 
     records = event_store.jsonl_rows(
-        [line("llm_usage", "info"), line("exec_envelope", "info"), line("exec_envelope", "error")]
+        [
+            line("llm_usage", "info"),
+            line("exec_envelope", "info"),
+            line("exec_envelope", "error"),
+            line("root_diagnostic_state", "info"),
+            line("understanding_backlog", "info"),
+        ]
     )
 
     assert [(r["event_name"], r["level"]) for r in records] == [
