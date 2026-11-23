@@ -34,7 +34,7 @@ from scripts.hooks.diff_checks_cache import (
     record_run,
 )
 from scripts.hooks.diff_checks_plan import schedule_groups
-from scripts.hooks.meizel_run import cached_full_meizel, safe_environment
+from scripts.hooks.meizel_run import cached_full_meizel, git_executable_digest, safe_environment
 
 # meiva:note
 # The interpreter the runner hands its children is the caller's value, so these tests name it here:
@@ -679,3 +679,19 @@ def test_git_hook_environment_allows_the_default_paths_for_linked_worktree(tmp_p
     assert safe_environment(linked, environment)
     assert not safe_environment(linked, {**environment, "GIT_DIR": str(repo / ".git")})
     assert not safe_environment(linked, {**environment, "GIT_INDEX_FILE": str(tmp_path / "index")})
+
+
+def test_git_executable_identity_survives_hook_path_prepend(tmp_path: Path) -> None:
+    user_bin = tmp_path / "bin"
+    exec_bin = tmp_path / "git-core"
+    user_bin.mkdir()
+    exec_bin.mkdir()
+    for directory in (user_bin, exec_bin):
+        executable = directory / "git"
+        executable.write_bytes(b"git executable version 1")
+        executable.chmod(0o755)
+    preflight = git_executable_digest(str(user_bin))
+    hook_path = f"{exec_bin}:{user_bin}"
+    assert git_executable_digest(hook_path) == preflight
+    (exec_bin / "git").write_bytes(b"git executable version 2")
+    assert git_executable_digest(hook_path) != preflight

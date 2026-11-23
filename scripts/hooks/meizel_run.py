@@ -41,18 +41,24 @@ def _file_stamp(path: Path) -> tuple[str, int, int, int, int, int]:
     return str(target), info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
+def git_executable_digest(path: str) -> str:
+    executable = shutil.which("git", path=path)
+    if executable is None:
+        raise FileNotFoundError("Git executable is missing")
+    with Path(executable).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def _toolchain(root: Path, python: str, path: str) -> list[tuple[str, int, int, int, int, int]]:
     node = shutil.which("node", path=path)
-    git_binary = shutil.which("git", path=path)
-    if node is None or git_binary is None:
-        raise FileNotFoundError("Git or Node executable is missing")
+    if node is None:
+        raise FileNotFoundError("Node executable is missing")
     installed_meizel = Path(meizel.__file__).parent
     frontend = typescript_toolchain()
     compiler = frontend / "node_modules/typescript"
     required = (
         root / python,
         Path(node),
-        Path(git_binary),
         frontend / "pnpm-lock.yaml",
         frontend / "node_modules/.modules.yaml",
         frontend / "node_modules/.pnpm/lock.yaml",
@@ -132,6 +138,8 @@ def input_fingerprint(
         inputs = (
             str(root),
             git(root, "config", "--null", "--list"),
+            git(root, "--exec-path"),
+            git_executable_digest(environment.get("PATH", "")),
             _toolchain(root, python, environment.get("PATH", "")),
         )
     except (OSError, RuntimeError, subprocess.CalledProcessError, MeizelError, UnicodeError):
