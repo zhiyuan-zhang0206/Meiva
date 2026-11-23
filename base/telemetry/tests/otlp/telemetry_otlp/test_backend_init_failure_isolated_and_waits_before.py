@@ -404,7 +404,7 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
     sdk_logger.filters[:] = []
-    loss.install_exporter_drop_observer(mirror_dir=tmp_path)
+    observer = loss.install_exporter_drop_observer(mirror_dir=tmp_path)
     provider = LoggerProvider()
     provider.add_log_record_processor(
         BatchLogRecordProcessor(
@@ -418,18 +418,21 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
     try:
         emitter.emit(LogRecord(body="first"))
         assert entered.wait(2)
-        for _ in range(3):
+        for _ in range(3000):
             emitter.emit(LogRecord(body="more"))
+        assert list(tmp_path.glob("*.jsonl")) == []
+        observer.flush()
+        observer.flush()
         day = datetime.now(UTC).strftime("%Y%m%d")
         mirror_path = tmp_path / f"events-{day}.jsonl"
         assert mirror_path.exists()
         reports = [
             json.loads(line) for line in mirror_path.read_text(encoding="utf-8").splitlines()
         ]
-        assert len(reports) == 2
-        assert all(
-            row["attributes"]["queue"] == "otel-sdk" and row["level"] == "error" for row in reports
-        )
+        assert len(reports) == 1
+        assert reports[0]["attributes"]["queue"] == "otel-sdk"
+        assert reports[0]["attributes"]["n"] == 2999
+        assert reports[0]["level"] == "error"
     finally:
         release.set()
         provider.shutdown()

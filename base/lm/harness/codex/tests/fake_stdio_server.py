@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import cast
 
 
@@ -18,6 +21,22 @@ def _bytes_param(message: dict[str, object]) -> int:
     typed = cast("dict[str, object]", params)
     value = typed.get("bytes")
     return value if isinstance(value, int) else 0
+
+
+def write_stderr(message: dict[str, object]) -> None:
+    if message["method"] == "stderr_secret":
+        value = os.environ["OPENAI_API_KEY"]
+        _ = sys.stderr.write(f"OPENAI_API_KEY={value} diagnostic_value={value}\n")
+    else:
+        _ = sys.stderr.write("x" * _bytes_param(message) + "\nstartup diagnostic\n")
+    sys.stderr.flush()
+
+
+def hold_stderr(path: Path) -> None:
+    for _ in range(500):
+        if path.exists():
+            return
+        time.sleep(0.02)
 
 
 def main() -> None:
@@ -77,10 +96,16 @@ def main() -> None:
             size = _bytes_param(message)
             _ = out.write("x" * size)
             out.flush()
-        elif method == "stderr_flood":
-            _ = sys.stderr.write("x" * _bytes_param(message) + "\nstartup diagnostic\n")
-            sys.stderr.flush()
+        elif method in ("stderr_secret", "stderr_flood"):
+            write_stderr(message)
             send({"jsonrpc": "2.0", "id": request_id, "result": {}})
+        elif method == "hold_stderr":
+            child = subprocess.Popen(  # noqa: S603
+                [sys.executable, __file__, "--hold-stderr", "release-stderr"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
+            send({"jsonrpc": "2.0", "id": request_id, "result": {"pid": child.pid}})
         elif method == "hang":
             continue
         elif method == "quit":
@@ -91,4 +116,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == "--hold-stderr":
+        hold_stderr(Path(sys.argv[2]))
+    else:
+        main()

@@ -52,6 +52,9 @@ def test_a_secret_named_value_in_a_serialized_mapping_is_masked() -> None:
         ('DB_PASSWORD="fixture-quoted"', 'DB_PASSWORD="***"'),
         ("API_SECRET: fixture-colon then text", "API_SECRET: *** then text"),
         ("MEIVA_DB_PASSWORD='fixture-single'", "MEIVA_DB_PASSWORD='***'"),
+        ("OPENAI_API_KEY=fixture-key", "OPENAI_API_KEY=***"),
+        ('apiKey: "quoted fixture"', 'apiKey: "***"'),
+        ("{'CODEX_API_KEY': 'fixture-key'}", "{'CODEX_API_KEY': '***'}"),
         (
             "Authorization: Bearer canary-fake-bearer-token-998877",
             "Authorization: Bearer ***",
@@ -83,6 +86,7 @@ def test_an_environment_assignment_keeps_its_key_and_loses_its_value(
         "token_count=3 tokenizer=bert token_expires_at=soon",
         "PASSWORD_POLICY=strict",
         "TOKENIZER_PATH=/x",
+        "cache_key=diagnostic-id",
         "[mcp-oauth] open authorization URL: https://issuer.test/auth",
         "authorization callback missing 'code'",
         "a line with no credential at all",

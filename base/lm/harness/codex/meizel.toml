@@ -15,7 +15,7 @@ exports = ["auth.py", "session.py", "tests", "transcript"]
 "subagents.py" = ["config.py", "frames.py", "mapping.py"]
 "transcript" = ["reconciliation"]
 "tests" = ["__init__.py", "auth.py", "frames.py", "mapping.py", "requests.py", "session.py", "transport.py", "turns.py"]
-"transport.py" = ["frames.py"]
+"transport.py" = ["auth.py", "frames.py"]
 "turns.py" = ["frames.py", "mapping.py"]
 
 [purity]

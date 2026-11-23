@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Generator, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -48,6 +49,9 @@ class _ReceiverHandler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         with _POSTS_LOCK:
             _POSTS.append((self.path, body))
+        self.acknowledge(body)
+
+    def acknowledge(self, body: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/x-protobuf")
         self.send_header("Content-Length", "0")
@@ -57,15 +61,23 @@ class _ReceiverHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture
-def otlp_receiver() -> Any:
+@contextlib.contextmanager
+def _serve_receiver(handler: type[_ReceiverHandler]) -> Generator[http.server.ThreadingHTTPServer]:
     _POSTS.clear()
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ReceiverHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server
-    server.shutdown()
-    server.server_close()
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+@pytest.fixture
+def otlp_receiver() -> Iterator[http.server.ThreadingHTTPServer]:
+    with _serve_receiver(_ReceiverHandler) as server:
+        yield server
 
 
 _CHILD_SCRIPT = Path(__file__).with_name("_otlp_exit_delivery_child.py")
@@ -116,13 +128,9 @@ def _sent_pairs() -> set[tuple[object, object]]:
     return {_marker_seq_of(record) for record in _received_log_records(posts)}
 
 
-def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
-    tmp_path: Path, otlp_receiver: Any
-) -> None:
-    """The last record emitted before exit must ship while the providers are
-    still alive — the exit seam, not the SDK's atexit order, carries it."""
-    marker = uuid.uuid4().hex
-    home = tmp_path / "home"
+def _run_child(
+    home: Path, marker: str, server: http.server.ThreadingHTTPServer
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
         {
@@ -130,7 +138,7 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
             "MEIVA_PROCESS_PROFILE": "agent",
             # The explicit endpoint + enabled flag open the export gate
             # (tests/fixtures/env_bootstrap.py disables OTLP suite-wide).
-            "MEIVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{otlp_receiver.server_address[1]}",
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT": f"http://127.0.0.1:{server.server_port}",
             "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
         }
     )
@@ -139,7 +147,7 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
     # Fixed argv, sys.executable is trusted. -I keeps the parent's PYTHON*
     # environment out; `import base` resolves through the checkout's
     # editable install.
-    proc = subprocess.run(  # noqa: S603
+    return subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-X", "utf8", str(_CHILD_SCRIPT), marker],
         capture_output=True,
         text=True,
@@ -147,6 +155,14 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
         timeout=120,
         check=False,
     )
+
+
+def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
+    tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
+) -> None:
+    marker = uuid.uuid4().hex
+    home = tmp_path / "home"
+    proc = _run_child(home, marker, otlp_receiver)
     assert proc.returncode == 0, proc.stderr
 
     deadline = time.monotonic() + 10.0
@@ -175,3 +191,40 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
         if attributes.get("marker") == marker and attributes.get("seq") == "tail":
             mirror_tail.append(row)
     assert mirror_tail, "the JSONL mirror must hold the tail record"
+
+
+def test_stalled_log_acknowledgement_is_accounted_before_exit(tmp_path: Path) -> None:
+    stalled = threading.Event()
+    release = threading.Event()
+
+    class StalledReceiver(_ReceiverHandler):
+        def acknowledge(self, body: bytes) -> None:
+            if self.path == "/v1/logs" and b'"seq":"tail"' in body:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-protobuf")
+                self.send_header("Content-Length", "1")
+                self.end_headers()
+                stalled.set()
+                release.wait(10)
+                self.close_connection = True
+            else:
+                super().acknowledge(body)
+
+    try:
+        with _serve_receiver(StalledReceiver) as receiver:
+            marker = uuid.uuid4().hex
+            result = _run_child(tmp_path / "home", marker, receiver)
+            assert stalled.is_set()
+            assert (marker, "early") in _sent_pairs()
+            assert result.returncode == 0, result.stderr
+            with _POSTS_LOCK:
+                pending = [(path, raw) for path, raw in _POSTS if b'"seq":"tail"' in raw]
+            assert len(pending) == 1
+            count = len(_received_log_records(pending))
+            assert count > 0
+            assert (
+                f"OTLP log export failed for {count} record(s), error.type=Timeout" in result.stderr
+            )
+            assert "unfinished" not in result.stderr
+    finally:
+        release.set()

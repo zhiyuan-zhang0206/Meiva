@@ -26,7 +26,6 @@ from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.antigravity.transcript.window import session_file
 from base.lm.harness.process import ProcessFamily, PsutilChildProbe, WaitClock, stderr_lines
 from base.log import logger
-from base.log.redaction import redact_text
 
 READ_CHUNK_BYTES = 65536
 
@@ -510,8 +509,8 @@ class AgyTransport:
 
     async def _pump_stderr(self, stream: asyncio.StreamReader, *, agent_id: int | None) -> None:
         with contextlib.suppress(OSError):
-            async for line in stderr_lines(stream):
-                text = redact_text(line.replace(self._csrf_token, "<redacted>"))
+            secrets = (self._csrf_token, self._environ.get("MEIVA_HARNESS_HANDLE", ""))
+            async for text in stderr_lines(stream, secrets=secrets):
                 self._stderr.append(text)
                 if agent_id is not None:
                     logger.info(

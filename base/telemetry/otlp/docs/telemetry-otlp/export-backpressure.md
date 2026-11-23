@@ -13,10 +13,14 @@ the collector sidecar owns durable mirroring after acceptance.
   `put_nowait`; a full queue increments the cumulative drop counter and reports
   the loss outside the saturated log lane. In-memory metric recording never waits on the
   exporter queue.
-- SDK-owned log and metric threads perform network I/O. Each OTLP/HTTP exporter
-  has the standard 10-second request and retry budget. This gives a restarting
-  local receiver time to accept a retried batch. Export runs outside the producer
-  thread and the caller's flush and shutdown budgets stay bounded.
+- SDK-owned log and metric threads perform network I/O. The OTLP log exporter
+  shares a 3.5-second deadline across one SDK batch's requests, leaving room
+  within the five-second process-exit budget for local loss reporting. Metrics
+  retain a two-second HTTP budget. The SDK owns HTTP retry and backoff.
+- The log exporter measures uncompressed protobuf size and splits requests
+  above 16 MiB, allowing for the collector's 20 MiB request limit. An individual
+  record above the request ceiling is dropped and counted. Harness stderr lines
+  are redacted before their text is capped at 4,096 characters.
 - `base/telemetry/tracing.py:OtlpJsonHttpSpanExporter` gives each protobuf trace batch one
   2-second POST. Three consecutive failed batches open a 30-second circuit.
   During cooldown it returns `FAILURE` without encoding or posting and counts
@@ -55,23 +59,24 @@ alerts cover that failure. These are observable losses, not a durable delivery
 guarantee or a reconstruction of missing calls.
 
 The OTel SDK observer handles its pinned queue-full warning before OTel's
-duplicate-log filter, records each loss, and suppresses the original warning
-after replacing it with an error outside the emitter. A real bounded SDK queue
-test locks this upstream diagnostic contract.
+duplicate-log filter and increments a pending count. The exporter reports the
+aggregate outside the emitter at the end of a batch or at shutdown, free of
+per-record file I/O in the SDK admission path.
 
 ## SDK export loss
 
-The log processor and HTTP log exporter send SDK internal metrics through the
-existing metrics provider. Provider construction defaults the SDK setting
-`OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED` to `true`. The log-exporter's local
-diagnostics stay available in stderr and process logs even during an outage.
+The log processor and HTTP log exporter publish through the existing metrics
+provider. Provider construction defaults the SDK setting
+`OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED` to `true` for the processor.
 
 - `otel.sdk.processor.log.processed` with `error.type=queue_full` counts logs
   evicted by the SDK batch processor.
-- `otel.sdk.exporter.log.exported` with `error.type` counts logs in failed
-  exports that raised a transport error. For SDK 1.44.0, HTTP response failures
-  are visible on `otel.sdk.exporter.operation.duration` via
-  `http.response.status_code`, at batch granularity.
+- `otel.sdk.exporter.log.exported` counts acknowledged records and failed
+  records separately. The HTTP adapter reads the final OTLP response so a
+  rejected batch carries the HTTP status as `error.type` and partial success
+  counts only its rejected records under `error.type="rejected"`. Partial
+  acknowledgements complete the request. Failed and rejected counts also go to
+  local stderr and process logs.
 - These metrics travel through the collector. After an interruption a surviving
   process can export the cumulative counts on a later metrics pass. The local
   diagnostics cover periods when a process exits before its metrics can reach

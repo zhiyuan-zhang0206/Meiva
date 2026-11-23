@@ -6,10 +6,9 @@
 # an agent, a value an operator passed in) is unchanged.
 #
 # Four rules, and no guessing beyond them: a URL's userinfo password; the value of a mapping key
-# named `token`, `secret`, `password` or `authorization` (case-insensitive, also when that mapping
+# named `token`, `secret`, `password`, `api_key` or `authorization` (case-insensitive, also when that mapping
 # was serialized into the message); an `Authorization: Bearer <credential>` header in text; and the
-# value of an environment assignment whose key is upper-case and ends in `_TOKEN`/`_PASSWORD`/
-# `_SECRET` (`MEIVA_API_TOKEN=...`). A key that merely contains one of those words stays visible,
+# value of a credential assignment such as `MEIVA_API_TOKEN=...` or `OPENAI_API_KEY=...`. A key that merely contains one of those words stays visible,
 # and so does everything else, because the evidence a later reader needs is usually right next to
 # the credential. The asymmetry decides the edges: masking one more non-secret costs a little
 # readability, missing one real password costs an irreversible leak.
@@ -37,7 +36,7 @@ __all__ = ["REDACTED", "install_log_redaction", "redact_record", "redact_text"]
 
 REDACTED = "***"
 
-_SECRET_KEYS = frozenset({"token", "secret", "password", "authorization"})
+_SECRET_KEYS = frozenset({"token", "secret", "password", "api_key", "apikey", "authorization"})
 
 # meiva:note
 # A password inside a URL's userinfo, matched on raw text rather than through `urlsplit` so a value
@@ -53,7 +52,7 @@ _USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
 # message or an exec output. The key list is exact, so `token_count`, `tokenizer` and
 # `token_expires_at` keep their values.
 _SECRET_IN_TEXT = re.compile(
-    r'("(?:token|secret|password|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
+    r'("(?:token|secret|password|api_?key|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
 )
 
 # meiva:note
@@ -65,13 +64,12 @@ _AUTHORIZATION_BEARER = re.compile(
 
 # meiva:note
 # A value a process echoed as an environment assignment: `MEIVA_API_TOKEN=...`,
-# `DB_PASSWORD="..."`, `API_SECRET: ...`. The key shape is fixed -- upper-case, digits and
-# underscores, ending in `_TOKEN`/`_PASSWORD`/`_SECRET` -- so an ordinary line such as
-# `token_count=3` or `TOKENIZER_PATH=/x` keeps its value, and the key itself stays visible because
-# a reader has to know which variable leaked. The value runs to whitespace; quotes around it are
-# kept.
+# `DB_PASSWORD="..."`, `OPENAI_API_KEY=...`, or `apiKey: "..."`. The assignment
+# keeps its key and quote style so the source of a leak remains diagnosable.
 _ENV_SECRET = re.compile(
-    r'\b([A-Z][A-Z0-9_]*(?:_TOKEN|_PASSWORD|_SECRET)\b\s*[:=]\s*)(["\']?)([^\s"\']+)\2'
+    r"""(?i)(\b(?:[a-z][a-z0-9_]*_(?:token|password|secret|api_key|private_key|access_key)"""
+    r"""|api_?key|secret_key|private_key|access_key|azure_openai_key|meiva_harness_handle)\b["']?\s*[:=]\s*)"""
+    r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,"';}]+)"""
 )
 
 
@@ -84,13 +82,16 @@ def redact_text(text: str) -> str:
         text = _USERINFO_PASSWORD.sub(r"\1" + REDACTED + "@", text)
     if '"' in text:
         text = _SECRET_IN_TEXT.sub(lambda match: match.group(1) + '"' + REDACTED + '"', text)
-    if "Authorization" in text or "authorization" in text:
+    if "=" in text or ":" in text:
         text = _AUTHORIZATION_BEARER.sub(lambda match: match.group(1) + REDACTED, text)
-    if "_TOKEN" in text or "_PASSWORD" in text or "_SECRET" in text:
-        text = _ENV_SECRET.sub(
-            lambda match: match.group(1) + match.group(2) + REDACTED + match.group(2), text
-        )
+        text = _ENV_SECRET.sub(_mask_assignment, text)
     return text
+
+
+def _mask_assignment(match: re.Match[str]) -> str:
+    quote = match[2][0]
+    masked = f"{quote}{REDACTED}{quote}" if quote in {"'", '"'} else REDACTED
+    return match[1] + masked
 
 
 # meiva:note

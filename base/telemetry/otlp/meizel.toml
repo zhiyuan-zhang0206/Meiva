@@ -1,4 +1,4 @@
-exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
+exports = ["event_resource_exporter.py", "http_log_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
 
 [uses]
 "telemetry_otlp.py" = ["plans.py", "telemetry_otlp_barrier.py", "telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py"]
@@ -6,12 +6,12 @@ exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_de
 "telemetry_otlp_logs.py" = ["telemetry_otlp_worker.py"]
 "telemetry_otlp_exporting.py" = ["telemetry_otlp.py"]
 "telemetry_otlp_metrics.py" = ["plans.py"]
-"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "telemetry_otlp_metrics.py"]
+"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "http_log_exporter.py", "telemetry_otlp_metrics.py"]
 "telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py", "telemetry_otlp_gauges.py"]
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 
 [roots]
-"telemetry_otlp_sdk.py" = { kinds = ["environ"], why = "builds the SDK providers and opts into SDK internal metrics through the public SDK environment setting before constructing them" }
+"telemetry_otlp_sdk.py" = { kinds = ["clock", "environ"], why = "builds the SDK providers, opts into native processor metrics and supplies the monotonic clock that bounds a whole HTTP log batch" }
 
 [purity]
 "__init__.py" = "strict"

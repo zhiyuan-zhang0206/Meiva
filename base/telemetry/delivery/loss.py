@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 
 from base.log import logger
 from base.telemetry.delivery.mirror import append_jsonl
@@ -88,24 +89,31 @@ def report_loss(
     return report
 
 
-class _ExporterDropFilter(logging.Filter):
-    """Observe the pinned OTel SDK's queue-overflow warning at the source."""
+class ExporterDropObserver(logging.Filter):
+    """Count SDK log evictions on admission and publish one report per export."""
 
     def __init__(self, *, mirror_dir: Path) -> None:
         super().__init__()
         self._mirror_dir = mirror_dir
+        self._lock = Lock()
+        self._pending = 0
+        self._last_dropped_at = 0.0
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.msg != "Queue full, dropping %s.":
+        if record.msg != "Queue full, dropping %s." or record.args != ("Log",):
             return True
+        with self._lock:
+            self._pending += 1
+            self._last_dropped_at = max(self._last_dropped_at, record.created)
+        return False
+
+    def flush(self) -> None:
+        with self._lock:
+            if not self._pending:
+                return
+            count, self._pending = self._pending, 0
+            now = datetime.fromtimestamp(self._last_dropped_at, UTC)
         try:
-            # meiva:note
-            # The instant of the loss is the log record's own creation time: the SDK stamped it
-            # when it found its queue full, and this filter runs on that same call. Converting a
-            # value in hand (with an explicit zone, so nothing at all is read from the host) is
-            # what keeps this observer off the clock; a filter that read `now` would be a second
-            # time source for a fact the producer already stated.
-            now = datetime.fromtimestamp(record.created, UTC)
             state = process_state
             event = Event(
                 ts=now,
@@ -124,7 +132,7 @@ class _ExporterDropFilter(logging.Filter):
             pipeline = state["pipeline"]
             report = report_loss(
                 event,
-                1,
+                count,
                 "otel-sdk",
                 now=now,
                 record_metric=pipeline.record_export_loss if pipeline is not None else None,
@@ -132,17 +140,15 @@ class _ExporterDropFilter(logging.Filter):
             append_jsonl([report], target_dir=self._mirror_dir, now=now)
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
-        # The replacement error already reached local sinks. Re-exporting the
-        # original warning through the log queue would amplify the overflow.
-        return False
 
 
-def install_exporter_drop_observer(*, mirror_dir: Path) -> None:
-    """Attach once before constructing providers, including standalone SDK processes."""
+def install_exporter_drop_observer(*, mirror_dir: Path) -> ExporterDropObserver:
+    """Attach once before the SDK's duplicate log filter, so every eviction counts."""
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     for item in sdk_logger.filters:
-        if isinstance(item, _ExporterDropFilter):
+        if isinstance(item, ExporterDropObserver):
             item._mirror_dir = mirror_dir
-            return
-    # Run before OTel's DuplicateFilter: every lost record must count.
-    sdk_logger.filters.insert(0, _ExporterDropFilter(mirror_dir=mirror_dir))
+            return item
+    observer = ExporterDropObserver(mirror_dir=mirror_dir)
+    sdk_logger.filters.insert(0, observer)
+    return observer

@@ -9,12 +9,17 @@ from typing import Protocol
 import psutil
 
 from base.log import logger
+from base.log.redaction import REDACTED, redact_text
 
 SIGTERM = 15
 SIGKILL = 9
+_STDERR_LOG_CHARS = 4096
 
 
-async def stderr_lines(stream: asyncio.StreamReader) -> AsyncIterator[str]:
+async def stderr_lines(
+    stream: asyncio.StreamReader, *, secrets: Iterable[str] = ()
+) -> AsyncIterator[str]:
+    secret_values = tuple(value for value in secrets if value)
     oversized = False
     while True:
         try:
@@ -32,6 +37,11 @@ async def stderr_lines(stream: asyncio.StreamReader) -> AsyncIterator[str]:
             if oversized
             else line.decode("utf-8", errors="replace").rstrip()
         )
+        for secret in secret_values:
+            text = text.replace(secret, REDACTED)
+        text = redact_text(text)
+        if len(text) > _STDERR_LOG_CHARS:
+            text = text[:_STDERR_LOG_CHARS] + " [stderr line truncated]"
         if text:
             yield text
         if eof:

@@ -80,9 +80,8 @@ def test_endpoint_reachable_non_http_scheme_skips_probe():
 def test_production_otlp_provider_construction_contract(
     tmp_path: Path, probe_server: http.server.HTTPServer
 ) -> None:
-    """Log and metric SDK workers receive the same explicit HTTP deadline, and
-    both providers leave the process-exit shutdown to the emitter (task #4320)."""
-    timeout_s = 10.0
+    """Both SDK providers leave process-exit shutdown to the emitter."""
+    timeout_s = 2.0
     plan = telemetry_otlp_metrics.provider_build_plan(
         "http://127.0.0.1:4318", http_timeout_s=timeout_s
     )
