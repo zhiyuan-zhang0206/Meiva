@@ -6,7 +6,13 @@ from pathlib import Path
 
 from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
-from base.lm.harness.antigravity.mapping import transcript_rows
+from base.lm.harness.antigravity.mapping import (
+    IdleReplies,
+    NativeReply,
+    OutputProjection,
+    TranscriptSnapshot,
+    transcript_rows,
+)
 from base.lm.harness.antigravity.subagents import (
     Child,
     ChildCursor,
@@ -32,8 +38,37 @@ class SubagentReader:
     home: Path | None
     cursors: dict[str, ChildCursor] = field(default_factory=dict)
     _warned: set[str] = field(default_factory=set)
+    _deferred: dict[int, NativeReply] = field(default_factory=dict[int, NativeReply])
 
-    def adopt(self, conversation_id: str) -> None:
+    def defer_replies(self, projection: OutputProjection | None, session_id: str | None) -> None:
+        if projection is not None and session_id is not None:
+            transcript = TranscriptSnapshot.for_session(session_id, home=self.home)
+            for reply in projection.background_replies(transcript, session_id, None):
+                self._deferred[reply.record_start] = reply
+
+    def _registered_replies(self, session_id: str | None) -> tuple[NativeReply, ...]:
+        if session_id is None or not self._deferred:
+            return ()
+        children = {child.conversation_id for child in self._children(session_id)}
+        return tuple(
+            self._deferred.pop(index)
+            for index, reply in tuple(self._deferred.items())
+            if reply.notice.sender in children
+        )
+
+    def replay_idle(
+        self, idle: IdleReplies, projection: OutputProjection | None, session_id: str | None
+    ) -> tuple[OutputProjection | None, tuple[NativeReply, ...], bool] | None:
+        current = idle.replay(projection, session_id, self, home=self.home)
+        deferred = self._registered_replies(session_id)
+        if current is not None:
+            projection, replies, needed = current
+            return projection, (*deferred, *replies), needed
+        return (projection, deferred, projection is not None) if deferred else None
+
+    def adopt(self, conversation_id: str | None) -> None:
+        if conversation_id is None:
+            return
         # meiva:note
         # A resumed conversation's existing children belong to turns this session never saw: they are
         # marked shown up to what is on disk now, so only what they write from here on is reported.

@@ -134,8 +134,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = self._resolve_resume(resume)
-        if resume:
-            self._subagents.adopt(resume)
+        self._subagents.adopt(resume)
         await self._enter_tasks()
         try:
             await self._open_transport(resume)
@@ -271,7 +270,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _await_background_reply(self) -> None:
         while not self._closed and self._prompt_turn is None:
             self._background_changed.clear()
-            self._replay_idle()
+            if self._transport is not None:
+                self._replay_idle()
             now = self._clock.now().timestamp()
             draining = bool(self._projection and self._projection.has_undrained_native)
             if not self._schedules.blocks_prompt(now, draining_echo=draining):
@@ -424,6 +424,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._lose_schedules()
         self._background_changed.set()
         self._tools.clear()
+        self._subagents.defer_replies(self._projection if error is None else None, self._session_id)
         self._projection = None
         self._idle_replies = IdleReplies(0, self.config.max_buffered_events)
         if error is not None:
@@ -558,10 +559,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 )
 
     def _replay_idle(self) -> None:
-        result = self._idle_replies.replay(
-            self._projection, self._session_id, self._subagents, home=self._home
-        )
-        if result is not None:
+        if result := self._subagents.replay_idle(
+            self._idle_replies, self._projection, self._session_id
+        ):
             projection, replies, needed = result
             for reply in replies:
                 self._finish_background_reply(reply)

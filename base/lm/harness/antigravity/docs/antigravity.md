@@ -97,8 +97,10 @@ complete on the old peer. Every resumed generation projects the first prompt
 against its own transcript markers and planner steps. agy can emit history
 after the setup responses, even after the first prompt is written.
 Idle replay keeps each completed native span while its child descriptor is
-missing, even across other replies or foreground inputs. It keeps the current
-notice while its terminal row is missing. An idle frame can drain an echo
+missing, even across other replies or foreground inputs. Graceful retirement
+sets aside undelivered child spans by transcript offset. The new peer keeps
+its replay fence while idle replay delivers those spans once their descriptors
+appear. It keeps the current notice while its terminal row is missing. An idle frame can drain an echo
 only against planner evidence present when the frame is scanned. A retained
 partial can finish only against that same planner row. When stdout arrives
 before the planner evidence, idle replay can still publish the transcript

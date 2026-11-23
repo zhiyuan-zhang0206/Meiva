@@ -354,17 +354,17 @@ class OutputProjection:
         return notice if boundary is not None and boundary.excludes(step, notice) else None
 
     def background_replies(
-        self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
+        self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup | None
     ) -> Iterator[NativeReply]:
+        deferring = subagents is None
         pending: dict[BackgroundNotice, list[PlannerRow]] = {}
         unresolved: set[int] = set()
         for step in self.steps(transcript.rows):
             notice = step.notice
-            if (
-                notice is None
-                or notice.index in self._answered_at
-                or not notice.belongs_to(session_id, subagents)
-            ):
+            if notice is None or notice.index in self._answered_at:
+                continue
+            owned = notice.belongs_to(session_id, subagents)
+            if owned == deferring:
                 continue
             owner = self._route(step)
             if owner is None:
@@ -377,8 +377,8 @@ class OutputProjection:
                 self._answered_at[notice.index] = step.index
                 reply = NativeReply(
                     notice,
-                    transcript,
-                    self.offset,
+                    transcript.offsets[self.offset + notice.index],
+                    transcript.offsets[self.offset + step.index],
                     tuple(pending.pop(notice)),
                     incomplete_span=notice.index in unresolved,
                 )
@@ -681,8 +681,8 @@ def planner_tokens(row: dict[str, object]) -> Usage:
 @dataclass(frozen=True, slots=True)
 class NativeReply:
     notice: BackgroundNotice
-    transcript: TranscriptSnapshot
-    offset: int
+    record_start: int
+    record_reply: int
     steps: Sequence[PlannerRow]
     incomplete_span: bool = False
 
@@ -712,8 +712,8 @@ class NativeReply:
                 generation,
                 cause=self.notice.cause,
                 detail=self.notice.sender,
-                record_start=self.transcript.offsets[self.offset + self.notice.index],
-                record_reply=self.transcript.offsets[self.offset + self.steps[-1].index],
+                record_start=self.record_start,
+                record_reply=self.record_reply,
             ),
             AssistantText(turn_id, text),
             TurnCompleted(

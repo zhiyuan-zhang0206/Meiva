@@ -12,6 +12,8 @@ from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import clock_over, system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.mapping import transcript_path
+from base.lm.harness.antigravity.tests.fake_agy import declare_child
 from base.lm.harness.antigravity.tests.support import Harness, seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
 from base.lm.harness.delivery import HarnessInput
@@ -637,6 +639,37 @@ async def test_other_completed_work_does_not_delete_unknown_child_notice(
             if interruption == "adjacent"
             else ["CHILD RESPONSE"]
         )
+    finally:
+        await harness.stop()
+
+
+async def test_pending_completed_child_survives_generation_fence(tmp_path: Path) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", "prepare-idle-fence")
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        timer = await _native_completion(harness, "TIMER RESPONSE")
+        assert timer.generation == first.generation
+
+        following = await _send_input(harness, "second", "next")
+        assert following.text == "OK" and following.generation > first.generation
+        new_pid = harness.session.cli_pid
+        assert new_pid is not None and new_pid != pid
+
+        transcript = transcript_path("conv-acp", home=harness.home)
+        assert transcript is not None
+        _ = declare_child(transcript)
+        child = await _native_completion(harness, "CHILD RESPONSE")
+        last = await _send_input(harness, "third", "next")
+        assert last.text == "OK" and last.generation == child.generation == following.generation
+        assert harness.session.cli_pid == new_pid
+        assert [
+            e.text
+            for e in harness.events
+            if isinstance(e, TurnCompleted) and e.text in {"TIMER RESPONSE", "CHILD RESPONSE"}
+        ] == ["TIMER RESPONSE", "CHILD RESPONSE"]
     finally:
         await harness.stop()
 

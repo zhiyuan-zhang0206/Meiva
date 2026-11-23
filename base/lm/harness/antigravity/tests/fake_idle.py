@@ -71,14 +71,15 @@ def replay_late_idle_echo() -> None:
         update("usage_update", used=4, size=10)
 
 
-def unregistered_child(transcript: Path, *, adjacent: bool) -> None:
+def unregistered_child(transcript: Path, *, adjacent: bool, echo_timer: bool) -> None:
     child_notice(transcript)
     record(transcript, planner_row("CHILD RESPONSE", tokens=217))
     message("CHILD RESPONSE")
     if adjacent:
         background_notice(transcript)
         record(transcript, planner_row("TIMER RESPONSE", tokens=237))
-        message("TIMER RESPONSE")
+        if echo_timer:
+            message("TIMER RESPONSE")
     barrier()
     after_release(Path("finish-early-idle"), lambda: declare_child(transcript))
 
@@ -100,6 +101,8 @@ def prepare_idle(transcript: Path, request: int, case: str) -> None:
             message("NATIVE RESPONSE")
             barrier()
         else:
-            unregistered_child(transcript, adjacent=case == "adjacent")
+            unregistered_child(
+                transcript, adjacent=case != "intervening", echo_timer=case != "fence"
+            )
 
     after_release(Path("send-early-idle"), send)
