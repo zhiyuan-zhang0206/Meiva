@@ -10,6 +10,7 @@ from base.lm.harness.delivery import (
     DeliveryLedger,
     HarnessInput,
     InputBlock,
+    InputPreparation,
     LedgerStep,
     Reconciliation,
     ReconciliationUnavailableError,
@@ -65,10 +66,12 @@ class ActiveTurn:
         turn_id: str,
         key: str,
         blocks: tuple[InputBlock, ...],
+        prepare: InputPreparation | None = None,
     ) -> None:
         self.turn_id = turn_id
         self.input_key = key
         self.blocks = blocks
+        self._prepare = prepare
         self.started_at: float | None = None
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
@@ -76,6 +79,10 @@ class ActiveTurn:
         self.parts: list[str] = []
         self.thoughts: list[str] = []
         self.denials: list[str] = []
+
+    def prepare_input(self) -> HarnessInput:
+        entry = HarnessInput(self.input_key, self.blocks)
+        return self._prepare(entry) if self._prepare is not None else entry
 
     @property
     def text(self) -> str:
@@ -282,11 +289,14 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # would otherwise read an event that belonged to no turn as its own, #5663), and the adapter's `_begin`
     # addresses the prompt to the CLI. This is the only place a turn of ours starts.
     # meiva:link base/lm/harness/docs/harness.md
-    def _start_input_turn(self, entry: HarnessInput) -> ActiveTurn:
+    def _start_input_turn(
+        self, entry: HarnessInput, *, prepare: InputPreparation | None = None
+    ) -> ActiveTurn:
         turn = ActiveTurn(
             turn_id=self._mint_turn_id(),
             key=entry.key,
             blocks=entry.blocks,
+            prepare=prepare,
         )
         self._discard_unconsumed_events()
         self._active = turn
@@ -477,11 +487,15 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # meiva:note
     # A process the session itself replaced (Antigravity respawns `agy` after an interrupt) took
     # its background work with it: it joins what the previous process left, for the next turn's
-    # note, and the live set starts empty.
+    # note, and the live set starts empty. Work known lost at retirement stays reportable after
+    # its former deadline so a slow reopen or retry cannot erase that notice.
     def _lose_background(self, items: tuple[BackgroundItem, ...]) -> None:
         if not items:
             return
-        self._lost_background = (*self._lost_background, *items)
+        self._lost_background = (
+            *self._lost_background,
+            *(replace(item, until=None) for item in items),
+        )
         self._live_background = ()
         self._write_background()
 

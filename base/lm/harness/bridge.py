@@ -13,6 +13,7 @@ from base.lm.harness.delivery import HarnessInput, Reconciliation, Reconciliatio
 from base.lm.harness.engine import (
     BackgroundWaitReporting,
     ContextDigestKeeping,
+    DeferredInputDelivery,
     HarnessSession,
     HarnessTurn,
     SilenceFloorReporting,
@@ -392,11 +393,20 @@ class HarnessBridge:
             raise HarnessNotDeliveredError(str(exc)) from exc
         self._register(session.session_id or "")
         key = batch[0].key
-        batch[0] = batch[0].with_lead_text(
-            lambda text: self._opening_input(key, text, session, compaction_note)
-        )
+
+        def prepare(entry: HarnessInput) -> HarnessInput:
+            if entry.key == key:
+                return entry.with_lead_text(
+                    lambda text: self._opening_input(key, text, session, compaction_note)
+                )
+            return entry.with_lead_text(lambda text: self._with_lost_work(entry.key, text, session))
+
         try:
-            await session.deliver(batch)
+            if isinstance(session, DeferredInputDelivery):
+                await session.deliver_with_opening(batch, prepare)
+            else:
+                batch[0] = prepare(batch[0])
+                await session.deliver(batch)
         except InputsNotWrittenError as exc:
             raise HarnessNotDeliveredError(str(exc), keys=exc.keys) from exc
 

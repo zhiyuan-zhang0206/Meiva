@@ -9,6 +9,7 @@ from base.lm.harness.delivery.inputs import (
     HarnessInput,
     ImageBlock,
     InputBlock,
+    InputPreparation,
     TextBlock,
     validated_batch,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ImageBlock",
     "InputBlock",
     "InputPhase",
+    "InputPreparation",
     "LedgerStep",
     "Reconciliation",
     "ReconciliationUnavailableError",

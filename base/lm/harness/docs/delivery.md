@@ -19,7 +19,10 @@ text block (`with_lead_text`). Claude Code takes the blocks as the `content` of 
 (a single text block is sent as a plain string), Codex as the items of one `input` array; both were
 recorded accepting several text blocks and alternating images with the echo (`uuid` / `clientId`)
 arriving as usual (`multi_block_input.json` in each adapter's fixtures). Antigravity sends the blocks
-in a single ACP `session/prompt` for both new turns and steers.
+in a single ACP `session/prompt` for both new turns and steers. It prepares the
+bridge's opening text just before submitting the prompt, after any wait for
+timer retirement and `session/load`. This lets the input carry work lost while
+it was waiting, under the same acknowledgement contract.
 
 The graph obtains inline images from the message's `image_url` blocks and bounds them to 5 MB
 per image (Anthropic's per-image limit) and 15 MB of raw bytes per input (about 20 MB base64,

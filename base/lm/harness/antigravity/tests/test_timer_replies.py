@@ -34,7 +34,7 @@ async def _next_prompt(harness: Harness, command: str = "next") -> TurnCompleted
     assert isinstance(done, TurnCompleted)
     assert done.usage == Usage(40, 5, 0, 30)
     assert not harness.session.background_work().items
-    assert not any(isinstance(e, SessionFailed | TurnFaulted) for e in harness.events)
+    assert not any(isinstance(e, SessionFailed) for e in harness.events)
     return done
 
 
@@ -49,14 +49,17 @@ async def _wait_for_retired_peer(harness: Harness, pid: int) -> None:
     )
 
 
-def _assert_reopened(harness: Harness, old_pid: int, done: TurnCompleted) -> None:
+def _assert_reopened(
+    harness: Harness, old_pid: int, done: TurnCompleted, *, fault: TurnFaulted | None = None
+) -> None:
     assert harness.session.cli_pid is not None and harness.session.cli_pid != old_pid
     assert not PsutilChildProbe().is_alive(old_pid)
     assert done.generation == 2 and done.session_id == "conv-acp"
     [load] = [frame for frame in harness.frames() if frame.get("method") == "session/load"]
     assert load["params"]["sessionId"] == done.session_id
-    assert not any(
-        isinstance(e, SessionClosed | SessionFailed | TurnFaulted) for e in harness.events
+    assert not any(isinstance(e, SessionClosed | SessionFailed) for e in harness.events)
+    assert [e for e in harness.events if isinstance(e, TurnFaulted)] == (
+        [] if fault is None else [fault]
     )
 
 
@@ -291,5 +294,32 @@ async def test_pending_timer_allows_two_steered_terminals_with_separate_receipts
             isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
         )
         assert harness.session.background_work().items
+    finally:
+        await harness.stop()
+
+
+async def test_prompt_rpc_fault_recycles_the_peer_after_timer_expiry(tmp_path: Path) -> None:
+    wall = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=wall.now)
+    registry = FileSessionRegistry(tmp_path / "registry")
+    harness = await start(
+        tmp_path, clock=clock, registry=registry, extra_args=("--test-fault-held-prompt",)
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        old_pid = harness.session.cli_pid
+        assert old_pid is not None
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        tool = await harness.wait_for(
+            lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
+        )
+        wall.advance(36)
+        await _wait_for_keepalive_removal(harness, registry)
+        assert harness.session.cli_pid == old_pid
+        harness.release("release-fault")
+        fault = await harness.wait_for_type(TurnFaulted)
+        assert fault.turn_id == tool.turn_id and "provider fault" in fault.error
+        _assert_reopened(harness, old_pid, await _next_prompt(harness), fault=fault)
     finally:
         await harness.stop()

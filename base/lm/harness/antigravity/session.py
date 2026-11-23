@@ -33,7 +33,13 @@ from base.lm.harness.base_session import (
     SessionClock,
 )
 from base.lm.harness.cancel import CancelReport, Sweep, observed_cancel, unobserved_cancel
-from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
+from base.lm.harness.delivery import (
+    HarnessInput,
+    InputPhase,
+    InputPreparation,
+    Reconciliation,
+    validated_batch,
+)
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -198,11 +204,16 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         return self._transport.pid if self._transport is not None else None
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        await self.deliver_with_opening(inputs)
+
+    async def deliver_with_opening(
+        self, inputs: Sequence[HarnessInput], prepare: InputPreparation | None = None
+    ) -> None:
         batch = validated_batch(inputs)
         for entry in batch:
             self._ledger = self._ledger.sent(entry.key)
         try:
-            await self._deliver_batch(batch)
+            await self._deliver_batch(batch, prepare)
         except SessionClosedError as exc:
             unwritten = frozenset(entry.key for entry in batch if self._unwritten(entry.key))
             if not unwritten:
@@ -211,16 +222,18 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 self._apply(self._ledger.rejected(key, str(exc)))
             raise InputsNotWrittenError(str(exc), unwritten) from exc
 
-    async def _deliver_batch(self, batch: Sequence[HarnessInput]) -> None:
+    async def _deliver_batch(
+        self, batch: Sequence[HarnessInput], prepare: InputPreparation | None
+    ) -> None:
         for index, entry in enumerate(batch):
-            transport = await self._dispatch(entry)
+            transport = await self._dispatch(entry, prepare)
             if transport is not None:
                 await self._flush_prompt(transport)
             if self._closed:
                 raise SessionClosedError("session is closed")
-            if self._transport_failed and (index + 1 < len(batch) or self._unwritten(entry.key)):
-                raise SessionClosedError("agy ACP delivery stopped")
             if self._transport_failed:
+                if index + 1 < len(batch) or self._unwritten(entry.key):
+                    raise SessionClosedError("agy ACP delivery stopped")
                 return
 
     def _unwritten(self, key: str) -> bool:
@@ -235,12 +248,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         persisted = await super().reconcile(unresolved) if unresolved else {}
         return {**persisted, **unwritten}
 
-    async def _dispatch(self, entry: HarnessInput) -> AgyTransport | None:
+    async def _dispatch(
+        self, entry: HarnessInput, prepare: InputPreparation | None
+    ) -> AgyTransport | None:
         await self._await_background_reply()
         ticket = self._active
         if ticket is None:
             self._replay_idle()
-            ticket = self._start_input_turn(entry)
+            ticket = self._start_input_turn(entry, prepare=prepare)
             await ticket.interrupt_ready.wait()
             return self._transport if ticket.started_at is not None else None
         turn, transport = self._prompt_turn, self._transport
@@ -248,7 +263,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._apply(self._ledger.rejected(entry.key, "agy is not accepting input"))
             return None
         try:
-            self._send_prompt(transport, turn, entry)
+            self._send_prompt(transport, turn, prepare(entry) if prepare is not None else entry)
         except (TransportClosedError, OSError) as exc:
             self._retire_transport(transport, exc)
         return transport
@@ -291,9 +306,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._resume_projection = False
             self._prompt_turn = turn
             ticket.started_at = self._monotonic()
-            self._send_prompt(
-                transport, turn, HarnessInput(ticket.input_key, ticket.blocks), starts_turn=True
-            )
+            self._send_prompt(transport, turn, ticket.prepare_input(), starts_turn=True)
         except (OSError, RuntimeError, TimeoutError) as exc:
             if self._active is ticket:
                 if transport is not None and self._prompt_turn is not None:
@@ -639,14 +652,19 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._projection = OutputProjection(len(rows))
         self._complete(ticket)
         turn.finished.set()
-        if self._recycle_when_idle and (transport := self._transport) is not None:
-            self._retire_transport(transport)
+        self._recycle_idle_peer()
 
     def _fail_prompt_turn(self, exc: BaseException) -> None:
         turn, self._prompt_turn = self._prompt_turn, None
         if turn is not None:
             turn.finished.set()
         self._fail_active(exc)
+        self._recycle_idle_peer()
+
+    def _recycle_idle_peer(self) -> None:
+        transport = self._transport
+        if self._recycle_when_idle and self._prompt_turn is None and transport is not None:
+            self._retire_transport(transport)
 
     def _transcript(self, session_id: str | None = None) -> TranscriptSnapshot:
         return TranscriptSnapshot.for_session(session_id or self._session_id, home=self._home)
@@ -693,8 +711,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 timer_count=expired,
                 foreground_active=turn is not None,
             )
-            if turn is None:
-                self._retire_transport(transport)
+            self._recycle_idle_peer()
         return None
 
     async def _ack_adopted(self, transport: AgyTransport) -> None:
@@ -722,23 +739,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _track_schedule(self, event: ToolUse | ToolResult) -> None:
         before = self._schedules
-        mono = self._monotonic()
-        if isinstance(event, ToolUse):
-            self._schedules = before.tool_used(
-                event.tool_use_id,
-                event.name,
-                event.tool_input,
-                turn_id=event.turn_id,
-                monotonic_now=mono,
-            )
-        elif isinstance(event, ToolResult):
-            self._schedules = before.tool_returned(
-                event.tool_use_id,
-                is_error=event.is_error,
-                now=self._clock.now().timestamp(),
-                content=event.content,
-                monotonic_now=mono,
-            )
+        self._schedules = before.observe_tool(
+            event, now=self._clock.now().timestamp(), mono=self._monotonic()
+        )
         if self._schedules is not before:
             self._schedule_changed()
 

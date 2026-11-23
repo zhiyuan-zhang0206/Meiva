@@ -6,6 +6,7 @@ import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
+from base.lm.harness.events import ToolResult, ToolUse
 from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 
 # meiva:note
@@ -59,6 +60,23 @@ class Schedules:
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
     expired_replies: tuple[tuple[str, str | None], ...] = ()
+
+    def observe_tool(self, event: ToolUse | ToolResult, *, now: float, mono: float) -> Schedules:
+        if isinstance(event, ToolUse):
+            return self.tool_used(
+                event.tool_use_id,
+                event.name,
+                event.tool_input,
+                turn_id=event.turn_id,
+                monotonic_now=mono,
+            )
+        return self.tool_returned(
+            event.tool_use_id,
+            is_error=event.is_error,
+            now=now,
+            content=event.content,
+            monotonic_now=mono,
+        )
 
     def tool_used(
         self,

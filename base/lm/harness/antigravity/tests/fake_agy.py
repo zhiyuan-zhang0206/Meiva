@@ -514,7 +514,7 @@ def foreground_first(transcript: Path, request: int) -> None:
     if "--test-multi-planner" in sys.argv:
         foreground_multiple(transcript, request)
         return
-    hold_prompt(transcript, "hold")
+    hold_prompt(transcript, "hold", request)
     update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     record(transcript, planner_row("FOREGROUND"))
     split = {"--test-interleaved-chunks", "--test-truncated-foreground"}
@@ -535,7 +535,7 @@ def foreground_first(transcript: Path, request: int) -> None:
     )
 
 
-def hold_prompt(transcript: Path, command: str) -> None:
+def hold_prompt(transcript: Path, command: str, request: int) -> None:
     if "--test-terminal-before-steer" in sys.argv:
         record(transcript, planner_row("FIRST_DONE"))
         message("FIRST_DONE")
@@ -551,6 +551,11 @@ def hold_prompt(transcript: Path, command: str) -> None:
         },
     )
     beginning_of_tool()
+    if "--test-fault-held-prompt" in sys.argv:
+        after_release(
+            Path("release-fault"),
+            lambda: frame({"id": request, "error": {"code": -32603, "message": "provider fault"}}),
+        )
     if command == "reactive":
         message("Parked until the tool completes")
         update("usage_update", used=50, size=1000)
@@ -572,6 +577,14 @@ def arm_background(transcript: Path, request: int) -> None:
         else {"DurationSeconds": 5, "Prompt": "timer prompt"}
     )
     update("tool_call", toolCallId="timer", name="schedule", status="in_progress", rawInput=params)
+    if "--test-two-timers" in sys.argv:
+        update(
+            "tool_call",
+            toolCallId="second-timer",
+            name="schedule",
+            status="in_progress",
+            rawInput={"DurationSeconds": 600, "Prompt": "keep checking the long-running build"},
+        )
     message("TIMER_SET")
     result(request)
     after_release(Path("release-tool"), lambda: trigger_background(transcript))
@@ -616,7 +629,7 @@ def handle_prompt(
     if command == "steer":
         return original, permission_prompt
     if command in {"hold", "reactive", "hold-no-stdin"}:
-        hold_prompt(transcript, command)
+        hold_prompt(transcript, command, request)
         return request, permission_prompt
     if command == "background":
         arm_background(transcript, request)
@@ -676,6 +689,11 @@ def setup_session(method: str, request: int) -> None:
     if method == "session/load":
         if "--test-stall-load" in sys.argv:
             threading.Event().wait()
+        if "--test-gate-load" in sys.argv:
+            gate = threading.Event()
+            after_release(Path("release-load"), gate.set)
+            Path("load-waiting").touch()
+            gate.wait()
         message("REPLAYED_OLD_TEXT")
         update("usage_update", used=1, size=10)
     frame({"id": request, "result": {"sessionId": SID} if method == "session/new" else {}})

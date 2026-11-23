@@ -84,6 +84,9 @@ class HarnessInput:
         return HarnessInput(self.key, (*((TextBlock(lead),) if lead.strip() else ()), *self.blocks))
 
 
+type InputPreparation = Callable[[HarnessInput], HarnessInput]
+
+
 # meiva:note
 # A batch is delivered in order and its keys name its members, so a repeated key would make two
 # inputs indistinguishable in every later event.

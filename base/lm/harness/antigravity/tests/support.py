@@ -75,6 +75,43 @@ async def release_timer(harness: Harness) -> ToolResult:
     return await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
 
 
+def make_session(
+    tmp_path: Path,
+    *,
+    unsolicited: UnsolicitedSink | None = None,
+    extra_args: tuple[str, ...] = (),
+    cancel_seconds: float = 1.0,
+    write_seconds: float = 1.0,
+    reply_seconds: float = 30.0,
+    clock: SessionClock | None = None,
+    registry: SessionRegistry | None = None,
+) -> AgySession:
+    env = {"HOME": str(tmp_path / "home")}
+    clock = clock if clock is not None else system_clock()
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        model="gemini-4-hydrogen-low",
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=extra_args,
+        cancel_settle_seconds=cancel_seconds,
+        prompt_write_seconds=write_seconds,
+        background_reply_seconds=reply_seconds,
+    )
+    return AgySession(
+        config,
+        environ=env,
+        transport_factory=lambda: AgyTransport(
+            config, environ=env, owner_uid=os.getuid(), generation_id=uuid4().hex, clock=clock
+        ),
+        binding=SessionBinding(
+            agent_id=1 if registry is not None else None, registry=registry, unsolicited=unsolicited
+        ),
+        clock=clock,
+        home=tmp_path / "home",
+        timing_refresh_interval=0,
+    )
+
+
 async def start(
     tmp_path: Path,
     *,
@@ -87,29 +124,15 @@ async def start(
     clock: SessionClock | None = None,
     registry: SessionRegistry | None = None,
 ) -> Harness:
-    env = {"HOME": str(tmp_path / "home")}
-    clock = clock if clock is not None else system_clock()
-    config = AntigravityConfig(
-        cwd=tmp_path,
-        model="gemini-4-hydrogen-low",
-        executable=(sys.executable, str(FAKE_CLI)),
+    session = make_session(
+        tmp_path,
+        unsolicited=unsolicited,
         extra_args=extra_args,
-        cancel_settle_seconds=cancel_seconds,
-        prompt_write_seconds=write_seconds,
-        background_reply_seconds=reply_seconds,
-    )
-    session = AgySession(
-        config,
-        environ=env,
-        transport_factory=lambda: AgyTransport(
-            config, environ=env, owner_uid=os.getuid(), generation_id=uuid4().hex, clock=clock
-        ),
-        binding=SessionBinding(
-            agent_id=1 if registry is not None else None, registry=registry, unsolicited=unsolicited
-        ),
+        cancel_seconds=cancel_seconds,
+        write_seconds=write_seconds,
+        reply_seconds=reply_seconds,
         clock=clock,
-        home=tmp_path / "home",
-        timing_refresh_interval=0,
+        registry=registry,
     )
     await session.start(resume=resume)
     return Harness(session, tmp_path)
