@@ -244,10 +244,9 @@ protocol response. A response from an unrelated process or an HTTP 503 cannot
 certify readiness. The local Loki write/read diagnostic is separate from process
 lifecycle and never launches or restarts the stack.
 
-Tempo is remote and selected by `MEIVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
-and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
-The local lifecycle neither probes nor manages Tempo. The collector's filelog
-receivers ship session logs directly to Loki.
+The station's collector exports traces to `MEIVA_TELEMETRY_TEMPO_ENDPOINT`.
+Grafana and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries and
+scraping. The collector's filelog receivers ship session logs directly to Loki.
 
 ## Session logs in Loki
 
@@ -290,9 +289,9 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `MEIVA_OBSERVABILITY_URL` is set) |
 | `MEIVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. |
 | `MEIVA_ALERTS_WEBHOOK_URL` | Loopback plus `MEIVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `MEIVA_OBSERVABILITY_URL` set, it uses `MEIVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. |
-| `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
-| `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
-| `MEIVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
+| `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export and the source of the station listener port |
+| `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL for Grafana and Prometheus and the source of the station HTTP port |
+| `MEIVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for native Loki, Prometheus, and Tempo. When using a specific non-loopback address, point their consumer URLs to that address. |
 | `MEIVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `MEIVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
 | `MEIVA_TELEMETRY_OTLP_PORT` | `4318` | The OTLP/HTTP ingress port — single source (WP3, task #1945) for the sidecar receiver endpoint, the gateway's authenticated remote receiver + pure-runner relay endpoint, and the roster/healthcheck port probes. Deviating from 4318 also requires `MEIVA_TELEMETRY_OTLP_ENDPOINT` (the agents' full export URL) to follow |
 

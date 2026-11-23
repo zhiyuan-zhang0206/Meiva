@@ -1,7 +1,7 @@
 """Read-only probes for the designated observability station.
 
-The endpoint probes observe local Loki, Prometheus, Tempo and Grafana readiness. The
-Tempo additionally checks listener custody because its /ready has no home identity. The
+The endpoint probes observe local Loki, Prometheus, Tempo, and Grafana readiness.
+The Tempo probe checks listener custody because its /ready has no home identity. The
 write-path probe sends a unique Loki log and queries it back, with bounded
 admission retries. Probe results carry no authority to restart a backend;
 service lifecycle belongs to the root supervisor.
