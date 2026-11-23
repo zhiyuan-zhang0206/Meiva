@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import pytest
 
+from base import config
 from base.daemon.health import DaemonProbe
 from cli.commands import probe
 from cli.commands.lifecycle.start import refuse_occupied_health_ports
@@ -192,3 +193,21 @@ def test_a_legacy_tempo_listener_refuses_start_with_a_tempo_specific_stopgap(
     message = capsys.readouterr().err
     assert external in message
     assert "--disable-service tempo" in message
+
+
+def test_cold_station_refuses_loki_and_tempo_using_the_same_grpc_bind(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    start_run.declare(gateway=True, agent_runner=False)
+    (start_run.home / "lgtm-host").touch()
+    config.set_field("lgtm_loki_grpc_port", 29096)
+    config.set_field("lgtm_tempo_grpc_port", 29096)
+    roster = start_run.roster(frozenset({"gateway"}))
+    selected = tuple(spec for spec in roster if spec.session in {"loki", "tempo"})
+
+    assert len(selected) == 2
+    assert refuse_occupied_health_ports(selected) == 1
+    assert (
+        "configured bind 127.0.0.1:29096 overlaps tempo at 127.0.0.1:29096"
+        in capsys.readouterr().err
+    )

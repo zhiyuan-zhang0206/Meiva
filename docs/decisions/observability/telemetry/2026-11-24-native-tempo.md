@@ -24,8 +24,9 @@ In the isolated Linux cutover test, Tempo 3.1.1 recovered a 3.0.2 WAL trace
 and exited normally in 30 seconds after SIGTERM.
 
 A successful `/ready` counts only after all three listeners are attributed to
-the recorded native unit. Startup refuses external listeners and reports the
-ports and PIDs. Operators can stage assets while the legacy unit is serving,
+the recorded native unit. The root verifies the persisted native process birth and boot ID before reclaiming
+a prior generation. Startup checks configured binds among the selected backends,
+then reports the address and PID of any overlapping external listener. Operators can stage assets while the legacy unit is serving,
 then stop its pulse timer and retire the old unit before starting the managed
 Tempo. Copy the complete stopped data directory into the native volume to
 preserve blocks, WAL, and shutdown markers. Verify the authenticated collector

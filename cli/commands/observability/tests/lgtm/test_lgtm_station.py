@@ -20,7 +20,7 @@ import pytest
 from base.agents.context.clients import DatabaseFactory
 from base.host.system.tests.fake_commands import DARWIN_ARM64
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, TempoListeners
+from base.telemetry.lgtm_local import BACKENDS, LgtmSettings
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm, lgtm_native
 from cli.commands.observability.tests.lgtm.lgtm_harness import (
@@ -221,6 +221,8 @@ def test_the_storage_root_expands_a_tilde_against_the_home_the_session_read(
 def test_lgtm_status_reports_tempo_listener_conflicts(
     lgtm_unit: LgtmUnit, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    lgtm_unit.home.mkdir(exist_ok=True)
+    (lgtm_unit.home / "lgtm-host").touch()
     with serve({}) as foreign:
         port = int(foreign.url.rsplit(":", 1)[-1])
         settings = LgtmSettings(
@@ -230,7 +232,10 @@ def test_lgtm_status_reports_tempo_listener_conflicts(
             listen_host="127.0.0.1",
             grafana_listen_host="127.0.0.1",
             storage_dir_setting="",
-            tempo=TempoListeners(http=port, otlp=1, grpc=2),
+            loki_grpc_port=1,
+            tempo_query_url=foreign.url,
+            tempo_intake_url="http://127.0.0.1:1",
+            tempo_grpc_port=2,
         )
         lgtm.cmd_lgtm_status(home=lgtm_unit.home, machine=lgtm_unit.machine, observability=settings)
 

@@ -1,7 +1,8 @@
-exports = ["client.py", "instance_lock.py", "ipc.py", "tests"]
+exports = ["client.py", "instance_lock.py", "ipc.py", "tests", "unit_receipt.py"]
 
 [uses]
 "client.py" = ["ipc.py"]
+"unit_receipt.py" = ["client.py"]
 "tests" = ["client.py", "instance_lock.py", "ipc.py"]
 
 [purity]

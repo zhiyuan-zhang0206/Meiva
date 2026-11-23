@@ -346,15 +346,19 @@ def warn_env_file_divergence(meiva_home: Path, values: dict[str, str]) -> None:
         print(warning, file=sys.stderr)
 
 
-def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
+def _render_warnings(settings: LgtmSettings, *, render_tempo: bool) -> tuple[str, ...]:
     obs = settings.observability
     query_url = obs.telemetry_tempo_query_url.rstrip("/")
     intake_endpoint = obs.telemetry_tempo_endpoint.rstrip("/")
-    topology = tempo_topology_warning(
-        query_url=query_url,
-        query=split_url(query_url),
-        intake_endpoint=intake_endpoint,
-        intake=split_url(intake_endpoint),
+    topology = (
+        tempo_topology_warning(
+            query_url=query_url,
+            query=split_url(query_url),
+            intake_endpoint=intake_endpoint,
+            intake=split_url(intake_endpoint),
+        )
+        if render_tempo
+        else None
     )
     surfaces = tuple(
         ReadSurface(backend, env_var, listen_host, read_url, split_url(read_url))
@@ -374,6 +378,7 @@ def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
                 obs.telemetry_grafana_url,
             ),
         )
+        if render_tempo or backend != "tempo"
     )
     return (*((topology,) if topology else ()), *listen_read_warnings(surfaces))
 
@@ -437,11 +442,12 @@ def render_configs(
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentityReader,
+    render_tempo: bool = True,
 ) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/native/config"
     obs = settings.observability
     tempo_query_url = obs.telemetry_tempo_query_url.rstrip("/")
-    for warning in _render_warnings(settings):
+    for warning in _render_warnings(settings, render_tempo=render_tempo):
         print(warning, file=sys.stderr)
     warn_env_file_divergence(
         meiva_home,
@@ -461,10 +467,14 @@ def render_configs(
     loki_url, prometheus_url, pg_url, webhook_url = _grafana_endpoints(
         settings, direct_db_url=direct_db_url, machine=machine
     )
-    tempo = TempoListeners.from_urls(
-        query_url=tempo_query_url,
-        intake_url=obs.telemetry_tempo_endpoint,
-        grpc_port=obs.lgtm_tempo_grpc_port,
+    tempo = (
+        TempoListeners.from_urls(
+            query_url=tempo_query_url,
+            intake_url=obs.telemetry_tempo_endpoint,
+            grpc_port=obs.lgtm_tempo_grpc_port,
+        )
+        if render_tempo
+        else None
     )
     values = NativeRenderValues(
         meiva_home=str(meiva_home),
@@ -472,9 +482,9 @@ def render_configs(
         provisioning_path=str(native_dir / "config" / "provisioning"),
         repo=str(repo),
         tempo_query_url=tempo_query_url,
-        tempo_http_port=tempo.http,
-        tempo_otlp_port=tempo.otlp,
-        tempo_grpc_port=tempo.grpc,
+        tempo_http_port=tempo.http if tempo is not None else 0,
+        tempo_otlp_port=tempo.otlp if tempo is not None else 0,
+        tempo_grpc_port=tempo.grpc if tempo is not None else 0,
         tempo_retention_hours=obs.lgtm_tempo_retention_hours,
         loki_url=loki_url,
         prometheus_url=prometheus_url,
@@ -493,6 +503,7 @@ def render_configs(
     rendered = {
         name: render_config(name, (source_dir / name).read_text(encoding="utf-8"), values)
         for name in CONFIG_TEMPLATES
+        if render_tempo or name != "tempo.yaml"
     }
     loki_config = object_of(yaml.safe_load, rendered["loki.yaml"])
     if not _is_object_dict(loki_config):
@@ -604,6 +615,7 @@ def ensure_lgtm_native(
             dashboard=render_dashboard(database_factory, scratch=scratch),
             producer=producer,
             machine=machine,
+            render_tempo="tempo" in services,
         )
     )
     if "grafana" in services:

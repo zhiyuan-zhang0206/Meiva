@@ -8,12 +8,11 @@
 from __future__ import annotations
 
 import logging
-import signal
 from pathlib import Path
 
 from base.clock import Clock
-from base.host.proc import process_alive
 from base.log import logger
+from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 from services.supervision.meiva_root import unit_ledger
 from services.supervision.meiva_root.stopping import StoppingMixin, SupervisorConfig
@@ -40,53 +39,30 @@ class LeftBehindMixin(StoppingMixin):
     # Cleans up via standard pidfile and process group signalling.
     async def _clear_left_behind(self, runtime: UnitRuntime) -> None:
         unit_id = runtime.manifest.id
-        pid = unit_ledger.read(self._run_dir, unit_id)
-        if pid is None:
+        identity = unit_ledger.read(self._run_dir, unit_id)
+        if identity is None:
             return
-        if not process_alive(pid):
-            unit_ledger.clear(self._run_dir, unit_id)
-            return
-        self._emit_left_behind(runtime, pid)
-        await self._stop_left_behind(runtime, pid)
-        unit_ledger.clear(self._run_dir, unit_id)
+        if identity.live():
+            self._emit_left_behind(runtime, identity.pid)
+            await self._stop_left_behind(runtime, identity)
+        unit_ledger.clear(self._run_dir, unit_id, identity=identity)
 
-    # meiva:note
-    # TERM then KILL a recorded leftover, bounded by this unit's stop window.
-    async def _stop_left_behind(self, runtime: UnitRuntime, pid: int) -> bool:
-        if not self._signal_pid(pid, force=False):
-            return not process_alive(pid)
-        if await self._await_gone(pid, self._stop_window(runtime)):
-            return True
-        if not self._signal_pid(pid, force=True):
-            return not process_alive(pid)
-        return await self._await_gone(pid, self._config.stop_kill_reap_s)
+    async def _stop_left_behind(self, runtime: UnitRuntime, identity: OwnedProcess) -> None:
+        self._signal_owned(identity, force=False)
+        if not await self._await_gone(identity, self._stop_window(runtime)):
+            self._signal_owned(identity, force=True)
+            if not await self._await_gone(identity, self._config.stop_kill_reap_s):
+                raise RuntimeError(
+                    f"previous {runtime.manifest.id} process {identity.pid} survived root cleanup"
+                )
 
-    def _signal_pid(self, pid: int, *, force: bool) -> bool:
-        if not process_alive(pid):
-            return False
-        signum = signal.SIGKILL if force else signal.SIGTERM
-        try:
-            group = self._process_control.getpgid(pid)
-            if not process_alive(pid):
-                return False
-            if group == pid and group != self._own_group():
-                self._process_control.killpg(group, signum)
-            else:
-                self._process_control.kill(pid, signum)
-        except ProcessLookupError:
-            return False
-        return True
-
-    # meiva:note
-    # Poll a process until it is gone or time runs out.
-    async def _await_gone(self, pid: int, timeout_s: float) -> bool:
+    async def _await_gone(self, identity: OwnedProcess, timeout_s: float) -> bool:
         deadline = self._clock.monotonic() + timeout_s
-        while True:
-            if not process_alive(pid):
-                return True
+        while identity.live():
             if self._clock.monotonic() >= deadline:
                 return False
             await self._clock.asleep(READY_POLL_S)
+        return True
 
     def _emit_left_behind(self, runtime: UnitRuntime, pid: int) -> None:
         try:

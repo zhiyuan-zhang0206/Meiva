@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.cluster.listener_plan import TcpBind
+
 
 # meiva:note
 # The native listeners and retained data volume, resolved from observability fields. A composition root reads them once (`from_fields`)
@@ -19,7 +21,10 @@ class LgtmSettings:
     listen_host: str
     grafana_listen_host: str
     storage_dir_setting: str
-    tempo: TempoListeners
+    loki_grpc_port: int
+    tempo_query_url: str
+    tempo_intake_url: str
+    tempo_grpc_port: int
 
     @classmethod
     def from_fields(cls, read_field: Callable[[str], object]) -> LgtmSettings:
@@ -30,11 +35,18 @@ class LgtmSettings:
             listen_host=str(read_field("lgtm_listen_host")),
             grafana_listen_host=str(read_field("lgtm_grafana_listen_host")),
             storage_dir_setting=str(read_field("lgtm_storage_dir")),
-            tempo=TempoListeners.from_urls(
-                query_url=str(read_field("telemetry_tempo_query_url")),
-                intake_url=str(read_field("telemetry_tempo_endpoint")),
-                grpc_port=_port(read_field("lgtm_tempo_grpc_port")),
-            ),
+            loki_grpc_port=_port(read_field("lgtm_loki_grpc_port")),
+            tempo_query_url=str(read_field("telemetry_tempo_query_url")),
+            tempo_intake_url=str(read_field("telemetry_tempo_endpoint")),
+            tempo_grpc_port=_port(read_field("lgtm_tempo_grpc_port")),
+        )
+
+    @property
+    def tempo(self) -> TempoListeners:
+        return TempoListeners.from_urls(
+            query_url=self.tempo_query_url,
+            intake_url=self.tempo_intake_url,
+            grpc_port=self.tempo_grpc_port,
         )
 
 
@@ -137,21 +149,30 @@ def binary_path(home: Path, name: str) -> Path:
     return (home / "lgtm/native" / relative).resolve()
 
 
+def backend_binds(name: str, observability: LgtmSettings) -> tuple[TcpBind, ...]:
+    host = observability.listen_host
+    if name == "tempo":
+        return tuple(TcpBind(host, port) for port in observability.tempo.ports())
+    if name == "loki":
+        return TcpBind(host, observability.loki_port), TcpBind(host, observability.loki_grpc_port)
+    if name == "grafana":
+        return (TcpBind(observability.grafana_listen_host, observability.grafana_port),)
+    return (TcpBind(host, observability.prometheus_port),)
+
+
+def backend_url(bind: TcpBind) -> str:
+    host = bind.host.removeprefix("[").removesuffix("]")
+    host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)  # noqa: S104
+    return f"http://{TcpBind(host, bind.port)}"
+
+
 def backend_urls(observability: LgtmSettings) -> dict[str, str]:
-    """Probe the configured local binds; wildcard listeners are dialed on loopback."""
-    ports = {
-        "loki": observability.loki_port,
-        "prometheus": observability.prometheus_port,
-        "tempo": observability.tempo.http,
-        "grafana": observability.grafana_port,
+    """URLs for the backends whose ports are already available as settings integers."""
+    return {
+        name: backend_url(backend_binds(name, observability)[0])
+        for name in BACKENDS
+        if name != "tempo"
     }
-    urls: dict[str, str] = {}
-    for name, port in ports.items():
-        host = observability.grafana_listen_host if name == "grafana" else observability.listen_host
-        host = host.removeprefix("[").removesuffix("]")
-        host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)  # noqa: S104 — wildcard classification, never a bind
-        urls[name] = f"http://{'[' + host + ']' if ':' in host else host}:{port}"
-    return urls
 
 
 def storage_dir(home: Path, observability: LgtmSettings) -> Path:

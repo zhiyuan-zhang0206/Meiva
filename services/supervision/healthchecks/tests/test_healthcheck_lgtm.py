@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.parse
+from dataclasses import replace
 from pathlib import Path
 
+import psutil
 import pytest
 
 from base import config
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.cluster.listener_plan import TcpBind
 from base.cluster.machine import MachineFacts, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.native_process.ownership import OwnedProcess
 from base.paths.tests.homes import unit_home as unit_home
-from base.telemetry.lgtm_local import LgtmSettings, backend_urls
+from base.telemetry.lgtm_local import LgtmSettings, backend_binds, backend_urls
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
@@ -27,7 +32,6 @@ def test_the_default_backend_urls_dial_the_historical_loopback_ports() -> None:
     assert backend_urls(LgtmSettings.from_fields(config.get_field)) == {
         "loki": "http://127.0.0.1:3100",
         "prometheus": "http://127.0.0.1:9090",
-        "tempo": "http://127.0.0.1:3200",
         "grafana": "http://127.0.0.1:3003",
     }
 
@@ -230,47 +234,40 @@ def test_the_roles_lgtm_decides_on_are_none_only_while_no_capability_is_configur
 
 
 def test_tempo_refuses_external_listeners_even_if_they_answer_ready(tmp_path: Path) -> None:
-    observability = LgtmSettings.from_fields(config.get_field)
     with BackendStub() as legacy_tempo:
-        verdict = hc.probe_tempo(
-            home=tmp_path,
-            observability=observability,
-            urls={"tempo": legacy_tempo.url},
-            listeners_on=lambda port: [17] if port == observability.tempo.http else [],
+        observability = replace(
+            LgtmSettings.from_fields(config.get_field), tempo_query_url=legacy_tempo.url
         )
+        verdict = hc.probe_tempo(home=tmp_path, observability=observability)
 
     assert verdict.terminal
     assert not verdict.alive
-    assert f":{observability.tempo.http} (PIDs [17])" in verdict.detail
+    assert f":{observability.tempo.http} (PID {os.getpid()})" in verdict.detail
     assert "disable the tempo-pulse timer" in verdict.detail
 
 
 def test_tempo_ready_requires_all_ports_owned_and_an_http_success(tmp_path: Path) -> None:
-    from base.paths import root_run_dir, root_unit_pidfile
-    from base.telemetry.lgtm_local import service_argv
-
-    observability = LgtmSettings.from_fields(config.get_field)
-    pidfile = root_unit_pidfile(root_run_dir(tmp_path), "tempo")
-    pidfile.parent.mkdir(parents=True)
-    pidfile.write_text("17\n")
-    argv = list(service_argv(tmp_path, "tempo", observability))
-    listeners = {port: [17] for port in observability.tempo.ports()}
+    identity = OwnedProcess.capture(psutil.Process(os.getpid()))
     with BackendStub() as tempo:
+        observability = replace(
+            LgtmSettings.from_fields(config.get_field), tempo_query_url=tempo.url
+        )
+        binds = backend_binds("tempo", observability)
+        listeners = {bind: [(bind, identity.pid)] for bind in binds}
 
         def probe() -> hc.DaemonProbe:
             return hc.probe_tempo(
                 home=tmp_path,
                 observability=observability,
-                urls={"tempo": tempo.url},
-                listeners_on=listeners.__getitem__,
-                cmdline=lambda _: argv,
+                listeners=listeners.__getitem__,
+                identity_at=lambda _: identity,
             )
 
         assert probe().alive
         tempo.script.ready = (503, b"")
         assert not probe().alive
         tempo.script.ready = (200, b"")
-        listeners[observability.tempo.otlp] = [23]
+        listeners[binds[1]] = [(TcpBind("127.0.0.1", binds[1].port), identity.pid + 1)]
         assert probe().terminal
-        listeners[observability.tempo.otlp] = []
+        listeners[binds[1]] = []
         assert not probe().alive

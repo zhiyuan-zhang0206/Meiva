@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 from collections.abc import Set as AbstractSet
+from dataclasses import dataclass
+from ipaddress import ip_address
 
 
 class ListenerDiscoveryError(RuntimeError):
@@ -144,3 +146,20 @@ def public_listener_bound(
         return False
     wildcard = bool(listener_addresses & {"0.0.0.0", "::", "*"})  # noqa: S104
     return wildcard or reachable_host in listener_addresses
+
+
+@dataclass(frozen=True)
+class TcpBind:
+    host: str
+    port: int
+
+    def __str__(self) -> str:
+        return f"[{self.host}]:{self.port}" if ":" in self.host else f"{self.host}:{self.port}"
+
+    def overlaps(self, other: TcpBind) -> bool:
+        left, right = ip_address(self.host), ip_address(other.host)
+        if self.port != other.port:
+            return False
+        if left.version == right.version:
+            return left == right or left.is_unspecified or right.is_unspecified
+        return any(address.version == 6 and address.is_unspecified for address in (left, right))

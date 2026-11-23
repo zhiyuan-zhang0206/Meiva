@@ -14,6 +14,8 @@ from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
 )
+from base.cluster.listener_plan import TcpBind
+from base.cluster.port_preflight import resolve_go_tcp_bind
 from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
@@ -439,6 +441,7 @@ def build_services(
             # The observer posts a valid empty OTLP ExportTraceServiceRequest: a listening
             # TCP port alone does not prove the collector protocol is ready.
             tcp_port=telemetry_otlp_port,
+            listen_binds=lambda: (TcpBind("127.0.0.1", telemetry_otlp_port),),
             identity_probe=partial(probe_collector_at, telemetry_otlp_port),
             healthcheck_module="services.supervision.healthchecks.otel_collector",
         ),
@@ -448,6 +451,7 @@ def build_services(
         BACKENDS,
         HEALTH_PATHS,
         LgtmSettings,
+        backend_binds,
         backend_urls,
         service_argv,
         service_input_paths,
@@ -456,6 +460,10 @@ def build_services(
 
     observability = LgtmSettings.from_fields(get_field)
     urls = backend_urls(observability)
+
+    def native_binds(name: str) -> tuple[TcpBind, ...]:
+        return tuple(resolve_go_tcp_bind(bind) for bind in backend_binds(name, observability))
+
     observability_services = tuple(
         ServiceSpec(
             session=name,
@@ -464,9 +472,10 @@ def build_services(
             config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
-            curl_url=urls[name] + HEALTH_PATHS[name],
+            curl_url=None if name == "tempo" else urls[name] + HEALTH_PATHS[name],
+            listen_binds=partial(native_binds, name),
             identity_probe=(
-                partial(probe_tempo, home=home, observability=observability, urls=urls)
+                partial(probe_tempo, home=home, observability=observability)
                 if name == "tempo"
                 else partial(probe_backend, name, urls=urls)
             ),

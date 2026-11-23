@@ -153,3 +153,22 @@ def test_the_collector_runs_on_the_home_of_a_station_unit(
     )
 
     assert reason is None
+
+
+def test_runner_ignores_an_unused_tempo_intake_url(
+    tmp_path: Path, set_machine_identity: MachineIdentitySetter
+) -> None:
+    machine = set_machine_identity(role="agent-runner")
+    config.set_field("telemetry_tempo_endpoint", "http://ignored.invalid:unused")
+
+    declared = composition.build_services(home=tmp_path)
+    assert any(service.session == "tempo" for service in declared)
+    active = spec.services_for_capabilities(
+        frozenset({"agent-runner"}),
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(),
+        home=tmp_path,
+    )
+    assert {"agent-host", "otel-collector"} <= {service.session for service in active}
+    assert all(service.session != "tempo" for service in active)

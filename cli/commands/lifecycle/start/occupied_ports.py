@@ -29,7 +29,9 @@ class Occupant:
 # needs to decide which unit should move.
 def refusal_text(occupants: tuple[Occupant, ...]) -> str:
     listed = "\n".join(f"    {occupant.name}: {occupant.detail}" for occupant in occupants)
-    drop = " ".join(f"--disable-service {occupant.session}" for occupant in occupants)
+    drop = " ".join(
+        f"--disable-service {session}" for session in dict.fromkeys(o.session for o in occupants)
+    )
     return (
         "\n✗ a listener conflict blocks this unit's start:\n"
         f"{listed}\n"
@@ -37,7 +39,7 @@ def refusal_text(occupants: tuple[Occupant, ...]) -> str:
         "Launching onto a held port dies on 'address already in use'; launching onto a "
         "RELAYED one is worse, because the watchdog's probe is answered by the other home's "
         "daemon and the failure reads as green.\n"
-        "  Stop the listed daemon, then retry `meiva start`. To bring the rest of this unit "
+        "  Stop the listed daemon or correct a conflicting configured bind, then retry `meiva start`. To bring the rest of this unit "
         f"up meanwhile, drop the listed daemons from this start: {drop}\n"
         "  (that daemon then does not run at all — it is a stopgap, not the fix)."
     )

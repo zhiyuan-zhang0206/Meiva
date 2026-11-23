@@ -46,8 +46,10 @@ and when an unattended operator stop is reported:
 
 ## Left-behind generations
 
-Root records the pid of every unit process it spawns
-(`units/<unit>.pid`) and clears the pidfile when that process exits. A pidfile
+Root records the native process birth and boot ID of each unit it spawns
+(`units/<unit>.pid`) and clears that receipt when that process exits. Records
+from a previous boot and old files containing only a PID grant no signalling
+authority. An identity receipt
 outlives a root that leaves its tree running — a crash, or the code-version
 gate's hard exit from a pool worker thread, which cannot stop an asynchronous
 tree. The next root reads it before it starts the same unit: a recorded birth

@@ -20,7 +20,7 @@ def cmd_lgtm_status(
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
     if not station:
         print("this home is not an observability station")
-    print_lgtm_status(observability, home=home)
+    print_lgtm_status(observability, home=home, station=station)
     if not station:
         return 0
     problems = verify_dashboard_provisioning(
@@ -35,11 +35,13 @@ def cmd_lgtm_status(
 
 # meiva:note
 # Print each backend's probe verdict and detail.
-def print_lgtm_status(observability: LgtmSettings, *, home: Path) -> None:
+def print_lgtm_status(observability: LgtmSettings, *, home: Path, station: bool = True) -> None:
     urls = backend_urls(observability)
     for name in BACKENDS:
+        if name == "tempo" and not station:
+            continue
         result = (
-            probe_tempo(home=home, observability=observability, urls=urls)
+            probe_tempo(home=home, observability=observability)
             if name == "tempo"
             else probe_backend(name, urls=urls)
         )
