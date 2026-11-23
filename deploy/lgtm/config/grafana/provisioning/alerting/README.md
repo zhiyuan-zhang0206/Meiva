@@ -156,6 +156,18 @@ identity). Alerts group by the roster identity. The queries use the old
 so an offline older Collector stays in the known set during rollout.
 Thresholds reflect the host capacity and co-tenancy.
 
+The native rollout regression evaluates the shipped queries with the
+`promtool` binary from the Prometheus release pinned in `deploy/lgtm/native/versions.yml`.
+From the repository root, write the fixture to a temporary path and run it with
+that binary:
+
+```bash
+fixture="$(mktemp)"
+.venv/bin/python -m scripts.data_plane_ops.tests.alert_rules.test_infra_machine_label_rollout \
+  > "$fixture"
+"$PROMTOOL" test rules "$fixture"
+```
+
 | uid | Metric | Condition | `for` | Severity |
 |-----|--------|-----------|-------|----------|
 | `meiva-ops-host-cpu-saturated` | non-idle CPU | avg by machine > 0.90 (Prometheus) | 15m | warning |

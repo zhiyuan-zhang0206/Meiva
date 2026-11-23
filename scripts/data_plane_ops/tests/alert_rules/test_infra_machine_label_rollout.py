@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-from pathlib import Path
 
-import pytest
 import yaml
 
 from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
@@ -30,20 +26,46 @@ def _promql_case(
     }
 
 
-def test_infra_queries_survive_old_new_and_overlapping_collector_samples(tmp_path: Path) -> None:
-    promtool = os.environ.get("MEIVA_TEST_PROMTOOL_BIN")
-    if not promtool:
-        pytest.skip("set MEIVA_TEST_PROMTOOL_BIN to evaluate the shipped PromQL with Prometheus")
-
+def _infra_queries() -> tuple[dict[str, str], dict[tuple[int, str], str]]:
     rules = {rule["uid"]: rule for rule in load_rules()}
-    [silence] = rule_query_exprs(rules["meiva-ops-otelcol-host-silent"], "prometheus")
-    [memory] = rule_query_exprs(rules["meiva-ops-host-memory-pressure"], "prometheus")
-    [enqueue_failures] = rule_query_exprs(rules["meiva-ops-otelcol-enqueue-failures"], "prometheus")
+    infra_uids = (
+        *INFRA_RULE_METRICS,
+        "meiva-ops-otelcol-queue-pressure",
+        "meiva-ops-otelcol-enqueue-failures",
+        "meiva-ops-otelcol-host-silent",
+    )
+    rule_queries: dict[str, str] = {}
+    for uid in infra_uids:
+        [expr] = rule_query_exprs(rules[uid], "prometheus")
+        rule_queries[uid] = expr
+
     dashboard = RULES.parent.parent / "dashboards" / "meiva-ops-main.json"
     panels = json.loads(dashboard.read_text(encoding="utf-8"))["panels"]
-    [memory_panel] = [panel for panel in panels if panel["id"] == 2102]
-    [memory_target] = memory_panel["targets"]
+    panel_queries: dict[tuple[int, str], str] = {
+        (panel["id"], target["refId"]): target["expr"]
+        for panel in panels
+        if 2101 <= panel["id"] <= 2112
+        for target in panel["targets"]
+    }
+    return rule_queries, panel_queries
 
+
+def test_infra_queries_prefer_current_samples_with_legacy_fallback() -> None:
+    rules, panels = _infra_queries()
+    assert panels
+    for name, expr in (*rules.items(), *panels.items()):
+        assert 'machine!=""' in expr, name
+        assert 'machine="", machine_name!=""' in expr, name
+        assert "or on (machine" in expr, name
+        assert '", "machine_name")' in expr, name
+        assert expr.count("or on (") == expr.count("label_join("), name
+
+
+def promtool_fixture() -> dict[str, object]:
+    rules, panels = _infra_queries()
+    silence = rules["meiva-ops-otelcol-host-silent"]
+    memory = rules["meiva-ops-host-memory-pressure"]
+    enqueue_failures = rules["meiva-ops-otelcol-enqueue-failures"]
     uptime = "otelcol_process_uptime_total"
     ram = "system_memory_utilization_ratio"
     drops = "otelcol_exporter_enqueue_failed_log_records_total"
@@ -72,55 +94,27 @@ def test_infra_queries_survive_old_new_and_overlapping_collector_samples(tmp_pat
     cases = [
         _promql_case(silence, {"old-down": 600, "new-down": 300, "both-down": 450}),
         _promql_case(memory, expected_memory),
-        _promql_case(memory_target["expr"], expected_memory),
+        _promql_case(panels[(2102, "A")], expected_memory),
         _promql_case(
             enqueue_failures, {"old": 25, "new": 5, "both": 5, "new-one-sample": 25}, exporter=True
         ),
     ]
-    infra_uids = (
-        *INFRA_RULE_METRICS,
-        "meiva-ops-otelcol-queue-pressure",
-        "meiva-ops-otelcol-enqueue-failures",
-        "meiva-ops-otelcol-host-silent",
-    )
-    expressions = {
-        expr for uid in infra_uids for expr in rule_query_exprs(rules[uid], "prometheus")
-    }
-    expressions.update(
-        target["expr"]
-        for panel in panels
-        if 2101 <= panel["id"] <= 2112
-        for target in panel["targets"]
-    )
-    file = tmp_path / "rollout.yml"
-    file.write_text(
-        yaml.safe_dump(
+    expressions = set(rules.values()) | set(panels.values())
+    return {
+        "tests": [
             {
-                "tests": [
-                    {
-                        "interval": "1m",
-                        "input_series": [
-                            {"series": labels, "values": values} for labels, values in series
-                        ],
-                        "promql_expr_test": cases,
-                    },
-                    {
-                        "interval": "1m",
-                        "input_series": [],
-                        "promql_expr_test": [
-                            _promql_case(expr, {}) for expr in sorted(expressions)
-                        ],
-                    },
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    result = subprocess.run(  # noqa: S603 - operator supplies the native promtool test binary
-        [promtool, "test", "rules", str(file)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+                "interval": "1m",
+                "input_series": [{"series": labels, "values": values} for labels, values in series],
+                "promql_expr_test": cases,
+            },
+            {
+                "interval": "1m",
+                "input_series": [],
+                "promql_expr_test": [_promql_case(expr, {}) for expr in sorted(expressions)],
+            },
+        ],
+    }
+
+
+if __name__ == "__main__":
+    print(yaml.safe_dump(promtool_fixture()), end="")
