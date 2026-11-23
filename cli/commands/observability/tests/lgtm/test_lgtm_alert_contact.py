@@ -97,6 +97,32 @@ def test_invalid_alert_document_preserves_installed_config(
 @pytest.mark.parametrize(
     ("original", "replacement", "error"),
     [
+        ("apiVersion: 1", "apiVersion: 1\napiVersion: 1", "duplicate mapping key"),
+        ("    type: webhook", "    type: webhook\n    type: webhook", "duplicate mapping key"),
+        ("disableResolveMessage: false", "disableResolveMessage: yes", "must use true or false"),
+        (
+            "disableResolveMessage: false",
+            "disableResolveMessage: !!bool tRuE",
+            "must use true or false",
+        ),
+        ("continue: true", "continue: no", "must use true or false"),
+        ("orgId: 1", "orgId: 0x1", "unsigned decimal"),
+        ("critical|error", "'['", "invalid regular expression"),
+        (
+            "      - =~\n      - critical|error",
+            "      - '!~'\n      - '['",
+            "invalid regular expression",
+        ),
+        ("critical|error", "'(?=error)'", "unsupported regular expression extension"),
+        ("critical|error", "'(error)\\1'", "unsupported regular expression escape"),
+        ("critical|error", "'a{1001}'", "repetition exceeds"),
+        ("critical|error", "'(a{500}){3}'", "repetition exceeds"),
+        ("critical|error", "'a{1}+'", "unsupported regular expression extension"),
+        ("group_wait: 30s", "group_wait: 99999999999999999999s", "signed 64-bit"),
+        ("group_interval: 5m", "group_interval: 9223372036s855ms", "signed 64-bit"),
+        ("repeat_interval: 4h", "repeat_interval: 9223372036855ms", "signed 64-bit"),
+        ("group_wait: 30s", "group_wait: 1m1h", "invalid Prometheus duration"),
+        ("group_wait: 30s", "group_wait: -1s", "invalid Prometheus duration"),
         ("name: meiva-alerts-webhook", "name: '  '", r"contactPoints\.0\.name"),
         ("receivers:", "receivers: []\n  ignored:", r"contactPoints\.0\.receivers"),
         ("type: webhook", "type: no-such-integration", r"receivers\.0\.type"),
@@ -126,6 +152,20 @@ def test_invalid_alert_contact_or_route_preserves_installed_config(
         lgtm_unit.render()
 
     assert _installed_contact(lgtm_unit) == previous
+
+
+def test_portable_alert_regex_and_bounded_duration_are_provisioned(lgtm_unit: LgtmUnit) -> None:
+    example = _EXAMPLE.read_bytes()
+    override = lgtm_unit.home / _SITE_CONTACT
+    override.parent.mkdir(parents=True)
+    policy = example.replace(b"critical|error", rb"'(?:critical|error)[0-9]{1,4}\.?'").replace(
+        b"group_wait: 30s", b"group_wait: 9223372036s854ms"
+    )
+    _ = override.write_bytes(policy)
+
+    lgtm_unit.render()
+
+    _assert_installed(lgtm_unit, policy)
 
 
 @pytest.fixture

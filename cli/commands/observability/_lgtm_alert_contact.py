@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
+from collections.abc import Hashable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, override
 
 import yaml
 from pydantic import (
@@ -16,27 +18,142 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
+from yaml.nodes import MappingNode, ScalarNode
 
+from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
 
 _SITE_CONTACT = Path("lgtm/alerting/contact.yml")
 _DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _READ_FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _MAX_CONTACT_BYTES = 256 * 1024
+_MAX_DURATION_NS = (1 << 63) - 1
+_DURATION_UNITS_NS = {
+    "y": 365 * 24 * 60 * 60 * 10**9,
+    "w": 7 * 24 * 60 * 60 * 10**9,
+    "d": 24 * 60 * 60 * 10**9,
+    "h": 60 * 60 * 10**9,
+    "m": 60 * 10**9,
+    "s": 10**9,
+    "ms": 10**6,
+}
+_DURATION = re.compile("".join(rf"(?:(?P<{unit}>[0-9]+){unit})?" for unit in _DURATION_UNITS_NS))
+_MAX_REGEX_REPEAT = 1000
+_REGEX_TOKENS = re.compile(
+    r"\[(?P<character_class>\^?\]?(?:\\.|[^\\\]])*)\]|\\."
+    r"|(?P<extension>\(\?(?!:))|(?P<opening>\((?:\?:)?)|(?P<closing>\))"
+    r"|(?P<possessive>[*+?]\+)"
+    r"|\{(?P<lower>[0-9]+)(?:,(?P<upper>[0-9]*))?\}(?P<range_possessive>\+)?",
+    re.DOTALL,
+)
+_REGEX_ESCAPES = re.compile(r"\\(.)", re.DOTALL)
+_COMMON_REGEX_ESCAPES = frozenset("aAbBdDfnrsStvwW")
+
+
+class _AlertYamlLoader(yaml.SafeLoader):
+    @override
+    def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Hashable, object]:
+        entries = object_of(getattr, node, "value")
+        if not is_object_list(entries):
+            raise yaml.YAMLError("invalid mapping")
+        keys: set[str] = set()
+        for entry in entries:
+            match entry:
+                case (ScalarNode() as key, object()) if key.tag == "tag:yaml.org,2002:str":
+                    name = self.construct_scalar(key)
+                case _:
+                    raise yaml.YAMLError("mapping keys must be strings")
+            if name in keys:
+                raise yaml.YAMLError("duplicate mapping key")
+            keys.add(name)
+        return super().construct_mapping(node, deep=deep)
+
+    @override
+    def construct_scalar(self, node: ScalarNode | MappingNode) -> str:
+        value = super().construct_scalar(node)
+        if node.tag == "tag:yaml.org,2002:bool" and value not in {
+            "true",
+            "True",
+            "TRUE",
+            "false",
+            "False",
+            "FALSE",
+        }:
+            raise yaml.YAMLError("boolean values must use true or false")
+        if node.tag == "tag:yaml.org,2002:int" and not re.fullmatch(
+            r"(?:0|[1-9][0-9]{0,18})", value
+        ):
+            raise yaml.YAMLError("integers must use unsigned decimal notation")
+        return value
+
+
+def _duration_nanoseconds(value: str) -> int:
+    if value == "0":
+        return 0
+    match = _DURATION.fullmatch(value)
+    if not value or match is None:
+        raise ValueError("invalid Prometheus duration")
+    total = 0
+    for unit, nanoseconds in _DURATION_UNITS_NS.items():
+        digits = (match.group(unit) or "").lstrip("0")
+        if len(digits) > 19:
+            raise ValueError("duration exceeds the signed 64-bit nanosecond range")
+        total += int(digits or "0") * nanoseconds
+    if total > _MAX_DURATION_NS:
+        raise ValueError("duration exceeds the signed 64-bit nanosecond range")
+    return total
+
+
+def _is_common_escape(character: str) -> bool:
+    return character in _COMMON_REGEX_ESCAPES or (
+        character.isascii() and character.isprintable() and not character.isalnum()
+    )
+
+
+def _check_regex_repeat_sizes(tokens: list[re.Match[str]]) -> None:
+    group_limits = [1]
+    previous_group_end = -1
+    previous_group_limit = 1
+    for token in tokens:
+        if token.group("opening"):
+            group_limits.append(1)
+        elif token.group("closing"):
+            previous_group_limit = group_limits.pop()
+            previous_group_end = token.end()
+            group_limits[-1] = max(group_limits[-1], previous_group_limit)
+        elif lower := token.group("lower"):
+            repetitions = int(token.group("upper") or lower)
+            atom_limit = previous_group_limit if token.start() == previous_group_end else 1
+            expanded = repetitions * atom_limit
+            if expanded > _MAX_REGEX_REPEAT:
+                raise ValueError("matcher repetition exceeds Alertmanager's limit of 1000")
+            group_limits[-1] = max(group_limits[-1], expanded)
+
+
+def _check_regex(value: str) -> None:
+    try:
+        _ = re.compile(value)
+    except (re.error, OverflowError, RecursionError):
+        raise ValueError("matcher contains an invalid regular expression") from None
+    tokens = list(_REGEX_TOKENS.finditer(value))
+    for token in tokens:
+        if token.group("extension") or token.group("possessive") or token.group("range_possessive"):
+            raise ValueError("matcher uses an unsupported regular expression extension")
+        escapes = [match[1] for match in _REGEX_ESCAPES.finditer(token[0])]
+        if any(not _is_common_escape(ch) for ch in escapes) or (
+            token.group("character_class") is not None and "b" in escapes
+        ):
+            raise ValueError("matcher uses an unsupported regular expression escape")
+    _check_regex_repeat_sizes(tokens)
+
 
 type NonBlank = Annotated[str, StringConstraints(pattern=r"\S")]
-type OrgId = Annotated[int, Field(ge=1)]
+type OrgId = Annotated[int, Field(ge=1, le=(1 << 63) - 1)]
 type Label = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")]
-type Interval = Annotated[
-    str,
-    StringConstraints(
-        min_length=1,
-        pattern=r"^(?:0|(?:[0-9]+y)?(?:[0-9]+w)?(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?(?:[0-9]+ms)?)$",
-    ),
-]
 type ObjectMatcher = Annotated[
     tuple[Label, Literal["=", "!=", "=~", "!~"], str], Field(strict=False)
 ]
@@ -78,18 +195,30 @@ class _Route(_ProvisioningModel):
     group_by: list[Label | Literal["..."]] = Field(default_factory=list)
     matchers: list[str] = Field(default_factory=list, max_length=0)
     object_matchers: list[ObjectMatcher] = Field(default_factory=list)
-    group_wait: Interval | None = None
-    group_interval: Interval | None = None
-    repeat_interval: Interval | None = None
+    group_wait: str | None = None
+    group_interval: str | None = None
+    repeat_interval: str | None = None
     continue_: bool = Field(default=False, alias="continue")
     routes: list[_Route] = Field(default_factory=list)
 
-    @field_validator("group_interval", "repeat_interval")
+    @field_validator("group_wait", "group_interval", "repeat_interval")
     @classmethod
-    def positive_interval(cls, value: str | None) -> str | None:
-        if value is not None and not any(digit in value for digit in "123456789"):
+    def check_duration(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if (
+            value is not None
+            and _duration_nanoseconds(value) == 0
+            and info.field_name != "group_wait"
+        ):
             raise ValueError("interval must be positive")
         return value
+
+    @field_validator("object_matchers")
+    @classmethod
+    def check_matchers(cls, matchers: list[ObjectMatcher]) -> list[ObjectMatcher]:
+        for _, operator, value in matchers:
+            if operator in {"=~", "!~"}:
+                _check_regex(value)
+        return matchers
 
     @field_validator("group_by")
     @classmethod
@@ -187,9 +316,12 @@ def read_alert_contact_override(meiva_home: Path) -> AlertContactOverride:
 
     try:
         content = raw.decode("utf-8")
-        document = object_of(yaml.safe_load, content)
-    except (yaml.YAMLError, UnicodeError):
+        document = object_of(yaml.load, content, Loader=_AlertYamlLoader)
+    except (UnicodeError, RecursionError):
         raise ValueError(f"Grafana alerting override {path} must be valid UTF-8 YAML") from None
+    except yaml.YAMLError as exc:
+        reason = str(exc) if type(exc) is yaml.YAMLError else "invalid YAML syntax"
+        raise ValueError(f"Grafana alerting override {path}: {reason}") from None
     try:
         _ = _AlertContact.model_validate(document)
     except ValidationError as exc:

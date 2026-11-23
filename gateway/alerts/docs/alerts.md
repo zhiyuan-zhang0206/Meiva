@@ -102,7 +102,11 @@ whole contact and policy file. Use the example's webhook receiver and policy
 structure. Each receiver needs a unique UID, a webhook URL and a named contact
 point. The root policy and any explicit child receiver must reference a
 contact point in the file for the same Grafana organization. Specify routing
-matchers as `object_matchers` triples as shown in the example.
+matchers as `object_matchers` triples as shown in the example. Use the common
+Alertmanager regex syntax, including character classes, alternation and ordinary
+repetition. Write policy durations in descending Prometheus units, within the
+signed 64-bit nanosecond range. Write booleans as `true` or `false`, and give
+each mapping key a single definition.
 
 Keep the override as a regular UTF-8 YAML file of at most 256 KiB. The example
 is a few KiB and this bound leaves room for station policies while limiting the
