@@ -98,8 +98,18 @@ The example uses the station's existing webhook URL and Bearer token environment
 Keep the agent route first with `continue: true` to retain the existing ingest
 routes. The example sends error and critical notifications, including resolved
 groups, and inherits the root grouping and timers. The override replaces the
-whole contact and policy file. Keep any local changes in that source file and
-check it against the shipped policy when upgrading.
+whole contact and policy file. Use the example's webhook receiver and policy
+structure. Each receiver needs a unique UID, a webhook URL and a named contact
+point. The root policy and any explicit child receiver must reference a
+contact point in the file for the same Grafana organization. Specify routing
+matchers as `object_matchers` triples as shown in the example.
+
+Keep the override as a regular UTF-8 YAML file of at most 256 KiB. The example
+is a few KiB and this bound leaves room for station policies while limiting the
+work before converge can proceed. Converge refuses links in the override path
+and validates its structure before replacing the installed copy or its hash.
+Keep any local changes in the source file and compare it with the shipped
+policy when upgrading.
 
 To stop agent routing, remove the override, converge and reload alerting
 provisioning. Grafana may retain the unused contact point. The restored policy

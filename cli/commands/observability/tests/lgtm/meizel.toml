@@ -6,3 +6,4 @@
 "test_lgtm_endpoints.py" = ["lgtm_harness.py"]
 "test_lgtm_native.py" = ["lgtm_harness.py"]
 "test_lgtm_station.py" = ["lgtm_harness.py", "test_lgtm_native.py"]
+"test_lgtm_alert_contact.py" = ["lgtm_harness.py"]

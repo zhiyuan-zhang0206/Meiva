@@ -37,6 +37,10 @@ from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.observability._lgtm_alert_contact import (
+    AlertContactOverride,
+    read_alert_contact_override,
+)
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
 from cli.commands.observability.inputs import LgtmSettings, lgtm_settings_from_boot
@@ -436,7 +440,10 @@ def render_configs(
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentityReader,
+    alert_contact: AlertContactOverride | None = None,
 ) -> tuple[Path, ...]:
+    if alert_contact is None:
+        alert_contact = read_alert_contact_override(meiva_home)
     source_dir = repo / "deploy/lgtm/native/config"
     obs = settings.observability
     tempo_query_url = obs.telemetry_tempo_query_url.rstrip("/")
@@ -505,7 +512,7 @@ def render_configs(
         native_dir,
         dashboard=dashboard,
         producer=producer,
-        alert_contact_override=meiva_home / "lgtm/alerting/contact.yml",
+        site_contact=alert_contact.content,
     )
 
 
@@ -554,6 +561,7 @@ def ensure_lgtm_native(
     tag = platform_tag(host.platform.system, host.platform.machine)
     if tag is None:
         raise RuntimeError("Native LGTM has no pinned binaries for this platform")
+    alert_contact = read_alert_contact_override(meiva_home)
     native_dir = meiva_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
@@ -598,6 +606,7 @@ def ensure_lgtm_native(
             dashboard=render_dashboard(database_factory, scratch=scratch),
             producer=producer,
             machine=machine,
+            alert_contact=alert_contact,
         )
     )
     if "grafana" in services:
