@@ -306,8 +306,14 @@ jobs:
                   or file_mentions(changed, "flaky")
               )
               run_pgvector_smoke = any(
-                  p.startswith(("base/cluster/dataplane/", "db/", "migrations/", ".github/ci-image/"))
-                  or p in {"scripts/ci/pgvector_runtime_smoke.py", ".github/workflows/ci.yml"}
+                  p.startswith((
+                      "base/cluster/dataplane/", "db/", "migrations/", ".github/ci-image/",
+                      ".github/actions/vendor-pg-runtime/",
+                  ))
+                  or p in {
+                      "scripts/ci/pgvector_runtime_smoke.py", "scripts/ci/vendor_pg_runtime.py",
+                      ".github/workflows/ci.yml",
+                  }
                   for p in changed
               )
               run_helper_smoke = any(
@@ -1850,8 +1856,11 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
+      - name: Restore or vendor pinned Postgres and pgvector
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
-        run: uv run python scripts/ci/pgvector_runtime_smoke.py
+        run: MEIVA_HOME="$(dirname "$CI_VENDORED_RUNTIME_ROOT")" uv run python scripts/ci/pgvector_runtime_smoke.py
 
   helper-signing-smoke:
     name: permissions helper signing smoke (macOS)

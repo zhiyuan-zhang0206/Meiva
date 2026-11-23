@@ -180,7 +180,7 @@ import zipfile
 source = pathlib.Path("/tmp/runtime_binaries.py").read_text(encoding="utf-8")
 module = ast.parse(source)
 constants: dict[str, object] = {}
-wanted = {"PG_VERSION", "_MAVEN_BASE", "PG_ARTIFACTS", "PGVECTOR_VERSION", "PGVECTOR_ARTIFACTS"}
+wanted = {"PG_VERSION", "_MAVEN_BASES", "PG_ARTIFACTS", "PGVECTOR_VERSION", "PGVECTOR_ARTIFACTS"}
 for node in module.body:
     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
         name = node.targets[0].id
@@ -196,45 +196,49 @@ if missing:
     raise RuntimeError(f"missing constants in runtime_binaries.py: {sorted(missing)}")
 
 pg_version = str(constants["PG_VERSION"])
-maven_base = str(constants["_MAVEN_BASE"])
+maven_bases = constants["_MAVEN_BASES"]
 pg_artifacts = constants["PG_ARTIFACTS"]
 pgvector_version = str(constants["PGVECTOR_VERSION"])
 pgvector_artifacts = constants["PGVECTOR_ARTIFACTS"]
 assert isinstance(pg_artifacts, dict) and isinstance(pgvector_artifacts, dict)
+assert isinstance(maven_bases, tuple)
 
-def fetch_verified(url: str, expected_sha256: str) -> bytes:
-    last_err: Exception | None = None
+def fetch_verified(urls: tuple[str, ...], expected_sha256: str) -> bytes:
+    last_err: OSError | None = None
     for attempt in range(1, 6):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "meiva-ci-image-builder/1.0"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                blob = resp.read()
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "meiva-ci-image-builder/1.0"})
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    blob = resp.read()
+            except OSError as exc:
+                last_err = exc
+                print(f"download source {url} failed: {exc}")
+                continue
             actual = hashlib.sha256(blob).hexdigest()
             if actual != expected_sha256:
                 raise RuntimeError(f"sha256 mismatch for {url}: expected {expected_sha256}, got {actual}")
             return blob
-        except Exception as exc:
-            last_err = exc
-            if attempt < 5:
-                time.sleep(attempt * 3)
-    raise RuntimeError(f"failed to fetch {url}: {last_err}") from last_err
+        if attempt < 5:
+            time.sleep(attempt * 3)
+    raise RuntimeError(f"failed to fetch {', '.join(urls)}: {last_err}") from last_err
 
 artifact, pg_sha = pg_artifacts["linux-x86_64"]
-pg_url = f"{maven_base}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar"
-jar_bytes = fetch_verified(pg_url, pg_sha)
+pg_urls = tuple(f"{base}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar" for base in maven_bases)
+jar_bytes = fetch_verified(pg_urls, pg_sha)
 
 pg_dir = pathlib.Path("/opt/meiva-vendored-pg/runtime/pg") / pg_version
 pg_dir.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(io.BytesIO(jar_bytes)) as jar:
     txz_names = [n for n in jar.namelist() if n.endswith(".txz")]
     if len(txz_names) != 1:
-        raise RuntimeError(f"expected one .txz in {pg_url}, got {txz_names}")
+        raise RuntimeError(f"expected one .txz in {artifact}-{pg_version}.jar, got {txz_names}")
     txz_bytes = jar.read(txz_names[0])
 with tarfile.open(fileobj=io.BytesIO(txz_bytes), mode="r:xz") as tar:
     tar.extractall(pg_dir, filter="data")
 
 vec_url, vec_sha = pgvector_artifacts["linux-x86_64"]
-deb_bytes = fetch_verified(vec_url, vec_sha)
+deb_bytes = fetch_verified((vec_url,), vec_sha)
 if not deb_bytes.startswith(b"!<arch>\n"):
     raise RuntimeError("pgvector artifact is not an ar archive")
 pos = 8

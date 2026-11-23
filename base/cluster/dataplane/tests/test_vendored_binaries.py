@@ -84,7 +84,7 @@ def test_download_retries_transient_answers_then_succeeds() -> None:
     assert timers.sleeps == [2, 4, 8]
 
 
-@pytest.mark.parametrize("status", [403, 404, 429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status", [403, 404, 429, 500, 501, 502, 503, 504])
 def test_download_retries_transient_http_then_succeeds(status: int) -> None:
     timers = ManualTimers()
     opener = _opener_for(_http_error(status), Answer(body=b"jar"))
@@ -220,6 +220,68 @@ def test_ensure_pg_binaries_hermetic_fixture(
         == bin_dir
     )
     assert len(opener.urls) == 1
+
+
+@pytest.mark.parametrize("bad_checksum", [False, True])
+def test_pg_jar_falls_back_on_429_and_checks_digest(
+    isolated_runtime: Path, bad_checksum: bool
+) -> None:
+    artifact = "synthetic-postgres"
+    jar = _synthetic_pg_jar(artifact)
+    checksum = hashlib.sha256(jar + b"unexpected" if bad_checksum else jar).hexdigest()
+    timers = ManualTimers()
+    opener = _opener_for(_http_error(429), Answer(body=jar))
+
+    def install() -> Path:
+        return rb.ensure_pg_binaries(
+            home=isolated_runtime,
+            system=_SYSTEM,
+            machine=_MACHINE,
+            artifacts={rb.platform_key(system=_SYSTEM, machine=_MACHINE): (artifact, checksum)},
+            pg_version="17.1.0",
+            open_url=opener,
+            sleep=timers.sleep,
+        )
+
+    if bad_checksum:
+        with pytest.raises(RuntimeError, match="vendored Postgres jar sha256 mismatch"):
+            install()
+        assert not rb.vendored_pg_dir(isolated_runtime, pg_version="17.1.0").exists()
+    else:
+        assert (install() / "initdb").is_file()
+    suffix = (
+        "/maven2/io/zonky/test/postgres/synthetic-postgres/17.1.0/synthetic-postgres-17.1.0.jar"
+    )
+    assert opener.urls == [
+        f"https://repo.maven.apache.org{suffix}",
+        f"https://repo1.maven.org{suffix}",
+    ]
+    assert timers.sleeps == []
+
+
+def test_pg_jar_fails_closed_after_both_sources_exhaust_retries(isolated_runtime: Path) -> None:
+    timers = ManualTimers()
+    opener = _opener_for(*([_http_error(429), _http_error(503)] * rb.DOWNLOAD_ATTEMPTS))
+    artifacts = {
+        rb.platform_key(system=_SYSTEM, machine=_MACHINE): ("synthetic-postgres", "unused")
+    }
+
+    with pytest.raises(RuntimeError, match=r"repo\.maven\.apache\.org.*repo1\.maven\.org.*503"):
+        rb.ensure_pg_binaries(
+            home=isolated_runtime,
+            system=_SYSTEM,
+            machine=_MACHINE,
+            artifacts=artifacts,
+            open_url=opener,
+            sleep=timers.sleep,
+        )
+
+    assert [url.split("/")[2] for url in opener.urls] == [
+        "repo.maven.apache.org",
+        "repo1.maven.org",
+    ] * rb.DOWNLOAD_ATTEMPTS
+    assert timers.sleeps == [2, 4, 8]
+    assert not rb.vendored_pg_dir(isolated_runtime).exists()
 
 
 # ── pgvector injection unit coverage ───────────────────────────────────────

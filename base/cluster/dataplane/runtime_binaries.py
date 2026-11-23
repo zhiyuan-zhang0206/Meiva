@@ -43,7 +43,10 @@ __all__ = [
 
 PG_VERSION = "17.11.0"
 
-_MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
+_MAVEN_BASES = (
+    "https://repo.maven.apache.org/maven2/io/zonky/test/postgres",
+    "https://repo1.maven.org/maven2/io/zonky/test/postgres",
+)
 
 PG_ARTIFACTS: dict[str, tuple[str, str]] = {
     "darwin": (
@@ -129,6 +132,7 @@ def ensure_pg_binaries(
     artifacts: Mapping[str, tuple[str, str]] | None = None,
     pg_version: str = PG_VERSION,
     open_url: UrlOpener | None = None,
+    sleep: Callable[[float], None] = retry_sleep,
 ) -> Path:
     pg_dir = vendored_pg_dir(home, pg_version=pg_version)
     bin_dir = pg_dir / "bin"
@@ -138,10 +142,15 @@ def ensure_pg_binaries(
     key = platform_key(system=system, machine=machine)
     table = artifacts if artifacts is not None else PG_ARTIFACTS
     artifact, expected_sha = table[key]
-    url = f"{_MAVEN_BASE}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar"
+    jar_path = f"{artifact}/{pg_version}/{artifact}-{pg_version}.jar"
+    primary, fallback = _MAVEN_BASES
+    url = f"{primary}/{jar_path}"
     logger.info(f"[runtime] fetching vendored Postgres {pg_version} ({key}) from {url}")
-    jar_bytes = (
-        download_with_opener(url, open_url=open_url) if open_url is not None else download(url)
+    jar_bytes = download_with_opener(
+        url,
+        open_url=SYSTEM_URL_OPENER if open_url is None else open_url,
+        fallback_url=f"{fallback}/{jar_path}",
+        sleep=sleep,
     )
 
     actual_sha = hashlib.sha256(jar_bytes).hexdigest()
@@ -157,14 +166,14 @@ def ensure_pg_binaries(
 
 
 DOWNLOAD_ATTEMPTS = 4
-_TRANSIENT_HTTP = frozenset({403, 404, 429, 500, 502, 503, 504})
+_TRANSIENT_HTTP = frozenset({403, 404, 429})
+_DOWNLOAD_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError)
 
 
 def _is_transient_download_error(exc: Exception) -> bool:
-    if not isinstance(exc, urllib.error.URLError):
-        return False
-    status = exc.code if isinstance(exc, urllib.error.HTTPError) else None
-    return status is None or status in _TRANSIENT_HTTP
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _TRANSIENT_HTTP or 500 <= exc.code < 600
+    return isinstance(exc, _DOWNLOAD_ERRORS)
 
 
 def _download_backoff(attempt: int) -> float:
@@ -186,6 +195,30 @@ _DOWNLOAD_POLICY = Policy(
 )
 
 
+def _read_from_sources(
+    urls: tuple[str, ...], *, open_url: UrlOpener, headers: dict[str, str] | None
+) -> bytes:
+    download_error: Exception | None = None
+    for url in urls:
+        try:
+            # meiva:note
+            # The sources are pinned HTTPS artifact URLs and the caller verifies SHA-256
+            # before extraction or execution.
+            request = urllib.request.Request(url, headers=headers or {})  # noqa: S310
+            with open_url(request, 120.0) as resp:
+                data: bytes = resp.read()
+                return data
+        except _DOWNLOAD_ERRORS as exc:
+            if len(urls) == 1:
+                raise
+            logger.warning(f"[runtime] download source {url} failed: {exc}")
+            if download_error is None or _is_transient_download_error(exc):
+                download_error = exc
+    if download_error is None:
+        raise ValueError("download requires at least one source")
+    raise download_error
+
+
 def download_with_opener(
     url: str,
     *,
@@ -194,37 +227,33 @@ def download_with_opener(
     what: str = "vendored Postgres",
     policy: Policy = _DOWNLOAD_POLICY,
     sleep: Callable[[float], None] = retry_sleep,
+    fallback_url: str | None = None,
 ) -> bytes:
     attempt = 0
+    urls = (url,) if fallback_url is None else (url, fallback_url)
+    sources = ", ".join(urls)
 
     def _fetch_once() -> bytes:
         nonlocal attempt
         attempt += 1
         try:
-            # meiva:note
-            # `url` comes from the pinned HTTPS artifact tables (`PG_ARTIFACTS`,
-            # `PGVECTOR_ARTIFACTS`), and every downloaded blob
-            # is SHA-256 verified before extraction or execution.
-            request = urllib.request.Request(url, headers=headers or {})  # noqa: S310
-            with open_url(request, 120.0) as resp:
-                data: bytes = resp.read()
-                return data
-        except urllib.error.URLError as exc:
+            return _read_from_sources(urls, open_url=open_url, headers=headers)
+        except _DOWNLOAD_ERRORS as exc:
             if attempt < DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
                 # meiva:note
                 # `1 << attempt` is 2**attempt: the stubs type `int ** int` as Any, which the Any
                 # rules refuse, so the doubling is written as a shift.
                 delay = 1 << attempt
                 logger.warning(
-                    f"[runtime] transient error fetching {url} ({exc}); "
+                    f"[runtime] transient error fetching {sources} ({exc}); "
                     f"retry {attempt}/{DOWNLOAD_ATTEMPTS - 1} in {delay}s"
                 )
             raise
 
     try:
         return retry(policy, sleep=sleep)(_fetch_once)
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"failed to download {what} from {url}: {exc}") from exc
+    except _DOWNLOAD_ERRORS as exc:
+        raise RuntimeError(f"failed to download {what} from {sources}: {exc}") from exc
 
 
 def download(
