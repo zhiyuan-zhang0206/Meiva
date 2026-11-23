@@ -15,6 +15,7 @@ from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.to_user import (
+    ONGOING_FILENAME,
     ToUserLimits,
     read_document,
     read_ongoing,
@@ -219,14 +220,33 @@ def machine_clause(ctx: MeivaContext) -> str | None:
     return machine_name_text(name)
 
 
-def workspace_facts(workspace: Path, home: Path, *, limits: ToUserLimits) -> Workspace:
-
-    display = workspace_display(workspace, home)
-    ongoing = None
+def ongoing_context(ctx: MeivaContext, agent_id: int) -> str:
+    slices = ctx.require_agent()
+    if not slices.read("agent", "workspace_in_system_prompt"):
+        return ""
+    workspace = workspace_dir(agent_id, home=ctx.require_meiva_home())
     try:
-        ongoing = read_ongoing(workspace, limits=limits).content
+        ongoing = read_ongoing(workspace, limits=to_user_limits_from_agent(slices)).content
     except (OSError, ValueError) as exc:
         logger.warning("Could not read ongoing work in {}: {}", workspace, exc)
+        return ""
+    if ongoing is None:
+        return ""
+    raw = ongoing.encode("utf-8")
+    budget = slices.read("agent", "ongoing_context_max_bytes")
+    excerpt = raw[:budget].decode("utf-8", errors="ignore")
+    notice = (
+        f"\n\nOngoing work excerpt truncated. Read `{workspace / ONGOING_FILENAME}` for the full file."
+        if len(raw) > budget
+        else ""
+    )
+    return f"Current ongoing work from `{ONGOING_FILENAME}`:\n{excerpt}{notice}"
+
+
+def workspace_facts(
+    workspace: Path, home: Path, *, limits: ToUserLimits, ongoing: str = ""
+) -> Workspace:
+    display = workspace_display(workspace, home)
     try:
         document = read_document(workspace, limits=limits)
     except (OSError, ValueError) as exc:
@@ -246,6 +266,7 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
             workspace_dir(aid, home=ctx.require_meiva_home()),
             ctx.require_user_home(),
             limits=to_user_limits_from_agent(ctx.require_agent()),
+            ongoing=ongoing_context(ctx, aid),
         )
         if ctx.require_agent().read("agent", "workspace_in_system_prompt")
         else None

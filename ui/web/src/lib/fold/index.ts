@@ -93,6 +93,9 @@ export function foldAgainstCache(
   if (ev.role === "ongoing_changed") {
     invalidations.push({ key: ["ongoing", ev.agent_id] });
   }
+  if (ev.role === "workspace_panels_resync") {
+    invalidations.push({ key: ["to-user"] }, { key: ["ongoing"] });
+  }
 
   // meiva:note
   // Questions and the fleet graph share the owner's bounded coalescing policy.

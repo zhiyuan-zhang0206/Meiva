@@ -35,6 +35,7 @@ from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
     machine_clause,
+    ongoing_context,
     own_label,
 )
 from .prompt.live import effective_sdk_disable, skill_view
@@ -99,13 +100,15 @@ def _seed_harness_timeline(
     tail: Sequence[BaseMessage],
     warm_session: bool,
 ) -> tuple[Handoff | None, Sequence[BaseMessage]]:
-    if ctx.ops_pool is None:
-        return _build_grounded_handoff(ctx, agent_id=agent_id), ()
-    needs_context = not warm_session or bool(tail)
-    return (
-        _build_grounded_handoff(ctx, agent_id=agent_id) if needs_context else None,
-        _load_context_notes(ctx) if needs_context else (),
-    )
+    if ctx.ops_pool is not None and warm_session and not tail:
+        return None, ()
+    handoff = _build_grounded_handoff(ctx, agent_id=agent_id)
+    if tail:
+        return handoff, _load_context_notes(ctx)
+    ongoing = ongoing_context(ctx, agent_id)
+    if ongoing:
+        handoff = replace(handoff, instruction=f"{handoff.instruction}\n\n{ongoing}")
+    return handoff, ()
 
 
 # meiva:note

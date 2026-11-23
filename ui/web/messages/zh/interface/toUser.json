@@ -7,7 +7,7 @@
   "backToMessages": "返回对话",
   "refresh": "刷新",
   "updated": "更新于 {time}",
-  "stale": "连接不可用，显示旧文档。",
+  "stale": "刷新失败，当前显示上次加载的版本。",
   "unavailable": "暂无法读取文档，请稍后重试。",
   "loading": "正在加载…",
   "empty": "No content",

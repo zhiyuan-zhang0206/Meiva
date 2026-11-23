@@ -22,7 +22,7 @@ from agent.graph.interrupt import (
 )
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.llm_stream.stream import stream_message
-from agent.graph.prompt.compaction import compact_contract
+from agent.graph.prompt.compaction import ONGOING_COMPACT_REMINDER, compact_contract
 from agent.graph.prompt.live import read_compact_doc
 from agent.hooks import Hook
 from agent.hooks.compact_anchor import SummaryText, closing_of, closing_request_of
@@ -43,7 +43,7 @@ from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.questions.model import OpenQuestion
 from base.agents.questions.render import reminder_text
-from base.agents.to_user import DOCUMENT_FILENAME, ONGOING_FILENAME
+from base.agents.to_user import DOCUMENT_FILENAME
 from base.api_contracts.agent_contract import Harness
 from base.clock import Timers
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
@@ -571,10 +571,7 @@ def _reminder_content(
             "render for the user, so detail can live in linked files. Edit in place, "
             "without a separate notification."
         )
-        parts.append(
-            f"If you maintain `{ONGOING_FILENAME}`, remove completed items and verify that "
-            "each wait under `## Waiting` still applies."
-        )
+        parts.append(ONGOING_COMPACT_REMINDER)
     questions = reminder_text(open_questions)
     if questions:
         parts.append(questions)

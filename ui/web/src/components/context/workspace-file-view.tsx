@@ -21,7 +21,7 @@ import { ZoomableImage } from "@/components/content/zoomable-image";
 import { InlineError } from "@/components/ui/inline-error";
 import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
+import { isOngoingPath, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn, formatFileSize } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
@@ -95,9 +95,10 @@ export function WorkspaceFileView({ agentId, target }: WorkspaceFileViewProps) {
   const client = useApi();
   const { openFile } = useWorkspaceFileStore();
 
+  const preserveExplicit = isOngoingPath(target, agentId);
   const { ownerAgentId, requestPath } = useMemo(
-    () => resolveWorkspaceFile(target.path, target.machineAgentId ?? agentId),
-    [target.path, target.machineAgentId, agentId],
+    () => resolveWorkspaceFile(target.path, target.machineAgentId ?? agentId, { preserveExplicit }),
+    [target.path, target.machineAgentId, agentId, preserveExplicit],
   );
 
   const { data, error, isLoading, refetch } = useQuery({

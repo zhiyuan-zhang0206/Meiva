@@ -5,7 +5,7 @@ import { fakeBrowser, pageWrapper, type FakeBrowser } from "@/lib/browser/testin
 
 import { PUSHED_ENTRY } from "./reference-url";
 import { useWorkspaceFileHistory } from "./workspace-file-history";
-import { useWorkspaceFileStore } from "./workspace-file-store";
+import { ongoingTab, useWorkspaceFileStore } from "./workspace-file-store";
 
 // meiva:note
 // The workspace file viewer moves through the page's history (user ruling 2026-11-20): every open is
@@ -24,6 +24,23 @@ afterEach(() => {
 });
 
 describe("workspace file history", () => {
+  it("reuses the fixed Ongoing tab for explicit aliases and preserves ordinary line-range tabs", () => {
+    const path = "/Users/runner/.meiva/workspaces/7/ongoing.md";
+    const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7&view=${path}` });
+    mount(page);
+    expect(store().activeFile).toEqual(ongoingTab(7));
+    expect(store().tabs[7]).toBeUndefined();
+
+    const line = { agentId: 7, path: ongoingTab(7).path, lineRange: "3" };
+    act(() => store().openFile(line));
+    expect(store().activeFile).toEqual(line);
+    expect(page.actions.pushed).toHaveLength(1);
+    act(() => store().selectTab(ongoingTab(7)));
+    expect(store().activeFile).toEqual(ongoingTab(7));
+    act(() => store().closeTab(line));
+    expect(store().activeFile).toEqual(ongoingTab(7));
+  });
+
   it("pushes an entry per opened file, drops an old to-user chain, and replaces a new line range in place", () => {
     const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7&file=notes.md` });
     mount(page);

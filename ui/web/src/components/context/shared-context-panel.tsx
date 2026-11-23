@@ -11,7 +11,7 @@ import { PanelBar } from "./panel-bar";
 import { PathBar } from "./path-bar";
 import { ToUserDocumentView } from "./to-user-document";
 import { WorkspaceFileView } from "./workspace-file-view";
-import { machineOf, ongoingTab, sameFile, useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
+import { isOngoingTab, machineOf, useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { useOngoing, type useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { cn } from "@/lib/format/utils";
@@ -37,7 +37,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
   const activeFile = useWorkspaceFileStore((s) => s.activeFile);
   const maximized = useWorkspaceFileStore((s) => s.maximized) && !mobile;
   const isViewingFile = activeFile !== null && activeFile.agentId === agentId;
-  const showingOngoing = sameFile(activeFile, ongoingTab(agentId));
+  const showingOngoing = isOngoingTab(activeFile, agentId);
   const shownDocument = showingOngoing ? ongoing : document;
   const documentScroll = useRef<HTMLDivElement>(null);
   const readingPosition = useRef(0);
@@ -83,7 +83,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
         agentId={agentId}
         mobile={mobile}
         inspecting={inspecting}
-        hasOngoing={Boolean(ongoing.data?.content)}
+        hasOngoing={!ongoing.isError && Boolean(ongoing.data?.content)}
         onInspect={mobile ? undefined : toggleInspection}
         onCollapse={onCollapse}
         onOpenSidebar={onOpenSidebar}

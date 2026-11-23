@@ -168,6 +168,26 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    ongoing_context_max_bytes: int = Field(
+        title="Ongoing context excerpt limit (bytes)",
+        default=8192,
+        gt=0,
+        le=16384,
+        alias="MEIVA_ONGOING_CONTEXT_MAX_BYTES",
+        description=(
+            "UTF-8 bytes of ongoing.md shown in an injected context excerpt. The default "
+            "fits several pages of notes, and the 16 KiB ceiling reserves most of the "
+            "model window for instructions, history and replies even for token-dense text. "
+            "Agents can read the original file when the excerpt is truncated."
+        ),
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     to_user_soft_limit_words: int = Field(
         title="User panel suggested length (words)",
         default=1500,

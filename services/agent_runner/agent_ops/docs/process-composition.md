@@ -78,13 +78,14 @@ factory and authority at their original construction points.
 
 The serving TaskGroup owns `to_user_watch.watch_to_user`. Every 0.5 seconds after
 its preceding scan/publication, outside the maintenance stop window, it snapshots numeric, non-symlink workspace
-directories and only their immediate `to_user.md` and `ongoing.md` entries.
+directories named canonically and only their immediate `to_user.md` and `ongoing.md` entries.
 Scanning runs in a worker thread; it never walks repositories or `node_modules`.
 Each target is identified with `lstat` device, inode, size, nanosecond mtime and
 ctime, including the link itself for a symbolic target. Directory identity uses
 only device and inode, so unrelated workspace writes do not publish events.
 
-The initial snapshot publishes nothing. Later workspace additions/removals and
+The initial snapshot publishes one cluster-wide `WorkspacePanelsResync` to refresh
+open panels after edits or deletions during downtime. Later workspace additions/removals and
 shared document changes publish at most one `ToUserChanged` per agent per scan.
 Changes to the optional `ongoing.md` file publish `OngoingChanged` independently. Polling
 coalesces writes between scans; a target created and removed entirely between

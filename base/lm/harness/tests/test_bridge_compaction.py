@@ -32,14 +32,15 @@ async def test_a_compaction_adds_a_reminder_to_the_next_turns_opening_input_only
     assert "/agents/6984/meiva_instructions.md" in reminder
 
 
-async def test_a_compaction_without_a_saved_instructions_file_adds_no_reminder() -> None:
+@pytest.mark.parametrize("note", ["", "Review the ongoing work in your workspace."])
+async def test_compaction_delivers_the_callers_note_without_saved_instructions(note: str) -> None:
     session = FakeSession(during=[ContextCompacted()])
     bridge = make_bridge(session, handoff=handoff())
 
     _ = await run_turn(bridge, "one", key="inbound-1")
-    _ = await run_turn(bridge, "two", key="inbound-2")
+    _ = await run_turn(bridge, "two", key="inbound-2", compaction_note=note)
 
-    assert session.submitted[1][0] == "two"
+    assert session.submitted[1][0] == (f"{note}\n\ntwo" if note else "two")
 
 
 async def test_a_new_handoff_replaces_the_file_the_reminder_names() -> None:

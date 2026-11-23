@@ -248,6 +248,30 @@ def test_note_includes_only_nonempty_ongoing_work(
 
 
 @pytest.mark.usefixtures("labelled_agent")
+def test_ongoing_context_honors_configured_utf8_budget(clients: ClientSet, unit_home: Path) -> None:
+    workspace = unit_home / "workspaces" / "29"
+    workspace.mkdir(parents=True)
+    content = "## Doing\n" + "\U0001f642" * 250_000 + "END OF DOCUMENT"
+    path = workspace / "ongoing.md"
+    path.write_text(content)
+    context = replace(
+        _context(clients, workspace=True),
+        agent=AgentSlices.resolve(
+            None, default_reader=defaults(agent__ongoing_context_max_bytes=8191)
+        ),
+    )
+
+    note = _content(agent_id_note(context))
+    excerpt = note.split("Current ongoing work from `ongoing.md`:\n", 1)[1].split(
+        "\n\nOngoing work excerpt truncated.", 1
+    )[0]
+    assert excerpt == content.encode()[:8191].decode("utf-8", errors="ignore")
+    assert len(excerpt.encode()) <= 8191
+    assert f"Read `{path}` for the full file." in note
+    assert path.read_text() == content
+
+
+@pytest.mark.usefixtures("labelled_agent")
 @pytest.mark.parametrize(
     ("meiva_under_user_home", "shown"),
     [(True, "~/elsewhere/workspaces/29"), (False, None)],

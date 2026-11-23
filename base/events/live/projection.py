@@ -422,6 +422,11 @@ class OngoingChanged(_Base):
     role: Literal["ongoing_changed"] = "ongoing_changed"
 
 
+class WorkspacePanelsResync(_Base):
+    agent_id: int = Field(default=0, ge=0, le=0)
+    role: Literal["workspace_panels_resync"] = "workspace_panels_resync"
+
+
 class AgentSpawned(_Base):
     """A committed agent creation invalidates the live roster.
 
@@ -517,6 +522,7 @@ Event = Annotated[
     | LabelUpdated
     | ToUserChanged
     | OngoingChanged
+    | WorkspacePanelsResync
     | TokenUsage
     | LLMKeepalive
     | LLMDone
@@ -555,6 +561,7 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (LabelUpdated, True),
     (ToUserChanged, True),
     (OngoingChanged, True),
+    (WorkspacePanelsResync, True),
     (TokenUsage, False),
     (LLMKeepalive, False),
     (LLMDone, False),

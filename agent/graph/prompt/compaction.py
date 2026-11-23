@@ -2,6 +2,13 @@
 
 from inspect import cleandoc
 
+from base.agents.to_user.models import ONGOING_FILENAME
+
+ONGOING_COMPACT_REMINDER = (
+    f"If you maintain `{ONGOING_FILENAME}`, remove completed items and verify that "
+    "each wait under `## Waiting` still applies."
+)
+
 
 # meiva:note
 # The SDK-owned contract (the docstring of `meiva.self.compact`) as a summary model that cannot

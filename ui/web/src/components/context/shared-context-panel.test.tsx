@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { WallClockProvider } from "@/lib/transport/transport-context";
+import { ApiError } from "@/lib/transport/api";
 import type { useToUser } from "@/lib/context/use-to-user";
 
 notifyManager.setScheduler((cb) => {
@@ -145,6 +146,41 @@ it("shows an error when the Ongoing document could not be read", async () => {
   fireEvent.click(screen.getByRole("tab", { name: "Ongoing" }));
   expect(await screen.findByText("Document unavailable. Try again later.")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "Has ongoing items" })).toBeNull();
+});
+
+it.each([
+  new ApiError(503, "unavailable", { code: "http_503", retryable: true }),
+  new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
+  new ApiError(422, "unreadable", { code: "to_user_document_unreadable", retryable: false }),
+])("marks a loaded Ongoing snapshot as stale on failed refresh (%s)", async (error) => {
+  transport.getOngoing.mockResolvedValue({
+    content: "## Waiting\n- Prior work",
+    version: "prior",
+    modified_at: null,
+  });
+  renderPanelView();
+  fireEvent.click(await screen.findByRole("tab", { name: /^Ongoing/ }));
+  expect(await screen.findByText("Prior work")).toBeTruthy();
+  transport.getOngoing.mockRejectedValue(error);
+
+  await act(() => qc.invalidateQueries({ queryKey: ["ongoing", 7] }));
+  expect(await screen.findByText("Refresh failed. Showing the last loaded version.")).toBeTruthy();
+  expect(screen.getByText("Prior work")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Has ongoing items" })).toBeNull();
+
+  transport.getOngoing.mockResolvedValue({ content: null, version: null, modified_at: null });
+  await act(() => qc.invalidateQueries({ queryKey: ["ongoing"] }));
+  expect(await screen.findByText("No ongoing items")).toBeTruthy();
+  expect(screen.queryByTestId("document-stale")).toBeNull();
+});
+
+it("reads the fixed tab breadcrumb by explicit workspace path", async () => {
+  renderPanelView();
+  fireEvent.click(await screen.findByRole("tab", { name: "Ongoing" }));
+  await waitFor(() => expect(transport.getWorkspaceFile).toHaveBeenCalledWith(
+    7, "~/.meiva/workspaces/7/ongoing.md", expect.anything(),
+  ));
+  expect(transport.getWorkspaceFile).not.toHaveBeenCalledWith(7, "ongoing.md", expect.anything());
 });
 
 it("renders WorkspaceFileView when activeFile is set for this agent", async () => {

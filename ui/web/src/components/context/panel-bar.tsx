@@ -3,7 +3,7 @@
 import { Maximize2, Minimize2, PanelLeft, PanelRight, ScanSearch, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { machineOf, ongoingTab, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
+import { isOngoingTab, machineOf, ongoingTab, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
 import { COLUMN_TITLE_BAR_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -46,7 +46,7 @@ export function PanelBar({ agentId, mobile, inspecting, hasOngoing = false, onIn
   const { selectTab, closeTab, setMaximized } = useWorkspaceFileStore.getState();
   const shownFile = activeFile?.agentId === agentId ? activeFile : null;
   const ongoing = ongoingTab(agentId);
-  const showingOngoing = sameFile(shownFile, ongoing);
+  const showingOngoing = isOngoingTab(shownFile, agentId);
   return (
     <div data-testid="panel-bar" className={cn("shrink-0 items-center gap-1 px-2", COLUMN_TITLE_BAR_CLASS, FLEX)}>
       {onOpenSidebar ? (
@@ -66,7 +66,7 @@ export function PanelBar({ agentId, mobile, inspecting, hasOngoing = false, onIn
             {hasOngoing ? <span role="img" aria-label={t("ongoingPresent")} className="size-1.5 rounded-full bg-current opacity-60" /> : null}
           </button>
           {tabs.map((tab) => {
-            const active = sameFile(shownFile, tab);
+            const active = !showingOngoing && sameFile(shownFile, tab);
             const name = fileName(tab.path);
             return (
               <div key={`${machineOf(tab)}:${tab.path}`} className={tabClass(active)}>

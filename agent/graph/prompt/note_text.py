@@ -30,7 +30,7 @@ class Workspace:
     display: str
     document: str | None
     error: str | None
-    ongoing: str | None = None
+    ongoing: str = ""
 
 
 def _timeout_display(timeout_s: float) -> str:
@@ -109,5 +109,5 @@ def agent_id_text(
                 "\n\nCurrent shared context displayed beside your messages:\n" + workspace.document
             )
         if workspace.ongoing:
-            tail += "\n\nCurrent ongoing work from `ongoing.md`:\n" + workspace.ongoing
+            tail += "\n\n" + workspace.ongoing
     return f"Your Agent ID is {agent_id}{detail}.{tail}"

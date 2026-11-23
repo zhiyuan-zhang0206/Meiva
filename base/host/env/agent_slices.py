@@ -239,6 +239,7 @@ class AgentSlices:
             "memory_inherit_max_block_chars",
             "memory_inherit_max_total_chars",
             "memory_per_agent_index_max_lines",
+            "ongoing_context_max_bytes",
             "timeline_default_limit",
             "to_user_soft_limit_words",
         ],

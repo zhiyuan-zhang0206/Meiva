@@ -6,7 +6,7 @@ from threading import Event
 
 from base.agents.to_user.models import DOCUMENT_FILENAME, ONGOING_FILENAME
 from base.events.live.bus import EventBus
-from base.events.live.projection import OngoingChanged, ToUserChanged
+from base.events.live.projection import OngoingChanged, ToUserChanged, WorkspacePanelsResync
 
 type FileStamp = tuple[int, int, int, int, int]
 type WorkspaceStamp = tuple[int, int, FileStamp | None]
@@ -29,13 +29,15 @@ def _snapshot(root: Path, stopped: Event) -> tuple[dict[int, WorkspaceStamp], di
                 break
             if not entry.name.isdecimal():
                 continue
+            agent_id = int(entry.name)
+            if agent_id <= 0 or entry.name != str(agent_id):
+                continue
             try:
                 value = entry.stat(follow_symlinks=False)
             except FileNotFoundError:
                 continue
             if stat.S_ISDIR(value.st_mode):
                 workspace = root / entry.name
-                agent_id = int(entry.name)
                 workspaces[agent_id] = (
                     value.st_dev,
                     value.st_ino,
@@ -60,6 +62,9 @@ async def watch_to_user(root: Path, bus: EventBus) -> None:
     stopped = Event()
     try:
         previous_to_user, previous_ongoing = await asyncio.to_thread(_snapshot, root, stopped)
+        await bus.publish_best_effort(
+            WorkspacePanelsResync().model_dump_json(), context="workspace_panels_resync"
+        )
 
         while True:
             await asyncio.sleep(0.5)

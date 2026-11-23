@@ -170,6 +170,11 @@ export interface OngoingChangedEvent extends BaseEvent {
   readonly role: "ongoing_changed";
 }
 
+export interface WorkspacePanelsResyncEvent extends BaseEvent {
+  readonly role: "workspace_panels_resync";
+  readonly agent_id: 0;
+}
+
 export interface TimelineSnapshotEvent extends BaseEvent {
   readonly role: "timeline_snapshot";
   readonly items: readonly BackendTimelineItem[];
@@ -226,6 +231,7 @@ export type SystemEvent =
   | LabelUpdatedEvent
   | ToUserChangedEvent
   | OngoingChangedEvent
+  | WorkspacePanelsResyncEvent
   | TokenUsageEvent
   | LLMKeepaliveEvent
   | LLMDoneEvent

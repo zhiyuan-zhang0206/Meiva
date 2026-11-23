@@ -172,6 +172,7 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "label_updated",
         "to_user_changed",
         "ongoing_changed",
+        "workspace_panels_resync",
         "question_asked",
         "question_resolved",
         "notification",

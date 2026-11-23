@@ -512,9 +512,11 @@ class HarnessBridge:
         self, key: str, text: str, session: HarnessSession, compaction_note: str
     ) -> str:
         notices: list[str] = []
-        if self._context_compacted and self._instructions_file is not None and text:
-            reminder = compaction_reminder(self._instructions_file)
-            notices.append(f"{reminder}\n\n{compaction_note}" if compaction_note else reminder)
+        if self._context_compacted and text:
+            if self._instructions_file is not None:
+                notices.append(compaction_reminder(self._instructions_file))
+            if compaction_note:
+                notices.append(compaction_note)
         refresh, pending = self._refresh_text(session)
         if refresh:
             notices.append(refresh)

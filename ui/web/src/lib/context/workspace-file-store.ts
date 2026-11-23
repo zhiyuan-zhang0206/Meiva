@@ -61,6 +61,7 @@ export const sameFile = (a: WorkspaceFileTarget | null, b: WorkspaceFileTarget) 
 // meiva:note
 // A machine that is the conversation's own is not named, so one file has one form.
 function plain(target: WorkspaceFileTarget): WorkspaceFileTarget {
+  if (isOngoingTab(target, target.agentId)) return ongoingTab(target.agentId);
   if (target.machineAgentId !== target.agentId) return target;
   return { agentId: target.agentId, path: target.path, ...(target.lineRange ? { lineRange: target.lineRange } : {}) };
 }
@@ -70,8 +71,22 @@ export const ongoingTab = (agentId: number): WorkspaceFileTarget => ({
   path: `~/.meiva/workspaces/${agentId}/ongoing.md`,
 });
 
+export function isOngoingPath(target: WorkspaceFileTarget | null, agentId: number): boolean {
+  return target !== null && target.agentId === agentId && machineOf(target) === agentId
+    && target.path.endsWith(ongoingTab(agentId).path.slice(1));
+}
+
+export function isOngoingTab(target: WorkspaceFileTarget | null, agentId: number): boolean {
+  return isOngoingPath(target, agentId) && !target?.lineRange;
+}
+
+function sameTab(active: WorkspaceFileTarget | null, target: WorkspaceFileTarget): boolean {
+  return sameFile(active, target)
+    && isOngoingTab(active, target.agentId) === isOngoingTab(target, target.agentId);
+}
+
 function withTab(tabs: Record<number, WorkspaceFileTarget[]>, target: WorkspaceFileTarget) {
-  if (sameFile(target, ongoingTab(target.agentId))) return tabs;
+  if (isOngoingTab(target, target.agentId)) return tabs;
   const list = tabs[target.agentId] ?? [];
   const index = list.findIndex((tab) => sameFile(tab, target));
   const next = index < 0 ? [...list, target] : list.map((tab, i) => (i === index ? target : tab));
@@ -93,12 +108,12 @@ export const useWorkspaceFileStore = create<WorkspaceFileStore>((set, get) => ({
     const target = plain(opened);
     const { activeFile, tabs, recent, navigator } = get();
     set({ activeFile: target, tabs: withTab(tabs, target), recent: withRecent(recent, target) });
-    navigator?.show(target, sameFile(activeFile, target) ? "replace" : "push");
+    navigator?.show(target, sameTab(activeFile, target) ? "replace" : "push");
   },
 
   selectTab: (target) => {
     const { activeFile, navigator } = get();
-    if (target === null ? activeFile === null : sameFile(activeFile, target)) return;
+    if (target === null ? activeFile === null : sameTab(activeFile, target)) return;
     set({ activeFile: target });
     navigator?.show(target, "push");
   },
@@ -110,7 +125,7 @@ export const useWorkspaceFileStore = create<WorkspaceFileStore>((set, get) => ({
     if (index < 0) return;
     const rest = list.filter((_, i) => i !== index);
     set({ tabs: { ...tabs, [target.agentId]: rest } });
-    if (!sameFile(activeFile, target)) return;
+    if (!sameTab(activeFile, target)) return;
     const next = rest.at(index) ?? (index > 0 ? rest.at(index - 1) : undefined) ?? null;
     set({ activeFile: next });
     navigator?.show(next, "replace");
@@ -130,7 +145,8 @@ export const useWorkspaceFileStore = create<WorkspaceFileStore>((set, get) => ({
     get().navigator?.show(null, "replace");
   },
 
-  restore: (target) => {
+  restore: (restored) => {
+    const target = restored === null ? null : plain(restored);
     set(target === null
       ? { activeFile: null }
       : { activeFile: target, tabs: withTab(get().tabs, target) });

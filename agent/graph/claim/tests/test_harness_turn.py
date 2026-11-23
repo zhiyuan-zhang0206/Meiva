@@ -670,6 +670,9 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
         engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
         engine.context_compacted = compacted
         base = harness_runtime(engine, agent_id=agent)
+        workspace = base.context.require_meiva_home() / "workspaces" / str(agent)
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "ongoing.md").write_text("## Waiting\n- The database choice")
         context = replace(
             base.context, db=Database.from_settings(gate=database_gate), bus=event_bus
         )
@@ -679,6 +682,7 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
     [note] = await notes(True)
     assert f'#{question[0]} "Which database?"' in note
     assert "Questions you asked the user that are still unanswered" in note
+    assert "The database choice" in note and "each wait under `## Waiting` still applies" in note
     assert await notes(False) == [""]
 
 

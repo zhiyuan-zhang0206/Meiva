@@ -54,12 +54,13 @@ function joinRelativeSubpath(baseDir: string, relativeRef: string): string {
 export function resolveWorkspaceFile<T extends number | null>(
   rawPath: string,
   fallbackAgentId: T,
+  { preserveExplicit = false } = {},
 ): { ownerAgentId: number | T; requestPath: string } {
   const { pathPart } = splitSuffix(rawPath.trim());
   const decoded = decodeOrRaw(stripFileScheme(pathPart));
   const owned = EXPLICIT_WORKSPACE_RE.exec(decoded);
   if (owned) {
-    return { ownerAgentId: Number(owned[2]), requestPath: owned[3] };
+    return { ownerAgentId: Number(owned[2]), requestPath: preserveExplicit ? decoded : owned[3] };
   }
   return { ownerAgentId: fallbackAgentId, requestPath: decoded };
 }

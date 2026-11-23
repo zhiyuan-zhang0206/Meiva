@@ -19,11 +19,11 @@ from redis.asyncio.client import PubSub
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
-from base.events.live.projection import OngoingChanged, ToUserChanged
+from base.events.live.projection import OngoingChanged, ToUserChanged, WorkspacePanelsResync
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 
-type PanelEvent = ToUserChanged | OngoingChanged
-PANEL_EVENT = TypeAdapter[PanelEvent](ToUserChanged | OngoingChanged)
+type PanelEvent = ToUserChanged | OngoingChanged | WorkspacePanelsResync
+PANEL_EVENT = TypeAdapter[PanelEvent](PanelEvent)
 
 
 # meiva:note
@@ -75,7 +75,7 @@ async def test_changes_atomic_replacement_and_new_workspace(
     async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(tmp_path, event_bus))
         try:
-            await asyncio.sleep(0.2)
+            assert await next_event(events) == WorkspacePanelsResync()
             (workspace / "to_user.md").write_text("first")
             assert (await next_event(events)).agent_id == 7
             staged = workspace / ".next"
@@ -102,7 +102,7 @@ async def test_ongoing_edits_publish_only_their_own_event(
     async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(tmp_path, event_bus))
         try:
-            await asyncio.sleep(0.7)
+            assert await next_event(events) == WorkspacePanelsResync()
             ongoing.write_text("## Doing")
             assert await next_event(events) == OngoingChanged(agent_id=7)
             ongoing.write_text("## Waiting")
@@ -110,6 +110,54 @@ async def test_ongoing_edits_publish_only_their_own_event(
             ongoing.unlink()
             assert await next_event(events) == OngoingChanged(agent_id=7)
             assert not ongoing.exists()
+        finally:
+            watcher.cancel()
+
+
+@pytest.mark.asyncio
+async def test_runner_restart_resyncs_after_an_edit_and_removal_while_stopped(
+    tmp_path: Path, event_bus: EventBus
+) -> None:
+    workspace = tmp_path / "7"
+    workspace.mkdir()
+    shared = workspace / "to_user.md"
+    ongoing = workspace / "ongoing.md"
+    shared.write_text("Old shared context")
+    ongoing.write_text("Old ongoing work")
+    async with subscribed(event_bus) as events:
+        async with asyncio.TaskGroup() as group:
+            watcher = group.create_task(watch_to_user(tmp_path, event_bus))
+            try:
+                assert await next_event(events) == WorkspacePanelsResync()
+            finally:
+                watcher.cancel()
+        shared.write_text("Updated while stopped")
+        ongoing.unlink()
+        async with asyncio.TaskGroup() as group:
+            watcher = group.create_task(watch_to_user(tmp_path, event_bus))
+            try:
+                assert await next_event(events) == WorkspacePanelsResync()
+                assert events.empty()
+            finally:
+                watcher.cancel()
+
+
+@pytest.mark.asyncio
+async def test_ignores_noncanonical_workspace_aliases(tmp_path: Path, event_bus: EventBus) -> None:
+    canonical = tmp_path / "7"
+    canonical.mkdir()
+    alias = tmp_path / "07"
+    alias.mkdir()
+    (alias / "to_user.md").write_text("Alias shared context")
+    (alias / "ongoing.md").write_text("Alias ongoing work")
+    async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
+        watcher = group.create_task(watch_to_user(tmp_path, event_bus))
+        try:
+            assert await next_event(events) == WorkspacePanelsResync()
+            (canonical / "to_user.md").write_text("Canonical shared context")
+            (canonical / "ongoing.md").write_text("Canonical ongoing work")
+            assert await next_event(events) == ToUserChanged(agent_id=7)
+            assert await next_event(events) == OngoingChanged(agent_id=7)
         finally:
             watcher.cancel()
 
@@ -126,7 +174,7 @@ async def test_shallow_snapshots_coalesce_and_detect_preserved_mtime(
     async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(tmp_path, event_bus))
         try:
-            await asyncio.sleep(0.7)
+            assert await next_event(events) == WorkspacePanelsResync()
             assert events.empty()
             (workspace / "repository").mkdir()
             (workspace / "repository" / "to_user.md").write_text("nested")
@@ -173,7 +221,7 @@ async def test_target_symlink_watches_link_not_destination(
     async with subscribed(event_bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(tmp_path, event_bus))
         try:
-            await asyncio.sleep(0.7)
+            assert await next_event(events) == WorkspacePanelsResync()
             external.write_text("second")
             await asyncio.sleep(0.7)
             assert events.empty()
@@ -231,6 +279,7 @@ async def test_workspace_replaced_by_file_during_scan_is_a_removal(
     async with subscribed(event_bus) as subscriber, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(ReplacedWorkspaceRoot(tmp_path), event_bus))
         try:
+            assert await next_event(subscriber) == WorkspacePanelsResync()
             assert await recorded_event(subscriber) == 7
             assert (tmp_path / "7").is_file()
         finally:
@@ -272,6 +321,7 @@ async def scale_probe(root: Path, bus_config: EventBusConfig) -> dict[str, int]:
     async with subscribed(bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(root, bus))
         try:
+            assert await next_event(events) == WorkspacePanelsResync()
             while loop.time() - started < 3:
                 await asyncio.sleep(0.02)
                 now = loop.time()

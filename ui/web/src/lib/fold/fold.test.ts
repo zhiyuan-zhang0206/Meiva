@@ -129,3 +129,9 @@ it("refreshes only the changed agent's Ongoing document and refreshes it after r
   expect(ctx.invalidateQueries.mock.calls).toEqual([[["ongoing", 17]]]);
   expect(RECONNECT_QUERY_KEYS).toContainEqual(["ongoing"]);
 });
+
+it("repairs both workspace panel queries with one runner startup resync", () => {
+  const ctx = { getQueryData: () => undefined, setQueryData: vi.fn(), invalidateQueries: vi.fn() };
+  applyEvent(ctx, { role: "workspace_panels_resync", agent_id: 0 });
+  expect(ctx.invalidateQueries.mock.calls).toEqual([[["to-user"]], [["ongoing"]]]);
+});

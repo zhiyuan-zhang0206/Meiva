@@ -409,6 +409,7 @@ same origin as persistent events but uses an independent schema.
 | `timeline_snapshot` | — |
 | `to_user_changed` | ✓ |
 | `token_usage` | — |
+| `workspace_panels_resync` | ✓ |
 
 ---
 

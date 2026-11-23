@@ -121,7 +121,7 @@ export function PathBar({ agentId, documentModifiedAt, ongoing = false }: { agen
   const now = useWallDate();
   const activeFile = useWorkspaceFileStore((s) => s.activeFile);
   const shown = activeFile?.agentId === agentId ? activeFile : null;
-  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", shown?.machineAgentId ?? agentId);
+  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", shown?.machineAgentId ?? agentId, { preserveExplicit: true });
   const file = useQuery({
     queryKey: ["workspace-file", ownerAgentId, requestPath],
     queryFn: ({ signal }) => client.getWorkspaceFile(ownerAgentId, requestPath, signal),

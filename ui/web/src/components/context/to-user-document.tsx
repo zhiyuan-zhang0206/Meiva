@@ -12,7 +12,7 @@ import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { OngoingDocument, ToUserDocument } from "@/lib/contracts/types";
 import { fileQuery } from "@/lib/context/reference-url";
 import { cn } from "@/lib/format/utils";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
 
 
@@ -66,12 +66,17 @@ export function ToUserDocumentView({ agentId, document, failure, pending, bodyHi
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
   return (
     <section className={cn(FLEX, MIN_H_0, FLEX_COL, bodyHidden ? "shrink-0" : FLEX_1)} aria-label={t(ongoing ? "ongoing" : "sharedContext")}>
+      {!bodyHidden && current && refusal ? (
+        <InlineError data-testid="document-stale" className={cn("relative shrink-0 px-5 py-2", BAR_DIVIDER_CLASS)} detail={t(refusal.text)}>
+          {t("stale")}
+        </InlineError>
+      ) : null}
       <ScrollArea data-testid="shared-document" hidden={bodyHidden} viewportRef={viewportRef} className={cn(MIN_H_0, FLEX_1)}>
         {bodyHidden ? null : (
           <>
             {!content ? (
               <div className={cn("items-center justify-center px-8 py-20 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
-                {loading ? <Spinner className="size-4" label={t("loading")} /> : refusal ? (
+                {loading && !current ? <Spinner className="size-4" label={t("loading")} /> : refusal && !current ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <InlineError>{t(refusal.text)}</InlineError>
                   </div>

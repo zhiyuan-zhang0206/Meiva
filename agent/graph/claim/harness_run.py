@@ -51,6 +51,8 @@ from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.interrupt import (
     ModelInterruptedError,
 )
+from agent.graph.prompt.compaction import ONGOING_COMPACT_REMINDER
+from agent.graph.prompt.context_notes import ongoing_context
 from base.agents.context import MeivaContext
 from base.agents.messages.harness_input_key import recorded_input_key, row_input_key
 from base.agents.questions.render import reinjection_text
@@ -675,9 +677,13 @@ class ForegroundRun:
     async def _compaction_note(self) -> str:
         if not self._bridge.context_compacted:
             return ""
-        return reinjection_text(
+        questions = reinjection_text(
             await read_agent_open_questions(self._ctx, self._agent_id),
             source="read from the database, not from your summary",
+        )
+        ongoing = ongoing_context(self._ctx, self._agent_id)
+        return "\n\n".join(
+            filter(None, (questions, ongoing, ONGOING_COMPACT_REMINDER if ongoing else ""))
         )
 
     def _begin_delivery(self, handed: Sequence[Handed]) -> None:

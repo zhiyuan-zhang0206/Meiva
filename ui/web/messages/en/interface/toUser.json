@@ -7,7 +7,7 @@
   "backToMessages": "Back to messages",
   "refresh": "Refresh",
   "updated": "Updated {time}",
-  "stale": "Offline. Last document shown.",
+  "stale": "Refresh failed. Showing the last loaded version.",
   "unavailable": "Document unavailable. Try again later.",
   "loading": "Loading…",
   "empty": "No content",
