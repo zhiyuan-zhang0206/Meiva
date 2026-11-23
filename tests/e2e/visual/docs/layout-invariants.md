@@ -30,7 +30,12 @@ The shared ScrollArea track stays hit-testable at opacity 0 and reveals on hover
 
 With the on-screen keyboard up the composer stays inside the visible band: the viewport meta asks Chrome to resize content (interactive-widget=resizes-content, the Android half, which Safari ignores) and the shell pins <html> to the shrunken visualViewport height (the iOS half). A shortfall below the 150px keyboard threshold and a pinch-zoom leave the shell unpinned, and closing the keyboard restores the layout height.
 
-Expanded work headers (`turn-toggle`) and child detail headers (`card-toggle`) both stay in normal document flow without `position: sticky` (user ruling 2026-11-22). Expanded work blocks flow at full natural height in the outer timeline without an inner scrollport (`test_expanded_work_block_bounded_scroll_and_no_sticky`).
+`test_expanded_work_block_header_sticks_until_block_end` checks the expanded
+work header at 390 px and 1280 px in both themes. The opaque header sits flush
+against the bottom of the 44 px HeaderBar while the outer timeline scrolls through
+the middle of the block. It then leaves with the block's bottom edge. Expanded
+work blocks keep their natural height in the outer timeline without an inner
+scrollport, and child detail headers (`card-toggle`) stay in normal flow.
 
 One more suite drives the same stubbed page for a chrome measurement rather than a
 shell invariant: `test_work_block_chrome.py` opens `stubbed_home.work_block_items()`
