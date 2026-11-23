@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import stat
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +24,7 @@ from pydantic import (
 )
 from yaml.nodes import MappingNode, ScalarNode
 
-from base.host.boundary.json_values import is_object_list
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 
 _SITE_CONTACT = Path("lgtm/alerting/contact.yml")
@@ -52,6 +52,13 @@ _REGEX_TOKENS = re.compile(
 )
 _REGEX_ESCAPES = re.compile(r"\\(.)", re.DOTALL)
 _COMMON_REGEX_ESCAPES = frozenset("aAbBdDfnrsStvwW")
+
+_BRACED_ENV = re.compile(r"\$(?:__env)?\{([^}]+)\}")
+_PLAIN_ENV = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*|[0-9*#$@!?{-])")
+_WEBHOOK_ENV_FIELDS = {
+    "url": "MEIVA_ALERTS_WEBHOOK_URL",
+    "authorization_credentials": "MEIVA_ALERTS_WEBHOOK_TOKEN",
+}
 
 
 class _AlertYamlLoader(yaml.SafeLoader):
@@ -301,7 +308,53 @@ def _read_override(meiva_home: Path) -> bytes:
     return content
 
 
-def read_alert_contact_override(meiva_home: Path) -> AlertContactOverride:
+def _is_nontext_setting(value: str) -> bool:
+    if value in {"t", "T", "f", "F", "true", "True", "TRUE", "false", "False", "FALSE"}:
+        return True
+    if value != value.strip():
+        return False
+    try:
+        _ = float(value)
+    except ValueError:
+        return bool(re.fullmatch(r"[+-]?0[xX][0-9a-fA-F_.]+[pP][+-]?[0-9_]+", value))
+    return True
+
+
+def _expand_scalar(value: str, *, field: str, env: Mapping[str, str]) -> str:
+    def resolve(reference: re.Match[str]) -> str:
+        name = reference[1]
+        if name != _WEBHOOK_ENV_FIELDS.get(field) or name not in env:
+            raise ValueError("unsupported environment reference in Grafana alerting override")
+        return env[name]
+
+    parts = value.split("$$")
+    expanded = "$".join(_PLAIN_ENV.sub(resolve, _BRACED_ENV.sub(resolve, part)) for part in parts)
+    if len(parts) == 1 and expanded != value and _is_nontext_setting(expanded):
+        raise ValueError("expanded Grafana alerting override setting must remain text")
+    return expanded
+
+
+def _expanded_document(
+    value: object, *, env: Mapping[str, str], seen: set[int], field: str = ""
+) -> object:
+    if isinstance(value, str):
+        return _expand_scalar(value, env=env, field=field)
+    if id(value) in seen:
+        return value
+    if is_object_dict(value):
+        seen.add(id(value))
+        for key, item in value.items():
+            value[key] = _expanded_document(item, env=env, seen=seen, field=key)
+    elif is_object_list(value):
+        seen.add(id(value))
+        for index, item in enumerate(value):
+            value[index] = _expanded_document(item, env=env, seen=seen)
+    return value
+
+
+def read_alert_contact_override(
+    meiva_home: Path, *, webhook_url: str, webhook_token: str
+) -> AlertContactOverride:
     path = meiva_home / _SITE_CONTACT
     try:
         raw = _read_override(meiva_home)
@@ -323,7 +376,22 @@ def read_alert_contact_override(meiva_home: Path) -> AlertContactOverride:
         reason = str(exc) if type(exc) is yaml.YAMLError else "invalid YAML syntax"
         raise ValueError(f"Grafana alerting override {path}: {reason}") from None
     try:
-        _ = _AlertContact.model_validate(document)
+        expanded = _expanded_document(
+            document,
+            seen=set(),
+            env={
+                "MEIVA_ALERTS_WEBHOOK_URL": webhook_url,
+                "MEIVA_ALERTS_WEBHOOK_TOKEN": webhook_token,
+            },
+        )
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {path}") from None
+    except RecursionError:
+        raise ValueError(
+            f"Grafana alerting override {path} exceeds the YAML nesting limit"
+        ) from None
+    try:
+        _ = _AlertContact.model_validate(expanded)
     except ValidationError as exc:
         error = exc.errors(include_input=False, include_context=False, include_url=False)[0]
         loc = error["loc"][:-1] if error["type"] == "extra_forbidden" else error["loc"]

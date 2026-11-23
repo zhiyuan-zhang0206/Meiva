@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -11,7 +12,7 @@ import yaml
 
 from cli.commands.observability.tests.lgtm.lgtm_harness import LgtmUnit
 from cli.commands.observability.tests.lgtm.lgtm_harness import lgtm_unit as lgtm_unit
-from cli.commands.observability.tests.observability_inputs import REPO_ROOT
+from cli.commands.observability.tests.observability_inputs import REPO_ROOT, lgtm_settings
 
 _GRAFANA = REPO_ROOT / "deploy/lgtm/config/grafana"
 _SITE_CONTACT = "lgtm/alerting/contact.yml"
@@ -123,6 +124,14 @@ def test_invalid_alert_document_preserves_installed_config(
         ("repeat_interval: 4h", "repeat_interval: 9223372036855ms", "signed 64-bit"),
         ("group_wait: 30s", "group_wait: 1m1h", "invalid Prometheus duration"),
         ("group_wait: 30s", "group_wait: -1s", "invalid Prometheus duration"),
+        (
+            "$__env{MEIVA_ALERTS_WEBHOOK_URL}",
+            "$__env{MEIVA_ALERTS_WEBHOOK_URl}",
+            "unsupported environment reference",
+        ),
+        ("critical|error", "'[$MISSING_MATCH_LABEL]'", "unsupported environment reference"),
+        ("group_wait: 30s", "group_wait: '$MISSING_DURATION'", "unsupported environment reference"),
+        ("critical|error", "'[$__file{/missing}]'", "unsupported environment reference"),
         ("name: meiva-alerts-webhook", "name: '  '", r"contactPoints\.0\.name"),
         ("receivers:", "receivers: []\n  ignored:", r"contactPoints\.0\.receivers"),
         ("type: webhook", "type: no-such-integration", r"receivers\.0\.type"),
@@ -166,6 +175,45 @@ def test_portable_alert_regex_and_bounded_duration_are_provisioned(lgtm_unit: Lg
     lgtm_unit.render()
 
     _assert_installed(lgtm_unit, policy)
+
+
+@pytest.mark.parametrize(
+    "url_reference",
+    [
+        b"$__env{MEIVA_ALERTS_WEBHOOK_URL}",
+        b"${MEIVA_ALERTS_WEBHOOK_URL}",
+        b"$MEIVA_ALERTS_WEBHOOK_URL",
+    ],
+)
+def test_webhook_references_and_literal_regex_dollars_keep_original_yaml(
+    lgtm_unit: LgtmUnit, url_reference: bytes
+) -> None:
+    override = lgtm_unit.home / _SITE_CONTACT
+    override.parent.mkdir(parents=True)
+    content = _EXAMPLE.read_bytes()
+    content = content.replace(b"$__env{MEIVA_ALERTS_WEBHOOK_URL}", url_reference)
+    content = content.replace(b"critical|error", b"'^(?:critical|error)$$'")
+    _ = override.write_bytes(content)
+
+    lgtm_unit.render()
+
+    _assert_installed(lgtm_unit, content)
+
+
+def test_credential_stays_text_after_grafana_expansion(lgtm_unit: LgtmUnit) -> None:
+    lgtm_unit.render()
+    installed = _installed_contact(lgtm_unit)
+    override = lgtm_unit.home / _SITE_CONTACT
+    override.parent.mkdir(parents=True)
+    _ = override.write_bytes(_EXAMPLE.read_bytes())
+    settings = lgtm_settings()
+    credential = replace(settings.credentials, webhook_token="1234")  # noqa: S106
+    changed = replace(settings, credentials=credential)
+
+    with pytest.raises(ValueError, match="setting must remain text"):
+        lgtm_unit.render(settings=changed)
+
+    assert _installed_contact(lgtm_unit) == installed
 
 
 @pytest.fixture

@@ -108,6 +108,15 @@ repetition. Write policy durations in descending Prometheus units, within the
 signed 64-bit nanosecond range. Write booleans as `true` or `false`, and give
 each mapping key a single definition.
 
+Environment references are scoped to the rendered Grafana runtime values.
+`MEIVA_ALERTS_WEBHOOK_URL` is available in the webhook URL and
+`MEIVA_ALERTS_WEBHOOK_TOKEN` in the authorization credential. Use
+`$__env{NAME}`, `${NAME}`, or `$NAME`. The token can be empty for loopback
+delivery. Routing labels, matchers and timers use literal values. Grafana
+reduces `$$` to one literal dollar. Converge validates the expanded
+values and publishes the original YAML, keeping credential references in the
+provisioned file.
+
 Keep the override as a regular UTF-8 YAML file of at most 256 KiB. The example
 is a few KiB and this bound leaves room for station policies while limiting the
 work before converge can proceed. Converge refuses links in the override path
