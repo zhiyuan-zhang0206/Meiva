@@ -11,6 +11,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from opentelemetry.metrics import Observation
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
@@ -20,6 +21,7 @@ from base.config import settings
 from base.db import Database
 from base.paths import meiva_home
 from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
+from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.receipts import Category, Event, Level
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_sdk
 from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
@@ -262,7 +264,7 @@ def test_only_explicit_metrics_export_with_fixed_kinds(otlp_backend: OtlpFixture
 
 
 @pytest.mark.parametrize("process", ["agent-exec", "sdk", "schedule-runner", "cli-health-probe"])
-def test_short_lived_process_exports_logs_without_metrics(
+def test_short_lived_process_reports_queue_loss_on_the_metrics_lane(
     otlp_backend: OtlpFixture, process: str
 ) -> None:
     backend, log_exporter, metric_reader = otlp_backend
@@ -272,6 +274,38 @@ def test_short_lived_process_exports_logs_without_metrics(
 
     assert collected_metrics(metric_reader) == {}
     assert len(log_exporter.get_finished_logs()) == 1
+
+    now = system_clock().now()
+    report_loss(
+        replace(event, process=process), 3, "emitter", now=now, record_metric=backend.record_loss
+    )
+    backend.flush()
+
+    metrics = collected_metrics(metric_reader)
+    assert set(metrics) == {"meiva_event_log_drop_last_dropped_at"}
+    point = metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0]
+    assert point.value == now.timestamp()
+    assert dict(point.attributes) == {"process": process, "queue": "emitter"}
+    assert len(log_exporter.get_finished_logs()) == 1
+
+
+def test_short_lived_metric_view_exports_only_queue_loss() -> None:
+    from opentelemetry.sdk.metrics import MeterProvider
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views("sdk"))
+    try:
+        meter = provider.get_meter("meiva.telemetry")
+        meter.create_counter("otel.sdk.exporter.log.exported").add(2)
+        meter.create_histogram("meiva_llm_usage_latency").record(250.0)
+        assert reader.get_metrics_data() is None
+        meter.create_observable_gauge(
+            "meiva_event_log_drop_last_dropped_at",
+            callbacks=[lambda _: [Observation(123)]],
+        )
+        assert set(collected_metrics(reader)) == {"meiva_event_log_drop_last_dropped_at"}
+    finally:
+        provider.shutdown()
 
 
 def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
@@ -348,7 +382,9 @@ def test_metric_view_keeps_the_llm_latency_tail() -> None:
     from opentelemetry.sdk.metrics import MeterProvider
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views())
+    provider = MeterProvider(
+        metric_readers=[reader], views=telemetry_otlp_sdk.metric_views("agent_host")
+    )
     meter = provider.get_meter("meiva.telemetry")
     hist = meter.create_histogram("meiva_llm_usage_latency", unit="ms")
     hist.record(45000.0)

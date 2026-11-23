@@ -33,9 +33,12 @@ collector's machine label. The resource carries `service.name=meiva-<process>`,
 `service.namespace=meiva`, `service.version`, the cluster label, and one
 `service.instance.id` per process. The instance keeps concurrent cumulative
 streams distinct. The four short-lived roles `agent-exec`, `sdk`,
-`schedule-runner`, and `cli-health-probe` export their events as logs.
+`schedule-runner`, and `cli-health-probe` export their events as logs and
+retain the independent queue-loss timestamp gauge. Their metric views
+drop all other instruments, including SDK diagnostics. In the absence
+of queue loss, these roles create no Prometheus series.
 
 The periodic metric reader sends OTLP to the local sidecar every 15 seconds.
-The PR flow table and per-agent turn latency annotation query Loki for day
-and agent dimensions. Fleet turn p95 and the gateway heartbeat still use
-Prometheus.
+The PR flow table and the standalone per-agent turn latency diagnostic query
+Loki for day and agent dimensions. Fleet turn p95 and the gateway heartbeat
+use Prometheus.

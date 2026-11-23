@@ -16,7 +16,7 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.environment_variables import OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+from opentelemetry.sdk.metrics.view import DropAggregation, ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 
 from base.telemetry.delivery.loss import install_exporter_drop_observer
@@ -24,7 +24,7 @@ from base.telemetry.delivery.state import process_name
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
-from base.telemetry.otlp.plans import LOG_ONLY_PROCESSES
+from base.telemetry.otlp.plans import LOSS_ONLY_PROCESSES
 from base.telemetry.otlp.telemetry_otlp_metrics import (
     LLM_LATENCY_BUCKETS_MS,
     metrics_resource_attributes,
@@ -40,8 +40,14 @@ _LOGS_HTTP_TIMEOUT_S = 3.5
 
 
 # meiva:note
-# Preserve the tail of LLM call latency used by the fleet p95 rule.
-def metric_views() -> list[View]:
+# Keep the queue-loss gauge independent of the log queue. Short-lived roles suppress all
+# other instruments, including the SDK's own export metrics, so only actual loss creates series.
+def metric_views(process: str) -> list[View]:
+    if process in LOSS_ONLY_PROCESSES:
+        return [
+            View(instrument_name="*", aggregation=DropAggregation()),
+            View(instrument_name="meiva_event_log_drop_last_dropped_at"),
+        ]
     return [
         View(
             instrument_name="meiva_llm_usage_latency",
@@ -96,21 +102,18 @@ def build_providers(
     # process's tail record — stays mirror-only (task #4314 triage / #4320).
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
-    readers: list[PeriodicExportingMetricReader] = []
-    if process_name() not in LOG_ONLY_PROCESSES:
-        reader = PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
-            export_interval_millis=plan.metrics_interval_millis,
-            export_timeout_millis=plan.export_timeout_millis,
-        )
-        readers.append(reader)
-        if keep_reader is not None:
-            keep_reader(reader)
+    reader = PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
+        export_interval_millis=plan.metrics_interval_millis,
+        export_timeout_millis=plan.export_timeout_millis,
+    )
+    if keep_reader is not None:
+        keep_reader(reader)
     metrics = MeterProvider(
         shutdown_on_exit=plan.shutdown_on_exit,
-        metric_readers=readers,
+        metric_readers=[reader],
         resource=metrics_resource(home=home, instance_id=instance_id),
-        views=metric_views(),
+        views=metric_views(process_name()),
     )
     if keep_metrics is not None:
         keep_metrics(metrics)

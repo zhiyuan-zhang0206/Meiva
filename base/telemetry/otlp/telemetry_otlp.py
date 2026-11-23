@@ -66,7 +66,7 @@ from base.telemetry.delivery.reporting import (
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.plans import (
-    LOG_ONLY_PROCESSES,
+    LOSS_ONLY_PROCESSES,
     select_metric_attributes,
 )
 from base.telemetry.otlp.plans import (
@@ -599,7 +599,9 @@ class OtlpBackend:
         emit_log_record(logs, event)
 
     def _record_metrics(self, event: Event) -> None:
-        if event.category != "telemetry" or event.process in LOG_ONLY_PROCESSES:
+        if event.category != "telemetry":
+            return
+        if event.process in LOSS_ONLY_PROCESSES and event.event_name != "event_log_drop":
             return
         fields = METRIC_DISPOSITION.get(event.event_name)
         if not fields:

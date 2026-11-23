@@ -32,7 +32,7 @@ METRIC_DISPOSITION: dict[str, dict[str, Literal["counter", "histogram", "gauge"]
     "turn_end": {"duration_seconds": "histogram"},
 }
 
-LOG_ONLY_PROCESSES = frozenset({"agent-exec", "sdk", "schedule-runner", "cli-health-probe"})
+LOSS_ONLY_PROCESSES = frozenset({"agent-exec", "sdk", "schedule-runner", "cli-health-probe"})
 
 
 # meiva:note

@@ -483,7 +483,6 @@ _AGENT_COUNT_RULES = (
     "meiva-ops-sse-drop-backlog",
     "meiva-ops-delivery-stalled-backlog",
     "meiva-ops-inbound-consumed-unknown",
-    "meiva-ops-turn-duration-p95",
 )
 
 
@@ -502,13 +501,6 @@ def test_a_fleet_volume_rule_reports_its_distinct_agents(uid: str) -> None:
     assert nodes["N"]["model"]["expression"] == "B"
     assert "{{ $values.N }} agent(s)" in rule["annotations"]["summary"]
     assert rule["condition"] == "D" and nodes["D"]["model"]["expression"] == "C"
-
-
-def test_the_turn_duration_agent_count_uses_the_alert_threshold() -> None:
-    rule = {r["uid"]: r for r in load_rules()}["meiva-ops-turn-duration-p95"]
-    (count,) = rule_query_exprs(rule, "loki")
-    ((threshold,),) = threshold_params(rule)
-    assert " ".join(count.split()).endswith(f") > {threshold}) or vector(0)")
 
 
 # meiva:note
