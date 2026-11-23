@@ -22,6 +22,7 @@ __all__ = [
     "MACOS_GNU_BIN_DIRS",
     "MEIVA_HOME_ENV",
     "MEIVA_PYTHON_ENV",
+    "MEIVA_PYTHON_EXECUTABLE_ENV",
     "NETWORK_PROXY_KEYS",
     "SESSION_CREDENTIAL_KEYS",
     "TEMP_DIR_KEYS",
@@ -36,6 +37,7 @@ AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
 MEIVA_HOME_ENV = "MEIVA_HOME"
 MEIVA_PYTHON_ENV = "MEIVA_PYTHON"
+MEIVA_PYTHON_EXECUTABLE_ENV = "MEIVA_PYTHON_EXECUTABLE"
 
 # meiva:note
 # The two Homebrew prefixes in precedence order: Apple Silicon installs under `/opt/homebrew`,
@@ -95,7 +97,13 @@ def temp_dir_of(environ: Mapping[str, str]) -> Path:
 
 
 _SESSION_DELIVERY_KEYS = frozenset(
-    {"PATH", MEIVA_PYTHON_ENV, "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"}
+    {
+        "PATH",
+        MEIVA_PYTHON_ENV,
+        MEIVA_PYTHON_EXECUTABLE_ENV,
+        "MEIVA_HARNESS_HANDLE",
+        "CLAUDE_CONFIG_DIR",
+    }
 )
 
 # meiva:note

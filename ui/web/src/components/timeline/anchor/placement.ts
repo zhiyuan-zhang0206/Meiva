@@ -23,6 +23,7 @@ import { unreadBoundary } from "./unread";
 export interface RevealDecision {
   decided: boolean;
   itemId: string | null;
+  entrySeenId?: number;
   olderPages?: number;
 }
 
@@ -123,7 +124,7 @@ export class PlacementMachine {
     const goal = this.goal;
     if (goal.kind === "row") return locate(goal.place.identity, inputs.items, inputs.compactBuffer);
     if (goal.kind === "first" && inputs.reveal.decided) {
-      return unreadBoundary(inputs.items, inputs.reveal.itemId, goal.departure, inputs.compactBuffer).row;
+      return unreadBoundary(inputs.items, inputs.reveal, goal.departure, inputs.compactBuffer).row;
     }
     return null;
   }
@@ -197,7 +198,7 @@ export class PlacementMachine {
       case "first": {
         if (loading && (goal.departure || items.length === 0)) return false;
         const boundary = inputs.reveal.decided
-          ? unreadBoundary(items, inputs.reveal.itemId, goal.departure, inputs.compactBuffer)
+          ? unreadBoundary(items, inputs.reveal, goal.departure, inputs.compactBuffer)
           : null;
         const finish = () => {
           const row = boundary?.row;

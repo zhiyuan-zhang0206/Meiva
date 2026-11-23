@@ -382,8 +382,12 @@ but no external Bot API delivery path remains.
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
 webhook shape) — one alert instance = one row. It is the only writer of that table
-(`tests/scripts/test_alert_single_path.py`), and it delivers nothing: the IM fan-out retired with
-the IM channels on 2026-11-08, so the `notify_im` labels left in the rules are inert.
+(`tests/scripts/test_alert_single_path.py`). The retired IM channel's `notify_im` labels are inert.
+
+For an agent inbox destination, start with the [complete site policy example](../../contact.agent.example.yml).
+Copy it to `$MEIVA_HOME/lgtm/alerting/contact.yml`, replace the example agent ID, and converge the
+station, then reload Grafana alerting provisioning. Its error/critical route continues to the existing ingest rules. The built-in policy is
+ingest-only. [Receiver setup](../../../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)
 
 A planned outage is a silence, not a gate in the services: `meiva update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,
