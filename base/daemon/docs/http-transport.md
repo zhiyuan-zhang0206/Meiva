@@ -11,7 +11,10 @@ liveness payload. The wrapper resolves no home of its own, and the probes that
 check an answering daemon's home take the one they expect as an argument. Unknown
 routes return 404; configured bearer authentication precedes explicit route
 execution; unauthenticated health responses contain no secrets. Parsing and
-body limits remain shared rather than independently reimplemented.
+body limits remain shared rather than independently reimplemented. Agent-ops
+supplies an OpenTelemetry tracer. For authorized routes, the transport extracts
+W3C Trace Context and opens a server span around dispatch. Health probes stay
+outside the traced routes.
 
 The settings-free boundary supports explicit read-only tools without loading
 ordinary daemon configuration. The transport does not validate a release,

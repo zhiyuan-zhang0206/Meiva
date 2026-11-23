@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -13,14 +14,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
+from fastapi import FastAPI
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from base.clock.ids import new_uuid
 from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import GatewayAccess
 from base.config.tests.configuration import snapshot_process_config
+from base.daemon.http_transport import start_daemon_http
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.proc import run_bounded
@@ -78,6 +87,81 @@ def test_a_client_built_from_boot_takes_its_budget_and_its_credential_from_that_
     assert rpc.access().cluster_secret == first
     boot.set_field("cluster_secret", second)
     assert rpc.access().cluster_secret == second
+
+
+@pytest.mark.asyncio
+async def test_gateway_request_and_agent_ops_share_trace_context() -> None:
+    spans = InMemorySpanExporter()
+    gateway_traces = TracerProvider()
+    ops_traces = TracerProvider()
+    gateway_traces.add_span_processor(SimpleSpanProcessor(spans))
+    ops_traces.add_span_processor(SimpleSpanProcessor(spans))
+    access = GatewayAccess("", "", False, RPC_TEST_CREDENTIAL, "runner", False)
+    rpc = RpcClient(RpcConfig(2, 0), lambda: access, ManualTimers(), seeded_rng(), gateway_traces)
+
+    async def handle_ops(_body: bytes) -> tuple[int, bytes, str]:
+        active = trace.get_current_span().get_span_context()
+        return (
+            200,
+            json.dumps(
+                {
+                    "status": "completed",
+                    "result": {
+                        "trace_id": f"{active.trace_id:032x}",
+                        "span_id": f"{active.span_id:016x}",
+                    },
+                }
+            ).encode(),
+            "application/json",
+        )
+
+    ops = await start_daemon_http(
+        host="127.0.0.1",
+        port=0,
+        health_response=lambda: (200, b"{}"),
+        extra_routes={("POST", "/ops"): handle_ops},
+        auth_digests=frozenset({hashlib.sha256(RPC_TEST_CREDENTIAL.encode()).hexdigest()}),
+        tracer=ops_traces.get_tracer("test-ops"),
+    )
+    port = ops.sockets[0].getsockname()[1]
+    app = FastAPI()
+    FastAPIInstrumentor.instrument_app(
+        app, tracer_provider=gateway_traces, exclude_spans=["receive", "send"]
+    )
+
+    @app.post("/forward")
+    async def forward() -> dict[str, object]:
+        return await rpc.dispatch_to_url(
+            "runner-a", "spawn-launch", _LAUNCH, ops_url=f"http://127.0.0.1:{port}"
+        )
+
+    trace_id = "102030405060708090a0b0c0d0e0f000"
+    caller = "face0000feed0000"
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://gateway"
+        ) as client:
+            response = await client.post(
+                "/forward", headers={"traceparent": f"00-{trace_id}-{caller}-01"}
+            )
+        response.raise_for_status()
+        ops_span, rpc_span, gateway_span = spans.get_finished_spans()
+        for span in (gateway_span, rpc_span, ops_span):
+            assert span.context is not None and f"{span.context.trace_id:032x}" == trace_id
+        assert gateway_span.parent is not None and f"{gateway_span.parent.span_id:016x}" == caller
+        assert rpc_span.parent == gateway_span.context
+        assert ops_span.parent is not None and rpc_span.context is not None
+        assert ops_span.parent.span_id == rpc_span.context.span_id
+        assert ops_span.context is not None
+        assert response.json() == {
+            "trace_id": trace_id,
+            "span_id": f"{ops_span.context.span_id:016x}",
+        }
+    finally:
+        ops.close()
+        await ops.wait_closed()
+        gateway_traces.shutdown()
+        ops_traces.shutdown()
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import contextlib
 import json
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.inbox.wake import publish_inbound_wake
@@ -21,6 +22,7 @@ from base.db.rows import IdRow, query_one
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log, record_audit
+from base.telemetry.tracing import current_carrier
 
 
 def _reject_reserved_payload(payload: dict[str, object] | None) -> None:
@@ -165,14 +167,15 @@ def insert_inbound_message_in_transaction(
     assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
     event_type, target_agent_id = _lineage_event(kind, source)
 
+    trace_context = current_carrier() if event_type == "send_message" else {}
     prepared_event = None
     inserted = query_one(
         cur.connection,
         IdRow,
         "INSERT INTO inbound_messages "
         "(agent_id, content, kind, source, payload, source_verified_by, "
-        "source_transport, content_hash, source_assertion_match) "
-        "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
+        "source_transport, content_hash, source_assertion_match, trace_context) "
+        "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s) RETURNING id",
         (
             agent_id,
             content,
@@ -183,6 +186,7 @@ def insert_inbound_message_in_transaction(
             source_transport,
             content_hash,
             assertion_match,
+            Jsonb(trace_context) if trace_context else None,
         ),
     )
     if inserted is None:
@@ -216,12 +220,19 @@ def insert_spawn_prompt_in_transaction(
     """
     validate_source(source)
     payload = caller_payload(source, None)
+    trace_context = current_carrier()
     inserted = query_one(
         cur.connection,
         IdRow,
-        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-        "VALUES (%s, %s, 'chat', %s, %s::jsonb) RETURNING id",
-        (agent_id, content, source, json.dumps(payload) if payload else None),
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, trace_context) "
+        "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s) RETURNING id",
+        (
+            agent_id,
+            content,
+            source,
+            json.dumps(payload) if payload else None,
+            Jsonb(trace_context) if trace_context else None,
+        ),
     )
     if inserted is None:
         raise RuntimeError("expected exactly one row: insert spawn prompt")

@@ -36,6 +36,14 @@ _CONTENT_ATTR_PREFIXES: tuple[str, ...] = (
     "gen_ai.output.",
 )
 
+_HTTP_PAYLOAD_KEYS = frozenset({"http.target", "http.url", "url.full", "url.query", "url.path"})
+_HTTP_PAYLOAD_PREFIXES = (
+    "http.request.header.",
+    "http.response.header.",
+    "exception.",
+)
+
+
 # meiva:note
 # Defensive size guard: a metadata attribute is tiny (names, ids, paths,
 # durations); anything bigger on a single string value is treated as content
@@ -103,17 +111,33 @@ def _strip_attributes(owner: dict[str, object]) -> None:
         owner.pop("attributes", None)
 
 
-# meiva:note
-# Remove LLM-content attributes from a decoded OTLP export request, in place.
-#
-# Walks resourceSpans -> scopeSpans -> spans (attributes + events) and drops every attribute
-# whose key is a known content key (or content prefix), plus any attribute whose string payload
-# exceeds `MAX_ATTR_STRING_CHARS` (the size guard — metadata is never large). Span names,
-# timestamps, status, ids and `traceloop.*` / `gen_ai.task.*` / `langgraph.*` metadata survive.
-def strip_content_attributes(otlp: dict[str, object]) -> None:
+def _strip_http_payload(span: dict[str, object]) -> None:
+    if span.get("kind") not in {"SPAN_KIND_CLIENT", "SPAN_KIND_SERVER"}:
+        return
+    attrs = _objects_at(span, "attributes")
+    if not any(str(attr.get("key", "")).startswith("http.") for attr in attrs):
+        return
+    span["attributes"] = [
+        attr
+        for attr in attrs
+        if (key := str(attr.get("key", ""))) not in _HTTP_PAYLOAD_KEYS
+        and not key.startswith(_HTTP_PAYLOAD_PREFIXES)
+    ]
+    status = span.get("status")
+    if status is not None:
+        _as_object(status).pop("message", None)
+    for event in _objects_at(span, "events"):
+        if event.get("name") == "exception":
+            event.pop("attributes", None)
+
+
+def strip_content_attributes(otlp: dict[str, object], *, strip_llm: bool = True) -> None:
+    """Remove HTTP payload metadata and optionally LLM content from OTLP spans."""
     for rs in _objects_at(otlp, "resourceSpans"):
         for ss in _objects_at(rs, "scopeSpans"):
             for span in _objects_at(ss, "spans"):
-                _strip_attributes(span)
-                for ev in _objects_at(span, "events"):
-                    _strip_attributes(ev)
+                _strip_http_payload(span)
+                if strip_llm:
+                    _strip_attributes(span)
+                    for ev in _objects_at(span, "events"):
+                        _strip_attributes(ev)

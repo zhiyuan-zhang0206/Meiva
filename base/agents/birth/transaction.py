@@ -9,6 +9,7 @@ from typing import TypeGuard
 from uuid import UUID
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
@@ -34,6 +35,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
+from base.telemetry.tracing import current_carrier
 
 
 @dataclass(frozen=True)
@@ -362,13 +364,15 @@ def _insert_fork_history(
         # The claim node's fork handler appends their SKILL.md bodies at the
         # context tail — the inherited prefix stays byte-identical for the
         # provider cache. payload NULL = nothing to graft (legacy forks too).
+        trace_context = current_carrier()
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-            "VALUES (%s, '', 'fork', %s, %s::jsonb)",
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, trace_context) "
+            "VALUES (%s, '', 'fork', %s, %s::jsonb, %s)",
             (
                 new_id,
                 f"agent:{fork_from}",
                 json.dumps({"tail_skills": fork_tail_skills}) if fork_tail_skills else None,
+                Jsonb(trace_context) if trace_context else None,
             ),
         )
 

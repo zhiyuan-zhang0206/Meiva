@@ -25,7 +25,7 @@ from base.telemetry.tests.capture.armed_tracing import collector_endpoint, stop_
 
 
 def enter_turn() -> bool:
-    with tracing.turn_span(name="first turn", session_id="42", turn=1):
+    with tracing.turn_span(agent_id=42, turn=1):
         return trace.get_current_span().get_span_context().is_valid
 
 
@@ -159,7 +159,7 @@ def verify_recorded_turn() -> None:
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     assert enter_turn()
     spans = exporter.get_finished_spans()
-    assert [span.name for span in spans] == ["first turn"]
+    assert [span.name for span in spans] == ["meiva-agent-42"]
     assert spans[0].end_time is not None
 
 

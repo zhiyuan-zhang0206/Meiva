@@ -12,6 +12,9 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 
+from opentelemetry.trace import SpanKind, StatusCode, Tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
 from base.host.net.auth import verify_bearer_digest
 
 RouteHandler = Callable[[bytes], Awaitable[tuple[int, bytes, str]]]
@@ -83,6 +86,7 @@ async def _routed_response(
     auth_digests: frozenset[str] | None,
     body_limits: Mapping[tuple[str, str], int],
     body_slots: Mapping[tuple[str, str], asyncio.Semaphore],
+    tracer: Tracer | None,
 ) -> bytes:
     """Read the capped POST body and answer the request from health, the routes, or 404."""
     route = (method, path)
@@ -105,13 +109,46 @@ async def _routed_response(
             json.dumps({"error": f"body too large: {content_length} > {limit}"}).encode(),
             "application/json",
         )
+    if tracer is None:
+        return await _dispatch_with_slot(reader, content_length, routes[route], route, body_slots)
+    carrier = {
+        key.decode("ascii"): value
+        for key in (b"traceparent", b"tracestate")
+        if (value := _header_value(header_lines, key)) is not None
+    }
+    parent = TraceContextTextMapPropagator().extract(carrier)
+    with tracer.start_as_current_span(
+        f"{method} {path}",
+        context=parent,
+        kind=SpanKind.SERVER,
+        attributes={"http.request.method": method, "http.route": path},
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        response = await _dispatch_with_slot(
+            reader, content_length, routes[route], route, body_slots
+        )
+        status = int(response.split(b" ", 2)[1])
+        span.set_attribute("http.response.status_code", status)
+        if status >= 500:
+            span.set_status(StatusCode.ERROR)
+        return response
+
+
+async def _dispatch_with_slot(
+    reader: asyncio.StreamReader,
+    length: int,
+    handler: ServedRoute,
+    route: tuple[str, str],
+    body_slots: Mapping[tuple[str, str], asyncio.Semaphore],
+) -> bytes:
     gate = body_slots.get(route)
     if gate is None:
-        return await _read_and_dispatch(reader, content_length, routes[route], route)
+        return await _read_and_dispatch(reader, length, handler, route)
     if gate.locked():
         return _build_response(503, b'{"error":"route is busy"}', "application/json")
     async with gate:
-        return await _read_and_dispatch(reader, content_length, routes[route], route)
+        return await _read_and_dispatch(reader, length, handler, route)
 
 
 async def _read_and_dispatch(
@@ -141,6 +178,7 @@ async def start_daemon_http(
     auth_digests: frozenset[str] | None = None,
     body_limits: Mapping[tuple[str, str], int] | None = None,
     body_slots: Mapping[tuple[str, str], asyncio.Semaphore] | None = None,
+    tracer: Tracer | None = None,
 ) -> asyncio.Server:
     """Bind only the explicitly supplied routes and health response."""
     routes = dict(extra_routes) if extra_routes else {}
@@ -174,6 +212,7 @@ async def start_daemon_http(
                     auth_digests=auth_digests,
                     body_limits=limits,
                     body_slots=slots,
+                    tracer=tracer,
                 )
                 writer.write(response)
                 await writer.drain()

@@ -75,12 +75,6 @@ async def attach_trace_checkpoint_ref(
             agent_id=agent_id,
         )
         return
-    # The span-side write only lands while the span is still recording. The
-    # turn root is a placeholder ended at turn START (#1964), so in
-    # production this is skipped silently (an ended span would drop the
-    # attribute with a warning line every turn). The link that matters — the
-    # checkpoints.metadata.trace_id stamp below, read by the gateway trace
-    # endpoint — is DB-side and unaffected.
     if span.is_recording():
         span.set_attribute("meiva.checkpoint_id", checkpoint_id)
 

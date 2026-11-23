@@ -12,7 +12,9 @@ Follow the user's authorized scope.
   at their boundary; do not silently replace required data with defaults.
 - Prefer established dependencies over parallel implementations. Supported
   runtimes are Python 3.12, Postgres 17 and Redis 8.2; runtime upgrades require
-  an explicit project decision. No beta/nightly dependencies.
+  an explicit project decision. No beta/nightly dependencies. The OpenTelemetry
+  Python contrib `0.xbN` release line is its regular release channel. Pin new
+  contrib instrumentation to the same release as the existing locked components.
 - Source, comments, documentation, prompts and errors are English. Frontend
   i18n locale files are the only raw-CJK exception.
 - Keep one owner for shared facts and vocabulary. Respect the enforced import

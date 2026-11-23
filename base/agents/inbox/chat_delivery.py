@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import psycopg
 from psycopg.pq import TransactionStatus
+from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.messages.inbound_provenance import (
@@ -26,6 +27,7 @@ from base.api_contracts.caller_identity import caller_payload
 from base.db import fetch_one
 from base.db.rows import IdRow, query_one
 from base.telemetry.audit_events import record_audit
+from base.telemetry.tracing import current_carrier
 
 
 class ClientMessageConflictError(ValueError):
@@ -190,13 +192,14 @@ def insert_chat_inbound_in_transaction(
     source_transport = provenance.source_transport if provenance is not None else None
     content_hash = content_sha256(content) if provenance is not None else None
     assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
+    trace_context = current_carrier() if source.startswith("agent:") else {}
     inserted = query_one(
         db,
         IdRow,
         "INSERT INTO inbound_messages "
         "(agent_id, content, kind, source, payload, client_message_id, "
-        "source_verified_by, source_transport, content_hash, source_assertion_match) "
-        "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s, %s, %s, %s, %s) "
+        "source_verified_by, source_transport, content_hash, source_assertion_match, trace_context) "
+        "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (client_message_id) WHERE client_message_id IS NOT NULL "
         "DO NOTHING RETURNING id",
         (
@@ -209,6 +212,7 @@ def insert_chat_inbound_in_transaction(
             source_transport,
             content_hash,
             assertion_match,
+            Jsonb(trace_context) if trace_context else None,
         ),
     )
     if inserted is None:

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import Self, assert_never
 
 import httpx
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.trace import TracerProvider
 
 from base.clock import Timers
 from base.clock.ids import new_uuid
@@ -121,6 +123,7 @@ class RpcClient:
     access: Callable[[], GatewayAccess]
     timers: Timers
     rng: random.Random
+    tracer_provider: TracerProvider | None = None
 
     # meiva:note
     # The client a root builds from its own configuration: the dispatch budget from the
@@ -128,7 +131,14 @@ class RpcClient:
     # refreshed between attempts is the one presented). The root hands in `timers` and `rng`; nothing
     # here reads a process singleton.
     @classmethod
-    def from_boot(cls, config: ConfigBoot, *, timers: Timers, rng: random.Random) -> Self:
+    def from_boot(
+        cls,
+        config: ConfigBoot,
+        *,
+        timers: Timers,
+        rng: random.Random,
+        tracer_provider: TracerProvider | None = None,
+    ) -> Self:
         gateway = config.view.gateway
         return cls(
             config=RpcConfig(
@@ -138,6 +148,7 @@ class RpcClient:
             access=lambda: gateway_access_from_boot(config),
             timers=timers,
             rng=rng,
+            tracer_provider=tracer_provider,
         )
 
     async def _dispatch_once(
@@ -159,6 +170,9 @@ class RpcClient:
                 timeout=httpx.Timeout(timeout_s, connect=connect_timeout_s(timeout_s)),
                 trust_env=False,
             ) as client:
+                HTTPXClientInstrumentor.instrument_client(
+                    client, tracer_provider=self.tracer_provider
+                )
                 resp = await client.post(
                     url,
                     json=OpEnvelope(

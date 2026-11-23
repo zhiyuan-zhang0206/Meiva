@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from opentelemetry.sdk.trace import TracerProvider
+
 from base.agents.context.clients import ClientSet
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
@@ -19,6 +21,7 @@ from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import EventPipeline, build_pipeline
+from base.telemetry.tracing import build_process_tracer
 
 __all__ = ["GatewayProcess"]
 
@@ -48,6 +51,7 @@ class GatewayProcess:
         # process sees one observation.
         self.observe = observe
         self.image = image
+        self.tracer_provider: TracerProvider | None = None
         self.version = CodeVersion(image)
         self.gate = ProcessDbGate(
             version=self.version.get, process="gateway", end_process=hard_exit
@@ -74,8 +78,17 @@ class GatewayProcess:
             direct_url=ClusterDirectUrl(self.machine.host, home=self.home.resolve()),
         )
 
+    def enable_tracing(self) -> None:
+        self.tracer_provider = build_process_tracer(
+            service="meiva.gateway",
+            machine=self.machine,
+            home=self.home,
+            settings=self.config.view.observability,
+            environ=self.config.process_environment(),
+        )
+
     # meiva:note
-    # Open the writer on first use; logging and ASGI reuse the same object.
+    # Open the writer on first use. Logging and ASGI reuse the same object.
     def event_pipeline(self) -> EventPipeline:
         return self.clients.event_pipeline()
 
@@ -96,3 +109,6 @@ class GatewayProcess:
                 if primary is None:
                     raise
                 primary.add_note(f"Gateway writer cleanup also failed: {cleanup!r}")
+            finally:
+                if self.tracer_provider is not None:
+                    self.tracer_provider.shutdown()

@@ -697,7 +697,7 @@ class AgentHost:
         turn = 0
         while True:
             turn += 1
-            with turn_span(name=f"meiva-agent-{agent_id}", session_id=str(agent_id), turn=turn):
+            with turn_span(agent_id=agent_id, turn=turn):
                 try:
                     prepared = await self._invoke_graph(
                         agent_id, ctx, config, checkpoints, fresh_input=turn == 1

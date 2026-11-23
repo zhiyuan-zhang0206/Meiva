@@ -27,7 +27,7 @@ def inactive(scenario: str) -> None:
     assert not PROCESS_RECORDING.ready
     assert not isinstance(trace.get_tracer_provider(), TracerProvider)
     if scenario.startswith("turn"):
-        with tracing.turn_span(name="root", session_id="42", turn=3):
+        with tracing.turn_span(agent_id=42, turn=3):
             assert not trace.get_current_span().is_recording()
     else:
         with tracing.claim_idle_wait_span():
@@ -36,21 +36,42 @@ def inactive(scenario: str) -> None:
 
 
 def root(tracer: BillingRuntime) -> None:
-    with tracing.turn_span(name="meiva-agent-42", session_id="42", turn=3):
-        [recorded_root] = tracer.exporter.get_finished_spans()
-        assert recorded_root.name == "meiva-agent-42"
-        assert recorded_root.end_time is not None
-        assert dict(recorded_root.attributes or {}) == {"session.id": "42", "meiva.turn": 3}
-        current = trace.get_current_span().get_span_context()
-        assert recorded_root.context is not None
-        assert current.span_id == recorded_root.context.span_id
-        with tracer.provider.get_tracer("child").start_as_current_span("child"):
-            pass
-    spans = tracer.exporter.get_finished_spans()
-    assert [span.name for span in spans] == ["meiva-agent-42", "child"]
-    assert spans[1].parent is not None
-    assert spans[0].context is not None
-    assert spans[1].parent.span_id == spans[0].context.span_id
+    sdk = tracer.provider.get_tracer("probe")
+    with sdk.start_as_current_span("producer"):
+        sender = trace.get_current_span().get_span_context()
+        carrier = tracing.current_carrier()
+    previous = sdk.start_span("previous-turn-node")
+    previous.end()
+    with trace.use_span(previous):
+        with tracing.turn_span(agent_id=42, turn=3):
+            current = trace.get_current_span().get_span_context()
+            assert current.trace_id != previous.get_span_context().trace_id
+            assert [s.name for s in tracer.exporter.get_finished_spans()] == [
+                "producer",
+                "previous-turn-node",
+            ]
+            with sdk.start_as_current_span("claim"):
+                tracing.link_inbox_input(None)
+                tracing.link_inbox_input({"traceparent": "invalid"})
+                tracing.link_inbox_input(carrier)
+        assert trace.get_current_span() is previous
+
+    *_, claim, root = tracer.exporter.get_finished_spans()
+    assert root.name == "meiva-agent-42"
+    assert root.parent is None
+    assert root.context == current
+    assert claim.parent == root.context
+    assert root.end_time is not None and claim.end_time is not None
+    assert root.end_time >= claim.end_time
+    assert dict(root.attributes or {}) == {
+        "session.id": "42",
+        "meiva.turn": 3,
+        "meiva.agent_id": 42,
+    }
+    [link] = root.links
+    assert link.context.trace_id == sender.trace_id
+    assert link.context.span_id == sender.span_id
+    assert link.context.is_remote
 
 
 def idle(tracer: BillingRuntime, scenario: str) -> None:

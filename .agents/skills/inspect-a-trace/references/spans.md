@@ -59,16 +59,13 @@ Span attributes worth knowing: the root carries `session.id` (the agent id)
 and `meiva.turn` (the per-process turn counter); children carry
 `traceloop.association.properties.langgraph_node` / `.langgraph_step` /
 `.langgraph_path`, `traceloop.association.properties.ls_model_name`, and
-`gen_ai.operation.name`. Since #1964 the root is a placeholder ended at turn
-START (so a trace always has its root even when the process dies mid-turn),
-which means it can no longer carry `meiva.checkpoint_id` (an ended span drops
-attribute writes) — the trace↔checkpoint link now lives DB-side only
-(`checkpoints.metadata.trace_id`; `read_trace.py --with-content` joins it via
-the gateway trace endpoint). These attributes come from OpenLLMetry's
-auto-instrumentation of the LLM SDKs and LangChain/LangGraph, not from
-explicit calls in this repo — so a library upgrade can rename them. Check
-what a real span carries before building a query on an attribute you have not
-seen.
+`gen_ai.operation.name`. The root records the turn's duration, input
+span links and, when available, `meiva.checkpoint_id`. If the process dies
+mid-turn, children can reach Tempo before the root is exported.
+`read_trace.py --with-content` resolves the checkpoint through
+`checkpoints.metadata.trace_id` using the gateway trace endpoint. Check a real
+span before querying auto-instrumentation attributes, since a library upgrade
+can rename them.
 
 ## Fetch
 

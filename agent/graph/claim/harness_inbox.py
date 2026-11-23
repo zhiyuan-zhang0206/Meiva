@@ -41,7 +41,9 @@ DELIVERABLE_INBOUND_KINDS = (
     InboundKind.HEARTBEAT.value,
 )
 
-_COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,claimed_at"
+_COLUMNS: LiteralString = (
+    "id,agent_id,content,kind,source,payload,created_at,claimed_at,trace_context"
+)
 
 # meiva:note
 # The contiguous FIFO batch of pending deliverable rows at the head of the inbox. Any other pending kind

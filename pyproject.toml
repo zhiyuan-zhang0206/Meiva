@@ -55,6 +55,8 @@ dependencies = [
     # import them by name.
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-fastapi==0.65b0",
+    "opentelemetry-instrumentation-httpx==0.65b0",
     "pyyaml>=6.0.3",
     "httpx[socks]>=0.28",
     # Imported directly by meiva/mcps/_oauth.py (OAuth token exchange and

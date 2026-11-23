@@ -587,54 +587,6 @@ def test_shared_recording_read_has_a_bounded_wait(trace_readiness: TraceReadines
 # --- OtlpJsonHttpSpanExporter ---------------------------------------------------
 
 
-# --- turn_span placeholder-root export timing (#1964) ------------------------------
-
-
-def spans_received(posts: list[tuple[str, bytes, dict[str, str]]]) -> list[Any]:
-    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
-        ExportTraceServiceRequest,
-    )
-
-    requests = [ExportTraceServiceRequest.FromString(raw) for _url, raw, _h in posts]
-    return [
-        span
-        for req in requests
-        for rs in req.resource_spans
-        for ss in rs.scope_spans
-        for span in ss.spans
-    ]
-
-
-def assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
-    assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
-    root = spans[0]
-    assert root.name == "meiva-agent-7"
-    attrs = {kv.key: kv.value.string_value or kv.value.int_value for kv in root.attributes}
-    assert attrs["session.id"] == "7"
-    assert attrs["meiva.turn"] == 3
-    assert root.end_time_unix_nano > 0, "placeholder root must be ended when exported"
-    return root
-
-
-def assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -> None:
-    roots = [s for s in spans if not s.parent_span_id]
-    assert len(roots) == 1, f"root must be exported exactly once, got {len(roots)}"
-    assert roots[0].span_id == root.span_id
-    children = [s for s in spans if s.parent_span_id]
-    assert len(children) == 1
-    assert children[0].parent_span_id == root.span_id
-    assert children[0].trace_id == root.trace_id
-
-
-# --- retention prune ---------------------------------------------------------
-
-
-# --- turn_span -----------------------------------------------------------
-
-
-# --- claim idle-wait span -------------------------------------------------
-
-
 # --- trace v2: content stripping --------------------------------------------
 
 

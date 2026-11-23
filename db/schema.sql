@@ -362,6 +362,7 @@ CREATE TABLE inbound_messages (
     -- gateway compute creation -> pickup latency (claimed_at - created_at),
     -- e.g. for the delivery watchdog / degraded-wake alerts.
     claimed_at TIMESTAMPTZ,
+    trace_context JSONB,
     CONSTRAINT inbound_agent_command_unique UNIQUE(agent_id,id)
 ) WITH (
     fillfactor = 85,

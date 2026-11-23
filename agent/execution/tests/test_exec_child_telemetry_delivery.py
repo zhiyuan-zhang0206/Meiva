@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from pathlib import Path
 from uuid import UUID
 
@@ -67,7 +67,12 @@ def _endpoint(server: http.server.ThreadingHTTPServer) -> str:
 
 
 def _spawn(
-    tmp_path: Path, code: str, endpoint: str, *, corrupt_request: bool = False
+    tmp_path: Path,
+    code: str,
+    endpoint: str,
+    *,
+    corrupt_request: bool = False,
+    trace_environment: Mapping[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=_AGENT_ID, request_id=UUID(int=1))
@@ -93,6 +98,7 @@ def _spawn(
             "MEIVA_EXEC_RESULT_FILE": str(result_path),
             "MEIVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
             "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
+            **(trace_environment or {}),
             "MEIVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
         }
     )
@@ -212,7 +218,14 @@ def _poll_sent(expected: set[tuple[str, object, object]]) -> set[tuple[str, obje
 def test_done_child_delivers_result_write_record(
     tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
 ) -> None:
-    proc, result_path = _spawn(tmp_path, "print('delivery ran')", _endpoint(otlp_receiver))
+    trace_id = "102030405060708090a0b0c0d0e0f000"
+    parent_id = "face0000feed0000"
+    proc, result_path = _spawn(
+        tmp_path,
+        "print('delivery ran')",
+        _endpoint(otlp_receiver),
+        trace_environment={"TRACEPARENT": f"00-{trace_id}-{parent_id}-01"},
+    )
     assert proc.returncode == 0, proc.stderr
     assert read_result(result_path).kind == "done"
 
@@ -229,6 +242,31 @@ def test_done_child_delivers_result_write_record(
 
     mirror_keys = _mirror_keys(tmp_path)
     assert ("exec_envelope", "result", "write") in mirror_keys, f"mirror saw: {sorted(mirror_keys)}"
+    _assert_child_correlation(tmp_path, trace_id, parent_id)
+
+
+def _assert_child_correlation(tmp_path: Path, trace_id: str, parent_id: str) -> None:
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
+
+    received = [
+        span
+        for path, raw in _POSTS
+        if path == "/v1/traces"
+        for resource in trace_service_pb2.ExportTraceServiceRequest.FromString(raw).resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+    ]
+    [child_span] = [span for span in received if span.name == "execute_code"]
+    assert child_span.trace_id.hex() == trace_id
+    assert child_span.parent_span_id.hex() == parent_id
+    records = [
+        row
+        for row in _mirror_records(tmp_path)
+        if row.get("event_name") in {"exec_child_boot", "exec_envelope"}
+    ]
+    assert {(row.get("trace_id"), row.get("span_id")) for row in records} == {
+        (trace_id, child_span.span_id.hex())
+    }
 
 
 def test_crashed_child_delivers_its_records(

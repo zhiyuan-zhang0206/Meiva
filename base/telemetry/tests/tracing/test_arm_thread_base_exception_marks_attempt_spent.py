@@ -162,7 +162,7 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
     assert len(collector_up.posts) == tracing_mod.TRACE_EXPORT_FAILURE_THRESHOLD + 2
 
 
-def test_turn_span_exports_root_at_start_not_at_end(tmp_path: Path) -> None:
+def test_turn_span_exports_isolated_root_with_causal_links_at_exit(tmp_path: Path) -> None:
     run_trace_scenario(tmp_path, "root")
 
 

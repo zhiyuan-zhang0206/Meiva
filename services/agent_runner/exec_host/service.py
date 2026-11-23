@@ -25,6 +25,7 @@ from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import exec_run_dir
 from base.sessions.exec_host import protocol
 from base.sessions.exec_host.child_environment import ChildExecution, build_child_environment
+from base.telemetry.tracing import TRACE_ENV_KEYS
 
 _POLL_INTERVAL_S = 0.05
 _OUTPUT_DRAIN_TIMEOUT_S = 5.0
@@ -209,7 +210,7 @@ def _parse_run_request(req: dict[str, object], *, home: Path, default_cwd: Path)
 def _build_child_env(
     base_environ: Mapping[str, str], parsed: _RunRequest, source_root: Path | None
 ) -> dict[str, str]:
-    env = dict(base_environ)
+    env = {key: value for key, value in base_environ.items() if key not in TRACE_ENV_KEYS}
     helper_pid = base_environ.get("MEIVA_PERMISSIONS_HELPER_PID")
     env.update(parsed.env_overlay)
     if helper_pid is not None:

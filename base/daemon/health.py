@@ -78,6 +78,8 @@ from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit
 
+from opentelemetry.trace import Tracer
+
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
@@ -226,6 +228,7 @@ async def start_health_server(
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
     auth_digests: frozenset[str] | None = None,
     image: LoadedCommit,
+    tracer: Tracer | None = None,
 ) -> asyncio.Server:
     started_at = time.time()
     pid = os.getpid()
@@ -256,6 +259,7 @@ async def start_health_server(
         body_limits=body_limits,
         body_slots=body_slots,
         auth_digests=auth_digests,
+        tracer=tracer,
     )
 
 

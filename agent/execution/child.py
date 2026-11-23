@@ -590,6 +590,18 @@ def _unbind_exec_context() -> MeivaContext | None:
 
 
 def main() -> None:
+    from opentelemetry.context import attach, detach
+
+    from base.telemetry.tracing import exec_parent_context
+
+    token = attach(exec_parent_context(os.environ))
+    try:
+        _run_traced_child()
+    finally:
+        detach(token)
+
+
+def _run_traced_child() -> None:
     boot_started_at = time.perf_counter()
     request_path = os.environ.get("MEIVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("MEIVA_EXEC_RESULT_FILE")
@@ -599,6 +611,13 @@ def main() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
+    from contextlib import ExitStack
+
+    from opentelemetry import trace
+
+    from base.paths.home import resolve_meiva_home
+
+    tracing = ExitStack()
     clients: ClientSet | None = None
     apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
@@ -611,6 +630,24 @@ def main() -> None:
         config = ConfigBoot()
         config.boot()
         machine = ConfiguredMachineIdentity(config)
+        if trace.get_current_span().get_span_context().is_valid:
+            from base.telemetry.tracing import build_process_tracer
+
+            provider = build_process_tracer(
+                service="meiva.exec",
+                machine=machine,
+                home=resolve_meiva_home(),
+                settings=config.view.observability,
+                environ=config.process_environment(),
+            )
+            if provider is not None:
+                trace.set_tracer_provider(provider)
+                _ = tracing.callback(provider.shutdown)
+                _ = tracing.enter_context(
+                    provider.get_tracer("meiva.exec").start_as_current_span(
+                        "execute_code", record_exception=False, set_status_on_exception=False
+                    )
+                )
         clients = derived_clients(config, machine)
         # meiva:note
         # The generator this process reads once at start: the keyed SDK requests a child makes
@@ -625,11 +662,12 @@ def main() -> None:
 
         deliver_envelope_telemetry(clients=clients)
     finally:
-        context = _unbind_exec_context()
-        if context is not None and context.clients is not clients:
-            context.clients.close()
-        if clients is not None:
-            clients.close()
+        with tracing:
+            context = _unbind_exec_context()
+            if context is not None and context.clients is not clients:
+                context.clients.close()
+            if clients is not None:
+                clients.close()
 
 
 def write_crashed_result(
