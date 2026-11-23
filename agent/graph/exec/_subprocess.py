@@ -44,6 +44,7 @@ from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
+from base.telemetry.tracing import exec_trace_environment
 
 from ._child_boundary import (
     ChildLaunch,
@@ -353,8 +354,10 @@ async def run_in_subprocess(
     caller = (
         authority.new_caller(agent_id) if authority is not None and agent_id is not None else None
     )
+    env = exec_trace_environment(parent.environ)
     if caller is not None:
-        parent = replace(parent, environ={**parent.environ, BROWSER_CALLER_ENV: caller})
+        env[BROWSER_CALLER_ENV] = caller
+    parent = replace(parent, environ=env)
     try:
         outcome = await run_via_exec_host(
             exec_dir=exec_dir,

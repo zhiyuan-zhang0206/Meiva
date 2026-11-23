@@ -599,6 +599,23 @@ def main() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
+    with contextlib.ExitStack() as tracing:
+        if os.environ.get("TRACEPARENT"):
+            from opentelemetry.context import attach, detach
+
+            from base.telemetry.tracing import exec_parent_context
+
+            _ = tracing.callback(detach, attach(exec_parent_context(os.environ)))
+        _run_child_process(request_path, result_path, boot_started_at, tracing=tracing)
+
+
+def _run_child_process(
+    request_path: str, result_path: str, boot_started_at: float, *, tracing: contextlib.ExitStack
+) -> None:
+    from opentelemetry import trace
+
+    from base.paths.home import resolve_meiva_home
+
     clients: ClientSet | None = None
     apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
@@ -611,6 +628,25 @@ def main() -> None:
         config = ConfigBoot()
         config.boot()
         machine = ConfiguredMachineIdentity(config)
+        if trace.get_current_span().get_span_context().is_valid:
+            from base.telemetry.otlp.trace_workers import ExecTraceDrain
+            from base.telemetry.tracing import build_process_tracer
+
+            provider = build_process_tracer(
+                service="meiva.exec",
+                machine=machine,
+                home=resolve_meiva_home(),
+                settings=config.view.observability,
+                environ=config.process_environment(),
+            )
+            if provider is not None:
+                trace.set_tracer_provider(provider)
+                _ = tracing.callback(ExecTraceDrain(provider.shutdown).close)
+                _ = tracing.enter_context(
+                    provider.get_tracer("meiva.exec").start_as_current_span(
+                        "execute_code", record_exception=False, set_status_on_exception=False
+                    )
+                )
         clients = derived_clients(config, machine)
         # meiva:note
         # The generator this process reads once at start: the keyed SDK requests a child makes

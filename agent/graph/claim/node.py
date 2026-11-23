@@ -57,6 +57,7 @@ from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.api_contracts.agent_contract import Harness
+from base.telemetry.tracing import link_inbox_input
 
 from ._decide import decide
 from ._dispatch import (
@@ -238,6 +239,8 @@ async def settle_claimed_batch(
     agent_id: int,
     batch: list[ClaimedInbound],
 ) -> Command[ClaimGoto]:
+    for item in batch:
+        link_inbox_input(item.trace_context)
     routing = await resolve_routing(ctx, agent_id, batch)
     st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)

@@ -18,9 +18,11 @@ import random
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
+from opentelemetry.trace import Span, use_span
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
@@ -36,10 +38,16 @@ from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.db_authority.admission import admission_inputs
 from base.host.db_authority.unit import UnitIdentity
+from base.host.system.hostport import Host
+from base.lm.harness.session.transcript.record_file import UnreadRows
+from base.native_process.loaded_commit import LoadedCommit
+from ops.rpc_schemas import OpStatus
 from ops.upload_delivery import ReceiverConfig
 from services import pidfile as pidfile_operations
+from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 
 __all__ = [
+    "dispatch_in_thread",
     "endpoint",
     "is_running",
     "op_thread_pool",
@@ -207,6 +215,44 @@ def agent_host_row(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
 
 def pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
     return endpoint(config, runtime=runtime).pidfile
+
+
+def dispatch_in_thread(
+    kind: str,
+    payload: dict[str, object],
+    *,
+    span: Span,
+    pool: ConnectionPool,
+    authority: ConfigAuthority,
+    database: Callable[[], Database],
+    image: LoadedCommit,
+    local_machine: MachineIdentityReader,
+    host: Host,
+    rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
+    agent_host: ServiceEndpoint,
+    unread: UnreadRows,
+    timers: Timers,
+    now: Callable[[], datetime],
+) -> tuple[OpStatus, dict[str, object]]:
+
+    with use_span(span, record_exception=False, set_status_on_exception=False):
+        return dispatch_sync(
+            kind,
+            payload,
+            pool=pool,
+            db=ops_handles(database=database, authority=authority, rng=rng, timers=timers)[0],
+            authority=authority,
+            image=image,
+            local_machine=local_machine,
+            host=host,
+            home=home,
+            receiver=receiver,
+            agent_host=agent_host,
+            unread=unread,
+            now=now(),
+        )
 
 
 # meiva:note

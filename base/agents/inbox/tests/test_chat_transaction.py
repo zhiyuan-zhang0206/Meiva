@@ -3,6 +3,7 @@ from threading import Barrier
 
 import psycopg
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
 
 from base import telemetry
 from base.agents.inbox.chat_delivery import (
@@ -72,17 +73,30 @@ def test_caller_commit_makes_chat_and_audit_visible_together(
 ) -> None:
     agent_id, sender = create_agent(db_conn), create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
-        with write_transaction(pool) as conn:
+        tracer = TracerProvider().get_tracer("chat-test")
+        with tracer.start_as_current_span("producer") as source, write_transaction(pool) as conn:
             receipt, event = write(conn, agent_id, sender)
             assert receipt.inserted and event is not None
             assert counts(db_conn, agent_id) == (0, 0)
         assert counts(db_conn, agent_id) == (1, 1)
+        context = source.get_span_context()
+        assert event.trace_id == f"{context.trace_id:032x}"
+        assert event.span_id == f"{context.span_id:016x}"
 
-        with write_transaction(pool) as conn:
+        with tracer.start_as_current_span("retry"), write_transaction(pool) as conn:
             replay, repeated_event = write(conn, agent_id, sender)
             assert replay.inbound_id == receipt.inbound_id
             assert not replay.inserted and replay.pending
             assert repeated_event is None
+    row = db_conn.execute(
+        "SELECT payload, trace_context->>'traceparent' FROM inbound_messages WHERE id=%s",
+        (receipt.inbound_id,),
+    ).fetchone()
+    assert row is not None
+    assert (
+        row[1]
+        == f"00-{context.trace_id:032x}-{context.span_id:016x}-{int(context.trace_flags):02x}"
+    )
     assert counts(db_conn, agent_id) == (1, 1)
 
 

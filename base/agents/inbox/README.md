@@ -32,3 +32,11 @@ the database layer imports none of them.
 
 - `base/agents/inbox/insert.py:insert_inbound_message`
 - `base/agents/inbox/wake.py:publish_inbound_wake`
+
+
+Peer chats, spawn prompts and fork markers retain an optional W3C trace context
+alongside the inbound. The sender's audit event and stored context share the
+active producing span. A turn links to that span when it claims the native
+inbound or reserves it for an external harness. The carrier is stored apart
+from the message payload, so retry matching still compares only the original
+message identity.

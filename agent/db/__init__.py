@@ -173,6 +173,7 @@ class ClaimedInbound(NamedTuple):
     # meiva:note
     # Internal dispatch fact: the claimed restart/terminate command, never payload input.
     durable_lifecycle: bool = False
+    trace_context: dict[str, object] | None = None
 
     # meiva:note
     # The eight `RETURNING` columns of a claim, matched by type rather than trusted: a row of
@@ -181,6 +182,7 @@ class ClaimedInbound(NamedTuple):
     # `dict` of whatever the writer put there, so it goes through `is_object_dict`.
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> "ClaimedInbound":
+        carrier = row[8] if len(row) > 8 else None
         match row[:8]:
             case (
                 int() as id_,
@@ -205,6 +207,7 @@ class ClaimedInbound(NamedTuple):
                     raw_payload,
                     raw_created,
                     raw_claimed,
+                    trace_context=carrier if is_object_dict(carrier) else None,
                 )
             case _:
                 raise TypeError("a claimed inbound row has columns of unexpected types")
@@ -407,7 +410,7 @@ async def claim_inbound_batch(
                 "  ))) "
                 "  ORDER BY created_at ASC, id ASC "
                 "  FOR UPDATE SKIP LOCKED"
-                ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at"
+                ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at, trace_context"
             ).format(not_passive=sql.SQL(not_passive_inbound("d"))),
             (agent_id, runtime_owned, deliverable_by_harness, agent_id),
         )

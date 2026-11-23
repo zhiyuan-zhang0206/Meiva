@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from pathlib import Path
 from uuid import UUID
 
@@ -28,10 +28,19 @@ from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
+_TRACE_DRAIN_PROBE = Path(__file__).with_name("_exec_trace_drain_child.py")
 
 
 _POSTS: list[tuple[str, bytes]] = []
 _POSTS_LOCK = threading.Lock()
+
+
+class _ReceiverServer(http.server.ThreadingHTTPServer):
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), _ReceiverHandler)
+        self.trace_requested = threading.Event()
+        self.trace_response_allowed = threading.Event()
+        self.trace_response_allowed.set()
 
 
 class _ReceiverHandler(http.server.BaseHTTPRequestHandler):
@@ -42,19 +51,23 @@ class _ReceiverHandler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         with _POSTS_LOCK:
             _POSTS.append((self.path, body))
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-protobuf")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        if self.path == "/v1/traces" and isinstance(server := self.server, _ReceiverServer):
+            server.trace_requested.set()
+            _ = server.trace_response_allowed.wait(10)
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-protobuf")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
         pass
 
 
 @pytest.fixture
-def otlp_receiver() -> Generator[http.server.ThreadingHTTPServer]:
+def otlp_receiver() -> Generator[_ReceiverServer]:
     _POSTS.clear()
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ReceiverHandler)
+    server = _ReceiverServer()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield server
@@ -67,7 +80,12 @@ def _endpoint(server: http.server.ThreadingHTTPServer) -> str:
 
 
 def _spawn(
-    tmp_path: Path, code: str, endpoint: str, *, corrupt_request: bool = False
+    tmp_path: Path,
+    code: str,
+    endpoint: str,
+    *,
+    corrupt_request: bool = False,
+    trace_environment: Mapping[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=_AGENT_ID, request_id=UUID(int=1))
@@ -93,6 +111,7 @@ def _spawn(
             "MEIVA_EXEC_RESULT_FILE": str(result_path),
             "MEIVA_TELEMETRY_OTLP_ENDPOINT": endpoint,
             "MEIVA_TELEMETRY_OTLP_ENABLED": "true",
+            **(trace_environment or {}),
             "MEIVA_EXEC_WATCHDOG_MARGIN_S": "0.5",
         }
     )
@@ -212,7 +231,24 @@ def _poll_sent(expected: set[tuple[str, object, object]]) -> set[tuple[str, obje
 def test_done_child_delivers_result_write_record(
     tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
 ) -> None:
-    proc, result_path = _spawn(tmp_path, "print('delivery ran')", _endpoint(otlp_receiver))
+    trace_id = "102030405060708090a0b0c0d0e0f000"
+    parent_id = "face0000feed0000"
+    code = """
+from opentelemetry import trace
+
+active = trace.get_current_span()
+assert active.parent is not None
+assert active.parent.span_id == 0xface0000feed0000
+with trace.get_tracer("exec-test").start_as_current_span("correlation-probe"):
+    print("delivery ran")
+assert trace.get_tracer_provider().force_flush()
+"""
+    proc, result_path = _spawn(
+        tmp_path,
+        code,
+        _endpoint(otlp_receiver),
+        trace_environment={"TRACEPARENT": f"00-{trace_id}-{parent_id}-01"},
+    )
     assert proc.returncode == 0, proc.stderr
     assert read_result(result_path).kind == "done"
 
@@ -229,6 +265,47 @@ def test_done_child_delivers_result_write_record(
 
     mirror_keys = _mirror_keys(tmp_path)
     assert ("exec_envelope", "result", "write") in mirror_keys, f"mirror saw: {sorted(mirror_keys)}"
+    _assert_child_correlation(tmp_path, trace_id)
+
+
+def _assert_child_correlation(tmp_path: Path, trace_id: str) -> None:
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
+
+    received = [
+        span
+        for path, raw in _POSTS
+        if path == "/v1/traces"
+        for resource in trace_service_pb2.ExportTraceServiceRequest.FromString(raw).resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+    ]
+    [probe] = [span for span in received if span.name == "correlation-probe"]
+    assert probe.trace_id.hex() == trace_id
+    records = [
+        row
+        for row in _mirror_records(tmp_path)
+        if row.get("event_name") in {"exec_child_boot", "exec_envelope"}
+    ]
+    assert {(row.get("trace_id"), row.get("span_id")) for row in records} == {
+        (trace_id, probe.parent_span_id.hex())
+    }
+
+
+def test_exec_trace_drain_exits_while_collector_response_is_blocked(
+    tmp_path: Path, otlp_receiver: _ReceiverServer
+) -> None:
+    drain = tmp_path / "begin-drain"
+    otlp_receiver.trace_response_allowed.clear()
+    with subprocess.Popen(  # noqa: S603 — fixed interpreter and test-owned probe
+        [sys.executable, "-I", str(_TRACE_DRAIN_PROBE), _endpoint(otlp_receiver), str(drain)]
+    ) as process:
+        try:
+            assert otlp_receiver.trace_requested.wait(15)
+            drain.touch()
+            assert process.wait(timeout=1) == 0
+        finally:
+            drain.touch()
+            otlp_receiver.trace_response_allowed.set()
 
 
 def test_crashed_child_delivers_its_records(

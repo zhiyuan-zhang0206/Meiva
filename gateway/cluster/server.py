@@ -198,6 +198,7 @@ def _serve_process(
             )
         )
     else:
+        process.enable_tracing()
         serve(
             serve_kwargs(
                 host=plan.bind_host, app=build_app(process), factory=False, config=process.config

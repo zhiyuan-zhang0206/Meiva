@@ -37,21 +37,22 @@ Everything hangs off these. Get one, and the rest follows.
   string (`checkpoints.thread_id = '3048'`), the Loki stream matcher
   (`{service_name="unknown_service", agent_id="3048"}` — an index label
   since the 2026-08-23 cutover), and the root span's `session.id`.
-- **`trace_id`** — one turn of graph work, lowercase 32-hex. It is the Loki line
+- **`trace_id`** — the W3C trace identifier, lowercase 32-hex. It is the Loki line
   field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped per turn onto
   the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
   reverse link is the root span's `meiva.checkpoint_id` attribute.
 
-**One trace is exactly one turn.** The root span (`base/telemetry/tracing.py:turn_span`)
-wraps one `graph.ainvoke`, and the runloop invokes the graph once per turn —
-the claim node ends the invocation at the turn boundary, so the trace exports
-when the turn ends. The root keeps the name `meiva-agent-{agent_id}` and the
-`session.id` attribute, and carries `meiva.turn` (int, from 1, **per process** —
-it repeats across restarts; order turns across processes by timestamp or
-`meiva.checkpoint_id`, never by `meiva.turn`). Runs recorded before 2026-08-20
-used a session-scoped root (`session_span`) that wrapped the whole process
-life — an old run in the mirror or Tempo can span many turns, so check the
-root's bounds before reasoning about its span count or duration.
+Each agent graph invocation starts a fresh trace with a
+`meiva-agent-{agent_id}` root span. The trace can include SDK HTTP requests,
+gateway and agent-ops spans, and exec subprocess spans. A receiving turn links
+to the traces that supplied its input with span links. Follow those links to
+inspect the causal chain across agents. The root ends when the turn exits. If
+the host is killed before then, Tempo can show exported child spans while the
+root is missing.
+
+Root attributes include `meiva.agent_id`, `session.id`, and the `meiva.turn`
+counter local to a graph task. Order turns across tasks and restarts by
+timestamp or `meiva.checkpoint_id`.
 
 The checkpoint stamp is deliberately failure-tolerant
 (`agent/turn/trace_checkpoint.py`), so **not every checkpoint carries a

@@ -109,6 +109,7 @@ def gateway_endpoint(config: ConfigBoot) -> Callable[[], str]:
 
 def _gateway(url: str, *, config: ConfigBoot) -> GatewayHandle:
     import httpx
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
     from base.cluster.machine import gateway_bearer
     from base.cluster.machine.boot import gateway_access_from_boot
@@ -116,19 +117,19 @@ def _gateway(url: str, *, config: ConfigBoot) -> GatewayHandle:
     from base.host.net.http_dial import transport_for_url
 
     bearer = gateway_bearer(gateway_access_from_boot(config))
-    return httpx.Client(
+    client = httpx.Client(
         base_url=url,
         timeout=httpx.Timeout(config.view.gateway.gateway_client_http_timeout_seconds),
         headers=bearer_header(bearer),
         transport=transport_for_url(url),
     )
+    HTTPXClientInstrumentor.instrument_client(client)
+    return client
 
 
 # meiva:note
-# The sampling owner of a process with no service lifespan to schedule its cleanup (a launched
-# child, a script, a command-line inventory). It closes at interpreter exit: finite cleanup, not a
-# guarantee of a nonzero exit or of delivery after a hard exit. `uninstall` unregisters the close of
-# the installation that retains the owner, so a removed surface leaves no callback behind.
+# A process without a service lifespan closes sampling at interpreter exit.
+# `uninstall` unregisters that callback.
 def process_sampling_owner(
     rng: random.Random, *, environ: Mapping[str, str]
 ) -> SamplingPolicyOwner:

@@ -83,6 +83,7 @@ from base.lm.harness import (
 )
 from base.lm.harness.engine import TurnEngine
 from base.log import logger
+from base.telemetry.tracing import link_inbox_input
 
 HarnessGoto = Literal["claim"]
 
@@ -640,6 +641,8 @@ class ForegroundRun:
         if asyncio.get_running_loop().time() < self._backoff_until:
             await self._give_back(rows)
             return None
+        for item in rows:
+            link_inbox_input(item.trace_context)
         return rows
 
     async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:

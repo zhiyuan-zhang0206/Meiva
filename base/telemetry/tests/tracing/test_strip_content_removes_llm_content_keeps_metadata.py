@@ -167,22 +167,33 @@ def test_exporter_posts_stripped_line(collector_up: CollectorStubServer) -> None
     assert "traceloop.association.properties.agent_id" in keys  # metadata survives
 
 
-def test_exporter_strip_opt_out_keeps_content(collector_up: CollectorStubServer) -> None:
-    """trace_strip_content=False opts the wire back into full content
-    (benchmarks that genuinely want prompts in Tempo/mirror)."""
+def test_exporter_keeps_http_metadata_when_llm_stripping_is_off(
+    collector_up: CollectorStubServer,
+) -> None:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.trace import SpanKind
 
     provider = TracerProvider()
     provider.add_span_processor(
         SimpleSpanProcessor(OtlpJsonHttpSpanExporter(collector_up.endpoint, strip_content=False))
     )
     tracer = provider.get_tracer("meiva.session")
-    with tracer.start_as_current_span("root"):
-        pass
+    with tracer.start_as_current_span("GET /private/{id}", kind=SpanKind.SERVER) as span:
+        span.set_attribute("http.route", "/private/{id}")
+        span.set_attribute("http.target", "/private/1?token=secret-query")
+        span.set_attribute("http.request.header.authorization", "secret-bearer")
+        span.record_exception(ValueError("secret-exception"))
+    with tracer.start_as_current_span("generate") as span:
+        span.set_attribute("gen_ai.task.input", "benchmark prompt")
     provider.shutdown()
 
-    assert collector_up.posts
+    wire = b"".join(body for _url, body, _headers in collector_up.posts)
+    assert b"benchmark prompt" in wire
+    assert b"http.route" in wire
+    assert b"secret-query" not in wire
+    assert b"secret-bearer" not in wire
+    assert b"secret-exception" not in wire
 
 
 def test_enforce_dir_cap_deletes_oldest_first(tmp_path: Path) -> None:

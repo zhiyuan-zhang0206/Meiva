@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import assert_never
 
 import psycopg
+from opentelemetry.trace import Tracer, get_current_span
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
@@ -61,6 +62,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from base.telemetry.tracing import build_process_tracer
 from ops import lifecycle
 from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster_status import ShellNotFoundError, cluster_now
@@ -68,7 +70,6 @@ from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_o
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
 from services.agent_runner.agent_ops.browser_rpc import desktop_routes
-from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route, workspace_file_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 from services.agent_runner.agent_ops.upload_object import upload_object_route
@@ -122,9 +123,10 @@ async def run_arm(
         future = loop.run_in_executor(
             executor,
             functools.partial(
-                _dispatch_in_thread,
+                boot.dispatch_in_thread,
                 kind,
                 payload,
+                span=get_current_span(),
                 pool=pool,
                 authority=authority,
                 database=database,
@@ -136,6 +138,8 @@ async def run_arm(
                 receiver=receiver,
                 agent_host=agent_host,
                 unread=unread,
+                timers=SYSTEM_TIMERS,
+                now=cluster_now,
             ),
         )
         in_flight.track_worker(future, workers=workers)
@@ -143,42 +147,6 @@ async def run_arm(
     finally:
         if active_ops.get(kind) == active:
             active_ops.pop(kind)
-
-
-def _dispatch_in_thread(
-    kind: str,
-    payload: dict[str, object],
-    *,
-    pool: ConnectionPool,
-    authority: ConfigAuthority,
-    database: Callable[[], Database],
-    image: LoadedCommit,
-    local_machine: MachineIdentityReader,
-    host: Host,
-    rng: random.Random,
-    home: Path,
-    receiver: ReceiverConfig,
-    agent_host: ServiceEndpoint,
-    unread: UnreadRows,
-) -> tuple[OpStatus, dict[str, object]]:
-
-    return dispatch_sync(
-        kind,
-        payload,
-        pool=pool,
-        db=boot.ops_handles(database=database, authority=authority, rng=rng, timers=SYSTEM_TIMERS)[
-            0
-        ],
-        authority=authority,
-        image=image,
-        local_machine=local_machine,
-        host=host,
-        home=home,
-        receiver=receiver,
-        agent_host=agent_host,
-        unread=unread,
-        now=cluster_now(),
-    )
 
 
 async def dispatch(
@@ -523,6 +491,7 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
     home: Path,
     receiver: ReceiverConfig,
     access: GatewayAccess,
+    tracer: Tracer | None = None,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -584,6 +553,7 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
             endpoint.health_port,
             home=home,
             host=bind_host,
+            tracer=tracer,
             body_limits=desktop.limits,
             body_slots=desktop.slots,
             extra_routes={
@@ -728,6 +698,14 @@ def main(*, argv: list[str]) -> None:
             rng=_new_rng(),
         ),
     )
+    provider = build_process_tracer(
+        service="meiva.agent-ops",
+        machine=machine,
+        home=home,
+        settings=config.view.observability,
+        environ=config.process_environment(),
+    )
+    tracer = provider.get_tracer("meiva.agent-ops.http") if provider is not None else None
     code = 0
     primary: BaseException | None = None
 
@@ -763,6 +741,7 @@ def main(*, argv: list[str]) -> None:
                         upload_dir_name=config.view.gateway.upload_dir_name,
                     ),
                     access=access,
+                    tracer=tracer,
                 )
             )
         except KeyboardInterrupt as interrupted:
@@ -788,6 +767,9 @@ def main(*, argv: list[str]) -> None:
                 failure.add_note(f"ops event pipeline shutdown failed: {exc!r}")
             _log.exception("[ops] event pipeline shutdown failed")
             code = 1
+        finally:
+            if provider is not None:
+                provider.shutdown()
     hard_exit(code)
 
 

@@ -10,26 +10,34 @@ import json
 import math
 import threading
 import time
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import TypedDict
 
 import httpx
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry import context as otel_context
+from opentelemetry import trace as otel_trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from base.cluster.machine import MachineIdentityReader
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
-from base.telemetry.observability import cluster_label, observability_export_allowed
+from base.telemetry.observability import (
+    cluster_label,
+    endpoint_override_is_explicit,
+    observability_export_allowed,
+)
 from base.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S as COLLECTOR_RETRY_INTERVAL_S,
 )
 from base.telemetry.otlp.telemetry_otlp import endpoint_reachable
-from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_config import TraceConfig, TraceSettings
 from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S, TraceReadiness
 from base.telemetry.otlp.trace_strip import strip_content_attributes
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
@@ -171,8 +179,6 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     ) -> SpanExportResult:
         if self._circuit_drops(len(spans), now=now):
             return SpanExportResult.FAILURE
-        # Imported lazily: the OTLP encoder pulls in the protobuf stack, which
-        # the no-tracing path should not pay for.
         try:
             from google.protobuf.json_format import MessageToDict, Parse
             from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
@@ -181,8 +187,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
             )
 
             otlp = MessageToDict(encode_spans(spans))
-            if self._strip_content:
-                strip_content_attributes(otlp)
+            strip_content_attributes(otlp, strip_llm=self._strip_content)
             req = Parse(
                 json.dumps(otlp, separators=(",", ":"), ensure_ascii=False),
                 ExportTraceServiceRequest(),
@@ -238,6 +243,37 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
 
     def shutdown(self) -> None:
         return None
+
+
+def build_process_tracer(
+    *,
+    service: str,
+    machine: MachineIdentityReader,
+    home: Path,
+    settings: TraceSettings,
+    environ: Mapping[str, str],
+) -> TracerProvider | None:
+    """Build a lightweight provider for a process without LangGraph instrumentation."""
+    if not settings.trace_enabled or not observability_export_allowed(
+        machine,
+        home=home,
+        endpoint_explicit=endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", environ),
+    ):
+        return None
+    provider = TracerProvider(
+        resource=Resource.create(
+            {"service.name": service, "service.line": "meiva", "cluster": cluster_label(home)}
+        ),
+        shutdown_on_exit=False,
+    )
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            OtlpJsonHttpSpanExporter(
+                settings.telemetry_otlp_endpoint, strip_content=settings.trace_strip_content
+            )
+        )
+    )
+    return provider
 
 
 def start_collector_retry(
@@ -580,62 +616,73 @@ def initialize_tracing(
     start_arm_thread(config, machine, home, readiness=readiness)
 
 
+TRACE_ENV_KEYS = ("TRACEPARENT", "TRACESTATE")
+
+
+def current_carrier() -> dict[str, str]:
+    carrier: dict[str, str] = {}
+    TraceContextTextMapPropagator().inject(carrier)
+    return carrier
+
+
+def extract_context(carrier: Mapping[str, str]) -> otel_context.Context:
+    return TraceContextTextMapPropagator().extract(carrier, context=otel_context.Context())
+
+
+def exec_trace_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    env = {key: value for key, value in environ.items() if key not in TRACE_ENV_KEYS}
+    env.update({key.upper(): value for key, value in current_carrier().items()})
+    return env
+
+
+def exec_parent_context(environ: Mapping[str, str]) -> otel_context.Context:
+    return extract_context({key.lower(): environ[key] for key in TRACE_ENV_KEYS if key in environ})
+
+
+def inbox_span_context(carrier: Mapping[str, object] | None) -> otel_trace.SpanContext | None:
+    if not carrier:
+        return None
+    headers = {key: value for key, value in carrier.items() if isinstance(value, str)}
+    span_context = otel_trace.get_current_span(extract_context(headers)).get_span_context()
+    return span_context if span_context.is_valid else None
+
+
+_TURN_ROOT = otel_context.create_key("meiva.turn.root")
+
+
 @contextlib.contextmanager
-def turn_span(*, name: str, session_id: str, turn: int) -> Generator[None, None, None]:
-    # meiva:note
-    # Wrap ONE graph invocation (= one agent turn) in an OTel root span.
-    #
-    # The trace boundary is the turn: the runloop invokes the graph once per
-    # turn, so this span opens when the invocation starts — including claim's
-    # long wait for the turn's inbound (recorded separately, see
-    # claim_idle_wait_span). All child spans (LangGraph nodes, Anthropic calls,
-    # etc.) inherit the OTel context and become children of this root, so the
-    # recorded mirror shows a proper span tree per turn. The session_id
-    # attribute groups one agent's turns into a session on the viewer; the turn
-    # attribute orders them within a process lifetime.
-    #
-    # **Placeholder root — exported at turn START, not at turn end (#1964).**
-    # The root span is ended immediately after creation, so the batch processor
-    # exports it within one flush (5 s in production, immediately under a
-    # SimpleSpanProcessor in tests) while the turn is still running. Residual
-    # window: a turn shorter than the flush cadence whose process then dies
-    # hard loses the whole unflushed batch (root and children together) — a
-    # missing trace, never a rootless one. A trace
-    # therefore ALWAYS has its root, even when the process is killed mid-turn
-    # (SIGKILL / OOM / crash): the previous behaviour ended the root only when
-    # the turn's work finished, so a process that died with the root still open
-    # left a rootless trace in Tempo (children export as they end, the root
-    # never does). The trade-off: the root's duration reads 0 and its end time
-    # is the turn start — the turn's real duration is carried by the child
-    # spans (the batch/LLM spans' min start .. max end), which is how
-    # Grafana/Tempo compute the trace span anyway. The ended root stays the
-    # current span in the OTel context for the whole turn (use_span,
-    # end_on_exit=False), so children still parent under it; the context
-    # detaches on exit without a second end call.
-    #
-    # No-op when trace_enabled=False or initialize_tracing hasn't run yet; a
-    # pending background init is awaited through shared recording readiness so the
-    # root span never opens against the unset proxy tracer.
-    #
+def turn_span(*, agent_id: int, turn: int) -> Generator[None, None, None]:
+    """Trace one graph invocation with its own root and consumed-input links."""
     if not _recording_ready(PROCESS_RECORDING, timeout=TRACE_INIT_WAIT_S):
         yield
         return
-    from opentelemetry import trace as otel_trace
-
-    tracer = otel_trace.get_tracer("meiva.session")
-    # Placeholder root: created, attributed and ended at turn start so the
-    # trace has its root even if this process dies mid-turn. The context
-    # stays attached (end_on_exit=False) so every child span of the turn
-    # parents under this span; the CM exit only detaches the context and
-    # never ends the span a second time (Span.end is idempotent but warns).
-    root = tracer.start_span(name)
-    root.set_attribute(_ATTR_NEUTRAL_SESSION_ID, session_id)
-    root.set_attribute(_ATTR_TURN, turn)
-    root.end()
-    with otel_trace.use_span(
-        root, end_on_exit=False, record_exception=False, set_status_on_exception=False
-    ):
+    attributes = {
+        _ATTR_NEUTRAL_SESSION_ID: str(agent_id),
+        _ATTR_TURN: turn,
+        "meiva.agent_id": agent_id,
+    }
+    empty = otel_context.Context()
+    root = otel_trace.get_tracer("meiva.session").start_span(
+        f"meiva-agent-{agent_id}", context=empty, attributes=attributes
+    )
+    turn_context = otel_context.set_value(
+        _TURN_ROOT, root, otel_trace.set_span_in_context(root, empty)
+    )
+    token = otel_context.attach(turn_context)
+    try:
         yield
+    finally:
+        otel_context.detach(token)
+        root.end()
+
+
+def link_inbox_input(carrier: Mapping[str, object] | None) -> None:
+    """Link a claimed or reserved inbound to the active turn root."""
+    root = otel_context.get_value(_TURN_ROOT)
+    if isinstance(root, otel_trace.Span) and root.is_recording():
+        source = inbox_span_context(carrier)
+        if source is not None and source.trace_id != root.get_span_context().trace_id:
+            root.add_link(source)
 
 
 @contextlib.contextmanager

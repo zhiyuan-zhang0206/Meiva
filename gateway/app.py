@@ -12,6 +12,7 @@ import psutil
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import TypeAdapter
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -85,7 +86,7 @@ from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
-from gateway.http.auth.cluster_middleware import cluster_auth_middleware
+from gateway.http.auth.cluster_middleware import TraceIngressApp, cluster_auth_middleware
 from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.request_principal import SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle
@@ -282,7 +283,10 @@ async def lifespan(
             )
 
             state.rpc = RpcClient.from_boot(
-                config, timers=SYSTEM_TIMERS, rng=state.gateway_config.rng
+                config,
+                timers=SYSTEM_TIMERS,
+                rng=state.gateway_config.rng,
+                tracer_provider=process.tracer_provider,
             )
             state.started_at = state.clock.now().timestamp()
             if state.gateway_config.human_auth == "trusted_network":
@@ -445,7 +449,8 @@ def create_app(
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
-    app = FastAPI(
+    application = TraceIngressApp if process.tracer_provider is not None else FastAPI
+    app = application(
         title="Meiva",
         lifespan=partial(
             lifespan,
@@ -460,6 +465,13 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
+    if process.tracer_provider is not None:
+        FastAPIInstrumentor.instrument_app(
+            app,
+            tracer_provider=process.tracer_provider,
+            exclude_spans=["receive", "send"],
+            excluded_urls=r"/api/health(?:\?|$)",
+        )
     state = GatewayServerState()
     app.state = state
     state.gateway_config = config
@@ -621,6 +633,7 @@ def create_app_from_environment() -> FastAPI:
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         rng=secrets.SystemRandom(),
     )
+    process.enable_tracing()
     gateway_config_value = process_config(process.config, home=home)
     return create_app(
         gateway_config_value,
