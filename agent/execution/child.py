@@ -590,18 +590,6 @@ def _unbind_exec_context() -> MeivaContext | None:
 
 
 def main() -> None:
-    from opentelemetry.context import attach, detach
-
-    from base.telemetry.tracing import exec_parent_context
-
-    token = attach(exec_parent_context(os.environ))
-    try:
-        _run_traced_child()
-    finally:
-        detach(token)
-
-
-def _run_traced_child() -> None:
     boot_started_at = time.perf_counter()
     request_path = os.environ.get("MEIVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("MEIVA_EXEC_RESULT_FILE")
@@ -611,13 +599,23 @@ def _run_traced_child() -> None:
             "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
-    from contextlib import ExitStack
+    with contextlib.ExitStack() as tracing:
+        if os.environ.get("TRACEPARENT"):
+            from opentelemetry.context import attach, detach
 
+            from base.telemetry.tracing import exec_parent_context
+
+            _ = tracing.callback(detach, attach(exec_parent_context(os.environ)))
+        _run_child_process(request_path, result_path, boot_started_at, tracing=tracing)
+
+
+def _run_child_process(
+    request_path: str, result_path: str, boot_started_at: float, *, tracing: contextlib.ExitStack
+) -> None:
     from opentelemetry import trace
 
     from base.paths.home import resolve_meiva_home
 
-    tracing = ExitStack()
     clients: ClientSet | None = None
     apply_oom_preference(os.environ, OOM_SCORE_ADJ_PATH)
     try:
@@ -662,12 +660,11 @@ def _run_traced_child() -> None:
 
         deliver_envelope_telemetry(clients=clients)
     finally:
-        with tracing:
-            context = _unbind_exec_context()
-            if context is not None and context.clients is not clients:
-                context.clients.close()
-            if clients is not None:
-                clients.close()
+        context = _unbind_exec_context()
+        if context is not None and context.clients is not clients:
+            context.clients.close()
+        if clients is not None:
+            clients.close()
 
 
 def write_crashed_result(
