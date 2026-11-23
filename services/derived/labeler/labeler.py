@@ -4,6 +4,7 @@ Extracted from gateway/labels.py to eliminate the services -> gateway
 reverse dependency.
 """
 
+import asyncio
 from collections.abc import Callable
 from datetime import datetime
 
@@ -87,7 +88,8 @@ async def generate_label_async(
 
     from base.lm.usage import UsageOptions, log_usage_from_message
 
-    log_usage_from_message(
+    await asyncio.to_thread(
+        log_usage_from_message,
         response,
         catalog=catalog,
         model=config.labeler_model,

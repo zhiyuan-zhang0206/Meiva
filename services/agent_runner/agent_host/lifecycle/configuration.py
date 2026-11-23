@@ -4,6 +4,7 @@
 
 import random
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from base.agents.context.clients import ClientSet
@@ -11,7 +12,9 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
+from base.db.usage_ledger import bind_usage_ledger
 from base.host.boundary.untyped import object_of
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -148,7 +151,12 @@ def load_installation(
         authority = ConfigAuthority.deferred(
             runtime=config.view, build_all_domains=config.complete_read_model, env_path=env_path
         )
-    catalog = build_model_catalog(home=home)
+    catalog = replace(
+        build_model_catalog(home=home),
+        usage_ledger=bind_usage_ledger(
+            clients.database, ConfiguredMachineIdentity(config).name, home
+        ),
+    )
     load_extensions(
         home=home,
         catalog=catalog,

@@ -451,7 +451,7 @@ class ForegroundRun:
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
-        log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
+        await asyncio.to_thread(log_turn_usage, self._ctx, self._agent_id, self._bridge.model, turn)
         await self._projector.finish(
             (turn,),
             interrupted=turn.interrupted,

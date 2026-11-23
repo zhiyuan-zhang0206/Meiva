@@ -20,6 +20,7 @@ import random
 import signal
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.usage_ledger import bind_usage_ledger
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.env.agent_slices import ModelOverrides
 from base.host.env.process_profile import profile_unknown_error
@@ -261,7 +263,12 @@ async def run(
 
     db = database()
     pool = db.pool()
-    catalog = build_model_catalog(home=home)
+    catalog = replace(
+        build_model_catalog(home=home),
+        usage_ledger=bind_usage_ledger(
+            database, ConfiguredMachineIdentity(process_config).name, home
+        ),
+    )
     bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng(), timers=timers)
     try:
         await dispatch_loop(

@@ -8,7 +8,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import assert_never
@@ -28,6 +28,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.usage_ledger import bind_usage_ledger
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.log import prepare_process_logging
@@ -524,7 +525,10 @@ async def run(
     # Fail fast before deriving liveness or binding healthz: an unknown
     # MEIVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
-        catalog = build_model_catalog(home=home)
+        catalog = replace(
+            build_model_catalog(home=home),
+            usage_ledger=bind_usage_ledger(database, ConfiguredMachineIdentity(config).name, home),
+        )
         provider = get_provider(
             inputs.embedding_name,
             catalog=catalog,

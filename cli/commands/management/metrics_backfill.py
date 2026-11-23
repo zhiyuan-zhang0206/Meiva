@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from dataclasses import asdict
+from datetime import UTC, date, datetime, time
 
 from cli.database import OperatorDatabaseFactory
 from services.upkeep.events_maintenance.unpriced_backfill import (
     UnpricedBackfillReport,
+    load_price_book,
     run_unpriced_backfill,
 )
+from services.upkeep.events_maintenance.usage_ledger_backfill import backfill_usage_ledger
 
 
 def _render_report(report: UnpricedBackfillReport) -> str:
@@ -53,4 +56,23 @@ def cmd_metrics_backfill_unpriced(
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     else:
         print(_render_report(report))
+    return 0
+
+
+def cmd_backfill_usage_ledger(
+    database_factory: OperatorDatabaseFactory,
+    *,
+    start: date,
+    end: date,
+    batch_size: int,
+) -> int:
+    with database_factory().connect() as conn:
+        counts = backfill_usage_ledger(
+            conn,
+            start=datetime.combine(start, time.min, tzinfo=UTC),
+            end=datetime.combine(end, time.min, tzinfo=UTC),
+            batch_size=batch_size,
+            prices=load_price_book(),
+        )
+    print(json.dumps(asdict(counts), sort_keys=True))
     return 0

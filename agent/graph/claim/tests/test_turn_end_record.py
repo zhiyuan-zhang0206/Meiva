@@ -143,7 +143,7 @@ def test_nothing_held_and_nothing_declared_costs_one_read(loguru_records: LogRec
     assert _records(loguru_records) == []
 
 
-def test_incomplete_harness_usage_is_reported_without_pricing(loguru_records: LogRecords) -> None:
+def test_incomplete_harness_usage_is_marked_on_the_usage_report(loguru_records: LogRecords) -> None:
     ctx = runtime(silent_engine()).context
     turn = HarnessTurn(
         turn_id="t1",
@@ -158,7 +158,9 @@ def test_incomplete_harness_usage_is_reported_without_pricing(loguru_records: Lo
     log_turn_usage(ctx, 7684, "gemini-4-hydrogen", turn)
     [row] = loguru_records.events("harness_usage_uncertain")
     assert row["extra"]["tok_in"] == 17_349 and row["extra"]["tok_out"] == 106
-    assert not loguru_records.events("llm_usage")
+    [report] = loguru_records.events("llm_usage")
+    assert report["extra"]["complete"] is False
+    assert report["extra"]["in_total"] == 17_349
 
 
 def _write_native_planner(path: Path, **fields: object) -> None:

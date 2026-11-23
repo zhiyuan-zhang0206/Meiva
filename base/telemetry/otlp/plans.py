@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
-_NO_METRIC_ATTRS = frozenset({"body"})
+_NO_METRIC_ATTRS = frozenset({"body", "call_id"})
 _MAX_METRIC_ATTR_CHARS = 64
 
 BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {

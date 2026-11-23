@@ -7,6 +7,7 @@ distributions. Callers own truncation and chunking; this module never shortens `
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import Callable, Mapping
@@ -82,7 +83,8 @@ async def decide(
         result = await binding.decide(state, questions)
     except DecisionResponseError as exc:
         if exc.input_tokens is not None:
-            _log_usage(
+            await asyncio.to_thread(
+                _log_usage,
                 model,
                 exc.input_tokens,
                 started,
@@ -93,8 +95,16 @@ async def decide(
                 now=now,
             )
         raise
-    _log_usage(
-        model, result.input_tokens, started, usage_kind, source, for_agent_id, catalog, now=now
+    await asyncio.to_thread(
+        _log_usage,
+        model,
+        result.input_tokens,
+        started,
+        usage_kind,
+        source,
+        for_agent_id,
+        catalog,
+        now=now,
     )
     validate_decisions(questions, result.decisions)
     return result.decisions

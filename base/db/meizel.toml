@@ -1,10 +1,11 @@
-exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "protocols.py", "rows.py", "test_db_guard.py", "tests", "transaction.py"]
+exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "protocols.py", "rows.py", "test_db_guard.py", "tests", "transaction.py", "usage_ledger.py", "usage_record.py"]
 
 [dynamic-attrs]
 "protocols.py" = "_DynamicView is the structural type of the configuration view, which answers any slice name by forwarding to the live settings (base/config/_lite.py); a declaration with no body"
 
 [purity]
 "protocols.py" = "strict"
+"usage_record.py" = "strict"
 
 [uses]
 "__init__.py" = ["config.py", "connections.py", "handle.py", "pooled_session.py", "rows.py"]
@@ -12,10 +13,15 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_sessio
 "connections.py" = ["code_version_gate.py", "config.py", "pooled_session.py"]
 "handle.py" = ["code_version_gate.py", "config.py", "connections.py"]
 "pooled_session.py" = ["code_version_gate.py", "config.py", "protocols.py"]
-"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "rows.py", "test_db_guard.py", "transaction.py"]
+"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "rows.py", "test_db_guard.py", "transaction.py", "usage_ledger.py", "usage_record.py"]
 "transaction.py" = ["protocols.py"]
+"usage_ledger.py" = ["handle.py", "usage_record.py"]
+
+[roots]
+"usage_ledger.py" = { kinds = ["random"], why = "Mints usage identities when the provider exposes no stable call identifier." }
 
 [state]
+"usage_ledger.py" = ["db"]
 "__init__.py" = ["db"]
 "connections.py" = ["db"]
 "handle.py" = ["db"]

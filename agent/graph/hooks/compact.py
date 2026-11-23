@@ -1,6 +1,7 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
 
+import asyncio
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import NotRequired, TypedDict
@@ -235,7 +236,8 @@ async def generate_summary(
         # The compaction call is an agent's own spend, and the row carries that agent: this
         # process serves several agents, so the ambient identity is None here and a row that
         # falls back to it is `unattributed` (task #6444).
-        log_usage_from_message(
+        await asyncio.to_thread(
+            log_usage_from_message,
             response,
             model=model,
             usage_kind="agent",
