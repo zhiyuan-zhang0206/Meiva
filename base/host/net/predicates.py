@@ -10,6 +10,14 @@ from __future__ import annotations
 import ipaddress
 
 
+def is_unspecified_address(host: str) -> bool:
+    literal = host.strip().removeprefix("[").removesuffix("]")
+    try:
+        return ipaddress.ip_address(literal).is_unspecified
+    except ValueError:
+        return False
+
+
 def is_loopback_host(host: str) -> bool:
     """True when `host` names a loopback address — `localhost`, the 127.0.0.0/8
     block, `0.0.0.0`, or IPv6 `::1` (bracketed or bare).

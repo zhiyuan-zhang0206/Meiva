@@ -16,7 +16,7 @@ On the observability station, `meiva lgtm status` and `meiva status` report root
 readiness. Configuration or service-selection changes require a normal stop
 before start; stored observation data survives. `meiva lgtm on` and `meiva lgtm off`
 take the operator's explicit service selection, like `meiva start`; it must include the
-three backends for `on` and must not name them for `off`.
+four backends for `on` and must not name them for `off`.
 Inspect the rendered configuration and pinned versions through the backend owner
 above. Disabling the backend also removes the live data source for its consumers;
 check those consumers before choosing an outage window.

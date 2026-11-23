@@ -46,6 +46,7 @@ _EXPECTED_SESSIONS = {
     "exec-host",
     "loki",
     "prometheus",
+    "tempo",
     "grafana",
     "cloudflared",
     "tailscale",

@@ -1,2 +1,5 @@
 purity = "strict"
 exports = ["alerts.py", "settings.py"]
+
+[uses]
+"settings.py" = ["tempo.py"]

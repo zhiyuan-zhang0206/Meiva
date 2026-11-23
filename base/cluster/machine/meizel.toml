@@ -1,4 +1,4 @@
-exports = ["boot.py", "configured.py", "tests"]
+exports = ["application_listeners.py", "boot.py", "configured.py", "tests"]
 
 [uses]
 "__init__.py" = ["gateway_access.py", "identity.py"]
@@ -7,6 +7,7 @@ exports = ["boot.py", "configured.py", "tests"]
 "tests" = ["__init__.py", "configured.py"]
 
 [purity]
+"application_listeners.py" = "strict"
 "." = "ratchet"
 "configured.py" = { mode = "off", why = "the stateful owner of the machine identity: it reads each field from the root's ConfigBoot on first use, caches it and lets a root set or reset it, around the settings-free value module identity.py that holds the decisions" }
 "gateway_access.py" = "strict"

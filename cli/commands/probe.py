@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
+from itertools import combinations
 from typing import NamedTuple
 
 from base import telemetry
 from base.cluster.derive import session_name
+from base.cluster.listener_plan import TcpBind
+from base.cluster.port_preflight import resolve_tcp_bind
 from base.daemon.health import ProbeVerdict
 from cli.commands.probe_report import (
     ServiceRow,
@@ -28,6 +31,7 @@ __all__ = [
     "OccupiedPort",
     "ReadinessWait",
     "ServiceProbe",
+    "configured_listener_conflicts",
     "occupied_health_ports",
     "print_non_critical_unready_services",
     "print_service_row",
@@ -89,7 +93,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 
 
 # meiva:note
-# The health ports among `specs` that another unit already answers on.
+# Report terminal listener conflicts for daemons with home healthz and for Tempo.
 #
 # `meiva start` probes before it binds because the alternative is worse in both directions.
 # A daemon launched onto a taken port dies on `[Errno 48] Address already in use` and is
@@ -107,22 +111,41 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 # Nothing is remembered: the check is a fresh dial every start, so once the occupant leaves,
 # the next start proceeds with no state to clear.
 #
-# Only an occupant that answers HTTP on `/healthz` is detectable. The verdict comes from
+# For the healthz-based daemons, only an occupant that answers HTTP on `/healthz` is
+# detectable. The verdict comes from
 # reading a health payload, so a listener speaking any other protocol (a Postgres or redis
 # on the port), one that accepts and stays silent, and an HTTP server that 404s the path all
 # read DOWN, indistinguishable from an empty port, and the start proceeds into the
 # `EADDRINUSE` this gate exists to prevent. The gate narrows the failure it was built for
 # (issue #977's relay, which answers) and leaves the generic taken-port case where it
-# already was.
+# already was. Tempo's probe inspects its TCP listeners directly, independent of HTTP.
 def occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
     occupied: list[OccupiedPort] = []
     for spec in specs:
-        if not _binds_a_daemon_health_port(spec):
+        if not (_binds_a_daemon_health_port(spec) or spec.session == "tempo"):
             continue
         probe = probe_service(spec)
         if probe.terminal:
             occupied.append(OccupiedPort(spec, probe.detail))
     return tuple(occupied)
+
+
+def configured_listener_conflicts(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
+    binds: list[tuple[ServiceSpec, TcpBind]] = []
+    problems: list[OccupiedPort] = []
+    for spec in specs:
+        if spec.listen_binds is None:
+            continue
+        try:
+            binds.extend((spec, resolve_tcp_bind(bind)) for bind in spec.listen_binds())
+        except (OSError, RuntimeError, ValueError) as exc:
+            problems.append(OccupiedPort(spec, f"invalid configured listener: {exc}"))
+    for (left, bind), (right, other) in combinations(binds, 2):
+        if bind.overlaps(other):
+            problems.append(
+                OccupiedPort(left, f"configured bind {bind} overlaps {right.session} at {other}")
+            )
+    return tuple(problems)
 
 
 # meiva:note

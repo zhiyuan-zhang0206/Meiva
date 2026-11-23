@@ -87,7 +87,7 @@ def test_agent_runner_subset_and_otel() -> None:
         for u in gen.build_units(
             capabilities=["observability-station"], repo_root=_REPO, home=meiva_home()
         )
-    } == {"loki", "prometheus", "grafana"}
+    } == {"loki", "prometheus", "tempo", "grafana"}
 
 
 def test_key_units_exec_restart_attach() -> None:
@@ -109,6 +109,11 @@ def test_key_units_exec_restart_attach() -> None:
     ]
     assert units["ops"]["restart"] == "always"
     assert units["ops"]["attach"] == "root"
+    assert units["tempo"]["stop_tier"] == units["loki"]["stop_tier"]
+    assert units["tempo"]["stop_tier"] == units["prometheus"]["stop_tier"]
+    assert units["otel-collector"]["stop_tier"] == 3
+    assert units["tempo"]["stop_tier"] == 4
+    assert units["tempo"]["stop_timeout_s"] == 50.0
     frontend_cmd = cast("list[str]", units["frontend"]["exec"])[2]
     assert "&&" in frontend_cmd  # a compound command keeps its own shape
     assert frontend_cmd.count("exec ") == 1  # only its own final exec, none prefixed

@@ -1,4 +1,4 @@
-exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
+exports = ["collector_listeners.py", "event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
 
 [uses]
 "telemetry_otlp.py" = ["plans.py", "telemetry_otlp_barrier.py", "telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py"]
@@ -11,6 +11,7 @@ exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_de
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 
 [purity]
+"collector_listeners.py" = "strict"
 "__init__.py" = "strict"
 "plans.py" = "strict"
 "telemetry_otlp_barrier.py" = "strict"

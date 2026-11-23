@@ -24,16 +24,20 @@ def _url_suffix_rule(spec: ServiceSpec) -> bool:
     return spec.curl_url is not None and spec.curl_url.endswith("/healthz")
 
 
-def test_the_preflight_covers_exactly_the_entries_the_url_suffix_covered() -> None:
+def test_the_preflight_covers_healthz_endpoints_and_tempo_listener_custody() -> None:
     for spec in composition.build_services(home=meiva_home()):
-        assert _reports_foreign_occupant(spec) == _url_suffix_rule(spec), spec.session
+        expected = _url_suffix_rule(spec) or spec.session == "tempo"
+        assert _reports_foreign_occupant(spec) == expected, spec.session
 
 
-def test_the_covered_entries_are_the_standard_daemons_and_the_gate() -> None:
+def test_the_covered_entries_are_the_standard_daemons_gate_and_tempo() -> None:
     specs = _by_session()
     covered = {s for s, spec in specs.items() if _reports_foreign_occupant(spec)}
 
-    assert covered == {s for s, spec in specs.items() if spec.health_name is not None} | {"gate"}
+    assert covered == {s for s, spec in specs.items() if spec.health_name is not None} | {
+        "gate",
+        "tempo",
+    }
     for session in _NOT_DAEMON_PORTS:
         assert not _reports_foreign_occupant(specs[session]), session
 

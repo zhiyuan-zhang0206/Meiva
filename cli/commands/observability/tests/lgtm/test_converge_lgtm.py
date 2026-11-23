@@ -293,7 +293,7 @@ def test_a_rendered_loki_config_that_breaks_the_deploy_invariants_writes_nothing
     repo = lgtm_unit.home / "repo"
     source = repo / "deploy/lgtm/native/config"
     source.mkdir(parents=True)
-    for name in ("prometheus.yml", "grafana.ini", "runtime.env", "run.sh"):
+    for name in ("prometheus.yml", "tempo.yaml", "grafana.ini", "runtime.env", "run.sh"):
         (source / name).write_text("x\n", encoding="utf-8")
     (source / "loki.yaml").write_text(
         "limits_config:\n  retention_period: 1h\n  max_query_series: 1\nquerier:\n  max_concurrent: 1\n",
@@ -353,7 +353,11 @@ def test_an_unconfigured_grafana_password_leaves_no_credential_file(lgtm_unit: L
         ),
         (
             settings_with(lgtm_listen_host="10.0.0.5", lgtm_grafana_listen_host=WILDCARD),
-            ["MEIVA_TELEMETRY_LOKI_URL", "MEIVA_TELEMETRY_PROMETHEUS_URL"],
+            [
+                "MEIVA_TELEMETRY_LOKI_URL",
+                "MEIVA_TELEMETRY_PROMETHEUS_URL",
+                "MEIVA_TELEMETRY_TEMPO_QUERY_URL",
+            ],
         ),
         (settings_with(), []),
         (
@@ -361,6 +365,8 @@ def test_an_unconfigured_grafana_password_leaves_no_credential_file(lgtm_unit: L
                 lgtm_listen_host="10.0.0.5",
                 telemetry_loki_url="http://10.0.0.5:3100",
                 telemetry_prometheus_url="http://10.0.0.5:9090",
+                telemetry_tempo_query_url="http://10.0.0.5:3200",
+                telemetry_tempo_endpoint="http://10.0.0.5:14318",
             ),
             [],
         ),
@@ -402,3 +408,24 @@ def test_a_home_without_an_env_file_has_nothing_to_diverge_from(
     lgtm_unit.render()
 
     assert capsys.readouterr().err == ""
+
+
+def test_tempo_renderer_uses_station_urls_storage_and_block_retention(lgtm_unit: LgtmUnit) -> None:
+    storage = lgtm_unit.home / "volume with a space"
+    lgtm_unit.render(
+        storage_dir=storage,
+        settings=settings_with(
+            telemetry_tempo_query_url="http://[::1]:23200",
+            telemetry_tempo_endpoint="http://[::1]:24318",
+            lgtm_listen_host="::1",
+            lgtm_tempo_grpc_port=29096,
+            lgtm_tempo_retention_hours=96,
+        ),
+    )
+    rendered = (lgtm_unit.native / "config/tempo.yaml").read_text()
+    assert "http_listen_port: 23200" in rendered
+    assert 'http_listen_address: "::1"' in rendered
+    assert "grpc_listen_port: 29096" in rendered
+    assert 'endpoint: "[::1]:24318"' in rendered
+    assert rendered.count('block_retention: "96h"') == 2
+    assert f'path: "{storage}/tempo/wal"' in rendered

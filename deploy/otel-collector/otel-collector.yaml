@@ -112,7 +112,7 @@ $REMOTE_OTLP_RECEIVER
         - job_name: meiva-otel-collector
           scrape_interval: 30s
           static_configs:
-            - targets: [localhost:$SELF_METRICS_PORT]
+            - targets: [${SELF_METRICS_HOST}:$SELF_METRICS_PORT]
 
   # ── Session-log tailing ───────────────────────────────────────────────────
   # Agent shell transcripts and service stdout use separate, disjoint
@@ -295,7 +295,7 @@ service:
         - pull:
             exporter:
               prometheus:
-                host: localhost
+                host: $SELF_METRICS_HOST
                 port: $SELF_METRICS_PORT
   extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
