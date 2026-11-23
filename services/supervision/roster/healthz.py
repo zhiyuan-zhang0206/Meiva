@@ -22,6 +22,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from base.cluster.listener_plan import TcpBind
 from base.cluster.machine import MachineRole
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
@@ -93,6 +94,7 @@ def healthz_daemon(
     plugin_config: tuple[str, BaseModel] | None = None,
     db_access: DbAccess | None = None,
     stop_ceiling_s: float | None = None,
+    bind_host: Callable[[], str] | None = None,
 ) -> ServiceSpec:
     """A roster entry for a standard ``/healthz`` daemon.
 
@@ -125,6 +127,9 @@ def healthz_daemon(
         capabilities=capabilities,
         requires_db=requires_db,
         curl_url=healthz_url(name, endpoints),
+        listen_binds=lambda: (
+            TcpBind("127.0.0.1" if bind_host is None else bind_host(), endpoint.health_port),
+        ),
         identity_probe=daemon_identity(name, endpoint.pidfile, home=home, endpoints=endpoints),
         health_name=name,
         gate=gate,

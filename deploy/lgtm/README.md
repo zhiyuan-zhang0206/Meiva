@@ -13,7 +13,7 @@ ports preserve the single-station layout; isolated homes require explicit,
 non-overlapping native listen ports. Provider identity has two equivalent forms:
 
 - **`$MEIVA_HOME/lgtm-host` marker** (legacy): `meiva lgtm on` writes the marker and
-  enables the three backend services through normal `meiva start`, whose converge
+  enables the four backend services through normal `meiva start`, whose converge
   installs any missing pinned native binaries.
 - **`observability-station` unit capability** (declarative): a machine that
   declares the capability (`meiva init --serve-observability-station`, or
@@ -24,7 +24,7 @@ non-overlapping native listen ports. Provider identity has two equivalent forms:
   `MEIVA_OBSERVABILITY_URL`: the role decides who PROVIDES the stack, the switch
   decides where CONSUMERS point.
 
-With either form present, Loki, Prometheus, and Grafana are ordinary `meiva-root`
+With either form present, Loki, Prometheus, Tempo, and Grafana are ordinary `meiva-root`
 services on Darwin arm64 and Linux amd64: the ops roster defines their commands
 and readiness, and every converge prepares the binaries and rendered
 configuration of the selected backends without registering any OS job. A probe
@@ -40,9 +40,9 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
+| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native, `meiva-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
-| Tempo | remote per cluster config | host-managed on the station; this repository carries no Tempo configuration | configured by `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
+| Tempo | native, `meiva-root` service | 3.1.1 / `GOMEMLIMIT=600MiB` | 3200 HTTP, 14318 OTLP/HTTP, 9096 internal gRPC | trace backend, local blocks and WAL, 168h retention |
 | Grafana | native, `meiva-root` service | 13.2.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
@@ -55,8 +55,8 @@ support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 Native templates in `native/config/` are rendered on every converge into
 `$MEIVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
 and launch script. Native backend listen hosts are config
-knobs (`MEIVA_LGTM_LISTEN_HOST`, `MEIVA_LGTM_GRAFANA_LISTEN_HOST`): Loki and
-Prometheus default to loopback, Grafana defaults to all interfaces, and native
+knobs (`MEIVA_LGTM_LISTEN_HOST`, `MEIVA_LGTM_GRAFANA_LISTEN_HOST`): Loki,
+Prometheus, and Tempo default to loopback, Grafana defaults to all interfaces, and native
 Grafana dials Loki, Prometheus, and Postgres on the host loopback.
 
 **Plugin policy:** the native deployment needs no preinstalled plugins (every
@@ -70,7 +70,8 @@ do not re-enable background installation.
 
 The observation data volume is a per-machine knob: `MEIVA_LGTM_STORAGE_DIR`
 (empty default = `$MEIVA_HOME/lgtm/native/data`, byte-identical to the historical
-layout) moves the Loki filesystem store and the Prometheus TSDB to a configured
+layout) moves the Loki filesystem store, Prometheus TSDB, and Tempo trace store
+(`tempo/` within the volume) to a configured
 path — e.g. a dedicated data volume on a station host. Grafana's own data and
 the native logs stay under `$MEIVA_HOME/lgtm/native` regardless. Switching the
 knob does NOT migrate existing data: the new path starts empty, so move the old
@@ -80,7 +81,7 @@ first start on the new path) or accept the history loss.
 
 ### Isolated listeners
 
-The three backends are `meiva-root` services of the home that owns them, started
+The four backends are `meiva-root` services of the home that owns them, started
 and stopped only by that home's `meiva start` and `meiva stop` (see Start, stop, and
 rollback below). Converge registers no launchd job, systemd unit, or other OS
 job for them, and nothing enumerates or retires another home's processes.
@@ -95,11 +96,19 @@ Host-scoped ports default to the existing values:
 | `MEIVA_LGTM_LOKI_GRPC_PORT` | 9095 |
 | `MEIVA_LGTM_PROMETHEUS_PORT` | 9090 |
 | `MEIVA_LGTM_GRAFANA_PORT` | 3003 |
+| Port of `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | 3200 |
+| Port of `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | 14318 |
+| `MEIVA_LGTM_TEMPO_GRPC_PORT` | 9096 |
 
-An isolated acceptance home must set all four to unused ports, and point its
+On the station, the existing Tempo URLs supply the HTTP and OTLP/HTTP ports.
+`MEIVA_LGTM_LISTEN_HOST` supplies the bind address for all three Tempo listeners.
+Keep the station URLs pointed at its native Tempo. A gateway on a separate
+host uses the reachable Tempo intake URL and runners send to the gateway
+collector relay.
+
+An isolated acceptance home must set the ports above to unused ports, and point its
 consumer query URLs at those listeners. The regular cluster port registry
-does not allocate observability ports. These settings do not migrate storage,
-change the pinned releases, or alter remote Tempo. A changed rendered
+does not allocate observability ports. A changed rendered
 configuration or service roster takes effect through a normal stop before start,
 and an invalid Loki config fails converge before the root is started.
 
@@ -107,8 +116,8 @@ and an invalid Loki config fails converge before the root is started.
 
 One Grafana UI over Loki, Prometheus, and Tempo gives operators native LogQL,
 metrics, and trace exploration while keeping the rest of the product's OTel
-pipeline unchanged. Loki, Prometheus, and Grafana use verified native release
-assets on the LGTM host, and Tempo is selected by per-cluster configuration.
+pipeline unchanged. All four services use verified native release assets
+on the station.
 The native collector sidecar is still the one
 local OTLP entry on port 4318 for this marked home; its filelog receivers also
 own session-log shipping. OTLP records carry the home-derived `cluster`
@@ -117,24 +126,42 @@ before they reach Loki, Prometheus, or Tempo.
 
 ## Resource and retention posture
 
-Loki and Prometheus use explicit Go memory limits. Loki retains normal streams for 84 hours, preserves the configured
-archive-stream exception, and keeps bounded query splitting, fan-out, and
-embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
-limit is reached first. Tempo's block retention is set in its host-managed
-configuration (168 hours). Each native backend's
-stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
-is `loki`, `prometheus`, or `grafana`); Grafana's own log files are written to
+Loki, Prometheus, and Tempo use a seven-day troubleshooting window. Loki
+enforces 168 hours for current telemetry and preserves the historical archive
+stream at its configured retention. Prometheus expires the oldest blocks
+when it reaches either seven days or the 8 GB disk cap. Tempo's
+`MEIVA_LGTM_TEMPO_RETENTION_HOURS` defaults to 168 hours. Loki, Prometheus,
+and Tempo use explicit Go memory limits, and Loki bounds query splitting,
+parallelism, and result-cache size.
+
+The collector stamps local logs (including filelog), metrics, and traces with
+the roster identity in the `meiva.machine` resource attribute. Relays preserve
+the origin. Use `{machine="ubuntu"}` to select new Loki streams,
+`{machine="ubuntu"}` as a matcher on Prometheus series, and
+`{ resource.meiva.machine = "ubuntu" }` in TraceQL. Historical Loki streams and
+Prometheus series keep their ingest-time labels. Infrastructure dashboards and
+alerts include legacy `machine_name` samples under the same roster identity.
+Within a query window and group they prefer usable samples with `machine`.
+This keeps offline and not-yet-upgraded Collectors visible while the fleet
+rolls forward. Keep the fallback while old samples remain in the retained
+Prometheus window.
+
+In Grafana Explore, select **View trace** on a Loki entry with `trace_id` to
+open Tempo. A span's related logs link queries Loki for the same trace ID
+within the span's time range, padded by two seconds at each end.
+
+Each native backend's stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
+is `loki`, `prometheus`, `tempo`, or `grafana`); Grafana's own log files are written to
 `$MEIVA_HOME/lgtm/native/logs/`.
 
 All unauthenticated backend APIs remain loopback-only: Loki 3100, Prometheus
-9090, Tempo 3200 and 14318. Grafana 3003 is the intended wider,
+9090, Tempo 3200, 14318, and internal gRPC 9096. Grafana 3003 is the intended wider,
 anonymous-but-read-only surface; its listen host is the
 `MEIVA_LGTM_GRAFANA_LISTEN_HOST` knob, whose `0.0.0.0` default is the historical
 all-interfaces form. Widening a listen host past loopback requires the
 matching `MEIVA_TELEMETRY_*_URL` for remote consumers and Prometheus scrape
 targets; converge warns on a listen/read mismatch. Local health probes instead
-use the native bind settings and bypass HTTP proxy variables. A remote HTTPS
-query URL is never interpreted as a local bind address or port.
+use the native bind settings and bypass HTTP proxy variables. Tempo takes the query and intake ports from its URLs and the address from the native listen setting.
 
 ## OTLP late-sample window (out-of-order intake)
 
@@ -215,25 +242,29 @@ meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-s
 meiva lgtm on --all-services   # mark the station and start the named selection (it must include the backends)
 meiva lgtm status              # root-owned protocol readiness
 meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
-meiva lgtm off --disable-service loki --disable-service prometheus --disable-service grafana
+meiva lgtm off --disable-service loki --disable-service prometheus --disable-service tempo --disable-service grafana
                                # retract the station and start without the backends; data persists
 ```
 
-All three local backends are ordinary root services. Converge prepares assets and
+All four local backends are ordinary root services. Converge prepares assets and
 configuration; it never registers or restarts per-backend OS jobs. A repeated
 start reuses an unchanged root generation. A changed service set or configuration
 requires normal stop before start; it cannot terminate active agent work implicitly.
 
 The native Loki binary validates its rendered config before the root is started.
+An externally occupied Tempo port blocks startup and reports the port and
+process ID. During a legacy cutover, retire the old Tempo unit and its pulse
+timer before starting the managed service. See the
+[Tempo lifecycle decision](../../docs/decisions/observability/telemetry/2026-11-24-native-tempo.md).
+
 Readiness combines a live root-owned listener with the backend's successful
 protocol response. A response from an unrelated process or an HTTP 503 cannot
 certify readiness. The local Loki write/read diagnostic is separate from process
 lifecycle and never launches or restarts the stack.
 
-Tempo is remote and selected by `MEIVA_TELEMETRY_TEMPO_ENDPOINT`; native Grafana
-and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries and scraping.
-The local lifecycle neither probes nor manages Tempo. The collector's filelog
-receivers ship session logs directly to Loki.
+The station's collector exports traces to `MEIVA_TELEMETRY_TEMPO_ENDPOINT`.
+Grafana and Prometheus use `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries and
+scraping. The collector's filelog receivers ship session logs directly to Loki.
 
 ## Session logs in Loki
 
@@ -276,9 +307,9 @@ Copy `.env.example` to `.env` only when an override is needed.
 | `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` | `http://127.0.0.1:3100` / `http://127.0.0.1:9090` | Datasource URLs, expanded by Grafana from `$__env{}` references in the provisioning files. Native converge renders the two-state values (observatory base when `MEIVA_OBSERVABILITY_URL` is set) |
 | `MEIVA_PG_URL` | Derived from the direct DB URL (legacy default `127.0.0.1:5433`) | Native converge renders the cluster data plane's scheme-less host:port, resolving a local registered PgBouncer port to PostgreSQL; it never follows the observatory host. A remote pooler with no local registry mapping retains the configured endpoint with the existing direct-URL warning. |
 | `MEIVA_ALERTS_WEBHOOK_URL` | Loopback plus `MEIVA_GATEWAY_PORT` and `/api/alerts` (default port 8000) | Native converge keeps local Grafana traffic on loopback. With `MEIVA_OBSERVABILITY_URL` set, it uses `MEIVA_GATEWAY_URL`, preserving scheme, port and proxy path; a legacy empty URL uses the gateway's reachable host and configured bind port. |
-| `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export |
-| `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL rendered into native Grafana and Prometheus; when Tempo is remote, this host-scoped setting must name its remote query endpoint (writable through the config API), and converge warns when it conflicts with the intake topology |
-| `MEIVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for the native Loki (HTTP+gRPC) and Prometheus (web) listeners; `0.0.0.0` or a tailnet IP is the external-migration form — the matching `MEIVA_TELEMETRY_LOKI_URL` / `MEIVA_TELEMETRY_PROMETHEUS_URL` must follow (converge warns otherwise) |
+| `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | `http://127.0.0.1:14318` | Tempo OTLP intake URL for trace export and the source of the station listener port |
+| `MEIVA_TELEMETRY_TEMPO_QUERY_URL` | `http://127.0.0.1:3200` | Tempo query/metrics URL for Grafana and Prometheus and the source of the station HTTP port |
+| `MEIVA_LGTM_LISTEN_HOST` | `127.0.0.1` | Listen host for native Loki, Prometheus, and Tempo. When using a specific non-loopback address, point their consumer URLs to that address. |
 | `MEIVA_LGTM_GRAFANA_LISTEN_HOST` | `0.0.0.0` | Listen host for native Grafana's HTTP listener (the historical all-interfaces form); narrow it to `127.0.0.1` or a tailnet IP to restrict the anonymous read-only UI — a specific non-loopback address requires `MEIVA_TELEMETRY_GRAFANA_URL` to follow (converge warns otherwise) |
 | `MEIVA_TELEMETRY_OTLP_PORT` | `4318` | The OTLP/HTTP ingress port — single source (WP3, task #1945) for the sidecar receiver endpoint, the gateway's authenticated remote receiver + pure-runner relay endpoint, and the roster/healthcheck port probes. Deviating from 4318 also requires `MEIVA_TELEMETRY_OTLP_ENDPOINT` (the agents' full export URL) to follow |
 
@@ -317,7 +348,7 @@ on this surface. Status of each, as of WP3:
 | Gateway OTLP ingress + runner relay `:4318` | `cli/commands/observability/otel_collector.py` | Parameterized — same setting |
 | Roster gate + healthcheck probes `:4318` | `services/supervision/roster/spec.py`, `services/supervision/healthchecks/otel_collector.py` | Parameterized — same setting |
 | Agent export endpoint default `http://127.0.0.1:4318` | `base/config/domains/observability/settings.py` | Default derived from the same constant; the full URL stays a separate override (`MEIVA_TELEMETRY_OTLP_ENDPOINT`) |
-| Loki/Prometheus/Grafana readiness | `base/telemetry/lgtm_local.py` | Local native listen settings; external query URLs do not select process ownership. |
+| Loki/Prometheus/Tempo/Grafana readiness | `base/telemetry/lgtm_local.py` | Local bind addresses and ports; Tempo derives HTTP and OTLP/HTTP ports from the existing URLs. |
 | Grafana `root_url` `http://localhost:3003` | `deploy/lgtm/native/config/run.sh` | Deliberately NOT parameterized into a converge render: it is the browser-facing redirect base, resolved at runtime from `GRAFANA_ROOT_URL` (migration section above). Rendered run.sh is asserted byte-identical in `cli/commands/observability/tests/lgtm/test_converge_lgtm.py` |
 | Test pins `http://127.0.0.1:3200` / `http://127.0.0.1:14318` / `localhost` / `MEIVA_TELEMETRY_OTLP_PORT=4318` | `tests/fixtures/env_bootstrap.py` | Reviewed WP3: every pin exists to neutralize the operator's ambient `.env` on a dev box (login-shell leak class) and is asserted against both env and settings so a weakened pin fails loudly. `GRAFANA_ROOT_URL` is deliberately not pinned — it never reaches renders (script-level default), only runtime Grafana |
 

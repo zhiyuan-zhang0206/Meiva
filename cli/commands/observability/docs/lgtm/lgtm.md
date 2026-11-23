@@ -1,6 +1,6 @@
 # Root-owned native LGTM services
 
-Loki, Prometheus and Grafana are ordinary `meiva-root` units. The canonical ops
+Loki, Prometheus, Tempo, and Grafana are ordinary `meiva-root` units. The canonical ops
 roster defines their commands, station eligibility and readiness. macOS uses
 the signed helper as root's ancestor; Linux has no helper. There are no per-backend
 launchd jobs, systemd units, shell lifecycle commands or foreign-job retirement.
@@ -25,7 +25,7 @@ changes require a normal stop before a new generation; repeated unchanged start
 keeps the existing root. Observation data is retained across stops.
 
 `meiva lgtm on` records station intent and starts the service selection the operator
-names, which must not exclude these three; `meiva lgtm off` retracts it and starts a
+names, which must not exclude these four; `meiva lgtm off` retracts it and starts a
 named selection that must not name them. Nothing is derived from an earlier start;
 observation data is preserved. A running root refuses a
 changed generation; stop it normally before applying the changed selection. The marker or the
@@ -37,9 +37,10 @@ response. Grafana also reports its database ready. Unknown ownership is unavaila
 a 503 is not ready. Loki write/read diagnostics report ingestion failures separately
 and have no authority to launch processes.
 
-Local listen ports are explicit host configuration, independent of external query
-URLs. Co-located station homes need distinct ports, including Loki gRPC. Tempo is
-remote. `MEIVA_LGTM_STORAGE_DIR` chooses the retained observation data volume.
+Co-located station homes need distinct ports, including the Loki and Tempo
+internal gRPC ports. Tempo uses the ports from the existing query and OTLP/HTTP
+URLs with the native listen host. Readiness checks that all three Tempo
+listeners belong to the recorded root unit before reading `/ready`. `MEIVA_LGTM_STORAGE_DIR` chooses the retained observation data volume.
 Grafana provisioning resolves its database endpoint through the shared direct-DB
 mapping and never derives credentials from the cluster bearer. The storage volume
 reaches the renderer as a value (`storage_dir`), resolved by the converge step from
@@ -47,11 +48,11 @@ reaches the renderer as a value (`storage_dir`), resolved by the converge step f
 
 ## One deadline per asset download
 
-Each pinned archive (Loki ~46 MB, Prometheus ~105 MB, Grafana ~461 MB) is one
+Each pinned archive (Loki ~46 MB, Prometheus ~105 MB, Tempo ~21 MB, Grafana ~461 MB) is one
 download operation with exactly ONE deadline: `download_with_retry` computes
 `deadline = started + budget` once and hands it to every attempt, and
 `stream_download` spends only `remaining = deadline - now`. There is no
-per-attempt cap, and the three assets do not share a step budget — a slow Grafana
+per-attempt cap, and downloads do not share a step budget — a slow Grafana
 mirror cannot eat Loki's or Prometheus's time.
 
 Every read is preceded by a remaining-budget check, and the empty read that ends

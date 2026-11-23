@@ -581,11 +581,7 @@ def test_the_host_identity_processors_sit_on_the_infra_pipeline_only(
 ) -> None:
     pipelines = mapping_at(collector_unit.render(GATEWAY), "service", "pipelines")
 
-    assert sequence_at(pipelines, "metrics", "receivers") == [
-        "otlp",
-        "forward/harness",
-        "otlp/remote",
-    ]
+    assert sequence_at(pipelines, "metrics", "receivers") == ["otlp", "forward/harness"]
     assert "transform/host_label" not in sequence_at(pipelines, "metrics", "processors")
     assert "transform/host_label" in sequence_at(pipelines, "metrics/infra", "processors")
     assert "resource_detection/host" in sequence_at(pipelines, "metrics/infra", "processors")
@@ -599,8 +595,34 @@ def test_infra_datapoints_keep_the_physical_host_and_gain_the_roster_machine_nam
     statements = sequence_at(
         config, "processors", "transform/host_label", "metric_statements", 0, "statements"
     )
-    assert 'set(attributes["host"], resource.attributes["host.name"])' in statements
-    assert 'set(attributes["machine_name"], "test-machine")' in statements
+    assert 'set(attributes["host.name"], resource.attributes["host.name"])' in statements
+    machine_statements = sequence_at(
+        config, "processors", "transform/metric_machine", "metric_statements", 0, "statements"
+    )
+    assert machine_statements == [
+        'set(attributes["machine"], resource.attributes["meiva.machine"])'
+    ]
+    pipelines = mapping_at(config, "service", "pipelines")
+    for signal in ("metrics", "metrics/infra"):
+        processors = sequence_at(pipelines, signal, "processors")
+        assert processors.index("resource/meiva_machine") < processors.index(
+            "transform/metric_machine"
+        )
+
+
+def test_all_local_sources_receive_the_roster_machine_identity(
+    collector_unit: CollectorUnit,
+) -> None:
+    config = collector_unit.render(GATEWAY)
+    assert sequence_at(config, "processors", "resource/meiva_machine", "attributes") == [
+        {"key": "meiva.machine", "value": "test-machine", "action": "upsert"}
+    ]
+    assert sequence_at(config, "processors", "resource/loki_machine", "attributes") == [
+        {"key": "machine", "from_attribute": "meiva.machine", "action": "upsert"}
+    ]
+    for signal in ("logs", "metrics", "metrics/infra", "traces"):
+        processors = sequence_at(config, "service", "pipelines", signal, "processors")
+        assert processors.index("resource/meiva_machine") < processors.index("batch")
 
 
 @pytest.mark.parametrize("port", [8888, 8889])
@@ -667,13 +689,14 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
     assert sequence_at(logs, "receivers") == [
         "otlp",
         "forward/harness",
-        "otlp/remote",
         "filelog/sessions",
         "filelog/services",
     ]
     assert sequence_at(logs, "processors") == [
         "memory_limiter",
         "filter/cluster_allow",
+        "resource/meiva_machine",
+        "resource/loki_machine",
         "transform/promote_event_labels",
         "transform/filelog_service",
         "batch",

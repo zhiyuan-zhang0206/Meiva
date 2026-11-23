@@ -165,7 +165,10 @@ def _execute(
                 )
             )
         case ProbeLgtm():
-            print_lgtm_status(LgtmSettings.from_fields(delivered_config(command.config).get_field))
+            print_lgtm_status(
+                LgtmSettings.from_fields(delivered_config(command.config).get_field),
+                home=command.home,
+            )
         case ProbeRedisBridge():
             print_redis_bridge_status(
                 command.home, host=command.host, machine=command.machine, config=command.config

@@ -17,18 +17,20 @@
 # retired Postgres events read path (#1197) is gone — nothing queries `ops`
 # from these rules.
 #
-# Prometheus inputs have distinct label conventions:
+# Prometheus inputs use `machine` for the roster identity:
 # - APPLICATION metrics (R4 and the gateway-heartbeat silence rule) come from
 #   the event emitter's OTLP mirror and carry `machine` / `agent_id` datapoint
 #   attributes.
 # - INFRASTRUCTURE metrics (R8-R12, R14-R16, issue #46) come from each
 #   machine's OTel Collector sidecar (host/data-plane receivers plus its own
 #   queue/drop/uptime scrape) and live under `job="meiva-infra"` with both
-#   `host` = the OS hostname (physical identity) and `machine_name` = the Meiva
+#   `host_name` = the OS hostname (physical identity) and `machine` = the Meiva
 #   roster identity baked from the unit at converge. Per the 2026-08-24 user
-#   ruling, rules group by `machine_name`, so units on one host remain separate
-#   series; each label keeps one meaning. Names below were read off a live
-#   Prometheus 3.13.2, not inferred from the OTLP names.
+#   ruling, rules group by `machine`, so units on one host remain separate
+#   series. During a rolling upgrade, use `machine_name` when the same alert
+#   grouping has no samples under `machine`. Apply range functions before
+#   choosing a source so a new series without a usable window cannot hide
+#   older samples. Each branch excludes series without a roster identity.
 # - RECEIVER metrics (R24) come from Prometheus's own scrape target and report
 #   too-old sample loss across the whole OTLP intake, without machine labels.
 #
@@ -681,9 +683,9 @@ groups:
           metric: host_cpu
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} CPU at {{ $values.C }} (threshold 0.90) for 15m"
+          summary: "{{ $labels.machine }} CPU at {{ $values.C }} (threshold 0.90) for 15m"
           description: >-
-            Non-idle CPU on {{ $labels.machine_name }} has averaged
+            Non-idle CPU on {{ $labels.machine }} has averaged
             {{ $values.C }} (fraction of all cores) for 15 minutes. This is
             not a limit the kernel enforces — a training or eval job may
             legitimately own the box. The operator decides: identify the
@@ -700,8 +702,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(1 - avg by (machine_name)
-                (system_cpu_utilization_ratio{state="idle"}), 0.001)
+                round(1 - avg by (machine) (
+                  system_cpu_utilization_ratio{machine!="", state="idle"}
+                  or on (machine)
+                  label_join(system_cpu_utilization_ratio{machine="", machine_name!="", state="idle"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -755,9 +760,9 @@ groups:
           metric: host_memory
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} memory at {{ $values.C }} used (threshold 0.90) for 15m"
+          summary: "{{ $labels.machine }} memory at {{ $values.C }} used (threshold 0.90) for 15m"
           description: >-
-            Used memory on {{ $labels.machine_name }} has held at {{ $values.C }} of
+            Used memory on {{ $labels.machine }} has held at {{ $values.C }} of
             RAM for 15 minutes (reclaimable cache excluded). Sustained
             pressure precedes swapping and the OOM killer, whose visible form
             is an agent crash loop. Check the per-agent footprint and
@@ -773,8 +778,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(avg by (machine_name)
-                (system_memory_utilization_ratio{state="used"}), 0.001)
+                round(avg by (machine) (
+                  system_memory_utilization_ratio{machine!="", state="used"}
+                  or on (machine)
+                  label_join(system_memory_utilization_ratio{machine="", machine_name!="", state="used"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -817,7 +825,7 @@ groups:
       # rule fires on the cause, per mountpoint, so the pg data dir, the
       # traces mirror and the LGTM host's Loki volumes are all covered by
       # whichever filesystem carries them. One instance per
-      # (machine_name, mountpoint):
+      # (machine, mountpoint):
       # on macOS the volumes of one APFS container all report the container's
       # fullness, so a single full disk legitimately fires twice.
       # Excluded: non-asset mounts whose reported fullness is foreign or
@@ -846,9 +854,9 @@ groups:
           metric: host_disk
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.90)"
+          summary: "{{ $labels.machine }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.90)"
           description: >-
-            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine }} is
             {{ $values.C }} full. 0.90 is also MEIVA_TRACE_DISK_WATERMARK's
             default, so crossing it silently degrades trace recording on that
             machine (R7 reports that consequence). Triage: find the growth —
@@ -866,8 +874,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: &writable-disk >-
-                round(max by (machine_name, mountpoint)
-                (system_filesystem_utilization_ratio{mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}), 0.001)
+                round(max by (machine, mountpoint) (
+                  system_filesystem_utilization_ratio{machine!="", mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}
+                  or on (machine, mountpoint)
+                  label_join(system_filesystem_utilization_ratio{machine="", machine_name!="", mode!="ro", type!~"iso9660|udf|cd9660", mountpoint!~"/Volumes/.*|/private/tmp/.*|/private/var/folders/.*"}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -922,9 +933,9 @@ groups:
           metric: host_disk
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.93)"
+          summary: "{{ $labels.machine }} {{ $labels.mountpoint }} at {{ $values.C }} full (threshold 0.93)"
           description: >-
-            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine }} is
             {{ $values.C }} full. This escalation warning sits between the
             0.90 capacity watermark and Loki's 0.95 WAL disk-full hard stop.
             Free space before write throttling can interrupt the event stream.
@@ -988,9 +999,9 @@ groups:
           metric: host_disk
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} {{ $labels.mountpoint }} at {{ $values.C }} full (critical threshold 0.95)"
+          summary: "{{ $labels.machine }} {{ $labels.mountpoint }} at {{ $values.C }} full (critical threshold 0.95)"
           description: >-
-            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine_name }} is
+            Filesystem {{ $labels.mountpoint }} on {{ $labels.machine }} is
             {{ $values.C }} full. 0.95 is Loki WAL's disk_full_threshold: the
             2026-09-05 incident crossed this line, throttled WAL writes, and
             killed the event stream while Loki /ready stayed green. Free disk
@@ -1289,9 +1300,9 @@ groups:
           metric: pg_connections
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} Postgres backends at {{ $values.C }} of max_connections (threshold 0.80)"
+          summary: "{{ $labels.machine }} Postgres backends at {{ $values.C }} of max_connections (threshold 0.80)"
           description: >-
-            Open Postgres backends on {{ $labels.machine_name }} are at
+            Open Postgres backends on {{ $labels.machine }} are at
             {{ $values.C }} of the server's max_connections. Past 1.0 new
             connections are refused and every process that needs the database
             fails at once. Check the PgBouncer pooler is up and pooling
@@ -1307,8 +1318,16 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (machine_name) (postgresql_backends)
-                / max by (machine_name) (postgresql_connection_max), 0.001)
+                round(max by (machine) (
+                  postgresql_backends{machine!=""}
+                  or on (machine)
+                  label_join(postgresql_backends{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
+                / max by (machine) (
+                  postgresql_connection_max{machine!=""}
+                  or on (machine)
+                  label_join(postgresql_connection_max{machine="", machine_name!=""}, "machine", "", "machine_name")
+                ), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1365,9 +1384,9 @@ groups:
           metric: redis_memory
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} Redis using {{ $values.C }} bytes (threshold 2 GiB)"
+          summary: "{{ $labels.machine }} Redis using {{ $values.C }} bytes (threshold 2 GiB)"
           description: >-
-            Redis on {{ $labels.machine_name }} is holding {{ $values.C }} bytes for
+            Redis on {{ $labels.machine }} is holding {{ $values.C }} bytes for
             15 minutes, above the 2 GiB deployment threshold. Inspect the
             keyspace for an unbounded producer; the events channel is a
             stream, not a store, so a growing resident set is normally a
@@ -1383,7 +1402,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (machine_name) (redis_memory_used_bytes)
+                max by (machine) (
+                  redis_memory_used_bytes{machine!=""}
+                  or on (machine)
+                  label_join(redis_memory_used_bytes{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:
@@ -1423,7 +1446,7 @@ groups:
       # The queue gauges are current state. This deliberately does NOT use the
       # process-lifetime enqueue-failure counter: one old outage must resolve
       # after the route recovers. One instance per
-      # machine_name/exporter/data_type says which machine and signal path is
+      # machine/exporter/data_type says which machine and signal path is
       # blocked.
       - uid: meiva-ops-otelcol-queue-pressure
         title: "OTel Collector exporter queue pressure"
@@ -1439,9 +1462,9 @@ groups:
           metric: otelcol_queue
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} {{ $labels.data_type }} queue at {{ $values.C }} (threshold 0.80)"
+          summary: "{{ $labels.machine }} collector {{ $labels.exporter }} {{ $labels.data_type }} queue at {{ $values.C }} (threshold 0.80)"
           description: >-
-            The OTel Collector exporter queue on {{ $labels.machine_name }} for
+            The OTel Collector exporter queue on {{ $labels.machine }} for
             {{ $labels.exporter }} ({{ $labels.data_type }}) has stayed above
             80% capacity for 5 minutes. The destination or runner-to-gateway
             relay is not keeping up. Check gateway reachability, the collector
@@ -1458,10 +1481,16 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                round(max by (machine_name, exporter, data_type)
-                (otelcol_exporter_queue_size)
-                / clamp_min(max by (machine_name, exporter, data_type)
-                (otelcol_exporter_queue_capacity), 1), 0.001)
+                round(max by (machine, exporter, data_type) (
+                  otelcol_exporter_queue_size{machine!=""}
+                  or on (machine, exporter, data_type)
+                  label_join(otelcol_exporter_queue_size{machine="", machine_name!=""}, "machine", "", "machine_name")
+                )
+                / clamp_min(max by (machine, exporter, data_type) (
+                  otelcol_exporter_queue_capacity{machine!=""}
+                  or on (machine, exporter, data_type)
+                  label_join(otelcol_exporter_queue_capacity{machine="", machine_name!=""}, "machine", "", "machine_name")
+                ), 1), 0.001)
               instant: true
               range: false
             relativeTimeRange:
@@ -1584,9 +1613,9 @@ groups:
           metric: otelcol_enqueue_failed
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} collector {{ $labels.exporter }} rejected {{ $values.C }} telemetry items in 5m"
+          summary: "{{ $labels.machine }} collector {{ $labels.exporter }} rejected {{ $values.C }} telemetry items in 5m"
           description: >-
-            The OTel Collector on {{ $labels.machine_name }} could not enqueue
+            The OTel Collector on {{ $labels.machine }} could not enqueue
             {{ $values.C }} log records, metric points, or spans for exporter
             {{ $labels.exporter }} in the last 5 minutes. This is active data
             loss, not historical backlog. Restore the runner-to-gateway relay
@@ -1602,8 +1631,11 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                sum by (machine_name, exporter)
-                (increase({__name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]))
+                sum by (machine, exporter) (
+                  increase({machine!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m])
+                  or on (machine, exporter)
+                  label_join(increase({machine="", machine_name!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]), "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:
@@ -1661,9 +1693,9 @@ groups:
           metric: otelcol_silence
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine_name }} collector has not reported for 5 minutes"
+          summary: "{{ $labels.machine }} collector has not reported for 5 minutes"
           description: >-
-            Machine {{ $labels.machine_name }} reported OTel Collector uptime within the
+            Machine {{ $labels.machine }} reported OTel Collector uptime within the
             last 24 hours but no sample arrived in the last 5 minutes. The
             collector may be down or its runner-to-gateway metrics relay may
             be broken. Check the local meiva-otel-collector session and the
@@ -1679,9 +1711,17 @@ groups:
                 uid: prometheus
               editorMode: code
               expr: >-
-                max by (machine_name) (max_over_time(otelcol_process_uptime_total[24h]))
-                unless on(machine_name)
-                max by (machine_name) (max_over_time(otelcol_process_uptime_total[5m]))
+                max by (machine) (
+                  max_over_time(otelcol_process_uptime_total{machine!=""}[24h])
+                  or on (machine)
+                  label_join(max_over_time(otelcol_process_uptime_total{machine="", machine_name!=""}[24h]), "machine", "", "machine_name")
+                )
+                unless on(machine)
+                max by (machine) (
+                  max_over_time(otelcol_process_uptime_total{machine!=""}[5m])
+                  or on (machine)
+                  label_join(max_over_time(otelcol_process_uptime_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name")
+                )
               instant: true
               range: false
             relativeTimeRange:
@@ -5130,7 +5170,7 @@ groups:
           team: meiva-ops
         annotations:
           summary: 'Tempo trace backend unreachable - up{job="tempo"}=0 for 1h (trace store down)'
-          description: 'The Prometheus scrape target for the Tempo trace store (the native systemd user unit com.meiva.tempo.meiva-578ca0ec.service on the observability station host ubuntu - 127.0.0.1:3200 queries, 127.0.0.1:14318 OTLP) has been down for over an hour. Its failure is deliberately outside the station healthcheck repair loop, so this rule IS the signal - a silent 7-day outage happened before this alert existed (2026-09-07..14, task #3330). Triage: on the station host (ubuntu) run systemctl --user status com.meiva.tempo.meiva-578ca0ec.service and restart it when needed with systemctl --user restart com.meiva.tempo.meiva-578ca0ec.service. Verify here: up{job="tempo"}=1 and 127.0.0.1:14318 answers (404 on a bare GET is normal for the OTLP receiver).'
+          description: 'The Tempo trace store scrape has failed for over an hour. On the observability station, run meiva lgtm status and inspect the Tempo unit log at $MEIVA_HOME/run/meiva-root/logs/tempo/output.log. Check for listener conflicts or unavailable storage. Verify recovery with up{job="tempo"}=1 and a trace query through the Grafana Tempo datasource.'
         data:
           - refId: A
             datasourceUid: prometheus

@@ -42,7 +42,7 @@ from cli.commands.observability.plans.collector.render import (
     CollectorValues,
     render_collector_config,
 )
-from cli.commands.observability.plans.collector.text import ottl_quote, yaml_quote
+from cli.commands.observability.plans.collector.text import yaml_quote
 from cli.commands.observability.url_split import split_url
 
 # meiva:note
@@ -221,9 +221,9 @@ def test_a_gateway_or_station_with_a_token_and_a_routable_host_serves_remote_pee
         "extensions": {"bearertokenauth/cluster": {"token": "tok"}}
     }
     assert fragments.auth_service_extension == ", bearertokenauth/cluster"
-    assert fragments.pipeline_receiver == ", otlp/remote"
-    traces = yaml.safe_load("pipelines:" + fragments.trace_pipeline)["pipelines"]["traces/remote"]
-    assert traces["exporters"] == ["otlphttp/tempo"]
+    pipelines = yaml.safe_load("pipelines:" + fragments.pipelines)["pipelines"]
+    assert set(pipelines) == {"logs/remote", "metrics/remote", "traces/remote"}
+    assert pipelines["traces/remote"]["exporters"] == ["otlphttp/tempo"]
 
 
 def test_the_remote_receiver_binds_an_ipv6_host_in_brackets() -> None:
@@ -335,10 +335,8 @@ def test_every_exporter_queue_is_in_memory_and_drops_instead_of_blocking(
         assert queue["wait_for_result"] is False
 
 
-def test_values_are_quoted_for_yaml_and_for_ottl() -> None:
+def test_values_are_quoted_for_yaml() -> None:
     assert yaml_quote("it's") == "'it''s'"
-    assert ottl_quote('say "hi"') == '"say \\"hi\\""'
-    assert ottl_quote("café") == '"café"'
 
 
 def values() -> CollectorValues:

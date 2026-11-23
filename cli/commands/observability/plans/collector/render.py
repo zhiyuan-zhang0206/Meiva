@@ -12,6 +12,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
+from base.telemetry.otlp.collector_listeners import SELF_METRICS_HOST
 from cli.commands.observability.plans.collector.remote import RemoteFragments
 
 __all__ = ["CollectorValues", "render_collector_config", "without_harness_receiver"]
@@ -80,6 +81,7 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "LOKI_BASE": values.loki_base,
         "PROM_BASE": values.prom_base,
         "RETENTION_DAYS": str(values.retention_days),
+        "SELF_METRICS_HOST": SELF_METRICS_HOST,
         "SELF_METRICS_PORT": str(values.self_metrics_port),
         "OTLP_RECEIVER_ENDPOINT": values.local_ingress_endpoint,
         "HARNESS_OTLP_RECEIVER": (
@@ -94,8 +96,7 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "REMOTE_OTLP_RECEIVER": values.remote.receiver,
         "CLUSTER_AUTH_EXTENSION": values.remote.auth_extension,
         "CLUSTER_AUTH_SERVICE_EXTENSION": values.remote.auth_service_extension,
-        "REMOTE_OTLP_PIPELINE_RECEIVER": values.remote.pipeline_receiver,
-        "REMOTE_TRACE_PIPELINE": values.remote.trace_pipeline,
+        "REMOTE_OTLP_PIPELINES": values.remote.pipelines,
     }
     return Template(template).substitute(substitutions)
 

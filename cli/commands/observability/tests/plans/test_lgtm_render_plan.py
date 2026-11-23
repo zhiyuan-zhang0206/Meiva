@@ -53,6 +53,10 @@ def values(**changes: str | int) -> NativeRenderValues:
             provisioning_path="/h/lgtm/native/config/provisioning",
             repo="/repo",
             tempo_query_url="http://127.0.0.1:3200",
+            tempo_http_port=3200,
+            tempo_otlp_port=14318,
+            tempo_grpc_port=9096,
+            tempo_retention_hours=168,
             loki_url="http://127.0.0.1:3100",
             prometheus_url="http://127.0.0.1:9090",
             pg_url="127.0.0.1:5433",
@@ -384,7 +388,7 @@ def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> Non
         name: render_config(
             name, (_REPO / "deploy/lgtm/native/config" / name).read_text(encoding="utf-8"), values()
         )
-        for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env")
+        for name in ("loki.yaml", "prometheus.yml", "tempo.yaml", "grafana.ini", "runtime.env")
     }
     for name, content in rendered.items():
         live = [line for line in content.splitlines() if not line.lstrip().startswith("#")]
@@ -400,7 +404,14 @@ def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> Non
 def test_every_substitution_is_spelled_by_a_template() -> None:
     spelled = {
         placeholder
-        for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env", "run.sh")
+        for name in (
+            "loki.yaml",
+            "prometheus.yml",
+            "tempo.yaml",
+            "grafana.ini",
+            "runtime.env",
+            "run.sh",
+        )
         for placeholder in _PLACEHOLDER.findall(
             (_REPO / "deploy/lgtm/native/config" / name).read_text(encoding="utf-8")
         )

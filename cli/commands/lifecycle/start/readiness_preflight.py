@@ -157,7 +157,7 @@ def _occupied(
 ) -> tuple[PortOccupant, ...]:
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import start_roster
-    from cli.commands.probe import occupied_health_ports
+    from cli.commands.probe import configured_listener_conflicts, occupied_health_ports
     from services.supervision.roster.composition import build_services, gate_settings
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
@@ -173,9 +173,8 @@ def _occupied(
             all_services=all_services,
         ),
     )
-    return tuple(
-        PortOccupant(port.spec.session, port.detail) for port in occupied_health_ports(roster)
-    )
+    findings = configured_listener_conflicts(roster) or occupied_health_ports(roster)
+    return tuple(PortOccupant(port.spec.session, port.detail) for port in findings)
 
 
 # meiva:note

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from base.cluster.machine.application_listeners import gateway_bind_host
+
 __all__ = ["GATEWAY_FACTORY", "ServePlan", "serve_plan"]
 
 # meiva:note
@@ -52,8 +54,7 @@ class ServePlan:
 # way, but a box that declares no private-network address serves no other machine, and a
 # runner's local gateway is dialed only by its local SDK and agent processes.
 def serve_plan(*, serves_gateway: bool, off_box: bool, reload: bool) -> ServePlan:
-    off_box_gateway = serves_gateway and off_box
-    bind_host = "" if off_box_gateway else _LOOPBACK
+    bind_host = gateway_bind_host(serves_gateway=serves_gateway, off_box=off_box)
     return ServePlan(
         require_cluster_secret=serves_gateway,
         bind_host=bind_host,

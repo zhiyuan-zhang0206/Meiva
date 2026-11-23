@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from base.host.net.predicates import is_loopback_host
+from base.telemetry.otlp.collector_listeners import remote_ingress_host
 from cli.commands.observability.plans.authority import host_port, is_unspecified_address
 from cli.commands.observability.plans.collector.text import yaml_quote
 from cli.commands.observability.plans.url_parts import UrlParts
@@ -25,7 +26,16 @@ __all__ = [
     "remote_receiver_fragments",
 ]
 
-_REMOTE_TRACE_PIPELINE = """
+_REMOTE_OTLP_PIPELINES = """
+    # Relays keep the origin collector's resource and datapoint identities.
+    logs/remote:
+      receivers: [otlp/remote]
+      processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
+      exporters: [otlphttp/loki]
+    metrics/remote:
+      receivers: [otlp/remote]
+      processors: [memory_limiter, filter/cluster_allow, batch]
+      exporters: [otlphttp/prometheus]
     # A remote peer already writes its own durable trace mirror. The remote
     # pipeline therefore fans out only to Tempo; adding file/traces here
     # duplicates every remote span in the local mirror and makes replay
@@ -101,11 +111,10 @@ class RemoteFragments:
     receiver: str
     auth_extension: str
     auth_service_extension: str
-    pipeline_receiver: str
-    trace_pipeline: str
+    pipelines: str
 
 
-NO_REMOTE_INGRESS = RemoteFragments("", "", "", "", "")
+NO_REMOTE_INGRESS = RemoteFragments("", "", "", "")
 
 
 # meiva:note
@@ -120,22 +129,15 @@ NO_REMOTE_INGRESS = RemoteFragments("", "", "", "", "")
 def remote_receiver_fragments(
     roles: frozenset[str] | None, *, host: str, token: str | None, ingress_port: int
 ) -> RemoteFragments:
-    if roles is None or not (roles & {"gateway", "observability-station"}):
-        return NO_REMOTE_INGRESS
-    if is_unspecified_address(host):
-        raise RuntimeError(
-            "cannot expose authenticated OTLP ingress: reachable host is "
-            "wildcard; set MEIVA_MACHINE_HOST to this host's exact "
-            "private address"
-        )
-    if not token or is_loopback_host(host):
+    endpoint = remote_ingress_host(roles, host=host, has_token=bool(token))
+    if endpoint is None or not token:
         return NO_REMOTE_INGRESS
     return RemoteFragments(
         receiver=f"""
   otlp/remote:
     protocols:
       http:
-        endpoint: {yaml_quote(host_port(host, ingress_port))}
+        endpoint: {yaml_quote(host_port(endpoint, ingress_port))}
         auth:
           authenticator: bearertokenauth/cluster
 """,
@@ -144,6 +146,5 @@ def remote_receiver_fragments(
     token: {yaml_quote(token)}
 """,
         auth_service_extension=", bearertokenauth/cluster",
-        pipeline_receiver=", otlp/remote",
-        trace_pipeline=_REMOTE_TRACE_PIPELINE,
+        pipelines=_REMOTE_OTLP_PIPELINES,
     )

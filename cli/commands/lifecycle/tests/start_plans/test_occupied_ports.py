@@ -43,4 +43,4 @@ def test_every_conflicting_port_is_reported_not_just_the_first() -> None:
 def test_the_report_opens_with_the_blank_line_and_cross_of_a_refusal() -> None:
     text = refusal_text((Occupant("ops", "meiva-ops", "x"),))
 
-    assert text.startswith("\n✗ another unit already answers on this unit's daemon health ports:\n")
+    assert text.startswith("\n✗ a listener conflict blocks this unit's start:\n")

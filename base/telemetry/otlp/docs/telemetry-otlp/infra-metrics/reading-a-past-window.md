@@ -2,11 +2,11 @@
 
 The series are Prometheus's OTLP translation, and the way to read a window back is the
 Prometheus HTTP API on the machine that holds the store (the ubuntu gateway,
-`127.0.0.1:59090`; its retention is `--storage.tsdb.retention.time=180h` and
+`127.0.0.1:59090`; its retention is `--storage.tsdb.retention.time=7d` and
 `--storage.tsdb.retention.size=8GB`, decided by the deployment's config, not here):
 
 ```
-/api/v1/query_range?query=system_cpu_load_average_1m{machine_name="ubuntu"}&start=...&end=...&step=60
+/api/v1/query_range?query=system_cpu_load_average_1m{machine="ubuntu"}&start=...&end=...&step=60
 ```
 
 **A first look reads load, not utilization.** In the 2026-10-29 stall the 1-minute load
@@ -16,7 +16,7 @@ collector from counter deltas; a host that starves the collector can leave it st
 misleading. That is one window's observation, not a proven mechanism, and it does not make
 utilization useless: before drawing a conclusion from either series, check the sample's
 freshness and the aggregation behind it — a `query_range` that returns every step says the store
-answered every step, not that every scrape happened. Group by `machine_name`, not `host`.
+answered every step, not that every scrape happened. Group by `machine` for the roster identity.
 
 The same asymmetry applies to per-process attribution, which is why a Linux host also runs a
 timer-driven sampler (`~/.meiva/hostwatch/sample.py`, a systemd timer every 30 s, a JSON path

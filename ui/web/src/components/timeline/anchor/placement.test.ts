@@ -208,6 +208,16 @@ describe("unread boundary", () => {
   const reply = row("4.0");
   const showReply = { decided: true, itemId: reply.item_id };
 
+  function delivered(item: BackendTimelineItem, id: number): BackendTimelineItem {
+    return {
+      ...item,
+      userDelivery: {
+        id, agent_id: 42, mode: "prefix", source_key: `harness:${item.item_id}`,
+        content: item.payload, suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false,
+      },
+    };
+  }
+
   it("includes the adjacent human prompt across ordinary work within the same turn", () => {
     const machine = machineFor(null);
     const fx = effects();
@@ -251,16 +261,58 @@ describe("unread boundary", () => {
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });
 
-  it.each([true, false])("reads the prompt across a page boundary (delivered: %s)", (delivered) => {
+  it.each(["2.0", "3.0"])("keeps the tail when the feed delivers an unchanged departure row or earlier reply (%s)", (itemId) => {
+    const old = rows(1, 3);
+    const machine = machineFor(tailDeparture(old, null));
+    const fx = effects();
+    const reveal = { decided: true, itemId, entrySeenId: 0 };
+    machine.step(inputs({ items: old.map((item) => item.item_id === itemId ? delivered(item, 1) : item), reveal }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
+  });
+
+  it("opens on the first new unread reply when an older delivery leads the feed", () => {
+    const old = rows(1, 3);
+    const machine = machineFor(tailDeparture(old, null));
+    const fx = effects();
+    const items = [delivered(old[0], 6), ...old.slice(1), delivered(reply, 5), delivered(row("5.0"), 7)];
+    const reveal = { decided: true, itemId: old[0].item_id, entrySeenId: 5 };
+    machine.step(inputs({ items, reveal }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "5.0", rank: 0 } }, { hold: false });
+  });
+
+  it.each([false, true])("ignores an old delivery after archiving the departure row (new reply: %s)", (hasNewReply) => {
+    const old = rows(101, 102);
+    const locator = (message_id: string, checkpoint_id?: string) => btoa(JSON.stringify({
+      version: 1, source: "native", agent_id: 42, epoch: "initial", checkpoint_id, message_id, block: 0,
+    })).replace(/=+$/, "");
+    const before = old.map((item) => ({ ...item, reading_locator: locator(item.item_id) }));
+    const [earlier, watermark] = before.map((item) => ({
+      ...item, item_id: `s1.boundary.${item.item_id}`, reading_locator: locator(item.item_id, "boundary"),
+    }));
+    const machine = machineFor(tailDeparture(before, null));
+    const fx = effects();
+    const archived = [delivered(earlier, 1), watermark];
+    const items = hasNewReply ? [...archived, human, delivered(reply, 2)] : archived;
+    machine.step(inputs({ items, reveal: { decided: true, itemId: earlier.item_id, entrySeenId: 0 } }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(hasNewReply
+      ? { kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }
+      : TAIL, { hold: false });
+  });
+
+  it.each(["published", "unpublished", "published while paging"])("reads the prompt across a page boundary (%s)", (publication) => {
     const machine = machineFor(tailDeparture([human], null));
     const fx = effects();
-    const reveal = delivered ? showReply : { decided: true, itemId: null };
+    const reveal = publication === "published" ? showReply : { decided: true, itemId: null, entrySeenId: 0 };
     const latest = { items: [work, reply], hasMoreOlder: true, reveal };
     machine.step(inputs(latest), fx);
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
     expect(machine.snapshot()).toMatchObject({ visible: false, fillAllowed: false });
-    machine.step(inputs({ ...latest, loadingOlder: true }), fx);
-    machine.step(inputs({ ...latest, items: [human, work, reply] }), fx);
+    const finalReply = publication === "published while paging" ? delivered(reply, 2) : reply;
+    machine.step(inputs({ ...latest, items: [work, finalReply], loadingOlder: true }), fx);
+    expect(fx.place).not.toHaveBeenCalled();
+    machine.step(inputs({ ...latest, items: [human, work, finalReply] }), fx);
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });
@@ -285,10 +337,74 @@ describe("unread boundary", () => {
   });
 
   it("keeps the boundary when a reply visible at departure grew before the return", () => {
-    const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Short" }], null));
+    const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Row" }], null));
     const fx = effects();
     machine.step(inputs({ items: [human, { ...reply, partial: true }] }), fx);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
+  });
+
+  it("opens on the first unread reply when compaction reused the partial departure's row id", () => {
+    const partial = row("6.0", { partial: true, payload: "Short start", source_message_id: "departure" });
+    const archived = { ...partial, item_id: "s1.boundary.5.0", partial: false, payload: "Completed before compaction", source_block_idx: 0 };
+    const reused = row("6.0", { source_message_id: "different-reply", source_block_idx: 0 });
+    const secondPrompt = { ...human, item_id: "5.0" };
+    const machine = machineFor(tailDeparture([partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [archived, human, work, delivered(reply, 1), secondPrompt, delivered(reused, 2)],
+      reveal: { ...showReply, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }, { hold: false });
+  });
+
+  it.each([false, true])("recognizes an archived streaming watermark whose delivery arrived later (new reply: %s)", (hasNewReply) => {
+    const partial = row("6.1", { partial: true, payload: "Full reply text", source_message_id: "departure" });
+    const otherBlock = row("s1.boundary.5.0", { source_message_id: "departure", source_block_idx: 0 });
+    const archived = delivered({ ...partial, item_id: "s1.boundary.5.1", partial: false, source_block_idx: 1 }, 1);
+    const machine = machineFor(tailDeparture([partial], null));
+    const fx = effects();
+    const items = hasNewReply ? [otherBlock, archived, human, work, delivered(reply, 2)] : [otherBlock, archived];
+    machine.step(inputs({ items, reveal: { decided: true, itemId: archived.item_id, entrySeenId: 0 } }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(hasNewReply
+      ? { kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }
+      : TAIL, { hold: false });
+  });
+
+  it.each([
+    { suffix: " with new content", opensAtPrompt: true },
+    { suffix: "  \n", opensAtPrompt: false },
+  ])("uses the archived prompt only if the same streaming block appended content (%o)", ({ suffix, opensAtPrompt }) => {
+    const partial = row("6.0", { partial: true, payload: "Short start", source_message_id: "departure" });
+    const archivedPrompt = { ...human, item_id: "s1.boundary.4.0" };
+    const archived = delivered({
+      ...partial, item_id: "s1.boundary.5.0", partial: false, source_block_idx: 0, payload: partial.payload + suffix,
+    }, 1);
+    const machine = machineFor(tailDeparture([human, partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [archivedPrompt, archived],
+      reveal: { decided: true, itemId: archived.item_id, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith(opensAtPrompt
+      ? { kind: "bounded-tail", row: { itemId: archivedPrompt.item_id, rank: 1 } }
+      : TAIL, { hold: false });
+  });
+
+  it("recognizes the same streaming block when it finalizes and an older delivery leads the feed", () => {
+    const older = delivered(row("0.0"), 1);
+    const partial = { ...reply, source_message_id: "departure", partial: true, payload: "Short start" };
+    const finalReply = delivered({
+      ...reply, source_message_id: "departure", source_block_idx: 0,
+      reading_locator: "loc-final", payload: partial.payload + " with new content",
+    }, 2);
+    const machine = machineFor(tailDeparture([older, human, work, partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [older, human, work, finalReply],
+      reveal: { ...showReply, itemId: older.item_id, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }, { hold: false });
   });
 });
 
