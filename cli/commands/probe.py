@@ -138,7 +138,7 @@ def configured_listener_conflicts(specs: tuple[ServiceSpec, ...]) -> tuple[Occup
             continue
         try:
             binds.extend((spec, resolve_tcp_bind(bind)) for bind in spec.listen_binds())
-        except (OSError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             problems.append(OccupiedPort(spec, f"invalid configured listener: {exc}"))
     for (left, bind), (right, other) in combinations(binds, 2):
         if bind.overlaps(other):

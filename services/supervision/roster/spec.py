@@ -235,7 +235,9 @@ def services_for_capabilities_annotated(
     services: tuple[ServiceSpec, ...] | None = None,
     home: Path,
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
-    roster = build_services(home=home) if services is None else services
+    roster = (
+        build_services(home=home, machine=machine, roles=roles) if services is None else services
+    )
     return tuple(
         (s, gate_reason(s, settings=settings, machine=machine, host=host, home=home))
         for s in roster

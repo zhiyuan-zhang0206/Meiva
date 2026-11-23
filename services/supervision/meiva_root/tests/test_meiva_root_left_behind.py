@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import replace
@@ -24,10 +25,15 @@ from services.supervision.meiva_root.tests.slices import system_clock
 _CHILD = Path(__file__).with_name("child_unit.py")
 
 
-def _root(run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2) -> Supervisor:
+def _root(
+    run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2, shell_exec: bool = False
+) -> Supervisor:
+    argv = (sys.executable, "-u", str(_CHILD), *scenario)
+    if shell_exec:
+        argv = ("/bin/sh", "-c", f"cd {shlex.quote(str(run_dir))} && exec {shlex.join(argv)}")
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-u", str(_CHILD), *scenario),
+        argv,
         RestartPolicy.ALWAYS,
         "root",
     )
@@ -189,7 +195,7 @@ def test_an_unreadable_record_is_dropped_rather_than_trusted(tmp_path: Path, bod
 async def test_root_drops_a_record_for_a_reused_pid_without_signalling(
     tmp_path: Path, legacy: bool
 ) -> None:
-    bystander = _leftover("sleep")
+    bystander = subprocess.Popen(["/bin/sleep", "60"]) if legacy else _leftover("sleep")
     try:
         if legacy:
             path = unit_ledger.pidfile_path(tmp_path, "worker")
@@ -216,3 +222,34 @@ async def test_root_drops_a_record_for_a_reused_pid_without_signalling(
         if bystander.poll() is None:
             bystander.kill()
         bystander.wait(timeout=5)
+
+
+@pytest.mark.parametrize("shell_exec", [False, True])
+async def test_live_legacy_receipt_blocks_a_duplicate_and_survives(
+    tmp_path: Path, shell_exec: bool
+) -> None:
+    leftover = _leftover("sleep")
+    try:
+        path = unit_ledger.pidfile_path(tmp_path, "worker")
+        path.parent.mkdir()
+        receipt = f"{leftover.pid}\n"
+        path.write_text(receipt)
+        owner = _root(tmp_path, "sleep", shell_exec=shell_exec)
+        with pytest.raises(RuntimeError, match=rf"cannot start worker: .*live PID {leftover.pid}"):
+            await owner.start()
+        assert _row(await owner.status())["pid"] is None
+        assert leftover.poll() is None
+        assert path.read_text() == receipt
+
+        leftover.terminate()
+        leftover.wait(timeout=5)
+        await owner.start()
+        try:
+            current = unit_ledger.read(tmp_path, "worker")
+            assert isinstance(current, OwnedProcess) and current.pid != leftover.pid
+        finally:
+            await owner.shutdown()
+    finally:
+        if leftover.poll() is None:
+            leftover.kill()
+            leftover.wait(timeout=5)

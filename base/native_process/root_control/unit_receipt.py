@@ -11,8 +11,15 @@ from base.native_process.untyped import is_object_dict, object_of
 
 def read_identity(path: Path) -> OwnedProcess | None:
     try:
-        record = object_of(json.loads, path.read_text())
-    except (FileNotFoundError, ValueError):
+        return decode_identity(path.read_text())
+    except (FileNotFoundError, UnicodeError):
+        return None
+
+
+def decode_identity(contents: str) -> OwnedProcess | None:
+    try:
+        record = object_of(json.loads, contents)
+    except ValueError:
         return None
     if not is_object_dict(record) or record.get("boot_id") != native_boot_id():
         return None

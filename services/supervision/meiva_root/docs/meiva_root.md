@@ -60,6 +60,12 @@ inside the unit's stop window, then KILL) and only then spawns its own, emitting
 it started with, and adopting it across a release is the silent drift this
 cleanup exists to end (task #5474).
 
+On upgrade from a PID-only receipt, root checks the PID and command before
+spawning a replacement. A dead or clearly unrelated process leaves a stale
+receipt that root can remove. A live process whose command matches the unit or
+whose identity is uncertain keeps its receipt and blocks the replacement.
+Verify the PID in the startup error and stop the previous unit before retrying.
+
 ## Failure-state signals
 
 How a dying unit is retried — the backoff ladder, the circuit breaker and the

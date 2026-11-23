@@ -2,7 +2,7 @@ exports = ["__main__.py", "composition.py", "field_values.py", "healthz.py", "pl
 
 [uses]
 "__init__.py" = ["healthz.py", "service_spec.py"]
-"composition.py" = ["field_values.py", "gate_plan.py", "healthz.py", "plugin_services.py", "service_spec.py"]
+"composition.py" = ["field_values.py", "gate_plan.py", "healthz.py", "listeners.py", "plugin_services.py", "service_spec.py"]
 "__main__.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]

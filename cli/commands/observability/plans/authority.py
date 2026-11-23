@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ipaddress
 
+from base.host.net.predicates import is_unspecified_address
 from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
@@ -22,16 +23,6 @@ def host_port(host: str, port: int | str) -> str:
     bare = host.strip().removeprefix("[").removesuffix("]")
     rendered = f"[{bare}]" if ":" in bare else bare
     return f"{rendered}:{port}"
-
-
-# meiva:note
-# True for the wildcard IP literals (0.0.0.0 and ::), never for a hostname.
-def is_unspecified_address(host: str) -> bool:
-    candidate = host.strip().removeprefix("[").removesuffix("]")
-    try:
-        return ipaddress.ip_address(candidate).is_unspecified
-    except ValueError:
-        return False
 
 
 # meiva:note

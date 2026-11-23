@@ -1788,7 +1788,7 @@
   "cli/commands/observability/lgtm_native.py": 19,
   "cli/commands/observability/logs.py": 18,
   "cli/commands/observability/otel_collector.py": 12,
-  "cli/commands/observability/plans/authority.py": 6,
+  "cli/commands/observability/plans/authority.py": 5,
   "cli/commands/observability/plans/collector/data_plane.py": 9,
   "cli/commands/observability/plans/collector/exporter_blocks.py": 1,
   "cli/commands/observability/plans/collector/exporters.py": 4,
