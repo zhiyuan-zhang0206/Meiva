@@ -25,9 +25,11 @@ replace only their Fleet values, preserving other plugins' cluster policy.
 Launched SDK probes also generate that complete packet before importing the SDK.
 
 Collection precedes session fixture setup. The provider roster matrix therefore
-reads its real catalog in one bounded child with a bare scratch home and an
-explicit environment. Pytest still expands and reports every model separately;
-collection neither installs parent-process policy nor loads its Settings.
+reads its real catalog in one bounded child per collecting process with a bare
+scratch home and an explicit environment. Two test modules each take alternating
+entries from that roster so file-based scheduling can run them in parallel.
+Pytest expands and reports every model separately; collection neither installs
+parent-process policy nor loads its Settings.
 
 
 ## Import isolation

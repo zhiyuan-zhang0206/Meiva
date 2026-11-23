@@ -364,6 +364,29 @@ over the selected files only, which each shard re-collects and checks before it 
 group. Every shard has the full shards' 20-minute limit. The verdict is the matrix job's
 result, which is also what the shadow report reads.
 
+The enforce-mode static lane intersects that same selected list with the Meizel
+static lane. Classify aggregates its measured node durations by file and assigns
+the longest files first to the shard with the least estimated work. The matrix
+uses the smallest number of shards that fits the total estimated work at a
+budget of 480 worker-seconds per shard, capped at eight shards and at the
+number of files. Four loadfile workers and a 120-second budget per worker leave
+room in the five-minute job target for startup, collection and reports. An
+untimed file uses the static lane's measured file-time p90 with a one-second
+floor, or ten seconds if the whole lane has no timing data. This affects
+placement and fan-out only.
+
+Classify checks that the shards cover each selected static file exactly once,
+stores their path lists in the same artifact as `tests.txt`, and passes each
+list's digest to its job. Jobs verify their lists before pytest and require
+readable JUnit. Selected static shards count skipped cases toward the minimum. A
+zero-target selection has one explicitly empty shard. Full and shadow runs retain
+eight static pytest-split shards and coverage. Every successful static shard
+publishes its validated JUnit under a unique run, classify attempt, execution
+attempt, group and plan digest. The required backend check verifies the entire
+plan, using the latest pass per group since that plan was published. A failed-job
+retry keeps passes from successful siblings under the same plan. Re-running
+classify requires a complete new set of passes.
+
 ## Duration estimates
 
 The timing input is the repository-root `.test_durations` file. It is not tracked: the daily
@@ -398,25 +421,12 @@ when it last passed can reuse that pass. `meizel test-cache` (see the checker's
 holds the key, the store and the report; this repository supplies the closures and the CI routing helper
 ([scripts/ci/pull_requests/test_cache.py](../../../scripts/ci/pull_requests/test_cache.py)).
 
-**Active PR skipping (`TEST_CACHE_MODE`).** `TEST_CACHE_MODE` under top-level `env:` in
-[ci.yml](../../../.github/workflows/ci.yml) is the single revert switch (default `"enforce"`):
-
-- **`enforce`**: `classify` probes the PR's isolated cache prefix with `lookup-only: true` and runs
-  `scripts/ci/pull_requests/test_cache.py decide`. Active skipping (`test_cache_skip == 'true'`) engages on a pull
-  request only when all of the following hold:
-  - `backend == 'true'` and `TEST_CACHE_MODE == 'enforce'`;
-  - the PR already has a PR-scoped cache entry (push #2+, so 1st pushes skip `test-cache-plan` and
-    incur zero critical-path delay while `test-cache-report` records their passing static tests);
-  - `decision != 'SELECTED'` or `selected_count >= 150` (small `SELECTED` PRs run directly without
-    waiting on `test-cache-plan`);
-  - the run is not in the deterministic **5% full-run canary** (`sha256(f"{run_id}:{run_attempt}") % 100 < 5`).
-  When `test_cache_skip == 'true'`, `test-cache-plan` computes `plan.json` and `backend-static-tests`
-  executes only `plan.run ∩ static` partitioned via `scripts/ci/pull_requests/test_cache.py shard-targets` (failing
-  open to the full static lane with a warning if `plan.json` is absent). Coverage combination and full
-  shard-count aggregation stand down on skipped runs, and continue running on `main`, 1st pushes, and
-  the 5% canary.
-- **`shadow`** (1-line revert): set `TEST_CACHE_MODE: "shadow"` in `ci.yml` to disable skipping
-  everywhere while keeping `test-cache-report` shadow reporting and baseline recording active.
+**PR cache validation.** Static tests start as soon as classify completes and
+execute the entire planned lane. `test-cache-report` computes input closures and
+possible cache hits after static execution. It compares potential hits with the
+JUnit results on every run and continues recording passes. This keeps the
+cost of computing the cache plan out of the required backend check while
+retaining data on hit value and correctness.
 
 **The closure of a test is the inverse of this selector.** `scripts/audit/input_closures.py` computes, for
 every file of the tree, the tests `select_tests` picks when that file is the only change, with the
@@ -434,8 +444,7 @@ miss; the key does not depend on the file list only through content.
 
 **What is never cached.** A native-lane test, a `flaky` test and a failure; a pass expires after 14
 days. What a key does not cover (environment variables, the clock, the network, state shared between
-test files) is the cache's residual risk; the 5% full-run canary and 1st-push shadow checks measure it
-continuously, and **`would_skip_failed` must stay empty** (`test-cache-report` emits an error
+test files) is the cache's residual risk; the shadow report compares recorded passes with real execution on every run, and **`would_skip_failed` must stay empty** (`test-cache-report` emits an error
 annotation naming the tests if any skippable test fails when run). A test that depends on an unkeyed
 input is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`.
 
@@ -444,14 +453,15 @@ input is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`
 - **`main` prefix (`test-pass-main-<run_id>-<attempt>`, path `tmp/test-cache/passes.jsonl`)**:
   written **exclusively** by `refs/heads/main` (`cache-warm.yml` incrementally seeds missing static
   passes on pushes to `main`, and the nightly / `workflow_dispatch` full run of `ci.yml` writes a
-  fresh baseline after clearing meizel's local SQLite cache without importing stale entries). Pull
-  requests never write `test-pass-main-*`.
+  fresh baseline after clearing meizel's local SQLite cache and verifying all FULL static
+  shard reports for the active plan). Pull requests never write `test-pass-main-*`.
 - **PR-isolated prefix (`test-pass-pr-<pr>-<run_id>-<attempt>`, path `tmp/test-cache/pr-passes.jsonl`)**:
   written **exclusively** by pull requests, physically scoped by GitHub Actions to `refs/pull/<pr>/merge`.
   Planning imports both `main` and PR passes; recording clears meizel's local SQLite cache, carries
   forward only that PR's prior `pr-passes.jsonl` (never `main`'s), records newly passed static tests
-  (including partial runs where another test failed), and saves a new PR cache entry only when
-  `recorded > 0`.
+  (including partial SELECTED runs where another file failed), and saves a new PR cache entry
+  only when `recorded > 0`. FULL runs require every shard to pass before publishing whole-file
+  records because pytest-split distributes cases from the same file across shards.
 
 ## Skipping e2e for changes outside the e2e inputs
 

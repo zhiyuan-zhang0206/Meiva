@@ -1,6 +1,9 @@
 exports = ["test_provider_plugins.py"]
 
 [uses]
-"test_validate_model_config.py" = ["_model_config_cases.py"]
+"model_config_process.py" = ["_model_config_cases.py"]
+"test_thinking_disabled_roster_a.py" = ["model_config_process.py"]
+"test_thinking_disabled_roster_b.py" = ["model_config_process.py"]
+"test_validate_model_config.py" = ["model_config_process.py"]
 "test_provider_key_fallback.py" = ["_provider_key_child.py"]
 "test_fresh_catalog_process.py" = ["_fresh_catalog_child.py"]

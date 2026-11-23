@@ -49,12 +49,12 @@ on every push to `main` and on manual dispatch, with
 - **Static-lane test result cache (`test-cache-plan` -> `test-cache-seed` ->
   `test-cache-save`)**: restores the latest `test-pass-main-` cache and computes
   cacheable misses with the exact same runner container digest and pytest
-  arguments as `ci.yml`'s `test-cache-plan`; when misses exist, `test-cache-seed`
+  arguments as `ci.yml`'s `test-cache-report`; when misses exist, `test-cache-seed`
   runs only the missing static tests and `test-cache-save` merges their passes
   back into `test-pass-main-<run_id>-<attempt>` (zero misses skip pytest). Pull
-  requests in `ci.yml` read `test-pass-main-` without writing PR-scoped entries,
-  and nightly full runs on `main` write a fresh baseline without importing stale
-  entries.
+  requests in `ci.yml` read `test-pass-main-` to report potential hits after static
+  execution and only write their own PR-scoped entries. Nightly full runs on
+  `main` write a fresh baseline without carrying forward stale entries.
 
 ## `workflows/ci-runner-image.yml`
 

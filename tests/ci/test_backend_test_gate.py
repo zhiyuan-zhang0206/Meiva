@@ -114,6 +114,7 @@ def _run_gate(
     minimum: int = 1,
     patterns: list[str] | None = None,
     latest: bool = False,
+    count_skipped: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     script = _ACTION["runs"]["steps"][0]["run"]
     env = {
@@ -122,6 +123,7 @@ def _run_gate(
         "JUNIT_PATTERNS": json.dumps(patterns or [str(tmp_path / "report.xml")]),
         "MIN_TESTS": str(minimum),
         "LATEST_REPORT": str(latest).lower(),
+        "COUNT_SKIPPED": str(count_skipped).lower(),
     }
     return subprocess.run(  # noqa: S603 - execute the repository action with synthetic reports
         ["bash", "-e", "-c", script], env=env, capture_output=True, text=True, check=False
@@ -187,6 +189,21 @@ def test_explicitly_empty_bucket_requires_a_valid_successful_report(tmp_path: Pa
     assert _run_gate(tmp_path, minimum=0, outcome="failure").returncode == 1
     _report(tmp_path, "", attributes='errors="1"')
     assert _run_gate(tmp_path, minimum=0).returncode == 1
+
+
+def test_selected_static_shard_accepts_an_opt_in_skip_but_still_requires_cases(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "test_opt_in.py").write_text(
+        "import pytest\n\n@pytest.mark.skip(reason='requires opt-in')\ndef test_live():\n    pass\n"
+    )
+    native = _pytest(tmp_path, "test_opt_in.py", "--junit-xml=report.xml")
+    assert native.returncode == 0, native.stdout + native.stderr
+    assert _run_gate(tmp_path, count_skipped=True).returncode == 0
+    assert _run_gate(tmp_path).returncode == 1
+
+    _report(tmp_path, "")
+    assert _run_gate(tmp_path, count_skipped=True).returncode == 1
 
 
 def test_final_attempt_is_validated_without_erasing_first_failure(tmp_path: Path) -> None:

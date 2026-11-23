@@ -215,14 +215,18 @@ def test_list_failed_jobs_empty_is_only_a_successful_query() -> None:
     assert rerun.list_failed_jobs(42, "owner/repo", host=host) == []
 
 
-def test_rerun_failed_jobs_posts_one_rerun_per_failed_job() -> None:
+@pytest.mark.parametrize(
+    ("job_name", "conclusion"),
+    [("e2e shard (3/4)", "failure"), ("backend static tests (2)", "cancelled")],
+)
+def test_rerun_failed_jobs_posts_only_the_unsuccessful_job(job_name: str, conclusion: str) -> None:
     host, calls = _fake_gh(
         [
             _sha_response(),
             _runs_response(_CI_RUN),
             _jobs_response(
-                _job("backend (1/8)", 101, 11, "success"),
-                _job("e2e shard (3/4)", 102, 11, "failure"),
+                _job("backend static tests (1)", 101, 11, "success"),
+                _job(job_name, 102, 11, conclusion),
             ),
             _R(stdout="{}"),
         ]
@@ -283,8 +287,9 @@ def test_rerun_failed_jobs_uses_run_level_for_multiple_failed_jobs() -> None:
             _sha_response(),
             _runs_response(_CI_RUN),
             _jobs_response(
-                _job("backend (1/8)", 101, 11, "failure"),
-                _job("e2e shard (3/4)", 102, 11, "failure"),
+                _job("backend static tests (2)", 101, 11, "cancelled"),
+                _job("backend (pytest + pyright)", 102, 11, "failure"),
+                _job("backend static tests (1)", 103, 11, "success"),
             ),
             _R(stdout="{}"),
         ]

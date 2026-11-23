@@ -46,12 +46,17 @@ CI_OWNED = {
     "frontend-vitest",
     "meizel-check-changed",
 }
-PREPUSH = {
+PREPUSH_MANUAL = {
     "pyright",
     "frontend-tsc",
     "frontend-eslint-full",
     "frontend-vitest",
     "meizel-check-full",
+}
+
+PREPUSH_MANUAL_LOCAL_ONLY = {
+    "lint-prepush-branch-diff",
+    "lint-prepush-artifact-freshness",
 }
 
 
@@ -60,8 +65,7 @@ PREPUSH = {
 # which returns 0 unless the repository is mid-merge, so the push stage re-declares it with
 # `--assume-in-merge`. This map is keyed by id, so the entry it holds is the push-stage one.
 PREPUSH_LOCAL_ONLY = {
-    "lint-prepush-branch-diff",
-    "lint-prepush-artifact-freshness",
+    "prepush-branch-checks",
     "lint-tests-location-full",
     "check-merge-conflict",
 }
@@ -688,8 +692,11 @@ def test_selector_import_failure_defaults_to_run() -> None:
 def test_prepush_migration_keeps_direct_ci_owners(tmp_path: Path) -> None:
     assert {
         hook_id for hook_id, hook in HOOKS.items() if hook.get("stages") == ["pre-push"]
-    } == PREPUSH | PREPUSH_LOCAL_ONLY
-    for hook_id in PREPUSH_LOCAL_ONLY:
+    } == PREPUSH_LOCAL_ONLY
+    assert {
+        hook_id for hook_id, hook in HOOKS.items() if hook.get("stages") == ["manual"]
+    } == PREPUSH_MANUAL | PREPUSH_MANUAL_LOCAL_ONLY
+    for hook_id in PREPUSH_LOCAL_ONLY | PREPUSH_MANUAL_LOCAL_ONLY:
         assert HOOKS[hook_id]["always_run"] is True
     backend = WORKFLOW["jobs"]["backend-static"]["steps"]
     frontend = WORKFLOW["jobs"]["frontend"]["steps"]

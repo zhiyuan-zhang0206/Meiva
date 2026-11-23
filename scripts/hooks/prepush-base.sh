@@ -38,19 +38,39 @@ refresh_origin_main() {
 # meiva:note
 # The message names the consequence, not just the failure: the range silently falls back to
 # the local ref, so a reader has to know what that costs to decide whether to re-run the push.
-if git rev-parse --verify -q origin/main >/dev/null; then
-    refresh_origin_main || echo "pre-push: could not refresh origin/main (waited up to ${REFRESH_LIMIT_S}s); the range uses the local ref and may include already-merged commits -- ask GitHub: gh api repos/{owner}/{repo}/commits/main" >&2
-else
-    # No local ref at all: the refresh is not optional now, and the check below reports it.
-    refresh_origin_main || true
+resolve_base() {
+    if git rev-parse --verify -q origin/main >/dev/null; then
+        refresh_origin_main || echo "pre-push: could not refresh origin/main (waited up to ${REFRESH_LIMIT_S}s); the range uses the local ref and may include already-merged commits -- ask GitHub: gh api repos/{owner}/{repo}/commits/main" >&2
+    else
+        refresh_origin_main || true
+    fi
+
+    local origin head base
+    if ! origin=$(git rev-parse --verify -q 'origin/main^{commit}'); then
+        echo "ERROR: pre-push requires local origin/main; fetch origin main before pushing" >&2
+        return 1
+    fi
+    if ! head=$(git rev-parse --verify -q HEAD) || ! base=$(git merge-base "$origin" "$head"); then
+        echo "ERROR: pre-push cannot establish a merge-base with origin/main" >&2
+        return 1
+    fi
+    printf '%s\n' "$base"
+}
+
+if [[ "${1:-}" == --run-push-checks ]]; then
+    # Keep an unknown range visible to each hook: freshness still checks every
+    # deletion-sensitive artifact, while selectors with no safe fallback fail.
+    _MEIVA_PREPUSH_BASE="$(resolve_base)" || _MEIVA_PREPUSH_BASE=
+    export _MEIVA_PREPUSH_BASE
+    if [[ -x .venv/bin/pre-commit ]]; then
+        exec .venv/bin/pre-commit run --hook-stage manual --all-files
+    fi
+    exec pre-commit run --hook-stage manual --all-files
 fi
 
-if ! git rev-parse --verify -q origin/main >/dev/null; then
-    echo "ERROR: pre-push requires local origin/main; fetch origin main before pushing" >&2
-    exit 1
+if [[ "${_MEIVA_PREPUSH_BASE+x}" == x ]]; then
+    [[ -n "$_MEIVA_PREPUSH_BASE" ]] || exit 1
+    printf '%s\n' "$_MEIVA_PREPUSH_BASE"
+else
+    resolve_base
 fi
-if ! base=$(git merge-base origin/main HEAD) || [[ -z "$base" ]]; then
-    echo "ERROR: pre-push cannot establish a merge-base with origin/main" >&2
-    exit 1
-fi
-printf '%s\n' "$base"

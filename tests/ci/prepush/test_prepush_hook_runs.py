@@ -35,6 +35,74 @@ MODULE = ROOT / "scripts/provision/prepush_branch_diff.py"
 # The nested branch-diff run.
 
 
+def test_git_push_refreshes_origin_once_for_all_branch_checks(tmp_path: Path) -> None:
+    repo = tmp_path / "checkout"
+    init_probe_repo(repo)
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+    dispatcher = hook_table()["prepush-branch-checks"]
+    checks = [hook for hook in hook_table().values() if hook.get("stages") == ["manual"]]
+    assert len(checks) == 7
+    base_script = "scripts/hooks/prepush-base.sh"
+    (repo / base_script).parent.mkdir(parents=True)
+    shutil.copy(ROOT / base_script, repo / base_script)
+    seen = tmp_path / "seen"
+    (repo / "probe.sh").write_text(
+        f'base=$(bash {base_script}) || exit\nprintf "%s %s %s\\n" "$1" "$base" "$PRE_COMMIT_TO_REF" >> "{seen}"\n'
+    )
+    (repo / ".gitignore").write_text(".venv/\n")
+    (repo / ".pre-commit-config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {
+                        "repo": "local",
+                        "hooks": [
+                            dispatcher,
+                            *({**hook, "entry": f"bash probe.sh {hook['id']}"} for hook in checks),
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    _commit_all(repo, "base")
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/heads/main"], cwd=repo, check=True)
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    runner = repo / ".venv/bin/pre-commit"
+    runner.parent.mkdir(parents=True)
+    runner.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m pre_commit "$@"\n')
+    runner.chmod(0o755)
+    subprocess.run([str(runner), "install", "--hook-type", "pre-push"], cwd=repo, check=True)
+    trace = tmp_path / "git-trace.jsonl"
+
+    for branch in ("first", "second"):
+        (repo / "branch.txt").write_text(branch)
+        _commit_all(repo, branch)
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        result = subprocess.run(
+            ["git", "push", "origin", f"HEAD:refs/heads/{branch}"],
+            cwd=repo,
+            env={**os.environ, "GIT_TRACE2_EVENT": str(trace)},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert seen.read_text().splitlines() == [f"{hook['id']} {base} {head}" for hook in checks]
+        seen.unlink()
+
+    events = map(json.loads, trace.read_text().splitlines())
+    fetches = [
+        event["argv"]
+        for event in events
+        if event.get("event") == "start" and event["argv"][1:2] == ["fetch"]
+    ]
+    assert len(fetches) == 2
+
+
 def test_branch_lint_skips_without_precommit(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -152,7 +220,7 @@ def test_eslint_keeps_commit_hook_and_scopes_push_contribution() -> None:
     assert "stages" not in changed, "the changed-files run belongs to the commit stage"
     assert changed["entry"] == "bash scripts/hooks/precommit-eslint.sh"
     assert "pass_filenames" not in changed, "it must be handed the changed files"
-    assert whole["stages"] == ["pre-push"]
+    assert whole["stages"] == ["manual"]
     assert whole["pass_filenames"] is False
     assert whole["entry"] == ".venv/bin/python scripts/provision/prepush_frontend.py eslint"
 
