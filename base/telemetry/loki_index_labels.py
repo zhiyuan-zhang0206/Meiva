@@ -15,7 +15,7 @@ from typing import TypeGuard
 
 EVENT_STREAM_SERVICE_NAME = "unknown_service"
 
-EVENT_STREAM_RETENTION = timedelta(hours=84)
+EVENT_STREAM_RETENTION = timedelta(days=7)
 # Must match deployed Loki `querier.max_concurrent`; render validation catches
 # drift before it ships (the 2026-08-18 incident). Raised 4 to 6 with the
 # 2026-09-18 query-latency mitigation (task #3891) so queued queries drain
@@ -37,7 +37,7 @@ LOKI_MAX_QUERY_SERIES = 20000
 
 
 def retention_hours() -> int:
-    """Whole hours retained — the gateway's window clamp."""
+    """Whole hours retained by the central log store."""
 
     return int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
 
@@ -53,10 +53,11 @@ def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 
 
 def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
-    """Reject rendered Loki retention, query-capacity, or WAL-throttle drift.
+    """Validate Loki retention, machine indexing, query capacity, and WAL throttle.
 
-    Covers the global retention period, query capacity, and the WAL throttle. Every rendered native config passes through
-    here at converge time (`cli/commands/observability/lgtm_native.py`)."""
+    Every rendered native config passes through this check at converge time
+    (`cli/commands/observability/lgtm_native.py`).
+    """
 
     raw_limits_config = config["limits_config"]
     raw_querier = config["querier"]
@@ -69,6 +70,15 @@ def validate_loki_deploy_config(config: Mapping[str, object]) -> None:
         raise ValueError(
             f"Loki retention_period must be {_retention_period_str()!r}, got {retention_period!r}"
         )
+    distributor = config.get("distributor")
+    otlp_config = distributor.get("otlp_config") if _is_str_mapping(distributor) else None
+    labels = (
+        otlp_config.get("default_resource_attributes_as_index_labels")
+        if _is_str_mapping(otlp_config)
+        else None
+    )
+    if not isinstance(labels, list) or "machine" not in labels:
+        raise ValueError("Loki OTLP resource index labels must include machine")
     max_query_series = limits_config["max_query_series"]
     if max_query_series != LOKI_MAX_QUERY_SERIES:
         raise ValueError(

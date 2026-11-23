@@ -54,6 +54,22 @@ def datasources(unit: LgtmUnit) -> dict[str, str]:
     return {entry["uid"]: entry["url"] for entry in rendered["datasources"]}
 
 
+def test_grafana_provisions_bidirectional_trace_links(lgtm_unit: LgtmUnit) -> None:
+    lgtm_unit.render()
+    file = lgtm_unit.native / "config/provisioning/datasources/datasources.yml"
+    sources = {entry["uid"]: entry for entry in yaml.safe_load(file.read_text())["datasources"]}
+    to_logs = sources["tempo"]["jsonData"]["tracesToLogsV2"]
+    assert to_logs["datasourceUid"] == "loki"
+    assert to_logs["customQuery"] is True
+    assert to_logs["query"] == '{service_name=~".+"} | trace_id=~"0*$${__trace.traceId}"'
+
+    [to_trace] = sources["loki"]["jsonData"]["derivedFields"]
+    assert to_trace["datasourceUid"] == "tempo"
+    assert to_trace["matcherType"] == "label"
+    assert to_trace["matcherRegex"] == "^trace_id$"
+    assert to_trace["url"] == "$${__value.raw}"
+
+
 def test_grafana_binds_the_configured_listen_host_and_port(lgtm_unit: LgtmUnit) -> None:
     lgtm_unit.render(settings=settings_with(lgtm_grafana_listen_host=WILDCARD))
     grafana_ini = (lgtm_unit.native / "config/grafana.ini").read_text(encoding="utf-8")

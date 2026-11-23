@@ -306,13 +306,16 @@ def test_loki_renders_native_paths_loopback_listeners_and_the_deploy_invariants(
     assert config["common"]["path_prefix"] == f"{lgtm_unit.native}/data/loki"
     assert config["frontend"]["address"] == "127.0.0.1"
     labels = config["distributor"]["otlp_config"]["default_resource_attributes_as_index_labels"]
-    assert {"agent_id", "event_name"} <= set(labels)
-    assert "service.instance.id" not in labels
+    assert {"agent_id", "event_name", "machine"} <= set(labels)
+    assert {"service.instance.id", "trace_id", "span_id", "meiva.machine"}.isdisjoint(labels)
+    assert config["limits_config"]["retention_stream"] == [
+        {"selector": '{stream="archive"}', "priority": 1, "period": "8760h"}
+    ]
     for line in (
         "http_listen_address: 127.0.0.1",
         "grpc_listen_address: 127.0.0.1",
         "instance_addr: 127.0.0.1",
-        "retention_period: 84h",
+        "retention_period: 168h",
         "disk_full_threshold: 0.95",
         "max_query_series: 20000",
         "query_timeout: 50s",
@@ -321,6 +324,10 @@ def test_loki_renders_native_paths_loopback_listeners_and_the_deploy_invariants(
     ):
         assert line in loki
     validate_loki_deploy_config(config)
+
+    labels.remove("machine")
+    with pytest.raises(ValueError, match="index labels must include machine"):
+        validate_loki_deploy_config(config)
 
 
 def scrape_targets(unit: LgtmUnit) -> dict[str, list[str]]:

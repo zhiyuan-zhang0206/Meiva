@@ -40,7 +40,7 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
+| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native, `meiva-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | native, `meiva-root` service | 3.1.1 / `GOMEMLIMIT=600MiB` | 3200 HTTP, 14318 OTLP/HTTP, 9096 internal gRPC | trace backend, local blocks and WAL, 168h retention |
 | Grafana | native, `meiva-root` service | 13.2.3 | 3003 | anonymous read-only UI |
@@ -126,13 +126,31 @@ before they reach Loki, Prometheus, or Tempo.
 
 ## Resource and retention posture
 
-Loki, Prometheus, and Tempo use explicit Go memory limits. Loki retains normal streams for 84 hours, preserves the configured
-archive-stream exception, and keeps bounded query splitting, fan-out, and
-embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
-limit is reached first. `MEIVA_LGTM_TEMPO_RETENTION_HOURS` defaults to 168
-hours to preserve the station's one-week trace investigation window and disk
-budget. Each native backend's
-stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
+Loki, Prometheus, and Tempo use a seven-day troubleshooting window. Loki
+enforces 168 hours for current telemetry and preserves the historical archive
+stream at its configured retention. Prometheus expires the oldest blocks
+when it reaches either seven days or the 8 GB disk cap. Tempo's
+`MEIVA_LGTM_TEMPO_RETENTION_HOURS` defaults to 168 hours. Loki, Prometheus,
+and Tempo use explicit Go memory limits, and Loki bounds query splitting,
+parallelism, and result-cache size.
+
+The collector stamps local logs (including filelog), metrics, and traces with
+the roster identity in the `meiva.machine` resource attribute. Relays preserve
+the origin. Use `{machine="ubuntu"}` to select new Loki streams,
+`{machine="ubuntu"}` as a matcher on Prometheus series, and
+`{ resource.meiva.machine = "ubuntu" }` in TraceQL. Historical Loki streams and
+Prometheus series keep their ingest-time labels. Infrastructure dashboards and
+alerts include legacy `machine_name` samples under the same roster identity.
+Within a query window and group they prefer usable samples with `machine`.
+This keeps offline and not-yet-upgraded Collectors visible while the fleet
+rolls forward. Keep the fallback while old samples remain in the retained
+Prometheus window.
+
+In Grafana Explore, select **View trace** on a Loki entry with `trace_id` to
+open Tempo. A span's related logs link queries Loki for the same trace ID
+within the span's time range, padded by two seconds at each end.
+
+Each native backend's stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
 is `loki`, `prometheus`, `tempo`, or `grafana`); Grafana's own log files are written to
 `$MEIVA_HOME/lgtm/native/logs/`.
 

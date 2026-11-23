@@ -2,17 +2,17 @@
 # main flow). Converge renders the scrape targets from the telemetry read URLs,
 # so a widened listen host plus a consistent MEIVA_TELEMETRY_*_URL keeps
 # self-scrape working. Meiva's own series arrive by OTLP push
-# (--web.enable-otlp-receiver in the native service arguments); retention is
-# set there too (180h time / 8GB size).
+# (--web.enable-otlp-receiver in the native service arguments); retention
+# is set there too: seven days cover the troubleshooting window, and 8 GB
+# bounds the TSDB on the shared observability host.
 #
 # There is no node_exporter here and there will not be one: host metrics
 # (issue #46) arrive on the same OTLP push, scraped by each machine's own OTel
 # Collector sidecar (`host_metrics` receiver, plus `postgresql` + `redis` on a
 # gateway unit). One already-pinned binary per machine instead of three more,
 # and the same path for a remote runner that this Prometheus cannot scrape.
-# Those series land under `job="meiva-infra"` with `host` (OS hostname / physical
-# identity) and `machine_name` (Meiva roster identity); consumers group by the
-# latter.
+# Those series land under `job="meiva-infra"` with `host_name` (OS hostname)
+# and `machine` (Meiva roster identity). Consumers group by `machine`.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s

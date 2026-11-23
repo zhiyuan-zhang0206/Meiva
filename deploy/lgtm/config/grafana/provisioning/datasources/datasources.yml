@@ -17,12 +17,28 @@ datasources:
     isDefault: false
     jsonData:
       httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-2s'
+        spanEndTimeShift: '2s'
+        customQuery: true
+        # Use the trace ID across machines and services. Loki stores it as structured metadata.
+        # Tempo search can trim leading zeros from trace IDs. Loki OTLP keeps all 32 digits.
+        query: '{service_name=~".+"} | trace_id=~"0*$${__trace.traceId}"'
 
   - name: Loki
     uid: loki
     type: loki
     access: proxy
     url: $__env{MEIVA_TELEMETRY_LOKI_URL}
+    jsonData:
+      derivedFields:
+        - name: Trace ID
+          matcherType: label
+          matcherRegex: '^trace_id$'
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace
 
   - name: Prometheus
     uid: prometheus

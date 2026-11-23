@@ -180,6 +180,25 @@ processors:
     logs:
       log_record:
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
+  # Stamp origin identity on data collected locally. Remote pipelines preserve
+  # the resource identity the sending collector already attached.
+  resource/meiva_machine:
+    attributes:
+      - key: meiva.machine
+        value: $MACHINE_NAME
+        action: upsert
+  # Loki keeps resource labels under their normalized names. Copy the roster
+  # identity here to expose the same `machine` selector as Prometheus.
+  resource/loki_machine:
+    attributes:
+      - key: machine
+        from_attribute: meiva.machine
+        action: upsert
+  transform/metric_machine:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["machine"], resource.attributes["meiva.machine"])
   # Session-log labeling (filelog receivers; per-file
   # service label): service.name <- the file's session name (strip .out.log),
   # guarded so event logs (no log.file.name) pass through untouched.
@@ -198,16 +217,9 @@ processors:
     send_batch_max_size: 1024
     timeout: 5s
 
-  # The infra pipeline's extra processors. host_metrics/postgresql/redis carry
-  # no host identity of their own, so detection supplies host.name and the
-  # transform puts both identities on every datapoint: `host` is the OS
-  # hostname (physical identity), and `machine_name` is the Meiva roster identity
-  # baked from this unit at converge via $MACHINE_NAME (macmini / macbook-air /
-  # company-mini / ...). One label per meaning; dashboards and alert rules group by
-  # `machine_name`. App metrics already carry `machine` / `agent_id`, and this
-  # transform cannot touch them because it sits on the infra pipeline only.
-  # Datapoint attributes are required: resource attributes land in
-  # Prometheus's `target_info`, where alert expressions cannot select on them.
+  # The infra pipeline detects the physical host and exposes it separately
+  # from the roster identity. Prometheus needs these names on datapoints,
+  # because unpromoted resource attributes are only available in target_info.
   resource_detection/host:
     detectors: [system]
     system:
@@ -224,8 +236,7 @@ processors:
     metric_statements:
       - context: datapoint
         statements:
-          - set(attributes["host"], resource.attributes["host.name"])
-          - set(attributes["machine_name"], $MACHINE_NAME)
+          - set(attributes["host.name"], resource.attributes["host.name"])
           # Interim fix (2026-08-28, #1818): postgresqlreceiver keys its rows by
           # resource attributes; Prometheus 3.x's OTLP receiver keeps resource
           # attrs out of series labels (they land in target_info), so all index
@@ -301,19 +312,24 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, filter/cluster_allow, batch]
+      processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER, filelog/sessions, filelog/services]
-      processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
+      receivers: [otlp, filelog/sessions, filelog/services]
+      processors:
+        - memory_limiter
+        - filter/cluster_allow
+        - resource/meiva_machine
+        - resource/loki_machine
+        - transform/promote_event_labels
+        - transform/filelog_service
+        - batch
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp$REMOTE_OTLP_PIPELINE_RECEIVER]
-      processors: [memory_limiter, filter/cluster_allow, batch]
+      receivers: [otlp]
+      processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, transform/metric_machine, batch]
       exporters: [otlphttp/prometheus]
-    # Infra metrics ride their own pipeline so the host-identity processors
-    # touch only them: app metrics already carry `machine`/`agent_id`
-    # datapoint attributes from the emitter and must not be relabelled.
+    # Infra receivers also need OS detection and data-plane dimensions.
     metrics/infra:
       receivers: [host_metrics, prometheus/otelcol$DATA_PLANE_PIPELINE_RECEIVERS]
       processors:
@@ -321,8 +337,10 @@ service:
           memory_limiter,
           resource_detection/host,
           resource/infra,
+          resource/meiva_machine,
+          transform/metric_machine,
           transform/host_label,
           batch,
         ]
       exporters: [otlphttp/prometheus]
-$REMOTE_TRACE_PIPELINE
+$REMOTE_OTLP_PIPELINES

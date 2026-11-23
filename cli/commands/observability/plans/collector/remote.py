@@ -26,7 +26,16 @@ __all__ = [
     "remote_receiver_fragments",
 ]
 
-_REMOTE_TRACE_PIPELINE = """
+_REMOTE_OTLP_PIPELINES = """
+    # Relays keep the origin collector's resource and datapoint identities.
+    logs/remote:
+      receivers: [otlp/remote]
+      processors: [memory_limiter, filter/cluster_allow, transform/promote_event_labels, transform/filelog_service, batch]
+      exporters: [otlphttp/loki]
+    metrics/remote:
+      receivers: [otlp/remote]
+      processors: [memory_limiter, filter/cluster_allow, batch]
+      exporters: [otlphttp/prometheus]
     # A remote peer already writes its own durable trace mirror. The remote
     # pipeline therefore fans out only to Tempo; adding file/traces here
     # duplicates every remote span in the local mirror and makes replay
@@ -102,11 +111,10 @@ class RemoteFragments:
     receiver: str
     auth_extension: str
     auth_service_extension: str
-    pipeline_receiver: str
-    trace_pipeline: str
+    pipelines: str
 
 
-NO_REMOTE_INGRESS = RemoteFragments("", "", "", "", "")
+NO_REMOTE_INGRESS = RemoteFragments("", "", "", "")
 
 
 # meiva:note
@@ -138,6 +146,5 @@ def remote_receiver_fragments(
     token: {yaml_quote(token)}
 """,
         auth_service_extension=", bearertokenauth/cluster",
-        pipeline_receiver=", otlp/remote",
-        trace_pipeline=_REMOTE_TRACE_PIPELINE,
+        pipelines=_REMOTE_OTLP_PIPELINES,
     )

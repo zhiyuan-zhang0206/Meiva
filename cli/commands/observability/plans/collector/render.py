@@ -57,7 +57,6 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "REMOTE_OTLP_RECEIVER": values.remote.receiver,
         "CLUSTER_AUTH_EXTENSION": values.remote.auth_extension,
         "CLUSTER_AUTH_SERVICE_EXTENSION": values.remote.auth_service_extension,
-        "REMOTE_OTLP_PIPELINE_RECEIVER": values.remote.pipeline_receiver,
-        "REMOTE_TRACE_PIPELINE": values.remote.trace_pipeline,
+        "REMOTE_OTLP_PIPELINES": values.remote.pipelines,
     }
     return Template(template).substitute(substitutions)
