@@ -140,7 +140,7 @@ async def test_idle_timer_without_a_reply_releases_waiting_input_on_the_same_pee
         await harness.wait_for_type(TurnCompleted)
         pid = harness.session.cli_pid
         await release_timer(harness)
-        command = "late-timer" if late_reply else "next"
+        command = "late-timer" if late_reply else "next-without-planner"
         done = await _next_prompt(harness, command)
         if late_reply:
             native = await harness.wait_for(
@@ -216,13 +216,72 @@ async def test_timer_expiry_preserves_fresh_foreground(
             )
         )
         assert isinstance(done, TurnCompleted), done
-        assert done.text == "FRESH"
         assert not done.usage_uncertain
-        expected = Usage(240, 3, 0, 30) if case == "timer-no-usage" else Usage(40, 5, 0, 30)
+        assert done.text == ("ACTUAL_FOREGROUND" if case == "timer-no-usage" else "FRESH")
+        expected = Usage(280, 6, 0, 60) if case == "timer-no-usage" else Usage(40, 5, 0, 30)
         assert done.usage == expected
         assert not any(
             isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
         )
         assert harness.session.cli_pid == pid
+    finally:
+        await harness.stop()
+
+
+async def test_pending_timer_allows_two_steered_terminals_with_separate_receipts(
+    tmp_path: Path,
+) -> None:
+    harness = await start(
+        tmp_path,
+        extra_args=(
+            "--test-overlap",
+            "--test-early-hub",
+            "--test-timer-before-steer",
+            "--test-terminal-before-steer",
+        ),
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        first = await harness.wait_for(
+            lambda e: isinstance(e, AssistantText) and e.text == "FIRST_DONE"
+        )
+        await release_timer(harness)
+        await harness.session.deliver([HarnessInput.of("steer", "steer")])
+        harness.release("release-steer")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == first.turn_id
+        )
+        assert done.text == "FIRST_DONE\nSTEER_DONE"
+        assert done.usage == Usage(95, 11, 0, 60) and not done.usage_uncertain
+        assert not any(
+            isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
+        )
+        assert harness.session.background_work().items
+    finally:
+        await harness.stop()
+
+
+async def test_late_timer_text_cannot_own_a_textless_prompt_without_usage(tmp_path: Path) -> None:
+    harness = await start(tmp_path, extra_args=("--test-early-hub",), reply_seconds=0.25)
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        await release_timer(harness)
+        await harness.session.deliver([HarnessInput.of("textless", "late-timer-textless:end_turn")])
+        begun = await harness.wait_for(
+            lambda e: isinstance(e, TurnStarted) and e.keys == ("textless",)
+        )
+        await harness.wait_for_marker("textless-stop-sent")
+        harness.release("release-blank")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
+        )
+        assert done.text == ""
+        assert not any(
+            isinstance(e, AssistantText) and e.turn_id == begun.turn_id for e in harness.events
+        )
+        assert not any(isinstance(e, SessionFailed) for e in harness.events)
     finally:
         await harness.stop()

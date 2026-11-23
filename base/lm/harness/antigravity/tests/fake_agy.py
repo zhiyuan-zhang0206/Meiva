@@ -107,6 +107,23 @@ def finish_steer(request: int, transcript: Path) -> None:
 
 
 def finish_timer_steer(request: int, transcript: Path) -> None:
+    if "--test-terminal-before-steer" in sys.argv:
+        record(transcript, {**planner_row("STEER_DONE", tokens=25), "output_tokens": 4})
+        message("STEER_DONE")
+        frame(
+            {
+                "id": request,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        **USAGE,
+                        "inputTokens": 25,
+                        "outputTokens": 4,
+                    },
+                },
+            }
+        )
+        return
     finish_background(transcript, early_notice=True, early_planner=False)
     record(transcript, planner_row("STEER_DONE"))
     message("STEER_DONE")
@@ -386,9 +403,37 @@ def foreground_with_preamble(transcript: Path, request: int) -> None:
 
 def timer_review_prompt(transcript: Path, request: int, command: str) -> None:
     case, reason = command.split(":", 1)
+    if case == "late-timer-textless":
+        record(transcript, planner_row("LATE_TIMER", tokens=237))
+        message("LATE_TIMER")
+        result(request, reason, usage=False)
+        Path("textless-stop-sent").touch()
+        after_release(
+            Path("release-blank"),
+            lambda: record(transcript, {**planner_row(None), "output_tokens": 0}),
+        )
+        return
+    if case == "timer-no-usage":
+        timer_tool_foreground(transcript, request, reason)
+        return
     record(transcript, planner_row("FRESH", tokens=210))
     message("FRESH")
-    result(request, reason, usage=case == "child-fence")
+    result(request, reason)
+
+
+def timer_tool_foreground(transcript: Path, request: int, reason: str) -> None:
+    record(
+        transcript,
+        {
+            **planner_row(None),
+            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 8"}}],
+        },
+    )
+    beginning_of_tool()
+    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    record(transcript, planner_row("ACTUAL_FOREGROUND", tokens=210))
+    message("ACTUAL_FOREGROUND")
+    result(request, reason, usage=False)
 
 
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
@@ -508,6 +553,10 @@ def foreground_first(transcript: Path, request: int) -> None:
 
 
 def hold_prompt(transcript: Path, command: str) -> None:
+    if "--test-terminal-before-steer" in sys.argv:
+        record(transcript, planner_row("FIRST_DONE"))
+        message("FIRST_DONE")
+        return
     if "--test-child" in sys.argv:
         child = subprocess.Popen(("/bin/sleep", "120"), start_new_session=True)
         _ = Path("child.pid").write_text(str(child.pid))
@@ -554,7 +603,10 @@ def complete_steer(transcript: Path, request: int) -> None:
 
 
 def regular_prompt(transcript: Path, request: int, command: str) -> None:
-    if command.startswith(("child-fence:", "timer-no-usage:")):
+    if command == "next-without-planner":
+        message("OK")
+        result(request)
+    elif command.startswith(("child-fence:", "timer-no-usage:", "late-timer-textless:")):
         timer_review_prompt(transcript, request, command)
     else:
         plain_prompt(transcript, request, command)

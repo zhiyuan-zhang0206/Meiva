@@ -239,9 +239,17 @@ def _witnesses(
     if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
     sole_carried_terminal = _has_sole_carried_terminal(known, possible)
+    terminals = {step.index for step in possible if step.final}
     for extra in _receipt_candidates(possible, sole_carried_terminal=sole_carried_terminal):
         span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-        if _matches_reports(span, reports, keys):
+        if not _matches_reports(span, reports, keys):
+            continue
+        if (
+            sole_carried_terminal
+            or not extra
+            or terminals.difference(step.index for step in extra)
+            or _matches_carried_receipts(span, extra, reports, keys)
+        ):
             yield span
 
 
@@ -252,15 +260,29 @@ def _receipt_candidates(
         if sole_carried_terminal:
             yield possible
         return
-    terminals = {step.index for step in possible if step.final}
     for count in range(len(possible) + 1):
-        for extra in combinations(possible, count):
-            if (
-                sole_carried_terminal
-                or not extra
-                or terminals.difference(step.index for step in extra)
-            ):
-                yield extra
+        yield from combinations(possible, count)
+
+
+def _matches_carried_receipts(
+    span: Sequence[PlannerRow],
+    extra: Sequence[PlannerRow],
+    reports: Sequence[PromptUsage],
+    keys: Sequence[str],
+) -> bool:
+    if (
+        len(keys) <= 1
+        or len(reports) != len(keys)
+        or not all(step.carries_notice for step in extra)
+    ):
+        return False
+    for key, report in zip(keys, reports, strict=True):
+        steps = tuple(step for step in span if step.input_key == key)
+        if not steps or not steps[-1].terminal:
+            return False
+        if sum((planner_tokens(step.row) for step in steps), Usage()) != _visible(report):
+            return False
+    return True
 
 
 def _has_sole_carried_terminal(
@@ -357,13 +379,8 @@ class PromptTurn:
             seen=frozenset(index for index, field, _ in projection.seen if field == "content"),
         )
 
-    def require_projection(
-        self, *, required: bool, late_timer_offset: int | None = None
-    ) -> OutputProjection | None:
-        if not required and late_timer_offset is None:
-            return None
-        offset = self.transcript_offset if late_timer_offset is None else late_timer_offset
-        return OutputProjection(offset, fences_replay=required)
+    def require_projection(self, *, required: bool) -> OutputProjection | None:
+        return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
 
     def prove_projection(
         self,
@@ -430,20 +447,20 @@ class PromptTurn:
         if (
             not known
             and expired is not None
-            and self._proves_text_only_span(possible, projection, expired)
+            and self._proves_tool_span(possible, projection, expired)
         ):
             return possible, ()
         return None
 
-    def _proves_text_only_span(
+    def _proves_tool_span(
         self,
         possible: tuple[PlannerRow, ...],
         projection: OutputProjection,
         expired: Callable[[str, str], bool],
     ) -> bool:
-        if len(possible) != 1:
+        if len(possible) < 2:
             return False
-        (step,) = possible
+        step = possible[-1]
         notice = step.notice
         return (
             notice is not None
@@ -452,6 +469,8 @@ class PromptTurn:
             and expired(notice.sender, notice.prompt)
             and step.final
             and self._proves_end(step)
+            and all(candidate.input_key == step.input_key for candidate in possible)
+            and projection.corroborates_tool_chain(possible[:-1])
             and self._stop_text.corroborates(possible, possible)
         )
 
@@ -496,7 +515,7 @@ class PromptTurn:
     ) -> bool:
         if self.verified_steps is not None:
             return True
-        if self.stop_reason == "end_turn" and not self._latest_marker_recorded(rows):
+        if self.stop_reason != "cancelled" and not self._latest_marker_recorded(rows):
             return False
         return self._projection_frames_ready(projection, rows)
 
@@ -528,9 +547,7 @@ class PromptTurn:
         reason = self.stop_reason
         if reason is None or self.projection_ready(projection, rows):
             return reason
-        if reason != "end_turn" or monotonic() < self.stop_deadline:
-            return None
-        if not self._latest_marker_recorded(rows):
+        if monotonic() < self.stop_deadline or not self._latest_marker_recorded(rows):
             return None
         scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
         owned = tuple(step for step in scope if projection.owns(step))

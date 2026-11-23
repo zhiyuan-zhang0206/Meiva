@@ -389,6 +389,28 @@ class OutputProjection:
             or any(item.get("toolCallId") == tool_id for item in self.pending)
         )
 
+    def corroborates_tool_chain(self, steps: Sequence[PlannerRow]) -> bool:
+        calls = [tuple(_calls(step.row)) for step in steps]
+        if not all(calls):
+            return False
+        expected = tuple(call for group in calls for call in group)
+        completed = {
+            frame.get("toolCallId")
+            for frame in self.pending
+            if isinstance(frame.get("toolCallId"), str)
+            and frame.get("status") in ("completed", "failed")
+        }
+        observed = tuple(
+            frame
+            for frame in self.pending
+            if frame.get("sessionUpdate") == "tool_call"
+            and isinstance(tool_id := frame.get("toolCallId"), str)
+            and tool_id in completed
+        )
+        return len(expected) == len(observed) and all(
+            _matches_call(frame, call) for frame, call in zip(observed, expected, strict=True)
+        )
+
     def project(self, rows: Sequence[Frame]) -> Iterator[ProjectedFrame]:
         steps = self.steps(rows)
         while self.pending:
@@ -663,7 +685,7 @@ class IdleReplies:
             self.offset = len(TranscriptSnapshot.for_session(session_id, home=home).rows)
 
     def changed(
-        self, session_id: str | None, *, home: Path | None, projecting: bool
+        self, session_id: str | None, *, home: Path | None, projecting: bool, force: bool = False
     ) -> TranscriptSnapshot | None:
         if not (self.pending or projecting) or session_id is None:
             return None
@@ -671,7 +693,7 @@ class IdleReplies:
         if path is None:
             return None
         signature = RecordFile(path).watch_signature()
-        if signature is None or signature == self._signature:
+        if signature is None or (not force and signature == self._signature):
             return None
         self._signature = signature
         return TranscriptSnapshot.read(path)

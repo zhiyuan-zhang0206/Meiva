@@ -285,10 +285,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             turn = PromptTurn(ticket, len(self._transcript().rows))
             if self._projection is None:
                 required = self._resume_projection or self._subagents.has_children(self._session_id)
-                offset = self._idle_replies.offset if self._schedules.reply_expired else None
-                self._projection = turn.require_projection(
-                    required=required, late_timer_offset=offset
-                )
+                self._projection = turn.require_projection(required=required)
             self._resume_projection = False
             self._prompt_turn = turn
             ticket.started_at = self._monotonic()
@@ -544,11 +541,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     turn.ticket.turn_id, monotonic_now=self._monotonic()
                 )
 
-    def _replay_idle(self) -> None:
+    def _replay_idle(self, *, force: bool = False) -> None:
         projection = self._projection
         if (
             transcript := self._idle_replies.changed(
-                self._session_id, home=self._home, projecting=projection is not None
+                self._session_id, home=self._home, projecting=projection is not None, force=force
             )
         ) is None:
             return
@@ -692,6 +689,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._schedules, expired = self._schedules.expire_replies(now)
         if expired:
             self._schedule_changed()
+            if turn is None:
+                self._replay_idle(force=True)
             logger.warning(
                 "Expired agy ACP timer keepalive without a verified reply",
                 event="agy_acp_timer_reply_expired",

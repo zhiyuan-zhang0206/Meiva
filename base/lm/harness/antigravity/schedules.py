@@ -58,7 +58,7 @@ class Schedules:
     reply_wait_seconds: float = BACKGROUND_REPLY_SECONDS
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
-    expired_replies: frozenset[tuple[str, str | None]] = frozenset()
+    expired_replies: tuple[tuple[str, str | None], ...] = ()
 
     def tool_used(
         self,
@@ -222,10 +222,6 @@ class Schedules:
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
-    @property
-    def reply_expired(self) -> bool:
-        return bool(self.expired_replies)
-
     def expire_replies(self, now: float) -> tuple[Schedules, int]:
         expired = tuple(
             timer
@@ -235,7 +231,7 @@ class Schedules:
         if not expired:
             return self, 0
         remaining = self._remove_detached({timer.tool_id for timer in expired})
-        identities = self.expired_replies.union((timer.prompt, timer.task_id) for timer in expired)
+        identities = (*self.expired_replies, *((timer.prompt, timer.task_id) for timer in expired))
         return replace(remaining, expired_replies=identities), len(expired)
 
     def is_expired_reply(self, sender: str, prompt: str) -> bool:
@@ -248,10 +244,8 @@ class Schedules:
         for timer in pending:
             if timer.task_id == sender:
                 return self._remove_detached({timer.tool_id})
-        if self.is_expired_reply(sender, prompt) or any(
-            task_id == sender for _, task_id in self.expired_replies
-        ):
-            return self
+        if (seen := self._consume_expired_reply(sender, prompt, pending, now=now)) is not None:
+            return seen
         candidates = tuple(
             timer
             for timer in pending
@@ -260,6 +254,30 @@ class Schedules:
             and (timer in self.replies or timer.due <= now)
         )
         return self._remove_detached({candidates[0].tool_id}) if len(candidates) == 1 else self
+
+    def _consume_expired_reply(
+        self, sender: str, prompt: str, pending: tuple[_DetachedTimer, ...], *, now: float
+    ) -> Schedules | None:
+        for index, (_, task_id) in enumerate(self.expired_replies):
+            if task_id == sender:
+                return self._forget_expiration(index)
+        key = (prompt, None)
+        if key not in self.expired_replies:
+            return None
+        if any(
+            timer.prompt == prompt
+            and timer.task_id is None
+            and (timer in self.replies or timer.due <= now)
+            for timer in pending
+        ):
+            return self
+        return self._forget_expiration(self.expired_replies.index(key))
+
+    def _forget_expiration(self, index: int) -> Schedules:
+        return replace(
+            self,
+            expired_replies=(*self.expired_replies[:index], *self.expired_replies[index + 1 :]),
+        )
 
     def _remove_detached(self, tool_ids: set[str]) -> Schedules:
         return replace(

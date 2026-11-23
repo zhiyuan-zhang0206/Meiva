@@ -93,7 +93,7 @@ native notice. Available planner usage stays on its own turn, and incomplete
 counts are marked uncertain. A current textless terminal row can close a
 prompt despite unmatched replay. Cancellation settles proved foreground
 evidence immediately, preserving recorded text and usage. At the attribution
-deadline, a successful ACP response with its current input marker in the
+deadline, a terminal ACP response with its current input marker in the
 transcript can settle with only attributed foreground output. The adapter logs
 `agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
 planner rows quarantined for native attribution. A pending notice from a
@@ -110,11 +110,14 @@ the same interleaved chunk matcher as live projection. A sole terminal must
 account for all remaining text with its own span. When independent terminals
 exist, other planner rows can account for skipped chunks in either order.
 Above the subset limit, only the whole span is tested. The notice remains
-pending for a separate native reply. A current ACP stop with no usage can
-also verify one terminal planner row when the entire buffered assistant text
-matches it and the timer notice was already present before this prompt and
-matches an expired timer. Independent candidates still need distinguishing
-evidence. Missing input evidence retains the attribution failure.
+pending for a separate native reply. A steer can verify multiple foreground
+terminals through unique receipt matches scoped to the individual input
+markers. With usage omitted, a carried expired timer notice can be bypassed
+by a current marker's unique tool-and-reply span. Each step before its
+terminal must have a matching completed ACP tool call, and the buffered text
+must corroborate the reply. A lone unkeyed text match and competing planner
+candidates remain provisional. Missing input evidence retains the attribution
+failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
@@ -139,13 +142,15 @@ schedule tool result can also represent an early provider cancellation. When
 a deadline passes without a verified reply, the adapter removes only the
 expired timers from the keepalive record, wakes any waiting dispatch, and logs
 `agy_acp_timer_reply_expired`. It continues to use transcript evidence for
-unkeyed output on that process, carrying unresolved timer notices across
-input markers so a late reply can still be attributed to its native turn.
+unkeyed output while an unresolved timer notice is on disk. An expiry
+without a notice releases the idle projection when no other work requires it.
 The task ID takes precedence when releasing a timer. A prompt can release
 only one eligible timer without a task ID, provided no expired timer makes
-that match ambiguous. Timers without sufficient identity evidence keep
-their own deadline. Cron-like calls retain the existing one-day bound. Timers also supply the
-foreground watchdog's silence floor while a prompt is active. See
+that match ambiguous. A verified late reply consumes its expiry record when
+its identity is distinguishable from live timers. Timers without sufficient
+identity evidence keep their own deadline. Cron-like calls retain the existing
+one-day bound. Timers also supply the foreground watchdog's silence floor while
+a prompt is active. See
 [background work](../../docs/background-work.md).
 
 The local, read-only `GetCascadeTrajectory` RPC remains the source of live
