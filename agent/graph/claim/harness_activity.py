@@ -30,10 +30,13 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
     catalog = ctx.require_catalog()
     pricing_model = resolve_pricing_model(model or ctx.require_agent().brain.llm_model, catalog)
     source = ctx.harness.value
-    identity = f"harness:{source}:{agent_id}:{turn.session_id or ''}:{turn.turn_id}"
+    identity = (
+        f"harness:{source}:{agent_id}:{turn.session_id or ''}:{turn.generation}:{turn.turn_id}"
+    )
     now = ctx.require_clock().now()
-    try:
-        for index, (step_usage, calls) in enumerate(entries):
+    write_error: UsageLedgerWriteError | None = None
+    for index, (step_usage, calls) in enumerate(entries):
+        try:
             fields = UsageFields(
                 tok_in=step_usage.input_tokens,
                 tok_out=step_usage.output_tokens,
@@ -53,30 +56,34 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
                 catalog=catalog,
                 now=now,
             )
-    except UsageLedgerWriteError:
-        raise
-    except Exception as error:
-        # meiva:note
-        # A bill that cannot be priced is a hole in an accounting row; the reply it
-        # describes is real either way. The turn has already finished by the time it
-        # is logged, so a raise here deletes a reply the user paid for — a provider
-        # that reports token counts in a shape the price book rejects must not cost
-        # the answer, and the recorded warning keeps the gap visible.
-        # meiva:link agent/graph/docs/harness-turn.md
-        logger.warning(
-            "[{label}] {body}",
-            label="harness",
-            event="harness_usage_log_failed",
-            body=(
-                f"agent {agent_id}'s {ctx.harness.value} turn finished but its usage could not be "
-                f"priced: {error!r}"
-            ),
-            agent_id=agent_id,
-            tok_in=usage.input_tokens,
-            tok_out=usage.output_tokens,
-            tok_cached=usage.cache_read_input_tokens,
-            cache_write=usage.cache_creation_input_tokens,
-        )
+        except UsageLedgerWriteError as error:
+            if write_error is None:
+                write_error = error
+        except Exception as error:
+            # meiva:note
+            # A bill that cannot be priced is a hole in an accounting row; the reply it
+            # describes is real either way. The turn has already finished by the time it
+            # is logged, so a raise here deletes a reply the user paid for — a provider
+            # that reports token counts in a shape the price book rejects must not cost
+            # the answer, and the recorded warning keeps the gap visible.
+            # meiva:link agent/graph/docs/harness-turn.md
+            logger.warning(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_usage_log_failed",
+                body=(
+                    f"agent {agent_id}'s {ctx.harness.value} turn finished but its usage could not be "
+                    f"priced: {error!r}"
+                ),
+                agent_id=agent_id,
+                tok_in=usage.input_tokens,
+                tok_out=usage.output_tokens,
+                tok_cached=usage.cache_read_input_tokens,
+                cache_write=usage.cache_creation_input_tokens,
+            )
+
+    if write_error is not None:
+        raise write_error
 
 
 def _reported_units(turn: HarnessTurn) -> list[tuple[Usage, int]]:

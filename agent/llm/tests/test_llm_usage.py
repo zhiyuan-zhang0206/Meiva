@@ -9,17 +9,24 @@ usage_metadata.{input,output}_token_details.
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
 from agent.llm.usage import log_llm_usage
+from base.api_contracts.usage import UsageLedgerConflictError
+from base.db import Database
+from base.db.usage_ledger import bind_usage_ledger
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_mapping
 from base.host.proc import run_bounded
+from base.lm.usage.metering import LlmUsageMeter
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -446,3 +453,62 @@ def test_missing_cache_metering_differs_from_a_measured_zero(
     else:
         assert extra["cache_read"] == cached
         assert f"cached={cached}" in message
+
+
+def _usage_message(request_id: str | None = None, *, tokens: int = 100) -> AIMessage:
+    return AIMessage(
+        content="reply",
+        response_metadata={"request_id": request_id} if request_id is not None else {},
+        usage_metadata={"input_tokens": tokens, "output_tokens": 10, "total_tokens": tokens + 10},
+    )
+
+
+def test_provider_request_replay_preserves_first_report(database: Database) -> None:
+    home = meiva_home()
+    ledger = bind_usage_ledger(lambda: database, lambda: "test", home)
+    catalog = replace(build_model_catalog(home=home), usage_ledger=lambda: ledger)
+    later = _NOW + timedelta(days=1)
+    log_llm_usage(
+        _usage_message("request-1"), "deepseek-v4-pro", agent_id=7, catalog=catalog, now=_NOW
+    )
+    log_llm_usage(
+        _usage_message("request-1"), "deepseek-v4-pro", agent_id=7, catalog=catalog, now=later
+    )
+    log_llm_usage(
+        _usage_message("request-2"), "deepseek-v4-pro", agent_id=7, catalog=catalog, now=later
+    )
+    with pytest.raises(UsageLedgerConflictError):
+        log_llm_usage(
+            _usage_message("request-1", tokens=101),
+            "deepseek-v4-pro",
+            agent_id=7,
+            catalog=catalog,
+            now=later,
+        )
+    with database.connect() as conn:
+        rows = conn.execute(
+            "SELECT provider_request_id, occurred_at, tokens_in FROM llm_usage_ledger "
+            "WHERE agent_id = 7 ORDER BY provider_request_id"
+        ).fetchall()
+    assert rows == [("request-1", _NOW, 100), ("request-2", later, 100)]
+
+
+def test_callback_replay_of_rebuilt_result_preserves_first_report(
+    database: Database,
+) -> None:
+    home = meiva_home()
+    ledger = bind_usage_ledger(lambda: database, lambda: "test", home)
+    catalog = replace(build_model_catalog(home=home), usage_ledger=lambda: ledger)
+    run_id = uuid4()
+    later = _NOW + timedelta(days=1)
+    instants = iter((_NOW, later, later))
+    meter = LlmUsageMeter(model="deepseek-v4-pro", catalog=catalog, now=lambda: next(instants))
+    for uid in (run_id, run_id, uuid4()):
+        meter.on_llm_end(
+            LLMResult(generations=[[ChatGeneration(message=_usage_message())]]), run_id=uid
+        )
+    with database.connect() as conn:
+        rows = conn.execute(
+            "SELECT occurred_at, tokens_in FROM llm_usage_ledger ORDER BY occurred_at"
+        ).fetchall()
+    assert rows == [(_NOW, 100), (later, 100)]

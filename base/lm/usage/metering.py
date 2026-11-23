@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -58,11 +59,13 @@ class LlmUsageMeter(BaseCallbackHandler):
         model: str,
         catalog: ModelCatalog,
         emit: UsageEmitter = log_usage_from_message,
+        now: Callable[[], datetime] = process_now,
     ) -> None:
         super().__init__()
         self._model = model
         self._catalog = catalog
         self._emit = emit
+        self._now = now
         self._started: dict[UUID, float] = {}
         self._lock = threading.Lock()
         self._failures = 0
@@ -113,7 +116,7 @@ class LlmUsageMeter(BaseCallbackHandler):
                 catalog=self._catalog,
                 usage_kind=DIRECT_USAGE_KIND,
                 options=options,
-                now=process_now(),
+                now=self._now(),
             )
         except UsageLedgerWriteError:
             raise

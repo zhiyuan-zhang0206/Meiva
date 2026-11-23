@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import psycopg
 import pytest
 
 from base.api_contracts.usage import (
@@ -47,7 +48,7 @@ def _entry() -> UsageLedgerEntry:
 def test_usage_replays_once_and_conflicts_fail(
     database: Database, loguru_records: LogRecords
 ) -> None:
-    write = usage_writer(lambda: database)
+    write = usage_writer(database.connect)
     entry = _entry()
     write(entry)
     write(entry)
@@ -62,7 +63,7 @@ def test_usage_replays_once_and_conflicts_fail(
 
 
 def test_usage_write_failure_is_reported_and_propagates(loguru_records: LogRecords) -> None:
-    def disconnected() -> Database:
+    def disconnected() -> psycopg.Connection:
         raise ConnectionError("unreachable")
 
     with pytest.raises(UsageLedgerWriteError, match="commit failed"):

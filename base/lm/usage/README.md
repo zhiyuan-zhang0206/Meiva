@@ -41,12 +41,20 @@ Exactly one layer owns a call's row. The factory owns it by default. A caller th
 
 Cluster process boot supplies the database and machine identity. The usage path
 commits before the caller advances, using a separate transaction where the
-caller has no checkpoint transaction to share. A repeated call ID with the same
-report succeeds. Reusing an ID for different reported fields raises. Harness
-replay keeps the original observation time, machine and quote since the harness
-supplies its report identity and token counts without a bill timestamp. A process
-killed after the provider bills and before Postgres commits can leave a missing
-report. Use the provider bill to reconcile that window.
+caller has no checkpoint transaction to share. The first committed report owns
+its time, machine and price snapshot. A replay of matching usage acknowledges
+that row. Conflicting provider facts raise. Meiva receipts use the provider and
+its request ID when supplied. Direct callbacks use the LangChain run ID and input
+index. A harness turn uses the provider session, the process generation persisted
+in the session registry, the local turn ID, and the step index. The generation
+advances when the same session resumes in a new process.
+
+The writer retries a transient database failure once with the same frozen
+report. An exhausted commit still emits `llm_usage` with the same ID, original
+occurrence time, and exact quoted cost for historical recovery. The error
+propagates after a completed harness turn finishes projecting its output. A
+process killed after the provider bills and before Postgres commits can leave a
+missing report. Use the provider bill to reconcile that window.
 
 `calls` counts the calls described by a report. A harness can report one step
 or a turn total. `complete` records whether the provider covered the usage.

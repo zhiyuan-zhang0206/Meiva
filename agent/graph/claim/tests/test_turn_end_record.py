@@ -5,18 +5,32 @@
 # meiva:link agent/graph/llm/docs/turn-records.md
 from __future__ import annotations
 
+import asyncio
 import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
+from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import snapshot_items
-from agent.graph.claim.tests.harness_support import runtime, silent_engine
+from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    RuntimeFixture,
+    completed,
+    config,
+    in_a_turn,
+    runtime,
+    silent_engine,
+)
+from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
+from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.claim.turn_end import settle_turn_end
 from agent.nodes import BEFORE_TURN, END
 from agent.ownership.tests.ownership_support import agent_row
@@ -24,23 +38,29 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.langgraph_views import command_update
 from base.api_contracts.agent_contract import Harness
+from base.api_contracts.usage import UsageLedgerWriteError
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.usage_ledger import bind_usage_ledger, usage_writer
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     AssistantText,
+    BridgeEvent,
+    FileSessionRegistry,
     HarnessInput,
     HarnessTurn,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
     Usage,
+    completed_turn,
 )
 from base.lm.harness.antigravity.tests.support import seed_replay_history, start
+from base.lm.harness.base_session import BaseHarnessSession, SessionBinding
 from base.log.tests.log_records import LogRecords
 
 
@@ -306,3 +326,102 @@ async def test_resumed_acp_replay_cannot_publish_historical_output(
         )
     finally:
         await harness.stop()
+
+
+@dataclass(frozen=True)
+class _UsageSessionConfig:
+    cwd: Path
+    model: str = "deepseek-v4-pro"
+    cancel_settle_seconds: float = 1.0
+    max_buffered_events: int = 16
+
+
+@pytest.mark.parametrize("harness", (Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY))
+def test_restored_harness_generation_books_new_reports_once(
+    harness: Harness, database: Database, tmp_path: Path
+) -> None:
+    source = harness.value
+
+    class Session(BaseHarnessSession[_UsageSessionConfig]):
+        harness = source
+
+        def first_report(self, session_id: str) -> TurnCompleted:
+            self._session_id = session_id
+            generation = self._begin_generation()
+            self._bind()
+            event = completed(self._mint_turn_id(), "done", usage=Usage(100, 10))
+            return replace(event, session_id=session_id, generation=generation)
+
+    ctx = runtime(silent_engine()).context
+    ledger = bind_usage_ledger(lambda: database, lambda: "test", tmp_path)
+    ctx = replace(
+        ctx, harness=harness, catalog=replace(ctx.require_catalog(), usage_ledger=lambda: ledger)
+    )
+    for _ in range(2):
+        registry = FileSessionRegistry(tmp_path / "sessions")
+        session = Session(
+            _UsageSessionConfig(tmp_path), binding=SessionBinding(7, registry), clock=system_clock()
+        )
+        provider_session = session._resume_from_registry() or "resumed-session"
+        event = session.first_report(provider_session)
+        assert event.turn_id == "turn-1"
+        log_turn_usage(ctx, 7, session.model, completed_turn(event, ""))
+        log_turn_usage(ctx, 7, session.model, completed_turn(event, ""))
+    with database.connect() as conn:
+        rows = conn.execute("SELECT source, tokens_in FROM llm_usage_ledger").fetchall()
+    assert rows == [(source, 100), (source, 100)]
+
+
+async def test_locked_ledger_preserves_every_report_and_finishes_the_turn(
+    database: Database,
+    db_url: str,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    loguru_records: LogRecords,
+    live_events: LiveEvents,
+    harness_runtime: RuntimeFixture,
+) -> None:
+    attempts = 0
+    writing = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def connect() -> psycopg.Connection:
+        nonlocal attempts
+        attempts += 1
+        _ = loop.call_soon_threadsafe(writing.set)
+        return psycopg.connect(db_url, options="-c statement_timeout=80")
+
+    reply = "MEIVA_DISPLAY_TO_USER\npaid reply"
+
+    def turn(inputs: tuple[HarnessInput, ...]) -> list[BridgeEvent]:
+        events = in_a_turn([item.key for item in inputs], reply)
+        terminal = events[-1]
+        assert isinstance(terminal, TurnCompleted)
+        events[-1] = replace(terminal, steps=(Usage(100, 10), Usage(200, 20)))
+        return events
+
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine(script=lambda inputs: turn(tuple(inputs)))
+    ctx = harness_runtime(engine, agent_id=agent_id, publisher=live_events.publisher).context
+    ledger = bind_usage_ledger(lambda: database, lambda: "test", tmp_path)
+    ledger = replace(ledger, write=usage_writer(connect))
+    ctx = replace(ctx, catalog=replace(ctx.require_catalog(), usage_ledger=lambda: ledger))
+    state = AgentState(harness_inputs=[{"key": "test-input", "prompt": "do it"}])
+    with psycopg.connect(db_url) as blocker:
+        blocker.execute("LOCK TABLE llm_usage_ledger IN ACCESS EXCLUSIVE MODE")
+        task = asyncio.create_task(harness_turn_node(state, Runtime(context=ctx), config(agent_id)))
+        await asyncio.wait_for(writing.wait(), timeout=10)
+        assert not task.done()
+        with pytest.raises(UsageLedgerWriteError) as failure:
+            await task
+        assert isinstance(failure.value.__cause__, psycopg.errors.QueryCanceled)
+    assert attempts == 4
+    assert [event["role"] for event in await live_events.object_events()].count("llm_done") == 1
+    observations = loguru_records.events("llm_usage")
+    assert [record["extra"]["in_total"] for record in observations] == [100, 200]
+    failed = loguru_records.events("llm_usage_ledger_write_failed")
+    assert [record["extra"]["call_id"] for record in observations] == [
+        record["extra"]["call_id"] for record in failed
+    ]
+    with psycopg.connect(db_url) as conn:
+        assert conn.execute("SELECT count(*) FROM llm_usage_ledger").fetchone() == (0,)

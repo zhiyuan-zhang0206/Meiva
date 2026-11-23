@@ -37,6 +37,7 @@ class HarnessTurn:
     error_code: str | None = None
     usage_uncertain: bool = False
     session_id: str | None = None
+    generation: int = 0
 
 
 def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
@@ -56,6 +57,7 @@ def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
         error_code=event.error_code,
         usage_uncertain=event.usage_uncertain,
         session_id=event.session_id,
+        generation=event.generation,
     )
 
 

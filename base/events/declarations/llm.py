@@ -33,6 +33,9 @@ class LlmUsage(TypedDict):
     source: NotRequired[str]
     parent_call_id: NotRequired[str]
     call_id: NotRequired[str]
+    occurred_at: NotRequired[str]
+    provider_request_id: NotRequired[str]
+    cost_usd_exact: NotRequired[str]
     complete: NotRequired[bool]
 
 

@@ -12,7 +12,12 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 
 from base.api_contracts.agent_contract import harness_billing_of_source
-from base.api_contracts.usage import UsageLedgerEntry
+from base.api_contracts.usage import (
+    UsageLedger,
+    UsageLedgerConflictError,
+    UsageLedgerEntry,
+    UsageLedgerWriteError,
+)
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
@@ -184,7 +189,7 @@ def log_usage_from_message(
 
 def _provider_request_id(msg: AIMessage) -> str | None:
     request_id = msg.response_metadata.get("request_id")
-    return request_id if isinstance(request_id, str) else None
+    return request_id if isinstance(request_id, str) and request_id else None
 
 
 def log_usage_fields(
@@ -326,16 +331,6 @@ def _log_usage(
         at=event.priced_at or _utc_usage_time(event.now),
         prices=event.catalog.prices,
     )
-    if priced is not None:
-        snapshot = _price_snapshot(priced)
-    else:
-        if not event.unpriced_already_reported:
-            logger.warning(
-                "[llm usage] model {model!r} is unpriced; add it to "
-                "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
-                model=event.model,
-            )
-        snapshot = {"unpriced": 1}
     # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.
     record: dict[str, object] = {
@@ -344,20 +339,58 @@ def _log_usage(
         "out_total": event.out_total,
         **cache_fields,
         "reasoning": event.reasoning,
-        **snapshot,
+        **_usage_snapshot(event, priced),
         "attribution": event.attribution or _attribution(event.for_agent_id),
     }
     vendor = vendor_of_model(event.model, catalog=event.catalog)
-    call_id, inserted = _write_usage(event, priced, vendor)
-    if call_id is not None:
-        record["call_id"] = call_id
-    if call_id is not None or not event.complete:
-        record["complete"] = event.complete
+    try:
+        inserted = _book_usage(event, priced, vendor, record)
+    except UsageLedgerConflictError:
+        raise
+    except UsageLedgerWriteError:
+        _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
+        raise
     if record_out is not None:
         record_out.update(record)
     if inserted:
         _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
     return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
+
+
+def _usage_snapshot(event: _UsageEvent, priced: CostQuote | None) -> dict[str, float]:
+    if priced is not None:
+        return _price_snapshot(priced)
+    if not event.unpriced_already_reported:
+        logger.warning(
+            "[llm usage] model {model!r} is unpriced; add it to "
+            "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
+            model=event.model,
+        )
+    return {"unpriced": 1}
+
+
+def _book_usage(
+    event: _UsageEvent, priced: CostQuote | None, vendor: str | None, record: dict[str, object]
+) -> bool:
+    resolve_ledger = event.catalog.usage_ledger
+    ledger = resolve_ledger() if resolve_ledger is not None else None
+    if ledger is None:
+        if not event.complete:
+            record["complete"] = False
+        return True
+    call_id = event.call_id
+    if call_id is None and event.provider_request_id is not None:
+        call_id = f"api:provider:{vendor or event.model}:{event.provider_request_id}"
+    if call_id is None:
+        call_id = ledger.new_call_id()
+    record["call_id"] = call_id
+    record["occurred_at"] = _utc_usage_time(event.now).isoformat()
+    if event.provider_request_id is not None:
+        record["provider_request_id"] = event.provider_request_id
+    if priced is not None and priced.exact_usd is not None:
+        record["cost_usd_exact"] = str(priced.exact_usd)
+    record["complete"] = event.complete
+    return _write_usage(ledger, call_id, event, priced, vendor)
 
 
 def _emit_usage_observation(
@@ -416,15 +449,12 @@ def _utc_usage_time(now: datetime) -> datetime:
 
 
 def _write_usage(
+    ledger: UsageLedger,
+    call_id: str,
     event: _UsageEvent,
     priced: CostQuote | None,
     vendor: str | None,
-) -> tuple[str | None, bool]:
-    resolve_ledger = event.catalog.usage_ledger
-    ledger = resolve_ledger() if resolve_ledger is not None else None
-    if ledger is None:
-        return None, True
-    call_id = event.call_id if event.call_id is not None else ledger.new_call_id()
+) -> bool:
     price_snapshot: dict[str, float | str] = {}
     if priced is not None:
         price_snapshot.update(_price_snapshot(priced))
@@ -433,7 +463,7 @@ def _write_usage(
         provenance = event.catalog.prices.provenance(event.model)
         if provenance is not None:
             price_snapshot["source_url"], price_snapshot["source_checked_at"] = provenance
-    inserted = ledger.write(
+    return ledger.write(
         UsageLedgerEntry(
             call_id=call_id,
             occurred_at=_utc_usage_time(event.now),
@@ -461,7 +491,6 @@ def _write_usage(
             price_source="live" if priced is not None else None,
         )
     )
-    return call_id, inserted
 
 
 # meiva:note

@@ -47,6 +47,17 @@ class _Event:
             f"legacy:{self.event_uid}:{self.ts.astimezone(UTC).isoformat()}"
         )
 
+    @property
+    def occurred_at(self) -> datetime:
+        raw = _text(self.attributes.get("occurred_at"))
+        if raw is None:
+            return self.ts
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return self.ts
+        return parsed if parsed.utcoffset() is not None else self.ts
+
 
 @dataclass(slots=True)
 class BackfillCounts:
@@ -83,7 +94,9 @@ class _LegacyPrice:
 
 def _historical_price(event: _Event, model: str, prices: PriceBook) -> _LegacyPrice:
     attrs = event.attributes
-    stored = _price(attrs.get("cost_usd"))
+    stored = _price(attrs.get("cost_usd_exact"))
+    if stored is None:
+        stored = _price(attrs.get("cost_usd"))
     snapshot: dict[str, float | str] = {
         key: str(value) for key in _RATE_KEYS if (value := _price(attrs.get(key))) is not None
     }
@@ -100,7 +113,7 @@ def _historical_price(event: _Event, model: str, prices: PriceBook) -> _LegacyPr
             write_1h=_count(attrs.get("cache_write_1h")) or 0,
             write_30m=_count(attrs.get("cache_write_30m")) or 0,
         ),
-        at=event.ts,
+        at=event.occurred_at,
         prices=prices,
     )
     if calculated is None or calculated.exact_usd is None:
@@ -110,7 +123,7 @@ def _historical_price(event: _Event, model: str, prices: PriceBook) -> _LegacyPr
     snapshot = {
         key: str(rate) for key, rate in zip(_RATE_KEYS, values, strict=True) if rate is not None
     }
-    snapshot.update(priced_at=event.ts.isoformat(), priced_model=canonical)
+    snapshot.update(priced_at=event.occurred_at.isoformat(), priced_model=canonical)
     return _LegacyPrice(calculated.exact_usd, "historical_catalog", snapshot)
 
 
@@ -123,7 +136,7 @@ def _entry(event: _Event, prices: PriceBook) -> UsageLedgerEntry:
     tokens_out = _count(attrs.get("out_total"))
     return UsageLedgerEntry(
         call_id=event.call_id,
-        occurred_at=event.ts,
+        occurred_at=event.occurred_at,
         agent_id=event.agent_id,
         machine=event.machine,
         cluster=event.cluster,
@@ -133,7 +146,7 @@ def _entry(event: _Event, prices: PriceBook) -> UsageLedgerEntry:
         model=model,
         requested_model=_text(attrs.get("requested_model")),
         provider=prices.vendor(model),
-        provider_request_id=None,
+        provider_request_id=_text(attrs.get("provider_request_id")),
         calls=_count(attrs.get("calls")) or 1,
         complete=attrs.get("complete") is not False
         and tokens_in is not None
@@ -208,7 +221,7 @@ def _import_batch(
         if event.call_id in imported:
             continue
         entry = _entry(event, prices)
-        if insert_usage(conn, entry):
+        if insert_usage(conn, entry, check_replay=False):
             counts.inserted += 1
             counts.catalog_priced += entry.price_source == "historical_catalog"
             counts.still_unpriced += entry.cost_usd is None

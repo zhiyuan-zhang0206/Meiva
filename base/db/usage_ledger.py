@@ -17,6 +17,7 @@ from base.api_contracts.usage import (
     UsageLedgerWriteError,
 )
 from base.db.handle import Database
+from base.db.pooled_session import retryable_connection_error
 
 _COLUMNS = sql.SQL("""
     call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind, model,
@@ -37,7 +38,9 @@ _FIND = sql.SQL("SELECT {} FROM llm_usage_ledger WHERE call_id = %s").format(_CO
 
 
 # meiva:link base/lm/usage/README.md
-def insert_usage(conn: psycopg.Connection, entry: UsageLedgerEntry) -> bool:
+def insert_usage(
+    conn: psycopg.Connection, entry: UsageLedgerEntry, *, check_replay: bool = True
+) -> bool:
     with conn.cursor() as cur:
         cur.execute(
             _INSERT,
@@ -70,6 +73,8 @@ def insert_usage(conn: psycopg.Connection, entry: UsageLedgerEntry) -> bool:
         )
         if cur.fetchone() is not None:
             return True
+    if not check_replay:
+        return False
     with conn.cursor(row_factory=class_row(UsageLedgerEntry)) as cur:
         cur.execute(_FIND, (entry.call_id,))
         existing = cur.fetchone()
@@ -79,38 +84,45 @@ def insert_usage(conn: psycopg.Connection, entry: UsageLedgerEntry) -> bool:
 
 
 def _same_report(existing: UsageLedgerEntry, incoming: UsageLedgerEntry) -> bool:
-    if incoming.call_id.startswith("harness:"):
-        return existing == replace(
-            incoming,
-            occurred_at=existing.occurred_at,
-            machine=existing.machine,
-            cost_usd=existing.cost_usd,
-            price_snapshot=existing.price_snapshot,
-            price_source=existing.price_source,
-        )
-    return existing == incoming
+    # meiva:link base/lm/usage/README.md
+    return existing == replace(
+        incoming,
+        occurred_at=existing.occurred_at,
+        machine=existing.machine,
+        cost_usd=existing.cost_usd,
+        price_snapshot=existing.price_snapshot,
+        price_source=existing.price_source,
+    )
 
 
-def usage_writer(database: Callable[[], Database]) -> Callable[[UsageLedgerEntry], bool]:
-    return partial(_write_usage, database)
+def usage_writer(connect: Callable[[], psycopg.Connection]) -> Callable[[UsageLedgerEntry], bool]:
+    return partial(_write_usage, connect)
 
 
 def bind_usage_ledger(
     database: Callable[[], Database], machine: Callable[[], str], home: Path
 ) -> UsageLedger:
-    return UsageLedger(usage_writer(database), machine, home.name, _new_call_id)
+    return UsageLedger(usage_writer(lambda: database().connect()), machine, home.name, _new_call_id)
 
 
 def _new_call_id() -> str:
     return f"api:{uuid4()}"
 
 
-def _write_usage(database: Callable[[], Database], entry: UsageLedgerEntry) -> bool:
+def _write_usage(connect: Callable[[], psycopg.Connection], entry: UsageLedgerEntry) -> bool:
     try:
-        with database().connect() as conn:
-            conn.execute("SET TRANSACTION READ WRITE")
-            conn.execute("SET LOCAL synchronous_commit TO on")
-            return insert_usage(conn, entry)
+        try:
+            return _commit_usage(connect, entry)
+        except psycopg.Error as error:
+            if not (
+                retryable_connection_error(error)
+                or isinstance(
+                    error, (psycopg.errors.QueryCanceled, psycopg.errors.LockNotAvailable)
+                )
+            ):
+                raise
+            # meiva:link base/lm/usage/README.md
+            return _commit_usage(connect, entry)
     except Exception as exc:
         conflict = isinstance(exc, UsageLedgerConflictError)
         logger.warning(
@@ -125,3 +137,10 @@ def _write_usage(database: Callable[[], Database], entry: UsageLedgerEntry) -> b
         if conflict:
             raise
         raise UsageLedgerWriteError("LLM usage commit failed") from exc
+
+
+def _commit_usage(connect: Callable[[], psycopg.Connection], entry: UsageLedgerEntry) -> bool:
+    with connect() as conn:
+        conn.execute("SET TRANSACTION READ WRITE")
+        conn.execute("SET LOCAL synchronous_commit TO on")
+        return insert_usage(conn, entry)
