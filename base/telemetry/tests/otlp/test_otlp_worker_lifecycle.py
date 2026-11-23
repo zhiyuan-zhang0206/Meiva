@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
 from base.clock.tests.fakes import system_clock
@@ -409,7 +407,7 @@ def test_admitted_metric_call_retains_provider_until_it_finishes(tmp_path: Path)
         assert not caller.is_alive() and not backend._worker._thread.is_alive()
 
 
-def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> None:
+def test_real_sdk_partial_build_reader_is_owned_and_closed(tmp_path: Path) -> None:
     server = http.server.HTTPServer(("127.0.0.1", 0), _OkProbeHandler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -428,13 +426,8 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
         worker = backend._worker
         assert worker is not None
         assert worker.finished.wait(5)
-        assert worker.logs is not None and worker.metric_reader is not None
-        assert worker.metrics is None
-        assert isinstance(worker.logs, LoggerProvider)
+        assert worker.logs is None and worker.metrics is None
         assert isinstance(worker.metric_reader, PeriodicExportingMetricReader)
-        processor = worker.logs._multi_log_record_processor._log_record_processors[0]
-        assert isinstance(processor, BatchLogRecordProcessor)
-        assert not processor._batch_processor._worker_thread.is_alive()
         reader_thread = worker.metric_reader._daemon_thread
         assert reader_thread is not None and not reader_thread.is_alive()
         assert backend.shutdown().status is DrainStatus.COMPLETED

@@ -381,32 +381,6 @@ async def release_job(pool: AsyncConnectionPool, job_id: int, *, error: str) -> 
         )
 
 
-@dataclass(frozen=True)
-class Backlog:
-    """The queue's depth: rows waiting, rows in flight, and the oldest wait."""
-
-    pending: int
-    running: int
-    oldest_pending_age_seconds: float
-
-
-async def backlog(pool: AsyncConnectionPool) -> Backlog:
-    """One read of the queue's depth (the loop's per-round telemetry)."""
-    async with pool.connection() as conn:
-        row = await aquery_one(
-            conn,
-            Backlog,
-            "SELECT count(*) FILTER (WHERE status = 'pending') AS pending,"
-            " count(*) FILTER (WHERE status = 'running') AS running,"
-            " COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)"
-            "                  FILTER (WHERE status = 'pending')), 0)::float8"
-            " AS oldest_pending_age_seconds"
-            " FROM understanding_chunk_jobs WHERE status IN ('pending', 'running')",
-        )
-    assert row is not None, "an aggregate query always returns one row"  # noqa: S101
-    return row
-
-
 class ChunkNotReadyError(Exception):
     """The checkpoint does not hold the chunk's end yet; retry later."""
 

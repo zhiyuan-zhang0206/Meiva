@@ -1,16 +1,52 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
-from collections.abc import Coroutine, Iterable, Mapping
+from collections.abc import AsyncIterator, Coroutine, Iterable, Mapping
 from typing import Protocol
 
 import psutil
 
 from base.log import logger
+from base.log.redaction import REDACTED, redact_text
 
 SIGTERM = 15
 SIGKILL = 9
+_STDERR_LOG_CHARS = 4096
+
+
+async def stderr_lines(
+    stream: asyncio.StreamReader, *, secrets: Iterable[str] = ()
+) -> AsyncIterator[str]:
+    secret_values = tuple(value for value in secrets if value)
+    oversized = False
+    while True:
+        try:
+            line = await stream.readuntil(b"\n")
+            eof = False
+        except asyncio.LimitOverrunError as exc:
+            await stream.readexactly(exc.consumed)
+            oversized = True
+            continue
+        except asyncio.IncompleteReadError as exc:
+            line = exc.partial
+            eof = True
+        text = (
+            "[stderr line exceeded the pipe reader limit]"
+            if oversized
+            else line.decode("utf-8", errors="replace").rstrip()
+        )
+        for secret in secret_values:
+            text = text.replace(secret, REDACTED)
+        text = redact_text(text)
+        if len(text) > _STDERR_LOG_CHARS:
+            text = text[:_STDERR_LOG_CHARS] + " [stderr line truncated]"
+        if text:
+            yield text
+        if eof:
+            return
+        oversized = False
 
 
 class ChildProbe(Protocol):

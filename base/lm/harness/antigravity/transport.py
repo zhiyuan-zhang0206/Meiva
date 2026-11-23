@@ -24,7 +24,7 @@ from base.lm.harness.antigravity.rpc import (
 from base.lm.harness.antigravity.timing_store import store_timings
 from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.antigravity.transcript.window import session_file
-from base.lm.harness.process import ProcessFamily, PsutilChildProbe, WaitClock
+from base.lm.harness.process import ProcessFamily, PsutilChildProbe, WaitClock, stderr_lines
 from base.log import logger
 
 READ_CHUNK_BYTES = 65536
@@ -182,7 +182,7 @@ class AgyTransport:
     def stderr_tail(self) -> tuple[str, ...]:
         return tuple(self._stderr)
 
-    async def start(self) -> None:
+    async def start(self, *, agent_id: int | None = None) -> None:
         if self._process is not None:
             raise RuntimeError("transport already started")
         argv = self._config.command()
@@ -211,7 +211,7 @@ class AgyTransport:
             self._tasks_entered = True
         self._pumps = [
             self._tasks.create_task(self._pump_stdout(process.stdout)),
-            self._tasks.create_task(self._pump_stderr(process.stderr)),
+            self._tasks.create_task(self._pump_stderr(process.stderr, agent_id=agent_id)),
         ]
 
     async def open_session(self, *, resume: str | None) -> str:
@@ -507,13 +507,15 @@ class AgyTransport:
         elif method is not None and isinstance(request_id, (int, str)):
             self.respond_error(request_id)
 
-    async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:
-        with contextlib.suppress(ValueError):
-            async for line in _iter_lines(stream, max_frame_bytes=self._max_frame_bytes):
-                text = line.decode("utf-8", "replace").rstrip()
-                if text:
-                    self._stderr.append(text)
-        await _drain_pipe(stream)
+    async def _pump_stderr(self, stream: asyncio.StreamReader, *, agent_id: int | None) -> None:
+        with contextlib.suppress(OSError):
+            secrets = (self._csrf_token, self._environ.get("MEIVA_HARNESS_HANDLE", ""))
+            async for text in stderr_lines(stream, secrets=secrets):
+                self._stderr.append(text)
+                if agent_id is not None:
+                    logger.info(
+                        "antigravity stderr: {}", text, agent_id=agent_id, harness="antigravity"
+                    )
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:

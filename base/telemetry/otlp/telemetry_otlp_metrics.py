@@ -19,8 +19,6 @@ from base.telemetry.otlp.plans import (
     unit_for as unit_for,
 )
 
-OTLP_HTTP_TIMEOUT_S = 2.0
-
 # Histogram bucket boundaries for LLM-scale latencies (ms). The OTel defaults
 # top out at 10000 — every call slower than 10s fell into +Inf and clipped
 # p95/p50 at exactly 10s on the ops panels.

@@ -70,6 +70,7 @@ from base.telemetry.delivery.reporting import (
     report_sink_failure,
 )
 from base.telemetry.emitter import emit, pipeline_bound
+from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.plans import (
     BASE_METRIC_DISPOSITION,
     select_metric_attributes,
@@ -235,6 +236,7 @@ class OtlpBackend:
         self._mirror_dir = mirror_dir
         self._home = home
         self._now = now
+        self._log_deadline = LogExportDeadline(time.monotonic)
         # meiva:note
         # A backend handed `providers` never builds the real pair; one that builds them needs the
         # `service.instance.id` the pipeline root minted once.
@@ -373,17 +375,17 @@ class OtlpBackend:
     # exporter gets brought up for the first time at interpreter exit, an attempt the SDK
     # can no longer honour. Marking it keeps that failure out of a log nobody can act on.
     # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
-    def begin_close(self) -> None:
+    def begin_close(self, *, deadline: float) -> None:
         self._closing = True
+        self._log_deadline.close_by(deadline)
 
     def shutdown(self, timeout: float = 2.0) -> DrainResult:
         """Close admission and observe this exporter within one local deadline."""
-        self.begin_close()
-        self.begin_close()
         # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
+        self.begin_close(deadline=deadline)
         worker, preparation_error = self._close_admission()
         deferred_finished = self._deferral.stop(timeout=remaining_time(deadline, time.monotonic()))
         if self._start_error is not None:
@@ -562,6 +564,7 @@ class OtlpBackend:
                     mirror_dir=self._mirror_dir,
                     home=self._home,
                     instance_id=self._instance_id,
+                    log_deadline=self._log_deadline,
                 )
             meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter

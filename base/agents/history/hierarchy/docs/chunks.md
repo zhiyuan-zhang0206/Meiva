@@ -37,8 +37,7 @@ share the queue. A `running` row past its lease (claimer died) is failed by the 
 A loop of the agent host (`services/agent_runner/agent_host/daemon.py`, given the agent's
 `execute_code` schema), never raising. Due jobs run concurrently up to `max_in_flight` per
 consumer (`DEFAULT_MAX_IN_FLIGHT = 2` on the live host loop; unbounded when `None`, see
-[concurrency](concurrency.md)). Each poll
-samples the queue as `understanding_backlog`. A job, claimed:
+[concurrency](concurrency.md)). A claimed job:
 
 1. is described on its own: a chunk never depends on the previous one, and a topic that crosses
    its end is two nodes (the upper levels join them);

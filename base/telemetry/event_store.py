@@ -42,6 +42,7 @@ from base.telemetry.emitter import emit
 
 STORED_CATEGORIES = frozenset({"telemetry", "log"})
 _STORED_LEVELS = frozenset({"warning", "error", "critical"})
+_RETIRED_SAMPLES = frozenset({"root_diagnostic_state", "understanding_backlog"})
 
 # How many months ahead of the current one the writer keeps partitions for.
 PARTITION_MONTHS_AHEAD = 3
@@ -76,8 +77,11 @@ def is_persisted(event_name: str, level: str) -> bool:
 
     Yes for an event whose spec says `persist` (a Postgres reader queries it by name), for any
     event at warning or higher (the resolution counts, the stats and the status page read those
-    by level), and for a name the registry does not know. The rest stays in the mirror and Loki.
+    by level), and for a name the registry does not know. Retired samples stay excluded
+    when a mirror still contains them after their event declarations have been removed.
     """
+    if event_name in _RETIRED_SAMPLES:
+        return False
     spec = EVENTS.get(event_name)
     return spec is None or spec.persist or level.lower() in _STORED_LEVELS
 

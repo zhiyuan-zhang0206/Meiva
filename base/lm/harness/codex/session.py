@@ -171,6 +171,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             environ=child_env,
             trace_requests=config.otlp_endpoint is not None and config.trace_enabled,
             request_timeout=config.startup_timeout_seconds,
+            agent_id=binding.agent_id,
         )
         self._home_environ = dict(environ)
         self._starting = False

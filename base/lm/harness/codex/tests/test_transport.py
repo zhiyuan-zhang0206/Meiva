@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import http.server
 import sys
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, use_span
 
+from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.lm.harness.codex.frames import JsonObject, JsonRpcError, TransportClosedError, as_object
 from base.lm.harness.codex.transport import MAX_FRAME_BYTES, StdioAppServer
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
+from base.telemetry.otlp.telemetry_otlp import OtlpBackend
+from base.telemetry.process_logging import add_event_sink, release_event_sink
 
 SERVER = Path(__file__).with_name("fake_stdio_server.py")
 
@@ -34,6 +43,108 @@ async def test_request_reply_is_correlated_by_id(tmp_path: Path) -> None:
         assert await server.request("echo", {"x": 1}) == {"echo": "echo"}
     finally:
         await server.close()
+
+
+async def test_stderr_drains_oversized_lines_and_logs_following_diagnostics(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    server = StdioAppServer(
+        [sys.executable, str(SERVER)], cwd=tmp_path, environ={}, agent_id=123, request_timeout=5.0
+    )
+    await server.start()
+    try:
+        assert await server.request("stderr_flood", {"bytes": 256 * 1024}) == {}
+        assert await server.request("stderr_flood", {"bytes": 32 * 1024}) == {}
+    finally:
+        await server.close()
+    rows = [record for record in loguru_records if record["message"].startswith("codex stderr: ")]
+    assert [record["message"] for record in rows] == [
+        "codex stderr: [stderr line exceeded the pipe reader limit]",
+        "codex stderr: startup diagnostic",
+        "codex stderr: " + "x" * 4096 + " [stderr line truncated]",
+        "codex stderr: startup diagnostic",
+    ]
+    assert all(record["extra"]["agent_id"] == 123 for record in rows)
+    assert all(record["level"].name == "INFO" for record in rows)
+
+
+async def test_close_reaps_app_server_while_descendant_keeps_stderr_open(tmp_path: Path) -> None:
+    server = StdioAppServer([sys.executable, str(SERVER)], cwd=tmp_path, environ={}, agent_id=123)
+    await server.start()
+    try:
+        assert isinstance((await server.request("hold_stderr", {}))["pid"], int)
+        await asyncio.wait_for(server.close(), timeout=2)
+        assert server.returncode is not None
+    finally:
+        (tmp_path / "release-stderr").touch()
+        await server.close()
+
+
+async def test_codex_stderr_credentials_are_removed_from_otlp_payload(tmp_path: Path) -> None:
+    captured: list[str] = []
+    received = Event()
+
+    class Receiver(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            if self.path == "/v1/logs" and len(raw) > 16:
+                batch = ExportLogsServiceRequest.FromString(raw)
+                captured.extend(
+                    record.body.string_value
+                    for resource in batch.resource_logs
+                    for scope in resource.scope_logs
+                    for record in scope.log_records
+                )
+                received.set()
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    canary = "synthetic-stderr-fixture"
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver) as receiver:
+        thread = Thread(target=receiver.serve_forever, daemon=True)
+        thread.start()
+        now = system_clock().now
+        backend = OtlpBackend(
+            endpoint=lambda: f"http://127.0.0.1:{receiver.server_port}",
+            enabled=lambda: True,
+            export_allowed=lambda: True,
+            home=tmp_path,
+            mirror_dir=tmp_path,
+            instance_id="stderr-probe",
+            now=now,
+        )
+        pipeline = telemetry.EventPipeline(writer=backend.export_batch, now=now)
+        add_event_sink(
+            home=tmp_path,
+            process="stderr-probe",
+            producer=lambda: pipeline,
+            machine_reader=lambda: "probe-machine",
+        )
+        server = StdioAppServer(
+            [sys.executable, str(SERVER)],
+            cwd=tmp_path,
+            environ={"OPENAI_API_KEY": canary},
+            agent_id=123,
+        )
+        try:
+            await server.start()
+            assert await server.request("stderr_secret", {}) == {}
+            assert await asyncio.to_thread(received.wait, 5)
+            assert len(captured) == 1
+            assert canary not in captured[0]
+            assert "OPENAI_API_KEY=*** diagnostic_value=***" in captured[0]
+            assert '"agent_id":123' in captured[0]
+        finally:
+            await server.close()
+            release_event_sink()
+            pipeline.stop()
+            backend.shutdown()
+            receiver.shutdown()
+            thread.join()
 
 
 async def test_each_rpc_uses_its_callers_current_trace(tmp_path: Path) -> None:

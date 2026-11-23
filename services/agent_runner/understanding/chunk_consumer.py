@@ -21,8 +21,7 @@
 # back to the queue and is claimed again after a spacing, up to a bound; every other
 # failure ends the job as `failed` with the `understanding_chunk_failed` event and no
 # retry: drifted indices, a generation error (a grouping reply still refused after the
-# corrections included), a database error, a stopping host or a claimer that died. Each poll samples the queue's depth, with this
-# runner's in-flight jobs, as the `understanding_backlog` event. A job that ends
+# corrections included), a database error, a stopping host or a claimer that died. A job that ends
 # `done` is followed, in the same task, by the upper-level grouping checks of its agent
 # (`group_consumer.py`). A manual build's upper-level rebuild (`rebuild.py`) is claimed by the same
 # loop once its agent has no chunk job left.
@@ -37,7 +36,6 @@ import asyncio
 import contextlib
 import random
 import threading
-import time
 from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -59,7 +57,6 @@ from base.agents.history.hierarchy.chunks import (
     ChunkNotReadyError,
     GroupNode,
     LocatedChunk,
-    backlog,
     claim_job,
     covered_spans,
     finish_job,
@@ -439,19 +436,6 @@ class Consumer:
         # set whenever a job ends
         self.finished = asyncio.Event()
 
-    async def emit_backlog(self) -> None:
-        depth = await backlog(self.pool)
-        telemetry.emit(
-            "telemetry",
-            "understanding_backlog",
-            attributes={
-                "pending": depth.pending,
-                "running": depth.running,
-                "oldest_pending_age_seconds": depth.oldest_pending_age_seconds,
-                "in_flight": self.in_flight,
-            },
-        )
-
     async def claim(self, tg: asyncio.TaskGroup) -> bool:
         # meiva:note
         # Claim one due job and start it; False when nothing is due or this consumer's cap is full.
@@ -661,13 +645,8 @@ class Consumer:
 
     async def run_forever(self) -> None:
         async with asyncio.TaskGroup() as tg:
-            last_sample = 0.0
             while True:
                 try:
-                    now = time.monotonic()
-                    if now - last_sample >= self.poll_seconds:
-                        last_sample = now
-                        await self.emit_backlog()
                     while await self.claim(tg):
                         pass
                 except Exception:

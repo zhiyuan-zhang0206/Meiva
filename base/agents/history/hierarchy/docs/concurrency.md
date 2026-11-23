@@ -47,7 +47,6 @@ applies at the next start, not at the next phase. `GroupingModels` remains the m
   that still fails is a generation failure and the job ends `failed` (`understanding_chunk_failed`)
   without another attempt; only a wait (the checkpoint not caught up) goes back to the queue. `MEIVA_LLM_MAX_CONCURRENT`
   still applies inside each call when set.
-- `understanding_backlog` carries `in_flight` (this runner) beside the cluster's `pending` / `running`.
 
 The jobs table stays: it hands work from an agent's turn to the background durably, and it is not a
 rate limiter.

@@ -594,31 +594,6 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
     assert consumer.in_flight == 0
 
 
-async def test_the_backlog_event_carries_in_flight(
-    model_catalog: ModelCatalog,
-    aops_pool: AsyncConnectionPool,
-    emitted_events: EmittedEvents,
-    chunk_seams: ChunkSeams,
-) -> None:
-    await _enqueue_ends(aops_pool, 1, "m1")
-    consumer = loop.Consumer(
-        aops_pool,
-        db_without_agent_meta(),
-        [],
-        clock=CLOCK,
-        **lm_wiring(model_catalog),
-        config=consumer_config(),
-        describe=chunk_seams.describe,
-        locate_job_chunk=chunk_seams.locate_job_chunk,
-        rng=seeded_rng(),
-    )
-    consumer.in_flight = 1
-    await consumer.emit_backlog()
-    assert [event.attributes for event in emitted_events][-1]["pending"] == 1 and [
-        event.attributes for event in emitted_events
-    ][-1]["in_flight"] == 1
-
-
 async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
     model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: ChunkSeams
 ) -> None:

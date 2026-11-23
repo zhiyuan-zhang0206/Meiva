@@ -160,14 +160,6 @@ class RootDiagnostic(TypedDict):
     consecutive_failures: int
 
 
-# meiva:note
-# Latest definitive diagnostic status gauge: ok=1 when alive, ok=0 when down; unknown samples leave
-# the last definitive reading untouched.
-class RootDiagnosticState(TypedDict):
-    diagnostic: str
-    ok: int
-
-
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
@@ -458,13 +450,6 @@ EVENTS: dict[str, EventSpec] = {
         "recovery authority",
         payload=RootDiagnostic,
         tier="anomaly",
-    ),
-    "root_diagnostic_state": telemetry_event(
-        "root_diagnostic_state",
-        "latest definitive root diagnostic outcome gauge (ok=1 alive, ok=0 down)",
-        payload=RootDiagnosticState,
-        tier="noise",
-        site="services/supervision/meiva_root_glue/diagnostics.py:DiagnosticMonitor._emit_diagnostic_state",
     ),
     "root_health_tick": telemetry_event(
         "root_health_tick",

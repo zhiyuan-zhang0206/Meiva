@@ -9,6 +9,7 @@ from typing import Protocol
 
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from base.lm.harness.codex.auth import SECRET_ENV_NAMES
 from base.lm.harness.codex.frames import (
     ClosedHandler,
     JsonObject,
@@ -25,6 +26,8 @@ from base.lm.harness.codex.frames import (
     notification_frame,
     request_frame,
 )
+from base.lm.harness.process import stderr_lines
+from base.log import logger
 
 READ_CHUNK_BYTES = 65536
 
@@ -74,6 +77,16 @@ async def _iter_frames(
             buffer.extend(tail)
 
 
+class _AppServerProtocol(asyncio.subprocess.SubprocessStreamProtocol):
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__(limit=READ_CHUNK_BYTES, loop=loop)
+        self.exited = asyncio.Event()
+
+    def process_exited(self) -> None:
+        super().process_exited()
+        self.exited.set()
+
+
 class AppServerTransport(Protocol):
     @property
     def pid(self) -> int | None: ...
@@ -118,6 +131,7 @@ class StdioAppServer:
         environ: Mapping[str, str],
         request_timeout: float = 120.0,
         stderr: int | None = None,
+        agent_id: int | None = None,
         max_frame_bytes: int = MAX_FRAME_BYTES,
         trace_requests: bool = False,
     ) -> None:
@@ -125,10 +139,13 @@ class StdioAppServer:
         self._cwd = str(cwd)
         self._environ = dict(environ)
         self._request_timeout = request_timeout
-        self._stderr = stderr
+        self._agent_id = agent_id
+        self._stderr = asyncio.subprocess.PIPE if agent_id is not None else stderr
         self._max_frame_bytes = max_frame_bytes
         self._trace_propagator = TraceContextTextMapPropagator() if trace_requests else None
         self._process: asyncio.subprocess.Process | None = None
+        self._io: asyncio.SubprocessTransport | None = None
+        self._exited: asyncio.Event | None = None
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
         self._tasks_entered = False
@@ -173,18 +190,25 @@ class StdioAppServer:
     async def start(self) -> None:
         if self._process is not None:
             raise RuntimeError("transport already started")
-        self._process = await asyncio.create_subprocess_exec(
+        loop = asyncio.get_running_loop()
+        protocol = _AppServerProtocol(loop)
+        io, _ = await loop.subprocess_exec(
+            lambda: protocol,
             *self._command,
             cwd=self._cwd,
             env=self._environ,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=self._stderr,
-            limit=READ_CHUNK_BYTES,
         )
+        self._io = io
+        self._exited = protocol.exited
+        self._process = asyncio.subprocess.Process(io, protocol, loop)
         await self._tasks.__aenter__()
         self._tasks_entered = True
         self._spawn(self._read_loop())
+        if self._agent_id is not None and self._process.stderr is not None:
+            self._spawn(self._drain_stderr(self._process.stderr, self._agent_id))
 
     async def request(
         self, method: str, params: RequestParams, *, timeout: float | None = None
@@ -221,14 +245,12 @@ class StdioAppServer:
         self._closing = True
         self._closed = True
         process = self._process
-        if process is not None and process.returncode is None:
-            process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), 5.0)
-            except TimeoutError:
-                process.kill()
-                with contextlib.suppress(ProcessLookupError):
-                    await process.wait()
+        try:
+            if process is not None and self._exited is not None:
+                await self._terminate_process(process, self._exited)
+        finally:
+            if self._io is not None:
+                self._io.close()
         children = [task for task in self._children if not task.done()]
         for task in children:
             task.cancel()
@@ -244,6 +266,21 @@ class StdioAppServer:
                         self._closed_handler(f"app-server task failed: {error}")
         self._fail_pending("transport closed")
 
+    @staticmethod
+    async def _terminate_process(
+        process: asyncio.subprocess.Process, exited: asyncio.Event
+    ) -> None:
+        if process.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            process.terminate()
+        try:
+            _ = await asyncio.wait_for(exited.wait(), 5.0)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            _ = await exited.wait()
+
     async def _write(self, message: JsonObject) -> None:
         process = self._process
         if process is None or process.stdin is None or self._closed:
@@ -252,6 +289,14 @@ class StdioAppServer:
         async with self._write_lock:
             process.stdin.write(payload)
             await process.stdin.drain()
+
+    async def _drain_stderr(self, stream: asyncio.StreamReader, agent_id: int) -> None:
+        secrets = (
+            self._environ.get(name, "") for name in (*SECRET_ENV_NAMES, "MEIVA_HARNESS_HANDLE")
+        )
+        with contextlib.suppress(OSError):
+            async for line in stderr_lines(stream, secrets=secrets):
+                logger.info("codex stderr: {}", line, agent_id=agent_id, harness="codex")
 
     async def _read_loop(self) -> None:
         if self._process is None or self._process.stdout is None:

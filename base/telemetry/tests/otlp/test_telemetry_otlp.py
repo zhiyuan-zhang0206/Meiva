@@ -664,7 +664,8 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
     try:
         assert cluster_label(home) != cluster_label(Path("/"))
         assert worker.metrics._sdk_config.resource.attributes["cluster"] == cluster_label(home)
-        sdk_logger.warning("Queue full, dropping %s.", "logs")
+        sdk_logger.warning("Queue full, dropping %s.", "Log")
+        worker.logs.shutdown()
         day = datetime.now(UTC).strftime("%Y%m%d")
         rows = [
             json.loads(line)
@@ -673,5 +674,4 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
         assert [row["event_name"] for row in rows] == ["event_log_drop"]
     finally:
         sdk_logger.filters[:] = old_filters
-        worker.logs.shutdown()
         worker.metrics.shutdown()
