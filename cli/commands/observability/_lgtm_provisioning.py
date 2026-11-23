@@ -230,9 +230,13 @@ def record_rendered_hash(
     hashes_path.write_text(json.dumps(update, indent=2) + "\n", encoding="utf-8")
 
 
+_ALERT_CONTACT_PATH = Path("alerting/contact.yml")
+
+
 # meiva:note
 # Every provisioning file is copied verbatim, and the checkout owns the tree: a
-# rendered copy that drifted from its recorded hash is restored and reported as
+# site may replace the alert contact and policy file as one unit. A rendered copy that
+# drifted from its recorded hash is restored and reported as
 # converge_file_overwritten rather than preserved. The datasource and webhook
 # URLs stay Grafana-native $__env{} references resolved from runtime.env, and
 # Grafana reads the rendered tree through MEIVA_PROVISIONING_PATH, so a rollout
@@ -249,6 +253,7 @@ def render_provisioning(
     *,
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
+    site_contact: str | None = None,
 ) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     if not source_dir.is_dir():
@@ -266,7 +271,11 @@ def render_provisioning(
         if rel.as_posix() == RENDERED_DASHBOARD_REL:
             continue
         rendered_relative.add(rel.as_posix())
-        content = source.read_text(encoding="utf-8")
+        content = (
+            site_contact
+            if rel == _ALERT_CONTACT_PATH and site_contact is not None
+            else source.read_text(encoding="utf-8")
+        )
         dest = dest_dir / rel
         if not dest.is_file() or dest.read_text(encoding="utf-8") != content:
             changed.append(dest)
