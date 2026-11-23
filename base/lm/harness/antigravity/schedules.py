@@ -234,9 +234,6 @@ class Schedules:
         identities = (*self.expired_replies, *((timer.prompt, timer.task_id) for timer in expired))
         return replace(remaining, expired_replies=identities), len(expired)
 
-    def is_expired_reply(self, sender: str, prompt: str) -> bool:
-        return (prompt, None) in self.expired_replies or (prompt, sender) in self.expired_replies
-
     def reply_finished(self, sender: str, prompt: str | None, *, now: float) -> Schedules:
         if prompt is None:
             return self

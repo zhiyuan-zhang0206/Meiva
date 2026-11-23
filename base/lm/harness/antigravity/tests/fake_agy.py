@@ -401,38 +401,23 @@ def foreground_with_preamble(transcript: Path, request: int) -> None:
     )
 
 
-def timer_review_prompt(transcript: Path, request: int, command: str) -> None:
+def fresh_prompt(transcript: Path, request: int, command: str) -> None:
     case, reason = command.split(":", 1)
-    if case == "late-timer-textless":
-        record(transcript, planner_row("LATE_TIMER", tokens=237))
-        message("LATE_TIMER")
-        result(request, reason, usage=False)
-        Path("textless-stop-sent").touch()
-        after_release(
-            Path("release-blank"),
-            lambda: record(transcript, {**planner_row(None), "output_tokens": 0}),
+    if case == "fresh-tool":
+        record(
+            transcript,
+            {
+                **planner_row(None),
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 8"}}],
+            },
         )
-        return
-    if case == "timer-no-usage":
-        timer_tool_foreground(transcript, request, reason)
-        return
-    record(transcript, planner_row("FRESH", tokens=210))
-    message("FRESH")
-    result(request, reason)
-
-
-def timer_tool_foreground(transcript: Path, request: int, reason: str) -> None:
-    record(
-        transcript,
-        {
-            **planner_row(None),
-            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 8"}}],
-        },
-    )
-    beginning_of_tool()
-    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
-    record(transcript, planner_row("ACTUAL_FOREGROUND", tokens=210))
-    message("ACTUAL_FOREGROUND")
+        beginning_of_tool()
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    if case == "fresh-textless":
+        record(transcript, {**planner_row(None), "output_tokens": 0})
+    else:
+        record(transcript, planner_row("ACTUAL_FRESH", tokens=210))
+        message("ACTUAL_FRESH")
     result(request, reason, usage=False)
 
 
@@ -453,8 +438,6 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         _ = declare_child(transcript)
     if command == "late-native":
         send_late_native(transcript)
-    if command == "late-timer":
-        finish_background(transcript, early_notice=True, early_planner=False)
     if command == "tool-then-foreground":
         record_native_tool(transcript)
     if command == "foreground-preamble":
@@ -603,11 +586,8 @@ def complete_steer(transcript: Path, request: int) -> None:
 
 
 def regular_prompt(transcript: Path, request: int, command: str) -> None:
-    if command == "next-without-planner":
-        message("OK")
-        result(request)
-    elif command.startswith(("child-fence:", "timer-no-usage:", "late-timer-textless:")):
-        timer_review_prompt(transcript, request, command)
+    if command.startswith("fresh-"):
+        fresh_prompt(transcript, request, command)
     else:
         plain_prompt(transcript, request, command)
 
@@ -703,6 +683,20 @@ def setup_session(method: str, request: int) -> None:
         message("REPLAYED_OLD_TEXT")
         message("MEIVA_DISPLAY_TO_USER\nOld native reply")
         update("usage_update", used=2, size=10)
+    if method == "session/load" and "--test-timer-replay-on-load" in sys.argv:
+        replay_timer_on_load()
+
+
+def replay_timer_on_load() -> None:
+    update(
+        "tool_call",
+        toolCallId="old-timer-command",
+        name="run_command",
+        status="completed",
+        rawInput={"CommandLine": "echo old timer"},
+    )
+    message("LATE_TIMER")
+    update("usage_update", used=3, size=10)
 
 
 def main() -> None:

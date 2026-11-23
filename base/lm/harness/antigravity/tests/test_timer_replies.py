@@ -13,6 +13,7 @@ from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
     InputInContext,
+    SessionClosed,
     SessionFailed,
     ToolResult,
     ToolUse,
@@ -23,6 +24,7 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
+from base.lm.harness.process import PsutilChildProbe
 from base.lm.harness.registry import FileSessionRegistry
 
 
@@ -34,6 +36,28 @@ async def _next_prompt(harness: Harness, command: str = "next") -> TurnCompleted
     assert not harness.session.background_work().items
     assert not any(isinstance(e, SessionFailed | TurnFaulted) for e in harness.events)
     return done
+
+
+async def _wait_for_retired_peer(harness: Harness, pid: int) -> None:
+    probe = PsutilChildProbe()
+    async with asyncio.timeout(5):
+        while probe.is_alive(pid):
+            await asyncio.sleep(0.005)
+    assert harness.session.cli_pid is None
+    assert not any(
+        isinstance(e, SessionClosed | SessionFailed | TurnFaulted) for e in harness.events
+    )
+
+
+def _assert_reopened(harness: Harness, old_pid: int, done: TurnCompleted) -> None:
+    assert harness.session.cli_pid is not None and harness.session.cli_pid != old_pid
+    assert not PsutilChildProbe().is_alive(old_pid)
+    assert done.generation == 2 and done.session_id == "conv-acp"
+    [load] = [frame for frame in harness.frames() if frame.get("method") == "session/load"]
+    assert load["params"]["sessionId"] == done.session_id
+    assert not any(
+        isinstance(e, SessionClosed | SessionFailed | TurnFaulted) for e in harness.events
+    )
 
 
 async def _wait_for_keepalive_removal(harness: Harness, registry: FileSessionRegistry) -> None:
@@ -71,8 +95,9 @@ async def test_unverified_background_tail_cannot_hold_foreground_completion(tmp_
         assert done.text == "FOREGROUND"
         assert harness.session.background_work().items
         pid = harness.session.cli_pid
-        await _next_prompt(harness)
-        assert harness.session.cli_pid == pid
+        assert pid is not None
+        reopened = await _next_prompt(harness)
+        _assert_reopened(harness, pid, reopened)
         assert (
             sum(isinstance(e, TurnCompleted) and e.turn_id == done.turn_id for e in harness.events)
             == 1
@@ -100,6 +125,7 @@ async def test_expired_detached_timer_leaves_steered_foreground_alive(
         await harness.wait_for_type(TurnCompleted)
         assert harness.session.background_work().items
         pid = harness.session.cli_pid
+        assert pid is not None
         wall.advance(198)
         await harness.session.deliver([HarnessInput.of("first", "hold")])
         tool = await harness.wait_for(
@@ -119,37 +145,48 @@ async def test_expired_detached_timer_leaves_steered_foreground_alive(
         await _wait_for_keepalive_removal(harness, registry)
         assert not harness.session.background_work().items
         assert harness.session.active_turn_id == tool.turn_id
+        assert harness.session.cli_pid == pid
         harness.release("release-steer")
         done = await harness.wait_for(
             lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
         )
-        assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
-        assert harness.session.cli_pid == pid
+        assert done.text == "ORIGINAL_DONE\nSTEER_DONE" and done.generation == 1
+        await _wait_for_retired_peer(harness, pid)
+        _assert_reopened(harness, pid, await _next_prompt(harness))
     finally:
         await harness.stop()
 
 
-@pytest.mark.parametrize("late_reply", [False, True])
-async def test_idle_timer_without_a_reply_releases_waiting_input_on_the_same_peer(
-    tmp_path: Path, late_reply: bool
+@pytest.mark.parametrize("early_hub", [False, True])
+async def test_idle_expiry_recycles_before_dispatch_and_fences_the_old_timer(
+    tmp_path: Path, early_hub: bool
 ) -> None:
-    args = ("--test-early-hub",) if late_reply else ()
+    args = ("--test-overlap", "--test-early-hub") if early_hub else ("--test-overlap",)
     harness = await start(tmp_path, extra_args=args, reply_seconds=0.25)
     try:
         await harness.session.deliver([HarnessInput.of("timer", "background")])
         await harness.wait_for_type(TurnCompleted)
         pid = harness.session.cli_pid
+        assert pid is not None
         await release_timer(harness)
-        command = "late-timer" if late_reply else "next-without-planner"
-        done = await _next_prompt(harness, command)
-        if late_reply:
-            native = await harness.wait_for(
-                lambda e: isinstance(e, TurnCompleted) and e.text == "BACKGROUND"
-            )
-            assert native.turn_id != done.turn_id and native.usage == Usage(267, 3, 0, 30)
-        assert await harness.session.reconcile(["next"]) == {"next": Reconciliation.IN_CONTEXT}
-        assert harness.session.cli_pid == pid
-        assert len(harness.prompts()) == 2
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        tool = await harness.wait_for(
+            lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
+        )
+        assert not PsutilChildProbe().is_alive(pid)
+        harness.release()
+        await harness.session.deliver([HarnessInput.of("steer", "steer")])
+        harness.release("release-steer")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
+        )
+        assert done.text == "ORIGINAL_DONE\nSTEER_DONE"
+        _assert_reopened(harness, pid, done)
+        assert not (tmp_path / "background-sent").exists()
+        assert await harness.session.reconcile(["first", "steer"]) == {
+            "first": Reconciliation.IN_CONTEXT,
+            "steer": Reconciliation.IN_CONTEXT,
+        }
     finally:
         await harness.stop()
 
@@ -191,39 +228,34 @@ async def test_live_timer_notice_survives_steer_and_keeps_separate_usage(tmp_pat
 
 
 @pytest.mark.parametrize("stop_reason", ["end_turn", "max_tokens"])
-@pytest.mark.parametrize("case", ["timer-no-usage", "child-fence"])
-async def test_timer_expiry_preserves_fresh_foreground(
-    tmp_path: Path, stop_reason: str, case: str
+@pytest.mark.parametrize(
+    ("case", "expected_text"),
+    [("fresh-one", "ACTUAL_FRESH"), ("fresh-tool", "ACTUAL_FRESH"), ("fresh-textless", "")],
+)
+async def test_resumed_prompt_without_usage_ignores_timer_replay(
+    tmp_path: Path, stop_reason: str, case: str, expected_text: str
 ) -> None:
-    args = ("--test-early-hub",) if case == "timer-no-usage" else ()
+    args = ("--test-early-hub", "--test-timer-replay-on-load")
     harness = await start(tmp_path, extra_args=args, reply_seconds=0.25)
     try:
         await harness.session.deliver([HarnessInput.of("timer", "background")])
-        await harness.wait_for_type(TurnCompleted)
+        timer = await harness.wait_for_type(TurnCompleted)
         pid = harness.session.cli_pid
+        assert pid is not None
         await release_timer(harness)
-        if case == "child-fence":
-            await harness.session.deliver([HarnessInput.of("warmup", "child-seed")])
-            await harness.wait_for(lambda e: isinstance(e, TurnCompleted) and e.text == "OK")
+        await _wait_for_retired_peer(harness, pid)
         await harness.session.deliver([HarnessInput.of("fresh", f"{case}:{stop_reason}")])
-        begun = await harness.wait_for(
-            lambda e: isinstance(e, TurnStarted) and e.keys == ("fresh",)
-        )
         done = await harness.wait_for(
-            lambda e: (
-                (isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id)
-                or isinstance(e, SessionFailed)
-            )
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id != timer.turn_id
         )
-        assert isinstance(done, TurnCompleted), done
-        assert not done.usage_uncertain
-        assert done.text == ("ACTUAL_FOREGROUND" if case == "timer-no-usage" else "FRESH")
-        expected = Usage(280, 6, 0, 60) if case == "timer-no-usage" else Usage(40, 5, 0, 30)
-        assert done.usage == expected
+        _assert_reopened(harness, pid, done)
+        assert done.text == expected_text and done.stop_reason == stop_reason
+        assert not any(
+            isinstance(e, ToolUse) and e.tool_use_id == "old-timer-command" for e in harness.events
+        )
         assert not any(
             isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
         )
-        assert harness.session.cli_pid == pid
     finally:
         await harness.stop()
 
@@ -259,29 +291,5 @@ async def test_pending_timer_allows_two_steered_terminals_with_separate_receipts
             isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
         )
         assert harness.session.background_work().items
-    finally:
-        await harness.stop()
-
-
-async def test_late_timer_text_cannot_own_a_textless_prompt_without_usage(tmp_path: Path) -> None:
-    harness = await start(tmp_path, extra_args=("--test-early-hub",), reply_seconds=0.25)
-    try:
-        await harness.session.deliver([HarnessInput.of("timer", "background")])
-        await harness.wait_for_type(TurnCompleted)
-        await release_timer(harness)
-        await harness.session.deliver([HarnessInput.of("textless", "late-timer-textless:end_turn")])
-        begun = await harness.wait_for(
-            lambda e: isinstance(e, TurnStarted) and e.keys == ("textless",)
-        )
-        await harness.wait_for_marker("textless-stop-sent")
-        harness.release("release-blank")
-        done = await harness.wait_for(
-            lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
-        )
-        assert done.text == ""
-        assert not any(
-            isinstance(e, AssistantText) and e.turn_id == begun.turn_id for e in harness.events
-        )
-        assert not any(isinstance(e, SessionFailed) for e in harness.events)
     finally:
         await harness.stop()
