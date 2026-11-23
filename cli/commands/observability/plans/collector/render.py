@@ -1,14 +1,20 @@
 # meiva:note
 # The collector config template with every value filled in.
+# Fallbacks edit YAML nodes so the operator's scalar encodings survive re-emission.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from string import Template
 
+import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from cli.commands.observability.plans.collector.remote import RemoteFragments
 
-__all__ = ["CollectorValues", "render_collector_config"]
+__all__ = ["CollectorValues", "render_collector_config", "without_harness_receiver"]
 
 
 _HARNESS_RECEIVER = """  otlp/harness:
@@ -92,3 +98,96 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "REMOTE_TRACE_PIPELINE": values.remote.trace_pipeline,
     }
     return Template(template).substitute(substitutions)
+
+
+def _node_value(node: Node) -> object:
+    return object_of(getattr, node, "value")
+
+
+def _entries(node: MappingNode) -> list[tuple[Node, Node]]:
+    pairs = _node_value(node)
+    if not is_object_list(pairs):
+        raise ValueError("expected YAML mapping entries")
+    entries: list[tuple[Node, Node]] = []
+    for pair in pairs:
+        match pair:
+            case (Node() as key, Node() as value):
+                entries.append((key, value))
+            case _:
+                raise ValueError("invalid YAML mapping entry")
+    return entries
+
+
+def _mapping_at(node: Node | None, name: str) -> MappingNode | None:
+    if isinstance(node, MappingNode):
+        for key, value in _entries(node):
+            if (
+                isinstance(key, ScalarNode)
+                and _node_value(key) == name
+                and isinstance(value, MappingNode)
+            ):
+                return value
+    return None
+
+
+def _drop_harness_pipelines(pipelines: MappingNode) -> None:
+    pipelines.value = [
+        (key, value)
+        for key, value in _entries(pipelines)
+        if _node_value(key) not in ("traces/harness", "logs/harness", "metrics/harness")
+    ]
+    for _, pipeline in _entries(pipelines):
+        if not isinstance(pipeline, MappingNode):
+            continue
+        for key, components in _entries(pipeline):
+            if _node_value(key) in ("receivers", "exporters") and isinstance(
+                components, SequenceNode
+            ):
+                _drop_harness_components(components)
+
+
+def _drop_harness_components(components: SequenceNode) -> None:
+    values = _node_value(components)
+    if not is_object_list(values):
+        raise ValueError("expected YAML pipeline components")
+    components.value = [
+        node
+        for node in values
+        if isinstance(node, Node) and _node_value(node) not in ("forward/harness", "otlp/harness")
+    ]
+
+
+def _serialize(root: Node) -> str:
+    serialize = object_of(getattr, yaml, "serialize")
+    if not callable(serialize):
+        raise TypeError("PyYAML serializer unavailable")
+    rendered = object_of(serialize, root, Dumper=yaml.SafeDumper)
+    if not isinstance(rendered, str):
+        raise TypeError("expected YAML text")
+    return rendered
+
+
+def without_harness_receiver(content: str) -> str | None:
+    try:
+        root = yaml.SafeLoader(content).get_single_node()
+    except yaml.YAMLError:
+        raise ValueError("cannot prepare collector fallback: config.yaml is invalid YAML") from None
+    if root is None:
+        return None
+    receivers = _mapping_at(root, "receivers")
+    if receivers is None or _mapping_at(receivers, "otlp/harness") is None:
+        return None
+    receivers.value = [
+        (key, value) for key, value in _entries(receivers) if _node_value(key) != "otlp/harness"
+    ]
+    connectors = _mapping_at(root, "connectors")
+    if connectors is not None:
+        connectors.value = [
+            (key, value)
+            for key, value in _entries(connectors)
+            if _node_value(key) != "forward/harness"
+        ]
+    pipelines = _mapping_at(_mapping_at(root, "service"), "pipelines")
+    if pipelines is not None:
+        _drop_harness_pipelines(pipelines)
+    return _serialize(root)

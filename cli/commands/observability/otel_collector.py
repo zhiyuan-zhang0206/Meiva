@@ -36,8 +36,9 @@ from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.deploy.release.collector import artifact as collector_artifact
 from base.deploy.release.collector import plan as collector_plan
+from base.host.atomic_io import write_text_atomic
 from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
-from base.paths import otel_collector_config, otel_collector_dir
+from base.paths import otel_collector_config, otel_collector_dir, otel_collector_fallback_config
 from base.paths.scratch import ScratchSpace
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
@@ -74,6 +75,7 @@ from cli.commands.observability.plans.collector.remote import (
 from cli.commands.observability.plans.collector.render import (
     CollectorValues,
     render_collector_config,
+    without_harness_receiver,
 )
 from cli.commands.observability.plans.collector.text import ottl_quote
 from cli.commands.observability.plans.observability_config import ObservabilityConfig
@@ -377,8 +379,6 @@ def ensure_otel_collector(
         print(plan.warning(), file=sys.stderr)
         return
     harness_problem = _harness_port_problem(meiva_home, settings.observability)
-    if harness_problem is not None:
-        print(f"  ! otel-collector: harness OTLP disabled: {harness_problem}", file=sys.stderr)
     dest_dir.mkdir(parents=True, exist_ok=True)
     version = collector_plan.OTELCOL_CONTRIB_VERSION
     match plan:
@@ -411,6 +411,25 @@ def ensure_otel_collector(
     )
     if wrote:
         warn_sealed_inputs(meiva_home, (config_path,), writer="converge")
+    fallback_path = otel_collector_fallback_config(meiva_home)
+    fallback = (
+        without_harness_receiver(config_path.read_text(encoding="utf-8"))
+        if harness_problem is not None and not wrote
+        else None
+    )
+    if fallback is not None:
+        if not fallback_path.is_file() or fallback_path.read_text(encoding="utf-8") != fallback:
+            write_text_atomic(fallback_path, fallback, encoding="utf-8", suffix="")
+            warn_sealed_inputs(meiva_home, (config_path, fallback_path), writer="converge")
+    elif fallback_path.is_file():
+        fallback_path.unlink()
+        warn_sealed_inputs(meiva_home, (fallback_path,), writer="converge")
+    if harness_problem is not None:
+        launch_path = fallback_path if fallback is not None else config_path
+        print(
+            f"  ! otel-collector: harness OTLP disabled: {harness_problem}; using {launch_path}",
+            file=sys.stderr,
+        )
 
 
 # meiva:note

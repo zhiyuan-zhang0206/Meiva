@@ -92,10 +92,15 @@ def cli_timezone(environ: Mapping[str, str]) -> tzinfo | None:
     return datetime.now().astimezone().tzinfo
 
 
-def _with_collector_bypass(environ: Mapping[str, str]) -> dict[str, str]:
+def _with_collector_bypass(environ: Mapping[str, str]) -> dict[str, str] | None:
+    keys = tuple(key for key in ("NO_PROXY", "no_proxy") if key in environ)
+    values = tuple(environ[key] for key in keys)
+    if len(values) == 2 and bool(values[0].strip()) != bool(values[1].strip()):
+        return None
+    if any(value != value.strip() and value.strip() in ("", "*") for value in values):
+        return None
     result = dict(environ)
-    populated = tuple(key for key in ("NO_PROXY", "no_proxy") if result.get(key))
-    for key in populated or ("no_proxy" if "no_proxy" in environ else "NO_PROXY",):
+    for key in keys or ("NO_PROXY",):
         value = result.get(key, "")
         if value != "*":
             result[key] = ",".join(filter(None, (value, "127.0.0.1")))
@@ -118,11 +123,18 @@ def open_session(
     otlp_endpoint: str | None = None,
     trace_enabled: bool = False,
 ) -> HarnessSession:
+    if harness is Harness.CLAUDE_CODE:
+        environ = {**dict.fromkeys(process_environment(), ""), **session_environ(environ)}
     if otlp_endpoint is not None:
-        environ = _with_collector_bypass(environ)
+        bypass = _with_collector_bypass(environ)
+        if bypass is None:
+            logger.warning("Native harness OTLP disabled: ambiguous proxy bypass environment")
+            otlp_endpoint = None
+            trace_enabled = False
+        else:
+            environ = bypass
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
-        claude_env = session_environ(environ)
         claude_config = BridgeConfig(
             cwd=cwd,
             agent_id=agent_id,
@@ -130,13 +142,13 @@ def open_session(
             reasoning_effort=reasoning_effort,
             otlp_endpoint=otlp_endpoint,
             trace_enabled=trace_enabled,
-            cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
+            cli_path=resolve_harness_binary("claude", path_env=environ.get("PATH")),
         )
         if model is not None:
             claude_config = replace(claude_config, model=model)
         return ClaudeSession(
             claude_config,
-            environ={**dict.fromkeys(process_environment(), ""), **claude_env},
+            environ=environ,
             binding=binding,
             clock=clock,
         )

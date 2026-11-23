@@ -22,7 +22,7 @@ from base.host.db_authority.unit import telemetry_bearer
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.system.tests.fake_commands import fake_host
 from base.native_process.os_platform import Platform
-from base.paths import otel_collector_config, otel_collector_dir
+from base.paths import otel_collector_config, otel_collector_dir, otel_collector_fallback_config
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.inputs import collector_settings_from_boot
 from cli.commands.observability.plans.collector.data_plane import PEER_PLACEHOLDER
@@ -121,6 +121,43 @@ def test_occupied_harness_port_renders_only_the_ordinary_receivers(
     assert f"harness OTLP disabled: port {port} is unavailable" in capsys.readouterr().err
     collector_unit.ensure(GATEWAY, observability=settings)
     assert "otlp/harness" in mapping_at(config_of(path.read_text()), "receivers")
+
+
+def test_harness_port_conflict_preserves_local_edits_in_the_launch_copy(
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _ = collector_unit.install_pinned_binary()
+    path = otel_collector_config(collector_unit.home)
+    fallback = otel_collector_fallback_config(collector_unit.home)
+    with socket.socket() as occupant:
+        occupant.bind(("127.0.0.1", 0))
+        occupant.listen()
+        port = occupant.getsockname()[1]
+        settings = observability(harness_otlp_port=port, trace_retention_days=3)
+        rendered = collector_unit.text(GATEWAY, observability=settings)
+        assert oc.write_config(path, rendered)
+        edited = rendered.replace("max_days: 3", "max_days: 19") + "\n# local edit\n"
+        path.write_text(edited)
+
+        collector_unit.ensure(GATEWAY, observability=settings)
+
+        assert path.read_text() == edited
+        launch = config_of(fallback.read_text())
+        assert fallback.stat().st_mode & 0o777 == 0o600
+        assert _rotation(launch)["max_days"] == 19
+        assert "otlp/harness" not in mapping_at(launch, "receivers")
+        assert "forward/harness" not in mapping_at(launch, "connectors")
+        for signal in ("logs", "metrics", "traces"):
+            assert f"{signal}/harness" not in mapping_at(launch, "service", "pipelines")
+            assert "otlp" in sequence_at(launch, "service", "pipelines", signal, "receivers")
+            assert "forward/harness" not in sequence_at(
+                launch, "service", "pipelines", signal, "receivers"
+            )
+        assert f"using {fallback}" in capsys.readouterr().err
+
+    collector_unit.ensure(GATEWAY, observability=settings)
+    assert not fallback.exists()
+    assert path.read_text() == edited
 
 
 def test_harness_processor_removes_non_attribute_payloads(

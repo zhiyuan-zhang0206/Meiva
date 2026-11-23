@@ -58,9 +58,13 @@ OTLP port by shifting within the unprivileged range, keeping adjacent unit
 ports distinct. Converge checks for conflicts before replacing the collector
 configuration and recognizes an existing listener owned by the same unit.
 If the derived port is occupied, converge warns and renders only the ordinary
-receivers. When enabling launchers, each existing proxy bypass variable keeps
-its own entries, and the collector's loopback address is appended without
-changing which spelling a child prefers. Before starting a CLI, the host sends an empty OTLP request
+receivers. When `config.yaml` has local edits, converge preserves it and the
+supervisor launches from a private copy with the harness ingress removed. The
+next converge with a free port restores `config.yaml` as the launch input.
+When enabling launchers, each existing proxy bypass variable keeps its own
+entries and adds the collector's loopback address. If an explicitly empty
+alias conflicts with a populated alias, the launcher preserves the proxy
+environment and disables native export. Before starting a CLI, the host sends an empty OTLP request
 and verifies the live receiver's redaction marker within a half-second total
 budget. The probe accepts at most 16 response bytes. It logs a warning and starts
 the CLI with export disabled if the probe fails. During collector replacement,

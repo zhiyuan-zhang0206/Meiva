@@ -15,7 +15,7 @@ from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.machine.tests.identity import set_machine_identity as set_machine_identity
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import otel_collector_binary, otel_collector_config
+from base.paths import otel_collector_binary, otel_collector_config, otel_collector_fallback_config
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, service_argv
 from services.desktop.browser.profile import profile_dir
 from services.supervision.healthchecks.gate import probe as gate_probe
@@ -42,6 +42,23 @@ def test_the_roster_binds_the_probes_and_paths_of_the_home_it_is_built_for(tmp_p
     assert str(otel_collector_binary(other)) in collector.cmd
     assert str(otel_collector_config(other)) in collector.cmd
     assert collector.config_inputs == (otel_collector_config(other),)
+
+
+def test_the_collector_launches_and_seals_the_fallback_when_converge_supplies_it(
+    tmp_path: Path,
+) -> None:
+    fallback = otel_collector_fallback_config(tmp_path)
+    fallback.parent.mkdir()
+    fallback.touch()
+
+    collector = _service(tmp_path, "otel-collector")
+
+    assert shlex.split(collector.cmd) == [
+        str(otel_collector_binary(tmp_path)),
+        "--config",
+        str(fallback),
+    ]
+    assert collector.config_inputs == (fallback,)
 
 
 def test_a_marker_in_the_handed_home_makes_it_the_observability_station(

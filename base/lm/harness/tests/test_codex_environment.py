@@ -143,25 +143,37 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
 
 
 @pytest.mark.parametrize(
-    ("proxy_env", "expected"),
+    ("proxy_env", "expected", "enabled"),
     [
-        ({}, {"NO_PROXY": "127.0.0.1"}),
-        ({"NO_PROXY": "127.0.0.2"}, {"NO_PROXY": "127.0.0.2,127.0.0.1"}),
-        ({"no_proxy": ".test.invalid"}, {"no_proxy": ".test.invalid,127.0.0.1"}),
+        ({}, {"NO_PROXY": "127.0.0.1"}, True),
+        ({"NO_PROXY": "127.0.0.2"}, {"NO_PROXY": "127.0.0.2,127.0.0.1"}, True),
+        ({"no_proxy": ".test.invalid"}, {"no_proxy": ".test.invalid,127.0.0.1"}, True),
         (
             {"NO_PROXY": "127.0.0.2", "no_proxy": ".test.invalid"},
             {"NO_PROXY": "127.0.0.2,127.0.0.1", "no_proxy": ".test.invalid,127.0.0.1"},
+            True,
         ),
-        ({"NO_PROXY": "*"}, {"NO_PROXY": "*"}),
+        ({"NO_PROXY": "*"}, {"NO_PROXY": "*"}, True),
         (
             {"NO_PROXY": "*", "no_proxy": ".test.invalid"},
             {"NO_PROXY": "*", "no_proxy": ".test.invalid,127.0.0.1"},
+            True,
         ),
-        ({"NO_PROXY": "*", "no_proxy": ""}, {"NO_PROXY": "*", "no_proxy": ""}),
+        ({"NO_PROXY": "*", "no_proxy": ""}, {"NO_PROXY": "*", "no_proxy": ""}, False),
+        (
+            {"NO_PROXY": "", "no_proxy": ".test.invalid"},
+            {"NO_PROXY": "", "no_proxy": ".test.invalid"},
+            False,
+        ),
+        (
+            {"NO_PROXY": "", "no_proxy": ""},
+            {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"},
+            True,
+        ),
     ],
 )
 async def test_native_otlp_preserves_proxy_exceptions(
-    tmp_path: Path, proxy_env: dict[str, str], expected: dict[str, str]
+    tmp_path: Path, proxy_env: dict[str, str], expected: dict[str, str], enabled: bool
 ) -> None:
     binary = Path(_stub_codex(tmp_path / "bin"))
     receipt = tmp_path / "environment.json"
@@ -174,16 +186,23 @@ async def test_native_otlp_preserves_proxy_exceptions(
             "PATH": str(binary.parent),
             "HOME": str(tmp_path),
             "MEIVA_TEST_ENV_RECEIPT": str(receipt),
+            "http_proxy": "http://127.0.0.1:1234",
             **proxy_env,
         },
         clock=system_clock(),
         otlp_endpoint="http://127.0.0.1:20702/meiva-harness",
+        trace_enabled=True,
     )
     try:
         await session.start()
         observed = json.loads(receipt.read_text())
         for child in (observed["environment"], observed["descendant"]):
             assert {key: child[key] for key in ("NO_PROXY", "no_proxy") if key in child} == expected
+            assert child["http_proxy"] == "http://127.0.0.1:1234"
+        args = observed["argv"]
+        assert ('otel.trace_exporter="none"' in args) is not enabled
+        assert ('otel.metrics_exporter="none"' in args) is not enabled
+        assert 'otel.exporter="none"' in args
     finally:
         await session.close()
 
