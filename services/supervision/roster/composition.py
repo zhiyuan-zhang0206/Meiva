@@ -32,6 +32,8 @@ from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY
 # work and closes its pools before the interpreter exits. Root must allow that tail.
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 
+_TEMPO_STOP_CEILING_S = 45.0
+
 
 # meiva:note
 # Render the observed relay endpoint as command, listen address and port. No
@@ -450,20 +452,26 @@ def build_services(
         service_argv,
         service_input_paths,
     )
-    from services.supervision.healthchecks.lgtm import probe_backend
+    from services.supervision.healthchecks.lgtm import probe_backend, probe_tempo
 
     observability = LgtmSettings.from_fields(get_field)
     urls = backend_urls(observability)
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(home, name, observability)),
+            cmd=("exec " if name == "tempo" else "")
+            + shlex.join(service_argv(home, name, observability)),
             config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
             curl_url=urls[name] + HEALTH_PATHS[name],
-            identity_probe=partial(probe_backend, name, urls=urls),
+            identity_probe=(
+                partial(probe_tempo, home=home, observability=observability, urls=urls)
+                if name == "tempo"
+                else partial(probe_backend, name, urls=urls)
+            ),
             healthcheck_module="services.supervision.healthchecks.lgtm",
+            stop_ceiling_s=_TEMPO_STOP_CEILING_S if name == "tempo" else None,
         )
         for name in BACKENDS
     )

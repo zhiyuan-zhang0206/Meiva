@@ -11,15 +11,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from base.paths import root_unit_pidfile as pidfile_path
+
 _log = logging.getLogger(__name__)
-
-_DIRECTORY = "units"
-
-
-# meiva:note
-# This unit's pidfile path under `run_dir`.
-def pidfile_path(run_dir: Path, unit_id: str) -> Path:
-    return run_dir / _DIRECTORY / f"{unit_id}.pid"
 
 
 record_path = pidfile_path

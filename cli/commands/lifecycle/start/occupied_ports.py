@@ -4,8 +4,7 @@
 # A daemon launched onto a taken port dies on 'address already in use'; one launched onto a
 # relayed port is worse, because the watchdog's probe is answered by the other home's daemon and
 # the failure reads as green. The start therefore refuses before anything launches and names the
-# occupants and the stopgap. Optional capabilities cannot block a start: only the services
-# core to serving are probed.
+# occupants and the stopgap. Core services are probed, plus Tempo during the handoff from its legacy external owner.
 
 from __future__ import annotations
 
@@ -32,7 +31,7 @@ def refusal_text(occupants: tuple[Occupant, ...]) -> str:
     listed = "\n".join(f"    {occupant.name}: {occupant.detail}" for occupant in occupants)
     drop = " ".join(f"--disable-service {occupant.session}" for occupant in occupants)
     return (
-        "\n✗ another unit already answers on this unit's daemon health ports:\n"
+        "\n✗ a listener conflict blocks this unit's start:\n"
         f"{listed}\n"
         "\n  Not starting — NOTHING was launched, including the gateway and the frontend. "
         "Launching onto a held port dies on 'address already in use'; launching onto a "

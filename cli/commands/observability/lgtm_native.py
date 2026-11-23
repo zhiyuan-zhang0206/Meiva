@@ -32,7 +32,7 @@ from base.host.system.hostport import Host
 from base.paths.expand import expand_home
 from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
-from base.telemetry.lgtm_local import BACKENDS, binary_path
+from base.telemetry.lgtm_local import BACKENDS, TempoListeners, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs
@@ -360,6 +360,7 @@ def _render_warnings(settings: LgtmSettings) -> tuple[str, ...]:
         ReadSurface(backend, env_var, listen_host, read_url, split_url(read_url))
         for backend, env_var, listen_host, read_url in (
             ("loki", "MEIVA_TELEMETRY_LOKI_URL", obs.lgtm_listen_host, obs.telemetry_loki_url),
+            ("tempo", "MEIVA_TELEMETRY_TEMPO_QUERY_URL", obs.lgtm_listen_host, query_url),
             (
                 "prometheus",
                 "MEIVA_TELEMETRY_PROMETHEUS_URL",
@@ -460,12 +461,21 @@ def render_configs(
     loki_url, prometheus_url, pg_url, webhook_url = _grafana_endpoints(
         settings, direct_db_url=direct_db_url, machine=machine
     )
+    tempo = TempoListeners.from_urls(
+        query_url=tempo_query_url,
+        intake_url=obs.telemetry_tempo_endpoint,
+        grpc_port=obs.lgtm_tempo_grpc_port,
+    )
     values = NativeRenderValues(
         meiva_home=str(meiva_home),
         storage_dir=str(storage_dir),
         provisioning_path=str(native_dir / "config" / "provisioning"),
         repo=str(repo),
         tempo_query_url=tempo_query_url,
+        tempo_http_port=tempo.http,
+        tempo_otlp_port=tempo.otlp,
+        tempo_grpc_port=tempo.grpc,
+        tempo_retention_hours=obs.lgtm_tempo_retention_hours,
         loki_url=loki_url,
         prometheus_url=prometheus_url,
         pg_url=pg_url,
@@ -553,7 +563,7 @@ def ensure_lgtm_native(
     native_dir = meiva_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
-    for sub in ("", "loki", "prom"):
+    for sub in ("", "loki", "prom", "tempo"):
         (storage_dir / sub).mkdir(parents=True, exist_ok=True)
     assets = native_versions(repo, tag=tag)
     plan = plan_backend_installs(

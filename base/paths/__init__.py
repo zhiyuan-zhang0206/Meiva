@@ -293,6 +293,10 @@ def root_run_dir(home: Path) -> Path:
     return run_dir(home) / "meiva-root"
 
 
+def root_unit_pidfile(run_directory: Path, unit_id: str) -> Path:
+    return run_directory / "units" / f"{unit_id}.pid"
+
+
 def root_manifests_path(home: Path) -> Path:
     """The K2 unit manifest the root supervisor reads (`<home>/run/meiva-root/manifests.json`).
 

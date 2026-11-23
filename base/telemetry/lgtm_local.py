@@ -1,15 +1,15 @@
-"""Local native LGTM listener identity, independent of external query URLs."""
+"""Native LGTM service commands, listener addresses and retained storage."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 # meiva:note
-# The observability fields this module reads: the two listen hosts, the three loopback ports the
-# probes dial, and the retention directory. A composition root reads them once (`from_fields`)
+# The native listeners and retained data volume, resolved from observability fields. A composition root reads them once (`from_fields`)
 # and hands the value down, so nothing here names the process settings.
 @dataclass(frozen=True)
 class LgtmSettings:
@@ -19,6 +19,7 @@ class LgtmSettings:
     listen_host: str
     grafana_listen_host: str
     storage_dir_setting: str
+    tempo: TempoListeners
 
     @classmethod
     def from_fields(cls, read_field: Callable[[str], object]) -> LgtmSettings:
@@ -29,6 +30,11 @@ class LgtmSettings:
             listen_host=str(read_field("lgtm_listen_host")),
             grafana_listen_host=str(read_field("lgtm_grafana_listen_host")),
             storage_dir_setting=str(read_field("lgtm_storage_dir")),
+            tempo=TempoListeners.from_urls(
+                query_url=str(read_field("telemetry_tempo_query_url")),
+                intake_url=str(read_field("telemetry_tempo_endpoint")),
+                grpc_port=_port(read_field("lgtm_tempo_grpc_port")),
+            ),
         )
 
 
@@ -38,6 +44,27 @@ def _port(value: object) -> int:
     if not isinstance(value, int | str):
         raise TypeError(f"an LGTM port must be a number, got {type(value).__name__}")
     return int(value)
+
+
+@dataclass(frozen=True)
+class TempoListeners:
+    http: int
+    otlp: int
+    grpc: int
+
+    @classmethod
+    def from_urls(cls, *, query_url: str, intake_url: str, grpc_port: int) -> TempoListeners:
+        return cls(http=_http_port(query_url), otlp=_http_port(intake_url), grpc=grpc_port)
+
+    def ports(self) -> tuple[int, int, int]:
+        return self.http, self.otlp, self.grpc
+
+
+def _http_port(url: str) -> int:
+    parts = urlsplit(url)
+    if parts.port is not None:
+        return parts.port
+    return 443 if parts.scheme == "https" else 80
 
 
 @dataclass(frozen=True)
@@ -69,6 +96,12 @@ NATIVE_SERVICES: dict[str, _NativeService] = {
         archive_member="prometheus-3.13.2.darwin-arm64/prometheus",
         binary_path="bin/prometheus",
     ),
+    "tempo": _NativeService(
+        arguments=("-config.file={config}/tempo.yaml",),
+        gomemlimit="600MiB",
+        archive_member="tempo",
+        binary_path="bin/tempo",
+    ),
     "grafana": _NativeService(
         arguments=(
             "server",
@@ -93,17 +126,14 @@ BACKENDS = tuple(NATIVE_SERVICES)
 HEALTH_PATHS = {
     "loki": "/ready",
     "prometheus": "/-/ready",
+    "tempo": "/ready",
     "grafana": "/api/health",
 }
 
 
 def binary_path(home: Path, name: str) -> Path:
     """The exact installed executable owned by this home."""
-    relative = {
-        "loki": "bin/loki",
-        "prometheus": "bin/prometheus",
-        "grafana": "grafana-home/bin/grafana",
-    }[name]
+    relative = NATIVE_SERVICES[name].binary_path
     return (home / "lgtm/native" / relative).resolve()
 
 
@@ -112,6 +142,7 @@ def backend_urls(observability: LgtmSettings) -> dict[str, str]:
     ports = {
         "loki": observability.loki_port,
         "prometheus": observability.prometheus_port,
+        "tempo": observability.tempo.http,
         "grafana": observability.grafana_port,
     }
     urls: dict[str, str] = {}

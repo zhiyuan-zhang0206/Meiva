@@ -94,7 +94,8 @@ def test_the_lgtm_backends_run_from_the_home_the_roster_is_built_for(tmp_path: P
     other.mkdir()
 
     for name in BACKENDS:
-        assert _service(other, name).cmd == shlex.join(
+        prefix = "exec " if name == "tempo" else ""
+        assert _service(other, name).cmd == prefix + shlex.join(
             service_argv(other, name, LgtmSettings.from_fields(config.get_field))
         )
 

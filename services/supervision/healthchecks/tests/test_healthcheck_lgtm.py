@@ -27,6 +27,7 @@ def test_the_default_backend_urls_dial_the_historical_loopback_ports() -> None:
     assert backend_urls(LgtmSettings.from_fields(config.get_field)) == {
         "loki": "http://127.0.0.1:3100",
         "prometheus": "http://127.0.0.1:9090",
+        "tempo": "http://127.0.0.1:3200",
         "grafana": "http://127.0.0.1:3003",
     }
 
@@ -226,3 +227,50 @@ def test_the_roles_lgtm_decides_on_are_none_only_while_no_capability_is_configur
         hc.lgtm_roles(invalid)
     machine_identity.set(role="observability-station")
     assert hc.lgtm_roles(machine_identity) == frozenset({"observability-station"})
+
+
+def test_tempo_refuses_external_listeners_even_if_they_answer_ready(tmp_path: Path) -> None:
+    observability = LgtmSettings.from_fields(config.get_field)
+    with BackendStub() as legacy_tempo:
+        verdict = hc.probe_tempo(
+            home=tmp_path,
+            observability=observability,
+            urls={"tempo": legacy_tempo.url},
+            listeners_on=lambda port: [17] if port == observability.tempo.http else [],
+        )
+
+    assert verdict.terminal
+    assert not verdict.alive
+    assert f":{observability.tempo.http} (PIDs [17])" in verdict.detail
+    assert "disable the tempo-pulse timer" in verdict.detail
+
+
+def test_tempo_ready_requires_all_ports_owned_and_an_http_success(tmp_path: Path) -> None:
+    from base.paths import root_run_dir, root_unit_pidfile
+    from base.telemetry.lgtm_local import service_argv
+
+    observability = LgtmSettings.from_fields(config.get_field)
+    pidfile = root_unit_pidfile(root_run_dir(tmp_path), "tempo")
+    pidfile.parent.mkdir(parents=True)
+    pidfile.write_text("17\n")
+    argv = list(service_argv(tmp_path, "tempo", observability))
+    listeners = {port: [17] for port in observability.tempo.ports()}
+    with BackendStub() as tempo:
+
+        def probe() -> hc.DaemonProbe:
+            return hc.probe_tempo(
+                home=tmp_path,
+                observability=observability,
+                urls={"tempo": tempo.url},
+                listeners_on=listeners.__getitem__,
+                cmdline=lambda _: argv,
+            )
+
+        assert probe().alive
+        tempo.script.ready = (503, b"")
+        assert not probe().alive
+        tempo.script.ready = (200, b"")
+        listeners[observability.tempo.otlp] = [23]
+        assert probe().terminal
+        listeners[observability.tempo.otlp] = []
+        assert not probe().alive

@@ -87,7 +87,7 @@ from services.supervision.roster.spec import services_for_capabilities_annotated
 # Refuse known core-port conflicts; optional capabilities cannot block start.
 def refuse_occupied_health_ports(roster: tuple[ServiceSpec, ...]) -> int:
     occupied = probe.occupied_health_ports(
-        tuple(s for s in roster if s.session in CRITICAL_SERVICE_SESSIONS)
+        tuple(s for s in roster if s.session in CRITICAL_SERVICE_SESSIONS or s.session == "tempo")
     )
     if not occupied:
         return 0

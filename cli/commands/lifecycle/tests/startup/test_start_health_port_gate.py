@@ -178,3 +178,17 @@ def test_a_disabled_service_is_not_in_the_roster_the_gate_probes(start_run: Star
 
     assert "labeler" in full
     assert narrowed == full - {"labeler"}
+
+
+def test_a_legacy_tempo_listener_refuses_start_with_a_tempo_specific_stopgap(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    external = "Tempo listeners occupied by external processes at port 14318"
+    tempo = _other_endpoint_spec(
+        "tempo", "http://127.0.0.1:3200/ready", DaemonProbe.port_taken(external)
+    )
+
+    assert refuse_occupied_health_ports((tempo,)) == 1
+    message = capsys.readouterr().err
+    assert external in message
+    assert "--disable-service tempo" in message

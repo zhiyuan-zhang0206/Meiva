@@ -1,0 +1,38 @@
+server:
+  http_listen_port: __TEMPO_HTTP_PORT__
+  http_listen_address: "{{TEMPO_LISTEN_HOST}}"
+  grpc_listen_port: __TEMPO_GRPC_PORT__
+  grpc_listen_address: "{{TEMPO_LISTEN_HOST}}"
+usage_report:
+  reporting_enabled: false
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: "{{TEMPO_OTLP_ADDRESS}}"
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: "{{TEMPO_RETENTION}}"
+  local_work_path: "{{TEMPO_DATA_PATH}}"
+backend_worker:
+  compaction:
+    block_retention: "{{TEMPO_RETENTION}}"
+storage:
+  trace:
+    backend: local
+    block:
+      version: vParquet4
+    local:
+      path: "{{TEMPO_DATA_PATH}}/blocks"
+    wal:
+      path: "{{TEMPO_DATA_PATH}}/wal"
+live_store:
+  shutdown_marker_dir: "{{TEMPO_DATA_PATH}}/live-store/shutdown-marker"
+  wal:
+    path: "{{TEMPO_DATA_PATH}}/live-store/traces"
+block_builder:
+  wal:
+    path: "{{TEMPO_DATA_PATH}}/block-builder/traces"

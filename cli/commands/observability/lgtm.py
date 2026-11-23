@@ -5,7 +5,12 @@ from pathlib import Path
 from base.cluster.machine import MachineIdentityReader
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, backend_urls
 from cli.commands.observability._lgtm_provisioning import verify_dashboard_provisioning
-from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles, probe_backend
+from services.supervision.healthchecks.lgtm import (
+    is_lgtm_host,
+    lgtm_roles,
+    probe_backend,
+    probe_tempo,
+)
 
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
@@ -15,7 +20,7 @@ def cmd_lgtm_status(
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
     if not station:
         print("this home is not an observability station")
-    print_lgtm_status(observability)
+    print_lgtm_status(observability, home=home)
     if not station:
         return 0
     problems = verify_dashboard_provisioning(
@@ -30,8 +35,12 @@ def cmd_lgtm_status(
 
 # meiva:note
 # Print each backend's probe verdict and detail.
-def print_lgtm_status(observability: LgtmSettings) -> None:
+def print_lgtm_status(observability: LgtmSettings, *, home: Path) -> None:
     urls = backend_urls(observability)
     for name in BACKENDS:
-        result = probe_backend(name, urls=urls)
+        result = (
+            probe_tempo(home=home, observability=observability, urls=urls)
+            if name == "tempo"
+            else probe_backend(name, urls=urls)
+        )
         print(f"  {name}: {result.verdict.value} ({result.detail})")

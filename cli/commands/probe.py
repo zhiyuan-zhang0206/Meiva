@@ -117,7 +117,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 def occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
     occupied: list[OccupiedPort] = []
     for spec in specs:
-        if not _binds_a_daemon_health_port(spec):
+        if not (_binds_a_daemon_health_port(spec) or spec.session == "tempo"):
             continue
         probe = probe_service(spec)
         if probe.terminal:

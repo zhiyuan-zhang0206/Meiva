@@ -126,7 +126,7 @@ def gate_kind(session: str) -> GateKind:
             return "browser"
         case "computer-mcp":
             return "computer-mcp"
-        case "loki" | "prometheus" | "grafana":
+        case "loki" | "prometheus" | "tempo" | "grafana":
             return "station"
         case "otel-collector":
             return "collector"

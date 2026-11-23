@@ -1,6 +1,7 @@
 """Read-only probes for the designated observability station.
 
-The endpoint probes observe local Loki, Prometheus and Grafana readiness. The
+The endpoint probes observe local Loki, Prometheus, Tempo and Grafana readiness. The
+Tempo additionally checks listener custody because its /ready has no home identity. The
 write-path probe sends a unique Loki log and queries it back, with bounded
 admission retries. Probe results carry no authority to restart a backend;
 service lifecycle belongs to the root supervisor.
@@ -22,8 +23,12 @@ from pydantic import TypeAdapter
 
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing, MachineRoles
-from base.daemon.health import DaemonProbe
+from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
+from base.daemon.health import DaemonProbe, recorded_pid
 from base.host.boundary.untyped import object_of
+from base.host.proc import process_cmdline
+from base.paths import root_run_dir, root_unit_pidfile
+from base.telemetry.lgtm_local import LgtmSettings, service_argv
 from services.supervision.healthchecks.plans.lgtm_plan import (
     NANOSECONDS_PER_SECOND,
     Accepted,
@@ -125,6 +130,42 @@ def probe_backend(name: str, *, urls: Mapping[str, str]) -> DaemonProbe:
     if urllib.parse.urlsplit(urls[name]).port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
     return readiness_at(name, urls[name] + HEALTH_PATHS[name])
+
+
+def probe_tempo(
+    *,
+    home: Path,
+    observability: LgtmSettings,
+    urls: Mapping[str, str],
+    listeners_on: Callable[[int], list[int]] = strict_listeners_on,
+    cmdline: Callable[[int], list[str] | None] = process_cmdline,
+) -> DaemonProbe:
+    ports = observability.tempo.ports()
+    if len(set(ports)) != len(ports) or 0 in ports:
+        return DaemonProbe.unavailable(
+            "Tempo needs distinct, nonzero HTTP, OTLP/HTTP and internal gRPC ports. "
+            "Check MEIVA_TELEMETRY_TEMPO_QUERY_URL, MEIVA_TELEMETRY_TEMPO_ENDPOINT "
+            "and MEIVA_LGTM_TEMPO_GRPC_PORT."
+        )
+    argv = list(service_argv(home, "tempo", observability))
+    try:
+        pid = recorded_pid(root_unit_pidfile(root_run_dir(home), "tempo"))
+        owned: set[int] = {pid} if pid is not None and cmdline(pid) == argv else set()
+        listeners = {port: set(listeners_on(port)) for port in ports}
+    except (ListenerDiscoveryError, OSError) as exc:
+        return DaemonProbe.unavailable(f"Tempo listener inspection failed: {exc}")
+    if conflicts := {
+        port: sorted(pids - owned) for port, pids in listeners.items() if pids - owned
+    }:
+        endpoints = ", ".join(f":{port} (PIDs {pids})" for port, pids in conflicts.items())
+        return DaemonProbe.port_taken(
+            f"Tempo listeners occupied by external processes: {endpoints}. "
+            "Stop the processes owning those ports before starting native Tempo. "
+            "For a legacy station, disable the tempo-pulse timer before stopping its Tempo unit."
+        )
+    if not all(listeners.values()):
+        return DaemonProbe.down("Tempo is waiting for its HTTP, OTLP/HTTP and gRPC listeners")
+    return probe_backend("tempo", urls=urls)
 
 
 # meiva:note

@@ -3900,7 +3900,7 @@
   "services/supervision/meiva_root/tests/test_meiva_root_supervisor.py": 15,
   "services/supervision/meiva_root/tests/test_meiva_root_supervisor_reaping.py": 2,
   "services/supervision/meiva_root/tests/test_meiva_root_wiring.py": 1,
-  "services/supervision/meiva_root/unit_ledger.py": 5,
+  "services/supervision/meiva_root/unit_ledger.py": 4,
   "services/supervision/meiva_root/unit_records.py": 12,
   "services/supervision/meiva_root/wiring.py": 9,
   "services/supervision/meiva_root_glue/diagnostic_probes.py": 10,
