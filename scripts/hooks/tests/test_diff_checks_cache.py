@@ -34,7 +34,12 @@ from scripts.hooks.diff_checks_cache import (
     record_run,
 )
 from scripts.hooks.diff_checks_plan import schedule_groups
-from scripts.hooks.meizel_run import cached_full_meizel, git_executable_digest, safe_environment
+from scripts.hooks.meizel_run import (
+    cached_full_meizel,
+    git_config_identity,
+    git_executable_digest,
+    safe_environment,
+)
 
 # meiva:note
 # The interpreter the runner hands its children is the caller's value, so these tests name it here:
@@ -695,3 +700,14 @@ def test_git_executable_identity_survives_hook_path_prepend(tmp_path: Path) -> N
     assert git_executable_digest(hook_path) == preflight
     (exec_bin / "git").write_bytes(b"git executable version 2")
     assert git_executable_digest(hook_path) != preflight
+
+
+def test_unrelated_upstream_updates_keep_the_git_config_identity(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    before = git_config_identity(tmp_path)
+    _git(tmp_path, "config", "branch.other-worktree.remote", "origin")
+    _git(tmp_path, "config", "branch.other-worktree.merge", "refs/heads/main")
+    assert git_config_identity(tmp_path) == before
+
+    _git(tmp_path, "config", "merge.renames", "false")
+    assert git_config_identity(tmp_path) != before

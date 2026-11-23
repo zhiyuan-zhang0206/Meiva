@@ -129,6 +129,16 @@ def _cacheable_checkout(root: Path, head: str) -> bool:
     return all(not entry or entry.startswith("H ") for entry in tracked)
 
 
+def git_config_identity(root: Path) -> tuple[str, ...]:
+    entries = git(root, "config", "--null", "--list").split("\0")
+    identity: list[str] = []
+    for entry in entries:
+        key = entry.partition("\n")[0]
+        if not (key.startswith("branch.") and key.endswith((".remote", ".merge"))):
+            identity.append(entry)
+    return tuple(identity)
+
+
 def input_fingerprint(
     root: Path, head: str, *, python: str, environment: Mapping[str, str]
 ) -> str | None:
@@ -137,7 +147,7 @@ def input_fingerprint(
             return None
         inputs = (
             str(root),
-            git(root, "config", "--null", "--list"),
+            git_config_identity(root),
             git(root, "--exec-path"),
             git_executable_digest(environment.get("PATH", "")),
             _toolchain(root, python, environment.get("PATH", "")),
