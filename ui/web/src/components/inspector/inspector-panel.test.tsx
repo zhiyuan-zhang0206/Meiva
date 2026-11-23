@@ -329,7 +329,7 @@ describe("InspectorPanel", () => {
     getAgentInspectStatistics.mockResolvedValue(fixture({
       cost: {
         cost_usd: 3, cost_usd_api: 3, cost_usd_subscription: 0,
-        unpriced_calls: 0, unpriced_calls_api: 0, unpriced_calls_subscription: 0, llm_calls: 2,
+        unpriced_calls: 0, unpriced_calls_api: 0, unpriced_calls_subscription: 0, incomplete_usage_reports: 0, llm_calls: 2,
         tokens_in: 6000, tokens_out: 0, tokens_cached: 0,
         tokens_reasoning: 0, cache_hit_pct: null,
       },
@@ -350,6 +350,7 @@ describe("InspectorPanel", () => {
           unpriced_calls: 0,
           unpriced_calls_api: 0,
           unpriced_calls_subscription: 0,
+          incomplete_usage_reports: 0,
           llm_calls: 142,
           tokens_in: 2_176_670_000,
           tokens_out: 3_420_000,
@@ -375,6 +376,7 @@ describe("InspectorPanel", () => {
           unpriced_calls: 0,
           unpriced_calls_api: 0,
           unpriced_calls_subscription: 0,
+          incomplete_usage_reports: 0,
           llm_calls: 0,
           tokens_in: 1_500_000_000_000,
           tokens_out: 999,
