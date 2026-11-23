@@ -237,9 +237,14 @@ def test_lgtm_status_reports_tempo_listener_conflicts(
             tempo_intake_url="http://127.0.0.1:1",
             tempo_grpc_port=2,
         )
-        lgtm.cmd_lgtm_status(home=lgtm_unit.home, machine=lgtm_unit.machine, observability=settings)
+        lgtm.cmd_lgtm_status(
+            home=lgtm_unit.home,
+            repo=REPO_ROOT,
+            platform=DARWIN_ARM64,
+            machine=lgtm_unit.machine,
+            observability=settings,
+        )
 
-    assert (
-        "tempo: port-taken (Tempo listeners occupied by external processes"
-        in capsys.readouterr().out
-    )
+    out = capsys.readouterr().out
+    assert "tempo: port-taken (Tempo listeners occupied by external processes" in out
+    assert "grafana bundled plugins: incomplete (release tree or manifest is missing)" in out

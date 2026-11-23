@@ -34,6 +34,7 @@ from base.paths.tests.fake_scratch import FakeScratch
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.observability import lgtm_native
+from cli.commands.observability._grafana_release import seal_grafana_release
 from cli.commands.observability.inputs import LgtmSettings
 from cli.commands.observability.plans.lgtm.dashboard_plan import (
     DashboardOutcome,
@@ -115,14 +116,20 @@ class LgtmUnit:
 
     # meiva:note
     # Leave the markers of the pinned release for `system`/`machine`, as a finished install does.
-    def mark_current(self, system: Literal["darwin", "linux"], machine: str) -> str:
+    def mark_current(
+        self, system: Literal["darwin", "linux"], machine: str, *, repo: Path = REPO_ROOT
+    ) -> str:
         tag = platform_tag(system, machine)
         assert tag is not None
-        for name, asset in lgtm_native.native_versions(REPO_ROOT, tag=tag).items():
+        for name, asset in lgtm_native.native_versions(repo, tag=tag).items():
             assert name in BACKENDS
             self.native.mkdir(parents=True, exist_ok=True)
             (self.native / f"version-{name}").write_text(asset["version"] + "\n", encoding="utf-8")
             (self.native / f"platform-{name}").write_text(tag + "\n", encoding="utf-8")
+            if name == "grafana":
+                release = self.native / "grafana-home"
+                release.mkdir()
+                seal_grafana_release(release, archive_sha256=asset["sha256"])
         return tag
 
 
@@ -166,7 +173,12 @@ class Mirror:
                 {f"prometheus-3.13.2.{self.asset_tag}/prometheus": b"#!/bin/sh\n"}
             ),
             "/tempo.tar.gz": tar_bytes({"tempo": b"#!/bin/sh\n"}),
-            "/grafana.tar.gz": tar_bytes({"grafana-13.2.3/bin/grafana": b"#!/bin/sh\n"}),
+            "/grafana.tar.gz": tar_bytes(
+                {
+                    "grafana-13.2.3/bin/grafana": b"#!/bin/sh\n",
+                    "grafana-13.2.3/data/plugins-bundled/prometheus/plugin.json": b"{}",
+                }
+            ),
         }
 
     def routes(self, *paths: str) -> dict[str, Reply]:

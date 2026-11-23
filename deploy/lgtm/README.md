@@ -52,6 +52,18 @@ before extraction, writes each executable or release tree under
 installation cannot reuse its executable markers on Linux. Pinned assets
 support Darwin arm64 and Linux amd64; unsupported platforms warn and skip.
 
+Converge seals the checksum-verified Grafana release tree, including its bundled
+datasource plugins, under `$MEIVA_HOME/lgtm/native/grafana-home`. A manifest in
+that tree records the archive hash and the installed file hashes and modes.
+Later passes verify the tree and reinstall it if files or permissions drift,
+including on the first converge of an older installation without a manifest.
+Grafana writes its database, installed plugins, and logs outside the release
+tree. After an interrupted install, converge can publish an intact staged or
+backed-up tree for the current pin before contacting the mirror. It updates the
+version and platform markers before clearing abandoned Grafana work directories.
+`meiva lgtm status` reports the release integrity on the station and
+exits nonzero when it detects drift.
+
 Native templates in `native/config/` are rendered on every converge into
 `$MEIVA_HOME/lgtm/native/config/`, including Grafana's INI, runtime environment,
 and launch script. Native backend listen hosts are config
@@ -250,6 +262,11 @@ All four local backends are ordinary root services. Converge prepares assets and
 configuration; it never registers or restarts per-backend OS jobs. A repeated
 start reuses an unchanged root generation. A changed service set or configuration
 requires normal stop before start; it cannot terminate active agent work implicitly.
+
+If rolling back to an installer without release sealing, stop Grafana first.
+When that installer must replace the sealed release, run
+`chmod -R u+w "$MEIVA_HOME/lgtm/native/grafana-home"` on the offline tree before
+its converge. The writable runtime data lives separately.
 
 The native Loki binary validates its rendered config before the root is started.
 An externally occupied Tempo port blocks startup and reports the port and

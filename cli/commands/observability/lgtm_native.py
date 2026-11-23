@@ -29,6 +29,7 @@ from base.host.boundary.untyped import object_of
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
+from base.native_process.os_platform import file_lock
 from base.paths.expand import expand_home
 from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
@@ -37,6 +38,17 @@ from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.observability._grafana_release import (
+    GRAFANA_BACKUP_PREFIX,
+    GRAFANA_DOWNLOAD_PREFIX,
+    GRAFANA_STAGING_PREFIX,
+    GRAFANA_UNPACK_PREFIX,
+    clean_grafana_release_work,
+    grafana_release_problem,
+    publish_grafana_release,
+    recover_grafana_release,
+    seal_grafana_release,
+)
 from cli.commands.observability._lgtm_alert_contact import (
     AlertContactOverride,
     read_alert_contact_override,
@@ -256,22 +268,28 @@ def _extract_member(
 
 
 # meiva:note
-# Install a release archive tree after stripping its top-level directory.
-def _extract_tree(name: str, archive: Path, destination: Path, *, scratch: ScratchSpace) -> None:
-    # meiva:note
-    # Unpacked beside the tree it replaces, so the final move is a rename; see `_extract_member`.
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with scratch.make(prefix="meiva-lgtm-tree-", parent=destination.parent) as temporary_dir:
-        extracted = temporary_dir / "extracted"
-        extracted.mkdir()
+# Install the tree from the verified Grafana archive.
+def _extract_tree(
+    name: str, archive: Path, destination: Path, *, archive_sha256: str, scratch: ScratchSpace
+) -> None:
+    parent = destination.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    with (
+        scratch.make(prefix=GRAFANA_UNPACK_PREFIX, parent=parent) as extracted,
+        scratch.make(prefix=GRAFANA_STAGING_PREFIX, parent=parent) as staged,
+        scratch.make(prefix=GRAFANA_BACKUP_PREFIX, parent=parent) as previous,
+    ):
         with tarfile.open(archive) as bundle:
             bundle.extractall(extracted, filter="data")
-        roots = [path for path in extracted.iterdir() if path.is_dir()]
+        roots = [path for path in extracted.iterdir() if path.is_dir() and not path.is_symlink()]
         if len(roots) != 1:
             raise RuntimeError(f"native LGTM {name} archive must have one top-level directory")
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.move(str(roots[0]), destination)
+        roots[0].rename(staged)
+        seal_grafana_release(staged, archive_sha256=archive_sha256)
+        # meiva:note
+        # Both renames stay in one parent so the old tree can remain sealed until
+        # unlinked from the homepath. Converge can rediscover both names after SIGKILL.
+        publish_grafana_release(staged, destination, previous=previous)
 
 
 # meiva:note
@@ -286,14 +304,22 @@ def download_and_verify(
     limits: DownloadLimits,
     scratch: ScratchSpace,
 ) -> tuple[Path, ...]:
-    with scratch.make(prefix="meiva-lgtm-download-") as temporary_dir:
+    is_grafana = name == "grafana"
+    if is_grafana:
+        native_dir.mkdir(parents=True, exist_ok=True)
+    with scratch.make(
+        prefix=GRAFANA_DOWNLOAD_PREFIX if is_grafana else "meiva-lgtm-download-",
+        parent=native_dir if is_grafana else None,
+    ) as temporary_dir:
         archive = temporary_dir / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
         download_with_retry(asset["url"], archive, limits=limits)
+        with archive.open("rb") as file:
+            archive_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
         problem = checksum_problem(
             name,
             version,
-            actual=hashlib.sha256(archive.read_bytes()).hexdigest(),
+            actual=archive_sha256,
             expected=asset["sha256"],
         )
         if problem is not None:
@@ -306,11 +332,23 @@ def download_and_verify(
         )
         match extraction:
             case ExtractTree(destination=destination):
-                _extract_tree(name, archive, native_dir / destination, scratch=scratch)
+                _extract_tree(
+                    name,
+                    archive,
+                    native_dir / destination,
+                    archive_sha256=archive_sha256,
+                    scratch=scratch,
+                )
             case ExtractMember(member=member, destination=destination):
                 _extract_member(name, archive, native_dir / destination, member, scratch=scratch)
             case _:
                 assert_never(extraction)
+        return _write_install_markers(native_dir, name, version=version, tag=tag)
+
+
+def _write_install_markers(
+    native_dir: Path, name: str, *, version: str, tag: str
+) -> tuple[Path, ...]:
     return tuple(
         native_dir / filename
         for filename, content in install_markers(name, version=version, tag=tag)
@@ -574,6 +612,69 @@ def _installed_markers(native_dir: Path, names: tuple[str, ...]) -> dict[str, In
     }
 
 
+def _ensure_assets(
+    repo: Path,
+    native_dir: Path,
+    *,
+    tag: str,
+    services: frozenset[str],
+    limits: DownloadLimits,
+    scratch: ScratchSpace,
+) -> list[Path]:
+    assets = native_versions(repo, tag=tag)
+    changed: list[Path] = []
+    release = native_dir / "grafana-home"
+    recovered = "grafana" in services and recover_grafana_release(
+        release, archive_sha256=assets["grafana"]["sha256"], scratch=scratch
+    )
+    if recovered:
+        changed.extend(
+            _write_install_markers(
+                native_dir, "grafana", version=assets["grafana"]["version"], tag=tag
+            )
+        )
+        clean_grafana_release_work(release)
+    installed = _installed_markers(native_dir, tuple(assets))
+    if (
+        "grafana" in services
+        and not recovered
+        and (
+            problem := grafana_release_problem(release, archive_sha256=assets["grafana"]["sha256"])
+        )
+    ):
+        print(f"  · lgtm native: Grafana release needs reinstall ({problem})")
+        installed.pop("grafana", None)
+    plan = plan_backend_installs(
+        tag=tag,
+        pinned_versions={name: asset["version"] for name, asset in assets.items()},
+        installed=installed,
+        services=services,
+    )
+    for step in plan:
+        asset = assets[step.name]
+        match step:
+            case KeepBackend():
+                print(f"  · lgtm native: {step.name} {asset['version']} present")
+            case InstallBackend():
+                changed.extend(
+                    download_and_verify(
+                        step.name,
+                        asset["version"],
+                        asset,
+                        native_dir,
+                        tag=tag,
+                        limits=limits,
+                        scratch=scratch,
+                    )
+                )
+                if step.name == "grafana":
+                    clean_grafana_release_work(release)
+                print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
+            case _:
+                assert_never(step)
+    return changed
+
+
 # meiva:note
 # Prepare the selected pinned binaries and config; lifecycle belongs to meiva-root.
 #
@@ -603,34 +704,10 @@ def ensure_lgtm_native(
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
     for sub in ("", "loki", "prom", "tempo"):
         (storage_dir / sub).mkdir(parents=True, exist_ok=True)
-    assets = native_versions(repo, tag=tag)
-    plan = plan_backend_installs(
-        tag=tag,
-        pinned_versions={name: asset["version"] for name, asset in assets.items()},
-        installed=_installed_markers(native_dir, tuple(assets)),
-        services=services,
-    )
-    changed: list[Path] = []
-    for step in plan:
-        asset = assets[step.name]
-        match step:
-            case KeepBackend():
-                print(f"  · lgtm native: {step.name} {asset['version']} present")
-            case InstallBackend():
-                changed.extend(
-                    download_and_verify(
-                        step.name,
-                        asset["version"],
-                        asset,
-                        native_dir,
-                        tag=tag,
-                        limits=settings.download,
-                        scratch=scratch,
-                    )
-                )
-                print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
-            case _:
-                assert_never(step)
+    with file_lock(native_dir / "install.lock"):
+        changed = _ensure_assets(
+            repo, native_dir, tag=tag, services=services, limits=settings.download, scratch=scratch
+        )
     changed.extend(
         render_configs(
             repo,

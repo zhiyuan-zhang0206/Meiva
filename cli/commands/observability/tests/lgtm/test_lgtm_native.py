@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,7 @@ from cli.commands.observability.tests.observability_inputs import (
     lgtm_settings,
     observability,
 )
-from cli.commands.observability.tests.scripted_http import serve
+from cli.commands.observability.tests.scripted_http import Reply, serve
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -143,24 +144,101 @@ def test_backends_already_installed_for_this_platform_are_not_downloaded(
     db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
 ) -> None:
     mirror = Mirror("darwin-arm64")
-    lgtm_unit.mark_current("darwin", "arm64")
     install_loki_stub(lgtm_unit)
     with serve({}) as served:
         repo = checkout_pinning(lgtm_unit.home / "repo", mirror.pins(served.url))
+        lgtm_unit.mark_current("darwin", "arm64", repo=repo)
         ensure(lgtm_unit, repo, database=operator_database)
 
     assert served.received == []
     assert (lgtm_unit.native / "config/loki.yaml").exists()
 
 
+def test_converge_restores_missing_and_changed_grafana_release_files(
+    db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
+) -> None:
+    mirror = Mirror("darwin-arm64")
+    release = lgtm_unit.native / "grafana-home"
+    plugin = release / "data/plugins-bundled/prometheus"
+    binary = release / "bin/grafana"
+    with serve(mirror.routes("/grafana.tar.gz")) as served:
+        repo = checkout_pinning(lgtm_unit.home / "repo", mirror.pins(served.url))
+        release.mkdir(parents=True)
+        (lgtm_unit.native / "version-grafana").write_text("13.2.3\n")
+        (lgtm_unit.native / "platform-grafana").write_text("darwin_arm64\n")
+        for expected_downloads in (1, 2, 3):
+            ensure(lgtm_unit, repo, services=frozenset({"grafana"}), database=operator_database)
+            assert len(served.received) == expected_downloads
+            assert (plugin / "plugin.json").read_bytes() == b"{}"
+            assert binary.read_bytes() == b"#!/bin/sh\n"
+            assert all(
+                path.stat().st_mode & 0o222 == 0
+                for path in (release, plugin.parent, plugin, binary)
+            )
+            if expected_downloads == 1:
+                plugin.parent.chmod(0o755)
+                plugin.chmod(0o755)
+                shutil.rmtree(plugin)
+                plugin.parent.chmod(0o555)
+            elif expected_downloads == 2:
+                binary.chmod(0o755)
+                binary.write_bytes(b"changed")
+                binary.chmod(0o555)
+        ensure(lgtm_unit, repo, services=frozenset({"grafana"}), database=operator_database)
+        assert len(served.received) == 3
+
+
+@pytest.mark.parametrize("surviving_release", ["staged", "previous", "published"])
+def test_converge_recovers_interrupted_grafana_install_before_an_unavailable_mirror(
+    db_url: str,
+    lgtm_unit: LgtmUnit,
+    operator_database: DatabaseFactory,
+    tmp_path: Path,
+    surviving_release: str,
+) -> None:
+    mirror = Mirror("darwin-arm64")
+    services = frozenset({"grafana"})
+    native = lgtm_unit.native
+    release = native / "grafana-home"
+    with serve(mirror.routes("/grafana.tar.gz")) as served:
+        repo = checkout_pinning(tmp_path / "online", mirror.pins(served.url))
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+
+    staged = native / "meiva-lgtm-tree-interrupted"
+    previous = native / "meiva-lgtm-previous-interrupted"
+    if surviving_release != "published":
+        release.rename(previous)
+    if surviving_release == "staged":
+        shutil.copytree(previous, staged)
+    else:
+        staged.mkdir()
+    survivor = {"staged": staged, "previous": previous, "published": release}[surviving_release]
+    expected_inode = survivor.stat().st_ino
+    (native / "version-grafana").write_text("before-interruption\n")
+    (native / "meiva-lgtm-unpack-interrupted").mkdir()
+    (native / "meiva-lgtm-grafana-download-interrupted").mkdir()
+
+    with serve({}, otherwise=Reply(status=503)) as unavailable:
+        repo = checkout_pinning(tmp_path / "offline", mirror.pins(unavailable.url))
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+        ensure(lgtm_unit, repo, services=services, database=operator_database)
+
+    assert not unavailable.received
+    assert release.stat().st_ino == expected_inode
+    assert (release / "data/plugins-bundled/prometheus/plugin.json").read_bytes() == b"{}"
+    assert (release / "bin/grafana").stat().st_mode & 0o222 == 0
+    assert (native / "version-grafana").read_text() == "13.2.3\n"
+    assert not list(native.glob("meiva-lgtm-*"))
+
+
 def test_only_the_backend_with_a_stale_marker_is_downloaded_again(
     db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
 ) -> None:
     mirror = Mirror("darwin-arm64")
-    lgtm_unit.mark_current("darwin", "arm64")
-    (lgtm_unit.native / "version-loki").write_text("old\n", encoding="utf-8")
     with serve(mirror.routes("/loki.zip")) as served:
         repo = checkout_pinning(lgtm_unit.home / "repo", mirror.pins(served.url))
+        lgtm_unit.mark_current("darwin", "arm64", repo=repo)
+        (lgtm_unit.native / "version-loki").write_text("old\n", encoding="utf-8")
         ensure(lgtm_unit, repo, database=operator_database)
 
     assert [request.path for request in served.received] == ["/loki.zip"]

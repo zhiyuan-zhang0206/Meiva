@@ -64,6 +64,7 @@ _NATIVE_ENVIRONMENT = {
     "GF_SERVER_SERVE_FROM_SUB_PATH": "true",
     "GF_ANALYTICS_REPORTING_ENABLED": "false",
     "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
+    "GF_PLUGINS_PREINSTALL_DISABLED": "true",
     "MEIVA_ALERTS_WEBHOOK_TOKEN": "",
     "GRAFANA_PG_PASSWORD": "",
 }
@@ -226,9 +227,17 @@ def _native_grafana_env(
 
 
 def _start_grafana(binary: Path, home: Path, env: dict[str, str]) -> subprocess.Popen[str]:
+    home = home.resolve(strict=True)
+    meiva_homes = [Path.home() / ".meiva"]
+    if configured := env.get("MEIVA_HOME"):
+        meiva_homes.append(Path(configured).expanduser())
+    if any(home.is_relative_to(path.resolve()) for path in meiva_homes) or any(
+        path.name == "native" and path.parent.name == "lgtm" for path in (home, *home.parents)
+    ):
+        raise ValueError(f"native Grafana tests require a disposable homepath, got {home}")
     return subprocess.Popen(  # noqa: S603 - checksum-pinned test binary
         [str(binary), "server", "--homepath", str(home)],
-        env=env,
+        env={**env, "GF_PATHS_BUNDLED_PLUGINS": str(home / "data" / "plugins-bundled")},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -301,6 +310,16 @@ def _assert_viewer_cannot_persist_dashboard(base_url: str) -> None:
         headers={"Content-Type": "application/json"},
     )
     assert save_status == 403
+
+
+def test_native_grafana_launcher_refuses_a_symlink_to_a_managed_home(tmp_path: Path) -> None:
+    managed = tmp_path / "station" / "lgtm" / "native" / "grafana-home"
+    managed.mkdir(parents=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(managed, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="require a disposable homepath"):
+        _start_grafana(tmp_path / "unused-binary", alias, {})
 
 
 def test_shipped_grafana_runtime_contract() -> None:

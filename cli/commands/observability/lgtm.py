@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
+from base.native_process.os_platform import Platform
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, backend_urls
 from cli.commands.observability._lgtm_provisioning import (
     verify_alert_rule_provisioning,
@@ -18,9 +19,40 @@ from services.supervision.healthchecks.lgtm import (
 
 # meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def cmd_lgtm_status(
-    *, home: Path, machine: MachineIdentityReader, observability: LgtmSettings
+    *,
+    home: Path,
+    repo: Path,
+    platform: Platform,
+    machine: MachineIdentityReader,
+    observability: LgtmSettings,
 ) -> int:
+    from cli.commands.observability._grafana_release import grafana_release_problem
+    from cli.commands.observability._lgtm_assets import load_versions
+    from cli.commands.observability.plans.lgtm.install import platform_tag
+
     station = is_lgtm_host(home, roles=lgtm_roles(machine))
+    result = _print_status(home=home, observability=observability, station=station)
+    if not station:
+        return result
+    tag = platform_tag(platform.system, platform.machine)
+    release_problem = (
+        "no pinned release for this platform"
+        if tag is None
+        else grafana_release_problem(
+            home / "lgtm/native/grafana-home",
+            archive_sha256=load_versions(repo, tag)["grafana"]["sha256"],
+        )
+    )
+    detail = (
+        f"incomplete ({release_problem})"
+        if release_problem
+        else "complete (pinned release, read-only)"
+    )
+    print(f"  grafana bundled plugins: {detail}")
+    return 1 if release_problem else result
+
+
+def _print_status(*, home: Path, observability: LgtmSettings, station: bool) -> int:
     if not station:
         print("this home is not an observability station")
     print_lgtm_status(observability, home=home, station=station)
