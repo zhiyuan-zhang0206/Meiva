@@ -87,3 +87,19 @@ def test_escalation_runs_the_installed_cli_and_reports_its_exit_code(tmp_path: P
     failing = Sentinel(home=tmp_path / "failed", meiva_bin=Path("/usr/bin/false"))
     assert failing.escalate("incident") is False
     assert "ERROR escalation rc=1" in failing.log_path.read_text()
+
+
+def test_missing_sample_after_first_sighting_uses_the_silence_escalation(tmp_path: Path) -> None:
+    recorder = Recorder()
+    recorder.age = 1
+    sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints())
+    assert sentinel.tick(now=1000) == 0
+
+    recorder.age = None
+    assert sentinel.tick(now=1900) == 0
+    assert sentinel.tick(now=2800) == 0
+
+    [message] = recorder.sent
+    assert "heartbeat series disappeared" in message
+    assert "SILENT" in sentinel.log_path.read_text()
+    assert sentinel.read_state() == {"first_seen": 1000, "last_sent": 1900}

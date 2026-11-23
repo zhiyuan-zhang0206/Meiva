@@ -1,9 +1,9 @@
 # Alert-pipeline host sentinel
 
 The sentinel queries Prometheus for the age of the newest accepted alert ingest.
-It remains unarmed until a sample exists, records healthy samples locally, and
-submits a silent-pipeline incident through the existing `meiva agents send`
-path. A successful CLI exit establishes queue acceptance; it does not prove the
+It remains unarmed until it sees its first sample. After that, a sample older
+than the silence threshold or a missing heartbeat series triggers a
+silent-pipeline incident through the existing `meiva agents send` path. A successful CLI exit establishes queue acceptance; it does not prove the
 human read a message. Failed submission is logged, returns nonzero, and remains
 retryable. Successful submissions share the persisted repeat window.
 

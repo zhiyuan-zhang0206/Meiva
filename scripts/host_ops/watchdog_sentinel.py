@@ -88,8 +88,8 @@ def http_json(
 
 def age_from_payload(payload: object) -> float | None:
     # meiva:note
-    # Prometheus answers a vector; an empty result is "this metric has never been pushed", which
-    # is not the same as zero age and is not an age at all.
+    # An empty Prometheus vector carries no age. The persisted first sighting tells
+    # the sentinel whether a missing series was ever established.
     if not is_json_object(payload):
         return None
     data = payload.get("data")
@@ -238,22 +238,26 @@ class Sentinel:
         except (OSError, ValueError) as error:
             self.note(f"ERROR prometheus query failed: {error}")
             return 1
-        if age is None:
+        if age is None and "first_seen" not in state:
             self.note("unarmed no sample yet")
             return 0
         state.setdefault("first_seen", stamp)
-        if age <= self.silence_seconds:
+        if age is not None and age <= self.silence_seconds:
             self.note(f"ok age={age:.0f}s")
             self.write_state(state)
             return 0
-        self.note(f"SILENT age={age:.0f}s")
+        reason = (
+            "the previously observed heartbeat series disappeared"
+            if age is None
+            else f"the newest ingest sample is {int(age)}s old"
+        )
+        self.note(f"SILENT {reason}")
         last_sent = state.get("last_sent")
         if last_sent is not None and stamp - last_sent < self.repeat_hours * 3600:
             self.write_state(state)
             return 0
         text = (
-            f"ALERT: the alert pipeline has been silent for over {int(self.silence_seconds)}s "
-            f"(newest ingest sample is {int(age)}s old). "
+            f"ALERT: the alert pipeline is silent ({reason}). "
             "Check the gateway and Grafana alert engine. (host sentinel, task #6220)"
         )
         if self.dry_run:

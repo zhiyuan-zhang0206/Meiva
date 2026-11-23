@@ -4,7 +4,10 @@ from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
 from base.telemetry.lgtm_local import BACKENDS, LgtmSettings, backend_urls
-from cli.commands.observability._lgtm_provisioning import verify_dashboard_provisioning
+from cli.commands.observability._lgtm_provisioning import (
+    verify_alert_rule_provisioning,
+    verify_dashboard_provisioning,
+)
 from services.supervision.healthchecks.lgtm import (
     is_lgtm_host,
     lgtm_roles,
@@ -23,14 +26,19 @@ def cmd_lgtm_status(
     print_lgtm_status(observability, home=home, station=station)
     if not station:
         return 0
-    problems = verify_dashboard_provisioning(
-        home / "lgtm" / "native", grafana_url=backend_urls(observability)["grafana"]
-    )
+    native_dir = home / "lgtm" / "native"
+    grafana_url = backend_urls(observability)["grafana"]
+    problems = verify_dashboard_provisioning(native_dir, grafana_url=grafana_url)
     for problem in problems:
         print(f"  dashboard: {problem}")
     if not problems:
         print("  dashboard: meiva-ops-main served from folder Meiva")
-    return 1 if problems else 0
+    rule_problems = verify_alert_rule_provisioning(native_dir, grafana_url=grafana_url)
+    for problem in rule_problems:
+        print(f"  alert rules: {problem}")
+    if not rule_problems:
+        print("  alert rules: loaded UIDs match rendered provisioning")
+    return 1 if problems or rule_problems else 0
 
 
 # meiva:note

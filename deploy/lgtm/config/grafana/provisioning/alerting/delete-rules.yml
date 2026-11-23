@@ -28,6 +28,21 @@ deleteRules:
     uid: meiva-ops-agent-continuation-lost
   - orgId: 1
     uid: meiva-ops-maintenance-hold-overdue
+  # Retired impersonation and root diagnostics used these UIDs after the rename.
+  - orgId: 1
+    uid: meiva-ops-impersonation-capture-failed
+  - orgId: 1
+    uid: meiva-ops-impersonation-notice-failed
+  - orgId: 1
+    uid: meiva-ops-impersonation-seal-stuck
+  - orgId: 1
+    uid: meiva-ops-root-diagnostic-brew-pin
+  - orgId: 1
+    uid: meiva-ops-root-unit-inputs-changed
+  - orgId: 1
+    uid: meiva-ops-root-unit-left-behind-stuck
+  - orgId: 1
+    uid: meiva-ops-root-unit-unowned-alive
 
 # Every rule below was re-provisioned under its meiva-* uid on 2026-10-17; the old
 # uid stayed orphaned and kept evaluating beside the new one.
