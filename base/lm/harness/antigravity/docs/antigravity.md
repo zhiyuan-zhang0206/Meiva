@@ -86,7 +86,25 @@ DONE afterward.
 
 A completed planner reply whose native ownership is proven can be delivered
 before its ACP text arrives. Its notice row identifies the reply for delivery
-within the generation. An unresolved native notice stays in the projection
+within the generation. The projector tracks the ACP echoes of delivered
+native output and matches them during idle replay. Echo matching in idle
+ignores whitespace differences and consumes identical native text in transcript
+order. A partial native echo can survive a fully attributed foreground
+settlement. Before writing the next prompt, an undrained native echo requires
+the idle peer to retire and the same conversation to load in a new process
+generation. Pending tracked background work can still drain the echo or
+complete on the old peer. Every resumed generation projects the first prompt
+against its own transcript markers and planner steps. agy can emit history
+after the setup responses, even after the first prompt is written.
+Idle replay keeps each completed native span while its child descriptor is
+missing, even across other replies or foreground inputs. Graceful retirement
+sets aside undelivered child spans by transcript offset. The new peer keeps
+its replay fence while idle replay delivers those spans once their descriptors
+appear. It keeps the current notice while its terminal row is missing. An idle frame can drain an echo
+only against planner evidence present when the frame is scanned. A retained
+partial can finish only against that same planner row. When stdout arrives
+before the planner evidence, idle replay can still publish the transcript
+reply and fence the old peer before the next prompt. An unresolved native notice stays in the projection
 across foreground settlement. When a prompt omits ACP usage, a terminal
 planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete

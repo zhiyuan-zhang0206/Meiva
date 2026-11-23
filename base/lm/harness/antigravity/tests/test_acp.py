@@ -15,8 +15,9 @@ from base.lm.harness.antigravity.foreground import (
     planner_usage,
     turn_usage,
 )
-from base.lm.harness.antigravity.mapping import OutputProjection
+from base.lm.harness.antigravity.mapping import OutputProjection, TranscriptSnapshot
 from base.lm.harness.antigravity.session import ActiveTurn
+from base.lm.harness.antigravity.subagent_files import SubagentReader
 from base.lm.harness.antigravity.tests.support import release_timer, start
 from base.lm.harness.antigravity.timing_store import timing_path
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
@@ -121,6 +122,7 @@ async def test_cancel_keeps_process_and_next_turn_works(
         harness.release()
         background = await harness.wait_for(_is_background)
         assert background.text == "BACKGROUND"
+        await harness.wait_for_marker("collision-receipt-read")
         await harness.session.deliver([HarnessInput.of("next", "after-cancel")])
         done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted) and e.text == "OK")
         assert done.text == "OK" and harness.session.cli_pid == pid
@@ -609,6 +611,66 @@ def test_foreground_total_must_cover_text_on_both_sides_of_the_hub_notice() -> N
     assert turn.projection_ready(projection, rows)
     result = turn.complete(rows, "end_turn", "conv", 0.0, 1)
     assert result.text == "FIRST\nTRUE FINAL" and result.usage == Usage(30, 6)
+
+
+def _native_notice(task: int) -> dict[str, object]:
+    return {
+        "type": "SYSTEM_MESSAGE",
+        "content": (
+            f"[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-{task} "
+            "priority=MESSAGE_PRIORITY_HIGH content=timer"
+        ),
+    }
+
+
+@pytest.mark.parametrize("prefix", ["native ", "  native  "])
+def test_partial_native_echo_survives_foreground_settlement(tmp_path: Path, prefix: str) -> None:
+    key = "one"
+    turn = PromptTurn(ActiveTurn(turn_id="turn", key=key, blocks=()), 0)
+    turn.register_request(1, key)
+    turn.stop_reason = "end_turn"
+    rows: list[dict[str, object]] = [
+        {"type": "USER_INPUT", "content": input_marker(key)},
+        _planner("Middle", 10),
+        _native_notice(1),
+        _planner("native reply", 20),
+    ]
+    transcript = TranscriptSnapshot(rows, tuple(range(len(rows))))
+    children = SubagentReader(tmp_path)
+    projection = OutputProjection(0, keys=[key])
+    projection.pending.extend((_chunk(prefix), _chunk("Middle")))
+    turn.prove_projection(projection, rows)
+    [foreground] = projection.project(rows)
+    assert foreground.input_key == key and foreground.frame == _chunk("Middle")
+    [native] = projection.background_replies(transcript, "conv", children)
+    assert native.notice.sender == "conv/task-1" and projection.has_undrained_native
+    assert not list(turn.restore_verified_text(projection, rows))
+
+    turn.close_projection(projection, rows)
+    assert list(projection.pending) == [_chunk(prefix)]
+    projection.pending.append(_chunk("reply "))
+    [echo] = projection.project(rows, idle=True)
+
+    assert echo.reply == "native reply" and echo.input_key is None
+    assert not projection.has_undrained_native and not projection.pending
+    assert not list(projection.background_replies(transcript, "conv", children))
+
+
+def test_idle_native_echo_matches_identical_replies_once_each(tmp_path: Path) -> None:
+    rows = [_native_notice(1), _planner("OK", 10), _native_notice(2), _planner("OK", 20)]
+    transcript = TranscriptSnapshot(rows, tuple(range(len(rows))))
+    children = SubagentReader(tmp_path)
+    projection = OutputProjection(0)
+    delivered = list(projection.background_replies(transcript, "conv", children))
+    assert [reply.notice.sender for reply in delivered] == ["conv/task-1", "conv/task-2"]
+
+    for index in (1, 2):
+        projection.pending.append(_chunk("  OK  "))
+        [echo] = projection.project(rows, idle=True)
+        assert echo.notice == delivered[index - 1].notice
+        assert projection.has_undrained_native == (index == 1)
+    assert not projection.pending
+    assert not list(projection.background_replies(transcript, "conv", children))
 
 
 def test_repeated_text_consumes_earliest_row_for_the_same_owner() -> None:

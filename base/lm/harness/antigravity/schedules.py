@@ -240,6 +240,11 @@ class Schedules:
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
 
+    def blocks_prompt(self, now: float, *, draining_echo: bool) -> bool:
+        return self.reply_deadline(now) is not None or (
+            draining_echo and bool(self.pending_at(now))
+        )
+
     def expire_replies(self, now: float) -> tuple[Schedules, int]:
         expired = tuple(
             timer

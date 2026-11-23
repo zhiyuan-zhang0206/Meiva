@@ -7,58 +7,25 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-SID = "conv-acp"
-STAMP = "2026-11-17T05:30:00Z"
-USAGE = {"inputTokens": 10, "cachedReadTokens": 30, "outputTokens": 3, "thoughtTokens": 2}
-STDOUT = threading.Lock()
-
-
-def frame(payload: dict[str, Any]) -> None:
-    with STDOUT:
-        _ = sys.stdout.write(json.dumps({"jsonrpc": "2.0", **payload}) + "\n")
-        sys.stdout.flush()
-
-
-def update(kind: str, **data: Any) -> None:
-    frame(
-        {
-            "method": "session/update",
-            "params": {
-                "sessionId": SID,
-                "update": {"sessionUpdate": kind, **data},
-            },
-        }
-    )
-
-
-def message(text: str) -> None:
-    update("agent_message_chunk", content={"type": "text", "text": text})
-
-
-def result(request: int, reason: str = "end_turn", *, usage: bool = True) -> None:
-    fields: dict[str, Any] = {"stopReason": reason}
-    if usage:
-        fields["usage"] = USAGE
-    frame({"id": request, "result": fields})
-
-
-def record(path: Path, row: dict[str, Any]) -> None:
-    with path.open("a") as stream:
-        _ = stream.write(json.dumps(row) + "\n")
-
-
-def after_release(path: Path, action: Any) -> None:
-    def wait() -> None:
-        while not path.exists():
-            time.sleep(0.005)
-        action()
-
-    threading.Thread(target=wait, daemon=True).start()
+from base.lm.harness.antigravity.tests.fake_idle import prepare_idle, replay_late_idle_echo
+from base.lm.harness.antigravity.tests.fake_wire import (
+    SID,
+    STAMP,
+    USAGE,
+    after_release,
+    background_notice,
+    declare_child,
+    frame,
+    message,
+    planner_row,
+    record,
+    result,
+    update,
+)
 
 
 class LocalRPC(BaseHTTPRequestHandler):
@@ -84,17 +51,6 @@ class LocalRPC(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
-
-
-def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
-    return {
-        "type": "PLANNER_RESPONSE",
-        "status": "DONE",
-        "input_tokens": tokens,
-        "cache_read_tokens": 30,
-        "output_tokens": 3,
-        "content": text,
-    }
 
 
 def finish_steer(request: int, transcript: Path) -> None:
@@ -130,25 +86,6 @@ def finish_timer_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
-def declare_child(transcript: Path) -> str:
-    sender = "child-conv"
-    descriptors = transcript.parent.parent / "subagents"
-    descriptors.mkdir(exist_ok=True)
-    _ = (descriptors / "child.json").write_text(json.dumps({"conversationId": sender}))
-    return sender
-
-
-def background_notice(transcript: Path) -> None:
-    sender = declare_child(transcript) if "--test-native-child" in sys.argv else SID + "/task-1"
-    record(
-        transcript,
-        {
-            "type": "SYSTEM_MESSAGE",
-            "content": f"[Message] timestamp={STAMP} sender={sender} priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
-        },
-    )
-
-
 def finish_background(transcript: Path, early_notice: bool, early_planner: bool) -> None:
     if not early_notice:
         background_notice(transcript)
@@ -162,6 +99,7 @@ def finish_background(transcript: Path, early_notice: bool, early_planner: bool)
         message("BACK")
         if not missing_tail:
             message("GROUND")
+    frame({"id": "collision-receipt", "method": "test/frame_barrier"})
     Path("background-sent").touch()
 
 
@@ -258,13 +196,14 @@ def resumed_command_completion(transcript: Path, request: int, command: str) -> 
     frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
 
     if unresolved:
+        frame({"id": "unresolved-stop", "method": "test/frame_barrier"})
         after_release(
             Path("release-native"),
             lambda: send_late_native(transcript, with_tool=Path("include-native-tool").exists()),
         )
 
 
-def record_native_tool(transcript: Path) -> None:
+def record_native_tool(transcript: Path, tool_id: str | None = "native-tool") -> None:
     args = {"CommandLine": "echo native"}
     record(
         transcript,
@@ -273,17 +212,23 @@ def record_native_tool(transcript: Path) -> None:
             "tool_calls": [{"name": "run_command", "args": args}],
         },
     )
-    update("tool_call", toolCallId="native-tool", name="run_command", rawInput=args)
-    update("tool_call_update", toolCallId="native-tool", status="completed")
+    if tool_id is not None:
+        update("tool_call", toolCallId=tool_id, name="run_command", rawInput=args)
+        update("tool_call_update", toolCallId=tool_id, status="completed")
 
 
 def send_late_native(transcript: Path, *, with_tool: bool = False) -> None:
+    reply = "OK" if "--test-native-same-text" in sys.argv else "LATE NATIVE REPLY"
     if with_tool:
         record_native_tool(transcript)
-    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
-    message("LATE NATIVE REPLY")
-    update("usage_update", used=2, size=10)
-    Path("native-written").touch()
+    if "--test-native-same-tool" in sys.argv:
+        record_native_tool(transcript, None)
+    record(transcript, planner_row(reply, tokens=237))
+    if not Path("delay-native-frame").exists():
+        message(reply)
+        update("usage_update", used=2, size=10)
+        frame({"id": "collision-receipt", "method": "test/frame_barrier"})
+    _ = Path("native-written").write_text(str(os.getpid()))
 
 
 def child_overlap(transcript: Path, request: int, command: str) -> None:
@@ -434,8 +379,22 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command.startswith("textless"):
         textless_prompt(transcript, request, command)
         return
+    followup_prompt(transcript, request, command)
+
+
+def followup_prompt(transcript: Path, request: int, command: str) -> None:
+    if command.startswith("prepare-idle-"):
+        prepare_idle(transcript, request, command.removeprefix("prepare-idle-"))
+        return
+    if command == "next-with-idle-echo":
+        replay_late_idle_echo()
     if command == "child-seed":
         _ = declare_child(transcript)
+    if command == "next-with-delayed-native-frame" and (
+        Path("native-written").read_text() == str(os.getpid())
+    ):
+        message("LATE NATIVE REPLY")
+        update("usage_update", used=2, size=10)
     if command == "late-native":
         send_late_native(transcript)
     if command == "tool-then-foreground":
@@ -446,11 +405,27 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command.startswith(("delayed-planner", "usage-tie-")):
         reply_with_delayed_planner(transcript, request, command)
         return
+    if command == "same-text-without-planner":
+        message("OK")
+        update("usage_update", used=2, size=10)
+        result(request)
+        frame({"id": "foreground-stop", "method": "test/frame_barrier"})
+        after_release(Path("write-foreground"), lambda: record(transcript, planner_row("OK")))
+        return
+    complete_followup(transcript, request, command)
+
+
+def complete_followup(transcript: Path, request: int, command: str) -> None:
+    if command == "same-tool":
+        record_native_tool(transcript, "foreground-tool")
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
     message(reply)
-    result(request)
+    result(request, usage=command != "same-tool")
+    if command == "idle-intervening":
+        update("usage_update", used=2, size=10)
+        frame({"id": "foreground-stop", "method": "test/frame_barrier"})
     if native:
         message(reply)
         update("usage_update", used=2, size=10)
@@ -611,7 +586,6 @@ def handle_prompt(
     original: int | None,
 ) -> tuple[int | None, int | None]:
     request = data["id"]
-    permission_prompt = None
     text = data["params"]["prompt"][0]["text"]
     marker, _, command = text.partition("\n")
     record(
@@ -627,10 +601,11 @@ def handle_prompt(
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
     if command == "steer":
-        return original, permission_prompt
+        return original, None
     if command in {"hold", "reactive", "hold-no-stdin"}:
         hold_prompt(transcript, command, request)
-        return request, permission_prompt
+        return request, None
+    permission_prompt = None
     if command == "background":
         arm_background(transcript, request)
     elif command == "overlap-first":
@@ -754,6 +729,8 @@ def main() -> None:
             original, permission_prompt = handle_prompt(transcript, data, original)
         elif request == "collision-receipt":
             Path("collision-receipt-read").touch()
+        elif request in ("unresolved-stop", "foreground-stop"):
+            Path(f"{request}-read").touch()
         elif request == "permission-1":
             assert permission_prompt is not None
             assert data["result"]["outcome"] == {"outcome": "selected", "optionId": "deny"}

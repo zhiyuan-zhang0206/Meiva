@@ -8,8 +8,12 @@ from uuid import uuid4
 
 import pytest
 
-from base.clock.tests.fakes import system_clock
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import clock_over, system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.mapping import transcript_path
+from base.lm.harness.antigravity.tests.fake_agy import declare_child
 from base.lm.harness.antigravity.tests.support import Harness, seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
 from base.lm.harness.delivery import HarnessInput
@@ -17,6 +21,7 @@ from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
     SessionFailed,
+    ToolResult,
     ToolUse,
     TurnCompleted,
     TurnOrigin,
@@ -364,17 +369,25 @@ async def test_resumed_multi_step_command_completion(
         await harness.stop()
 
 
-async def _assert_reused_prompt(
-    harness: Harness, first_turn_id: str, *, native_timing: str
-) -> None:
-    pid = harness.session.cli_pid
+async def _release_native_before_followup(harness: Harness, native_timing: str) -> None:
     if native_timing.startswith("before-marker"):
         if native_timing.endswith("-with-tool"):
             harness.release("include-native-tool")
+            harness.release("delay-native-frame")
         harness.release("release-native")
         await harness.wait_for_marker("native-written")
+        if native_timing == "before-marker":
+            await harness.wait_for_marker("collision-receipt-read")
+
+
+async def _assert_reused_prompt(
+    harness: Harness, first_turn_id: str, *, native_timing: str
+) -> None:
+    pid, generation = harness.session.cli_pid, harness.session.generation
+    await _release_native_before_followup(harness, native_timing)
     followup = {
         "after-marker": "late-native",
+        "before-marker-with-tool": "next-with-delayed-native-frame",
         "tool-after-marker": "tool-then-foreground",
         "delayed-planner": "delayed-planner",
         "delayed-planner-early": "delayed-planner-early",
@@ -398,7 +411,10 @@ async def _assert_reused_prompt(
     )
     expected = ["Working", "OK"] if native_timing == "foreground-preamble" else ["OK"]
     assert again.text == "\n".join(expected)
-    assert not again.usage_uncertain and harness.session.cli_pid == pid
+    assert not again.usage_uncertain
+    fenced = native_timing == "before-marker-with-tool"
+    assert (harness.session.generation > generation) is fenced
+    assert (harness.session.cli_pid != pid) is fenced
     assert _assistant_texts(harness, second.turn_id) == expected
     if native_timing not in {"none", "foreground-preamble"}:
         if native_timing == "tool-after-marker":
@@ -409,6 +425,253 @@ async def _assert_reused_prompt(
             TurnOrigin.INPUT,
             TurnOrigin.INPUT,
         ]
+
+
+class AttributionTimers(ManualTimers):
+    async def asleep(self, seconds: float) -> None:
+        await SYSTEM_TIMERS.asleep(seconds)
+
+
+@pytest.mark.parametrize(
+    ("case", "expires"),
+    [("text", False), ("text", True), ("tool", False)],
+    ids=["text", "deadline", "tool"],
+)
+async def test_undrained_native_echo_preserves_followup(
+    tmp_path: Path, case: str, expires: bool
+) -> None:
+    seed_replay_history(tmp_path)
+    timers = AttributionTimers()
+    harness = await start(
+        tmp_path,
+        resume="conv-acp",
+        reply_seconds=1,
+        clock=clock_over(timers),
+        extra_args=(f"--test-native-same-{case}", "--test-late-load-replay"),
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for_marker("unresolved-stop-read")
+        timers.advance(2)
+        first = await harness.wait_for_type(TurnCompleted)
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await harness.wait_for_marker("native-written")
+        native = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        pid, generation = harness.session.cli_pid, harness.session.generation
+        followup = "same-text-without-planner" if case == "text" else "same-tool"
+        await harness.session.deliver([HarnessInput.of("second", followup)])
+        if case == "text":
+            await harness.wait_for_marker("foreground-stop-read")
+            assert not any(
+                isinstance(e, AssistantText) and e.turn_id not in {first.turn_id, native.turn_id}
+                for e in harness.events
+            )
+            if expires:
+                timers.advance(2)
+            else:
+                harness.release("write-foreground")
+        done = await harness.wait_for(
+            lambda event: (
+                isinstance(event, TurnCompleted)
+                and event.turn_id not in {first.turn_id, native.turn_id}
+            )
+        )
+        assert harness.session.cli_pid != pid and done.generation > generation
+        assert sum(f.get("method") == "session/load" for f in harness.frames()) == 2
+        expected = "" if expires else "OK"
+        assert done.text == expected and done.usage_uncertain is expires
+        assert _assistant_texts(harness, done.turn_id) == ([expected] if expected else [])
+        if case == "tool":
+            assert [
+                type(e)
+                for e in harness.events
+                if isinstance(e, (ToolUse, ToolResult)) and e.turn_id == done.turn_id
+            ] == [ToolUse, ToolResult]
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize(
+    ("command", "text", "usage"),
+    [
+        ("resumed", "MEIVA_DISPLAY_TO_USER\nFresh reply", Usage(250, 3, 0, 30)),
+        ("fresh-textless:end_turn", "", Usage(40, 0, 0, 30)),
+    ],
+    ids=["history", "textless"],
+)
+async def test_fenced_reload_projects_first_prompt(
+    tmp_path: Path, command: str, text: str, usage: Usage
+) -> None:
+    seed_replay_history(tmp_path)
+    harness = await start(
+        tmp_path, resume="conv-acp", reply_seconds=0.2, extra_args=("--test-late-load-replay",)
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for_type(TurnCompleted)
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await _assert_native_reply(harness, with_tool=False)
+        generation, pid = harness.session.generation, harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("second", command)])
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.generation > generation
+        )
+        assert harness.session.cli_pid != pid
+        assert done.text == text and done.usage == usage and not done.usage_uncertain
+        assert _assistant_texts(harness, done.turn_id) == ([text] if text else [])
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("case", ["child", "drained", "recorded"])
+async def test_early_native_output_survives_idle_snapshot(tmp_path: Path, case: str) -> None:
+    harness = await start(tmp_path)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", f"prepare-idle-{case}")])
+        first = await harness.wait_for_type(TurnCompleted)
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("finish-early-idle")
+        native = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "NATIVE RESPONSE"
+        )
+        await harness.session.deliver([HarnessInput.of("second", "next")])
+        second = await harness.wait_for(
+            lambda e: (
+                isinstance(e, TurnCompleted)
+                and e.text == "OK"
+                and e.turn_id not in {first.turn_id, native.turn_id}
+            )
+        )
+        needs_fence = case != "recorded"
+        assert (harness.session.cli_pid != pid) is needs_fence
+        assert (second.generation > first.generation) is needs_fence
+        assert _assistant_texts(harness, second.turn_id) == ["OK"]
+        assert [e.text for e in harness.events if isinstance(e, TurnCompleted)] == [
+            "OK",
+            "NATIVE RESPONSE",
+            "OK",
+        ]
+    finally:
+        await harness.stop()
+
+
+async def _send_input(harness: Harness, key: str, command: str) -> TurnCompleted:
+    await harness.session.deliver([HarnessInput.of(key, command)])
+    turn: object = await harness.wait_for(
+        lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.INPUT and key in e.keys
+    )
+    assert isinstance(turn, TurnStarted)
+    done: object = await harness.wait_for(
+        lambda e: isinstance(e, TurnCompleted) and e.turn_id == turn.turn_id
+    )
+    assert isinstance(done, TurnCompleted)
+    return done
+
+
+async def _native_completion(harness: Harness, text: str) -> TurnCompleted:
+    done: object = await harness.wait_for(
+        lambda e: (
+            isinstance(e, TurnCompleted)
+            and e.text == text
+            and any(
+                isinstance(started, TurnStarted)
+                and started.turn_id == e.turn_id
+                and started.origin is TurnOrigin.HARNESS
+                for started in harness.events
+            )
+        )
+    )
+    assert isinstance(done, TurnCompleted)
+    return done
+
+
+async def test_unmatched_idle_echo_cannot_discharge_a_later_native_reply(tmp_path: Path) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", "prepare-idle-stale")
+        assert first.text == "READY"
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("finish-early-idle")
+        native = await _native_completion(harness, "READY")
+        assert native.generation == first.generation
+        following = await _send_input(harness, "next", "next-with-idle-echo")
+        assert following.text == "OK"
+        assert _assistant_texts(harness, following.turn_id) == ["OK"]
+        assert following.generation > first.generation and harness.session.cli_pid != pid
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("interruption", ["adjacent", "intervening"])
+async def test_other_completed_work_does_not_delete_unknown_child_notice(
+    tmp_path: Path, interruption: str
+) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", f"prepare-idle-{interruption}")
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        if interruption == "adjacent":
+            await _native_completion(harness, "TIMER RESPONSE")
+        else:
+            bridge = await _send_input(harness, "bridge", "idle-intervening")
+            assert bridge.text == "OK" and bridge.generation == first.generation
+            await harness.wait_for_marker("foreground-stop-read")
+        harness.release("finish-early-idle")
+        child = await _native_completion(harness, "CHILD RESPONSE")
+        assert child.generation == first.generation
+        following = await _send_input(harness, "next", "next")
+        assert following.text == "OK" and following.generation == first.generation
+        assert [
+            e.text
+            for e in harness.events
+            if isinstance(e, AssistantText) and e.text in {"CHILD RESPONSE", "TIMER RESPONSE"}
+        ] == (
+            ["TIMER RESPONSE", "CHILD RESPONSE"]
+            if interruption == "adjacent"
+            else ["CHILD RESPONSE"]
+        )
+    finally:
+        await harness.stop()
+
+
+async def test_pending_completed_child_survives_generation_fence(tmp_path: Path) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", "prepare-idle-fence")
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        timer = await _native_completion(harness, "TIMER RESPONSE")
+        assert timer.generation == first.generation
+
+        following = await _send_input(harness, "second", "next")
+        assert following.text == "OK" and following.generation > first.generation
+        new_pid = harness.session.cli_pid
+        assert new_pid is not None and new_pid != pid
+
+        transcript = transcript_path("conv-acp", home=harness.home)
+        assert transcript is not None
+        _ = declare_child(transcript)
+        child = await _native_completion(harness, "CHILD RESPONSE")
+        last = await _send_input(harness, "third", "next")
+        assert last.text == "OK" and last.generation == child.generation == following.generation
+        assert harness.session.cli_pid == new_pid
+        assert [
+            e.text
+            for e in harness.events
+            if isinstance(e, TurnCompleted) and e.text in {"TIMER RESPONSE", "CHILD RESPONSE"}
+        ] == ["TIMER RESPONSE", "CHILD RESPONSE"]
+    finally:
+        await harness.stop()
 
 
 async def _assert_native_reply(harness: Harness, *, with_tool: bool) -> None:

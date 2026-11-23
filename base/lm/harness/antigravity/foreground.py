@@ -331,6 +331,7 @@ class PromptTurn:
     _verified_text: tuple[str, ...] = ()
     _verified_usage_partial: bool = False
     _projection_degraded: bool = False
+    _restored_text: bool = False
     _stop_text: _StopText = _StopText()
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
@@ -365,6 +366,7 @@ class PromptTurn:
         self._verified_text = ()
         self._verified_usage_partial = False
         self._projection_degraded = False
+        self._restored_text = False
         self._stop_text = _StopText()
 
     def record_stop(self, reason: str, projection: OutputProjection) -> None:
@@ -520,12 +522,18 @@ class PromptTurn:
         )
         return reason
 
-    def close_projection(self, projection: OutputProjection, row_count: int) -> None:
-        projection.pending.clear()
+    def close_projection(
+        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+    ) -> None:
+        accounted = self.verified_steps is not None and not self._projection_degraded
+        if accounted and not self._restored_text and projection.has_undrained_native:
+            projection.retain_native_prefix(rows)
+        else:
+            projection.pending.clear()
         projection.close_foreground(
             self.keys,
-            row_count,
-            accounted=self.verified_steps is not None and not self._projection_degraded,
+            len(rows),
+            accounted=accounted,
             cancelled=self.interrupted,
             degraded=self._projection_degraded,
         )
@@ -543,6 +551,7 @@ class PromptTurn:
         for step, text in _planner_text(steps):
             evidence = (step.index, "content", 0)
             if evidence not in projection.seen:
+                self._restored_text = True
                 projection.seen.add(evidence)
                 yield text
 
