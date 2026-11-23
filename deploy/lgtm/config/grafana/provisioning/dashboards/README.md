@@ -126,9 +126,9 @@ for the fixed gauges published by the gateway and
 the PR-flow export job (Fleet growth task #2010, PR flow task #2139),
 turn-duration percentile alerting, and the
 host & data-plane panels
-(per-machine OTel Collector sidecar scrapes, `job="meiva-infra"` + `host` (OS
-hostname) and `machine_name` (Meiva roster name) labels; panels group by
-`machine_name`).
+(per-machine OTel Collector sidecar scrapes, `job="meiva-infra"` + `host_name` (OS
+hostname) and `machine` (Meiva roster name) labels; panels group by
+`machine`).
 
 ## Core metrics (registered, not hand-written)
 

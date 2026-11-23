@@ -68,7 +68,7 @@ schema_config:
         period: 24h
 
 # `default_resource_attributes_as_index_labels` replaces Loki's default list.
-# Keep the remaining 3.7.6 defaults plus bounded `agent_id` and `event_name`.
+# Keep the remaining 3.7.6 defaults plus the bounded Meiva labels: `agent_id`, `event_name`, and `machine`.
 # Task #4591: per-PID UUIDs from short-lived exec children drove ~95% of
 # projected new stream churn, so `service.instance.id` stays queryable as
 # structured metadata via `| service_instance_id="..."` instead of an index label.
@@ -95,18 +95,10 @@ distributor:
       - k8s.job.name
       - agent_id
       - event_name
+      - machine
 
-# Retention: the viewer ingests Meiva session stdout (~20MB/day new + ~130MB
-# one-time backfill of the existing logs dir) plus the OTLP event stream.
-# Without a cap the filesystem store grows linearly forever. The 84h global
-# window is pinned to the query and rollup floor in base/telemetry/loki_index_labels.py.
-#
-# Task #1281 (PG events archive import): the archived events (8.7M rows,
-# 05-23 -> 08-12) land under the stream label stream="archive" and get a
-# 365d retention via retention_streams (compactor-driven, applied on top of
-# the 84h period). The completed import needed old samples temporarily; the
-# default `reject_old_samples: true` is now restored as the clock-drift guard.
-# Keep reject_old_samples_max_age as that guard's age bound.
+# Seven days are the Meiva troubleshooting window. Retention bounds the
+# filesystem store as new session logs and OTLP records arrive.
 limits_config:
   # Task #1546: Loki's default 4 MB/s caused HTTP 429s (5575 retries /
   # 1365 drops in one day); prod runs at 32/64 since 2026-08-24 (disk file synced post-deploy).
@@ -116,15 +108,9 @@ limits_config:
   # 256KB per-line limit and Loki 400'd whole push batches -> collector drops.
   # Truncate instead of reject (identifier marks the cut).
   max_line_size_truncate: true
-  retention_period: 84h
-  retention_stream:
-    - selector: '{stream="archive"}'
-      priority: 1
-      period: 8760h
+  retention_period: 168h
+  # Reject samples more than two weeks old as a clock-drift guard.
   reject_old_samples_max_age: 336h
-  # The archive spans ~83 days (05-23 -> 08-12); Loki's default
-  # max_query_length (30d1h) would reject any whole-span parity/read query.
-  max_query_length: 2160h
   # Kill a query that runs longer than this server-side. Deliberately just
   # under a client's 60s httpx timeout: a hung
   # query then dies here with a clean error instead of holding a querier

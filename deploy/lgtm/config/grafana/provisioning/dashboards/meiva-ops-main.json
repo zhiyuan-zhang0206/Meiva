@@ -4297,8 +4297,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "1 - avg by (machine_name) (system_cpu_utilization_ratio{state=\"idle\"})",
-     "legendFormat": "{{machine_name}}",
+     "expr": "1 - avg by (machine) (system_cpu_utilization_ratio{machine!=\"\", state=\"idle\"})",
+     "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4362,8 +4362,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "avg by (machine_name) (system_memory_utilization_ratio{state=\"used\"})",
-     "legendFormat": "{{machine_name}}",
+     "expr": "avg by (machine) (system_memory_utilization_ratio{machine!=\"\", state=\"used\"})",
+     "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4425,8 +4425,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_1m",
-     "legendFormat": "{{machine_name}} 1m",
+     "expr": "system_cpu_load_average_1m{machine!=\"\"}",
+     "legendFormat": "{{machine}} 1m",
      "queryType": "range",
      "refId": "A"
     },
@@ -4436,8 +4436,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_5m",
-     "legendFormat": "{{machine_name}} 5m",
+     "expr": "system_cpu_load_average_5m{machine!=\"\"}",
+     "legendFormat": "{{machine}} 5m",
      "queryType": "range",
      "refId": "B"
     },
@@ -4447,8 +4447,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "system_cpu_load_average_15m",
-     "legendFormat": "{{machine_name}} 15m",
+     "expr": "system_cpu_load_average_15m{machine!=\"\"}",
+     "legendFormat": "{{machine}} 15m",
      "queryType": "range",
      "refId": "C"
     }
@@ -4512,8 +4512,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name, mountpoint) (system_filesystem_utilization_ratio)",
-     "legendFormat": "{{machine_name}} {{mountpoint}}",
+     "expr": "max by (machine, mountpoint) (system_filesystem_utilization_ratio{machine!=\"\"})",
+     "legendFormat": "{{machine}} {{mountpoint}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4575,8 +4575,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine_name, direction) (rate(system_disk_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}",
+     "expr": "sum by (machine, direction) (rate(system_disk_io_bytes_total{machine!=\"\"}[5m]))",
+     "legendFormat": "{{machine}} {{direction}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4638,8 +4638,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine_name, direction) (rate(system_network_io_bytes_total[5m]))",
-     "legendFormat": "{{machine_name}} {{direction}}",
+     "expr": "sum by (machine, direction) (rate(system_network_io_bytes_total{machine!=\"\"}[5m]))",
+     "legendFormat": "{{machine}} {{direction}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4702,8 +4702,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (postgresql_backends)",
-     "legendFormat": "{{machine_name}} backends",
+     "expr": "max by (machine) (postgresql_backends{machine!=\"\"})",
+     "legendFormat": "{{machine}} backends",
      "queryType": "range",
      "refId": "A"
     },
@@ -4713,8 +4713,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (postgresql_connection_max)",
-     "legendFormat": "{{machine_name}} max_connections",
+     "expr": "max by (machine) (postgresql_connection_max{machine!=\"\"})",
+     "legendFormat": "{{machine}} max_connections",
      "queryType": "range",
      "refId": "B"
     }
@@ -4776,8 +4776,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine_name) (rate(postgresql_commits_total[5m]))",
-     "legendFormat": "{{machine_name}} commits/s",
+     "expr": "sum by (machine) (rate(postgresql_commits_total{machine!=\"\"}[5m]))",
+     "legendFormat": "{{machine}} commits/s",
      "queryType": "range",
      "refId": "A"
     },
@@ -4787,8 +4787,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine_name) (rate(postgresql_rollbacks_total[5m]))",
-     "legendFormat": "{{machine_name}} rollbacks/s",
+     "expr": "sum by (machine) (rate(postgresql_rollbacks_total{machine!=\"\"}[5m]))",
+     "legendFormat": "{{machine}} rollbacks/s",
      "queryType": "range",
      "refId": "B"
     }
@@ -4850,8 +4850,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (postgresql_db_size_bytes)",
-     "legendFormat": "{{machine_name}}",
+     "expr": "max by (machine) (postgresql_db_size_bytes{machine!=\"\"})",
+     "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
     }
@@ -4913,8 +4913,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (redis_memory_used_bytes)",
-     "legendFormat": "{{machine_name}} used",
+     "expr": "max by (machine) (redis_memory_used_bytes{machine!=\"\"})",
+     "legendFormat": "{{machine}} used",
      "queryType": "range",
      "refId": "A"
     },
@@ -4924,8 +4924,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (redis_memory_rss_bytes)",
-     "legendFormat": "{{machine_name}} rss",
+     "expr": "max by (machine) (redis_memory_rss_bytes{machine!=\"\"})",
+     "legendFormat": "{{machine}} rss",
      "queryType": "range",
      "refId": "B"
     }
@@ -4988,8 +4988,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (redis_clients_connected)",
-     "legendFormat": "{{machine_name}} clients",
+     "expr": "max by (machine) (redis_clients_connected{machine!=\"\"})",
+     "legendFormat": "{{machine}} clients",
      "queryType": "range",
      "refId": "A"
     },
@@ -4999,8 +4999,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "sum by (machine_name) (rate(redis_keys_evicted_total[5m]))",
-     "legendFormat": "{{machine_name}} evictions/s",
+     "expr": "sum by (machine) (rate(redis_keys_evicted_total{machine!=\"\"}[5m]))",
+     "legendFormat": "{{machine}} evictions/s",
      "queryType": "range",
      "refId": "B"
     }
@@ -5062,8 +5062,8 @@
       "uid": "prometheus"
      },
      "editorMode": "code",
-     "expr": "max by (machine_name) (redis_commands_per_second)",
-     "legendFormat": "{{machine_name}}",
+     "expr": "max by (machine) (redis_commands_per_second{machine!=\"\"})",
+     "legendFormat": "{{machine}}",
      "queryType": "range",
      "refId": "A"
     }

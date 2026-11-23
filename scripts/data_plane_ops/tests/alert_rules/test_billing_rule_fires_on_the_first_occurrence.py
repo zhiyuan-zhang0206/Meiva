@@ -70,11 +70,12 @@ def test_infra_rule_queries_its_scraped_metric(uid: str, metric: str) -> None:
 
 
 @pytest.mark.parametrize("uid", sorted(INFRA_RULE_METRICS))
-def test_infra_rule_groups_by_machine_name(uid: str) -> None:
+def test_infra_rule_groups_by_machine(uid: str) -> None:
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
-    assert "by (machine_name" in expr, f"{uid}: aggregates away the machine name:\n{expr}"
-    assert "{{ $labels.machine_name }}" in rules[uid]["annotations"]["summary"]
+    assert "by (machine)" in expr or "by (machine," in expr
+    assert 'machine!=""' in expr, f"{uid}: mixes unlabelled and machine-labelled series"
+    assert "{{ $labels.machine }}" in rules[uid]["annotations"]["summary"]
 
 
 @pytest.mark.parametrize(
@@ -88,7 +89,7 @@ def test_infra_rule_groups_by_machine_name(uid: str) -> None:
 def test_disk_watermark_rule_is_per_mountpoint(uid: str) -> None:
     rules = {r["uid"]: r for r in load_rules()}
     expr = rule_query_exprs(rules[uid], "prometheus")[0]
-    assert "by (machine_name, mountpoint)" in expr
+    assert "by (machine, mountpoint)" in expr
     assert "{{ $labels.mountpoint }}" in rules[uid]["annotations"]["summary"]
 
 
@@ -107,7 +108,7 @@ def test_disk_watermark_rule_excludes_non_asset_mounts(uid: str) -> None:
     assert 'mode!="ro"' in expr
     assert 'type!~"iso9660|udf|cd9660"' in expr
     assert "WindowsRunner" not in expr
-    assert "by (machine_name, mountpoint)" in expr
+    assert "by (machine, mountpoint)" in expr
 
 
 def test_infra_ratio_rules_round_for_readability() -> None:
@@ -155,7 +156,7 @@ def test_disk_watermark_escalation_tiers() -> None:
             "metric": "host_disk",
             "team": "meiva-ops",
         }
-        assert "{{ $labels.machine_name }}" in rule["annotations"]["summary"]
+        assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
         assert "{{ $labels.mountpoint }}" in rule["annotations"]["summary"]
         assert "{{ $values.C }}" in rule["annotations"]["summary"]
 
@@ -166,7 +167,7 @@ def test_collector_queue_pressure_is_current_and_per_exporter() -> None:
     expr = rule_query_exprs(rule, "prometheus")[0]
     assert "otelcol_exporter_queue_size" in expr
     assert "otelcol_exporter_queue_capacity" in expr
-    assert "by (machine_name, exporter, data_type)" in expr
+    assert "by (machine, exporter, data_type)" in expr
     assert "increase(" not in expr
     assert threshold_params(rule) == [[0.8]]
     assert rule["for"] == "5m"
@@ -179,7 +180,7 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
     assert "otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total" in expr
     assert "increase(" in expr
     assert "[5m]" in expr
-    assert "sum by (machine_name, exporter)" in expr
+    assert "sum by (machine, exporter)" in expr
     assert threshold_params(rule) == [[0]]
 
 
@@ -191,10 +192,10 @@ def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
     assert "max_over_time" in expr
     assert "[24h]" in expr
     assert "[5m]" in expr
-    assert "unless on(machine_name)" in expr
-    assert "max by (machine_name)" in expr
+    assert "unless on(machine)" in expr
+    assert "max by (machine)" in expr
     assert rule["for"] == "0m", "the 5m absence window is already the debounce"
-    assert "{{ $labels.machine_name }}" in rule["annotations"]["summary"]
+    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 
 def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:

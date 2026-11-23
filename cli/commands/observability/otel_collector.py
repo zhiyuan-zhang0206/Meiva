@@ -71,7 +71,7 @@ from cli.commands.observability.plans.collector.render import (
     CollectorValues,
     render_collector_config,
 )
-from cli.commands.observability.plans.collector.text import ottl_quote
+from cli.commands.observability.plans.collector.text import yaml_quote
 from cli.commands.observability.plans.observability_config import ObservabilityConfig
 from cli.commands.observability.url_split import split_url
 
@@ -263,7 +263,7 @@ def generate_config(
     values = CollectorValues(
         meiva_home=str(meiva_home),
         cluster_label=home_label(meiva_home),
-        machine_name=ottl_quote(machine.name()),
+        machine_name=yaml_quote(machine.name()),
         tempo_endpoint=obs.telemetry_tempo_endpoint.rstrip("/"),
         loki_base=bases[0],
         prom_base=bases[1],

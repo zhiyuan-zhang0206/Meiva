@@ -1795,7 +1795,7 @@
   "cli/commands/observability/plans/collector/install.py": 7,
   "cli/commands/observability/plans/collector/remote.py": 6,
   "cli/commands/observability/plans/collector/render.py": 3,
-  "cli/commands/observability/plans/collector/text.py": 3,
+  "cli/commands/observability/plans/collector/text.py": 2,
   "cli/commands/observability/plans/lgtm/archive.py": 9,
   "cli/commands/observability/plans/lgtm/dashboard_checks.py": 5,
   "cli/commands/observability/plans/lgtm/dashboard_plan.py": 15,

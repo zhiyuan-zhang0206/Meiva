@@ -40,7 +40,7 @@ capability.
 
 | Backend | Delivery | Version / limit | Port | Role |
 |---|---|---|---|---|
-| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
+| Loki | native, `meiva-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 7-day retention |
 | Prometheus | native, `meiva-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | host-managed on the station; this repository carries no Tempo configuration | configured by `MEIVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
 | Grafana | native, `meiva-root` service | 13.2.3 | 3003 | anonymous read-only UI |
@@ -117,11 +117,25 @@ before they reach Loki, Prometheus, or Tempo.
 
 ## Resource and retention posture
 
-Loki and Prometheus use explicit Go memory limits. Loki retains normal streams for 84 hours, preserves the configured
-archive-stream exception, and keeps bounded query splitting, fan-out, and
-embedded result caches. Prometheus retains data for 15 days or 8GB, whichever
-limit is reached first. Tempo's block retention is set in its host-managed
-configuration (168 hours). Each native backend's
+Loki, Prometheus, and Tempo use a seven-day troubleshooting window. Loki
+enforces 168 hours across streams, and Prometheus expires the oldest blocks
+when it reaches either seven days or the 8 GB disk cap. Tempo's 168-hour block
+retention is configured on the observability station. Loki and Prometheus use
+explicit Go memory limits, and Loki bounds query splitting, parallelism, and
+result-cache size.
+
+The collector stamps local logs (including filelog), metrics, and traces with
+the roster identity in the `meiva.machine` resource attribute. Relays preserve
+the origin. Use `{machine="ubuntu"}` to select new Loki streams,
+`{machine="ubuntu"}` as a matcher on Prometheus series, and
+`{ resource.meiva.machine = "ubuntu" }` in TraceQL. Historical Loki streams and
+Prometheus series keep their ingest-time labels.
+
+In Grafana Explore, select **View trace** on a Loki entry with `trace_id` to
+open Tempo. A span's related logs link queries Loki for the same trace ID
+within the span's time range, padded by two seconds at each end.
+
+Each native backend's
 stdout and stderr go to `$MEIVA_HOME/run/meiva-root/logs/<name>/output.log` (`<name>`
 is `loki`, `prometheus`, or `grafana`); Grafana's own log files are written to
 `$MEIVA_HOME/lgtm/native/logs/`.
