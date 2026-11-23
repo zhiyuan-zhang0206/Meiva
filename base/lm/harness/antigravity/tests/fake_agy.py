@@ -7,58 +7,21 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-SID = "conv-acp"
-STAMP = "2026-11-17T05:30:00Z"
-USAGE = {"inputTokens": 10, "cachedReadTokens": 30, "outputTokens": 3, "thoughtTokens": 2}
-STDOUT = threading.Lock()
-
-
-def frame(payload: dict[str, Any]) -> None:
-    with STDOUT:
-        _ = sys.stdout.write(json.dumps({"jsonrpc": "2.0", **payload}) + "\n")
-        sys.stdout.flush()
-
-
-def update(kind: str, **data: Any) -> None:
-    frame(
-        {
-            "method": "session/update",
-            "params": {
-                "sessionId": SID,
-                "update": {"sessionUpdate": kind, **data},
-            },
-        }
-    )
-
-
-def message(text: str) -> None:
-    update("agent_message_chunk", content={"type": "text", "text": text})
-
-
-def result(request: int, reason: str = "end_turn", *, usage: bool = True) -> None:
-    fields: dict[str, Any] = {"stopReason": reason}
-    if usage:
-        fields["usage"] = USAGE
-    frame({"id": request, "result": fields})
-
-
-def record(path: Path, row: dict[str, Any]) -> None:
-    with path.open("a") as stream:
-        _ = stream.write(json.dumps(row) + "\n")
-
-
-def after_release(path: Path, action: Any) -> None:
-    def wait() -> None:
-        while not path.exists():
-            time.sleep(0.005)
-        action()
-
-    threading.Thread(target=wait, daemon=True).start()
+from base.lm.harness.antigravity.tests.fake_wire import (
+    SID,
+    STAMP,
+    USAGE,
+    after_release,
+    frame,
+    message,
+    record,
+    result,
+    update,
+)
 
 
 class LocalRPC(BaseHTTPRequestHandler):
@@ -259,6 +222,7 @@ def resumed_command_completion(transcript: Path, request: int, command: str) -> 
     frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
 
     if unresolved:
+        frame({"id": "unresolved-stop", "method": "test/frame_barrier"})
         after_release(
             Path("release-native"),
             lambda: send_late_native(transcript, with_tool=Path("include-native-tool").exists()),
@@ -445,6 +409,11 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
 
 
 def followup_prompt(transcript: Path, request: int, command: str) -> None:
+    if command.startswith("prepare-idle-"):
+        after_release(
+            Path("send-early-idle"),
+            lambda: early_idle_native(transcript, child=command.endswith("-child")),
+        )
     if command == "child-seed":
         _ = declare_child(transcript)
     if command == "next-with-delayed-native-frame" and (
@@ -466,6 +435,7 @@ def followup_prompt(transcript: Path, request: int, command: str) -> None:
         message("OK")
         update("usage_update", used=2, size=10)
         result(request)
+        frame({"id": "foreground-stop", "method": "test/frame_barrier"})
         after_release(Path("write-foreground"), lambda: record(transcript, planner_row("OK")))
         return
     if command == "same-tool":
@@ -479,6 +449,33 @@ def followup_prompt(transcript: Path, request: int, command: str) -> None:
         message(reply)
         update("usage_update", used=2, size=10)
         after_release(Path("release"), lambda: native_reply(transcript, command))
+
+
+def early_idle_native(transcript: Path, *, child: bool) -> None:
+    if child:
+        record(
+            transcript,
+            {
+                "type": "SYSTEM_MESSAGE",
+                "content": (
+                    f"[Message] timestamp={STAMP} sender=child-conv "
+                    "priority=MESSAGE_PRIORITY_HIGH content=early child callback"
+                ),
+            },
+        )
+    message("NATIVE RESPONSE")
+    update("usage_update", used=2, size=10)
+    frame({"id": "collision-receipt", "method": "test/frame_barrier"})
+
+    def finish() -> None:
+        if child:
+            declare_child(transcript)
+        else:
+            background_notice(transcript)
+        record(transcript, planner_row("NATIVE RESPONSE", tokens=237))
+        update("usage_update", used=3, size=10)
+
+    after_release(Path("finish-early-idle"), finish)
 
 
 def native_reply(transcript: Path, command: str) -> None:
@@ -778,6 +775,8 @@ def main() -> None:
             original, permission_prompt = handle_prompt(transcript, data, original)
         elif request == "collision-receipt":
             Path("collision-receipt-read").touch()
+        elif request in ("unresolved-stop", "foreground-stop"):
+            Path(f"{request}-read").touch()
         elif request == "permission-1":
             assert permission_prompt is not None
             assert data["result"]["outcome"] == {"outcome": "selected", "optionId": "deny"}

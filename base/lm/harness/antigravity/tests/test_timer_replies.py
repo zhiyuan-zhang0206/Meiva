@@ -98,7 +98,7 @@ async def test_native_echo_fence_preserves_another_live_timer(
 
         async def send() -> TurnCompleted:
             started.set()
-            return await _next_prompt(harness, "same-text-without-planner")
+            return await _next_prompt(harness)
 
         async with asyncio.TaskGroup() as tasks:
             delivery = tasks.create_task(send())
@@ -117,6 +117,40 @@ async def test_native_echo_fence_preserves_another_live_timer(
         assert pid is not None
         _assert_reopened(harness, pid, delivery.result())
         assert harness.session.take_lost_background() == ()
+    finally:
+        await harness.stop()
+
+
+async def test_timer_expiry_preserves_lost_work_and_reload_projection(tmp_path: Path) -> None:
+    wall = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=wall.now)
+    harness = await start(
+        tmp_path, clock=clock, reply_seconds=0.2, extra_args=("--test-two-timers",)
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        assert len(harness.session.background_work().items) == 2
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "" and e.usage_uncertain
+        )
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "LATE NATIVE REPLY"
+        )
+        pid, generation = harness.session.cli_pid, harness.session.generation
+        wall.advance(6)
+        await harness.session.deliver([HarnessInput.of("second", "resumed")])
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.generation > generation
+        )
+        assert harness.session.cli_pid != pid
+        [lost] = harness.session.take_lost_background()
+        assert "keep checking the long-running build" in (lost.description or "")
+        assert not harness.session.take_lost_background()
+        assert done.text == "MEIVA_DISPLAY_TO_USER\nFresh reply"
     finally:
         await harness.stop()
 

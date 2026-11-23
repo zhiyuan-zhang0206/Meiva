@@ -102,14 +102,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._transport: AgyTransport | None = None
         self._transport_failed = False
         self._recycle_when_idle = False
-        self._verify_load = True
         self._retirement: asyncio.Task[None] | None = None
         self._retirement_error: Exception | None = None
         self._background_changed = asyncio.Event()
         self._prompt_turn: PromptTurn | None = None
         self._projection: OutputProjection | None = None
         self._tools = ToolUpdates()
-        self._idle_replies = IdleReplies(0)
+        self._idle_replies = IdleReplies(0, config.max_buffered_events)
         self._adopted: set[str] = set()
         self._schedules = Schedules(
             max_timer_seconds=config.max_schedule_timer_seconds,
@@ -145,12 +144,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             raise
 
     # meiva:note
-    # A deliberate echo fence uses the ACP load and model responses to bound history playback.
+    # agy can replay history after setup, so every loaded generation projects its first prompt.
     async def _open_transport(self, resume: str | None) -> AgyTransport:
         generation = self._begin_generation()
         transport = self._factory()
-        self._resume_projection = resume is not None and self._verify_load
-        self._idle_replies = IdleReplies(len(self._transcript(resume).rows) if resume else 0)
+        self._resume_projection = resume is not None
+        offset = len(self._transcript(resume).rows) if resume else 0
+        self._idle_replies = IdleReplies(offset, self.config.max_buffered_events)
         try:
             await transport.start()
             session_id = await transport.open_session(resume=resume)
@@ -308,6 +308,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             if self._projection is None:
                 required = self._resume_projection or self._subagents.has_children(self._session_id)
                 self._projection = turn.require_projection(required=required)
+            elif self._resume_projection:
+                self._projection.fences_replay = True
             self._resume_projection = False
             self._prompt_turn = turn
             ticket.started_at = self._monotonic()
@@ -422,11 +424,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._lose_schedules()
         self._background_changed.set()
         self._tools.clear()
-        self._verify_load = error is not None or not (
-            self._projection and self._projection.has_undrained_native
-        )
         self._projection = None
-        self._idle_replies = IdleReplies(0)
+        self._idle_replies = IdleReplies(0, self.config.max_buffered_events)
         if error is not None:
             self._emit(SessionFailed(error=str(error)))
             self._fail_prompt_turn(error)
@@ -480,8 +479,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             else:
                 self._flush_text(turn)
             self.request_timing_refresh()
-        elif kind == "agent_message_chunk" and turn is None:
-            self._idle_replies.note_text(update, projection)
         elif kind in (
             "agent_message_chunk",
             "agent_thought_chunk",
@@ -489,8 +486,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             "tool_call_update",
         ):
             tool_id = update.get("toolCallId")
-            known = isinstance(tool_id, str) and tool_id in self._tools
-            if projection is None or known:
+            if isinstance(tool_id, str) and tool_id in self._tools:
+                self._project_update(turn, update)
+            elif turn is None:
+                self._idle_replies.note_frame(update)
+            elif projection is None:
                 self._project_update(turn, update)
             elif kind != "tool_call_update" or projection.expects_tool(tool_id):
                 projection.pending.append(update)
@@ -645,7 +645,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         self._schedule_changed()
         self._prompt_turn = None
-        self._idle_replies = IdleReplies(len(rows))
+        self._idle_replies = IdleReplies(len(rows), self.config.max_buffered_events)
         if self._projection is not None:
             turn.close_projection(self._projection, rows)
         elif self._schedules.has_detached:

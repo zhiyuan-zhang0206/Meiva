@@ -8,7 +8,9 @@ from uuid import uuid4
 
 import pytest
 
-from base.clock.tests.fakes import system_clock
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import clock_over, system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.tests.support import Harness, seed_replay_history, start
 from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
@@ -423,21 +425,32 @@ async def _assert_reused_prompt(
         ]
 
 
+class AttributionTimers(ManualTimers):
+    async def asleep(self, seconds: float) -> None:
+        await SYSTEM_TIMERS.asleep(seconds)
+
+
 @pytest.mark.parametrize(
-    ("case", "followup"), [("text", "same-text-without-planner"), ("tool", "same-tool")]
+    ("case", "expires"),
+    [("text", False), ("text", True), ("tool", False)],
+    ids=["text", "deadline", "tool"],
 )
 async def test_undrained_native_echo_preserves_followup(
-    tmp_path: Path, case: str, followup: str
+    tmp_path: Path, case: str, expires: bool
 ) -> None:
     seed_replay_history(tmp_path)
+    timers = AttributionTimers()
     harness = await start(
         tmp_path,
         resume="conv-acp",
-        reply_seconds=0.2,
+        reply_seconds=1,
+        clock=clock_over(timers),
         extra_args=(f"--test-native-same-{case}", "--test-late-load-replay"),
     )
     try:
         await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for_marker("unresolved-stop-read")
+        timers.advance(2)
         first = await harness.wait_for_type(TurnCompleted)
         harness.release("delay-native-frame")
         harness.release("release-native")
@@ -446,24 +459,99 @@ async def test_undrained_native_echo_preserves_followup(
             lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
         )
         pid, generation = harness.session.cli_pid, harness.session.generation
+        followup = "same-text-without-planner" if case == "text" else "same-tool"
         await harness.session.deliver([HarnessInput.of("second", followup)])
+        if case == "text":
+            await harness.wait_for_marker("foreground-stop-read")
+            assert not any(
+                isinstance(e, AssistantText) and e.turn_id not in {first.turn_id, native.turn_id}
+                for e in harness.events
+            )
+            if expires:
+                timers.advance(2)
+            else:
+                harness.release("write-foreground")
         done = await harness.wait_for(
             lambda event: (
                 isinstance(event, TurnCompleted)
                 and event.turn_id not in {first.turn_id, native.turn_id}
             )
         )
-        assert done.text == "OK" and _assistant_texts(harness, done.turn_id) == ["OK"]
         assert harness.session.cli_pid != pid and done.generation > generation
-        assert [f["method"] for f in harness.frames()].count("session/load") == 2
-        if case == "text":
-            harness.release("write-foreground")
-        else:
+        assert sum(f.get("method") == "session/load" for f in harness.frames()) == 2
+        expected = "" if expires else "OK"
+        assert done.text == expected and done.usage_uncertain is expires
+        assert _assistant_texts(harness, done.turn_id) == ([expected] if expected else [])
+        if case == "tool":
             assert [
                 type(e)
                 for e in harness.events
                 if isinstance(e, (ToolUse, ToolResult)) and e.turn_id == done.turn_id
             ] == [ToolUse, ToolResult]
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize(
+    ("command", "text", "usage"),
+    [
+        ("resumed", "MEIVA_DISPLAY_TO_USER\nFresh reply", Usage(250, 3, 0, 30)),
+        ("fresh-textless:end_turn", "", Usage(40, 0, 0, 30)),
+    ],
+    ids=["history", "textless"],
+)
+async def test_fenced_reload_projects_first_prompt(
+    tmp_path: Path, command: str, text: str, usage: Usage
+) -> None:
+    seed_replay_history(tmp_path)
+    harness = await start(
+        tmp_path, resume="conv-acp", reply_seconds=0.2, extra_args=("--test-late-load-replay",)
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for_type(TurnCompleted)
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await _assert_native_reply(harness, with_tool=False)
+        generation, pid = harness.session.generation, harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("second", command)])
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.generation > generation
+        )
+        assert harness.session.cli_pid != pid
+        assert done.text == text and done.usage == usage and not done.usage_uncertain
+        assert _assistant_texts(harness, done.turn_id) == ([text] if text else [])
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("case", ["child", "drained"])
+async def test_early_native_output_survives_idle_snapshot(tmp_path: Path, case: str) -> None:
+    harness = await start(tmp_path)
+    try:
+        await harness.session.deliver([HarnessInput.of("first", f"prepare-idle-{case}")])
+        first = await harness.wait_for_type(TurnCompleted)
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("finish-early-idle")
+        native = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "NATIVE RESPONSE"
+        )
+        await harness.session.deliver([HarnessInput.of("second", "next")])
+        second = await harness.wait_for(
+            lambda e: (
+                isinstance(e, TurnCompleted)
+                and e.text == "OK"
+                and e.turn_id not in {first.turn_id, native.turn_id}
+            )
+        )
+        assert harness.session.cli_pid == pid and second.generation == first.generation
+        assert [e.text for e in harness.events if isinstance(e, TurnCompleted)] == [
+            "OK",
+            "NATIVE RESPONSE",
+            "OK",
+        ]
     finally:
         await harness.stop()
 

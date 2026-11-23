@@ -93,10 +93,12 @@ order. A partial native echo can survive a fully attributed foreground
 settlement. Before writing the next prompt, an undrained native echo requires
 the idle peer to retire and the same conversation to load in a new process
 generation. Pending tracked background work can still drain the echo or
-complete on the old peer. The clean reload uses the ACP load and model setup
-responses as its replay boundary and handles the first prompt's live stdout
-without requiring a completed planner row. Ordinary resumes and child
-overlap retain their transcript projection. An unresolved native notice stays in the projection
+complete on the old peer. Every resumed generation projects the first prompt
+against its own transcript markers and planner steps. agy can emit history
+after the setup responses, even after the first prompt is written.
+Idle replay keeps a pending notice while its child descriptor or terminal
+planner row is missing. It also retains early idle text independently from
+foreground frames until a transcript snapshot can match it. An unresolved native notice stays in the projection
 across foreground settlement. When a prompt omits ACP usage, a terminal
 planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete

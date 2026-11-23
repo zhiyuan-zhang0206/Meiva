@@ -1,6 +1,7 @@
 exports = ["fake_agy.py", "support.py"]
 
 [uses]
+"fake_agy.py" = ["fake_wire.py"]
 "support.py" = ["fake_agy.py"]
 "test_acp.py" = ["support.py"]
 "test_schedules.py" = []
