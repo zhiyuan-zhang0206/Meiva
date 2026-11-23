@@ -53,7 +53,7 @@ restored by task #3689). All sections are **expanded by default**
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
 8. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
-   job's Prometheus gauges (task #2139).
+   job's Loki events (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.
@@ -68,17 +68,11 @@ rather than in the title: the registry renders the suffix, and for `per_minute`
 also appends each query part's bucket divisor (`[5m]` -> ` / 5`), so title and
 query cannot drift.
 
-The `PR flow` row (task #2139) reads the daily macmini export job
-(`scripts/ci/pull_requests/pr_flow_export.py`, 00:25 cluster time) back as Prometheus gauges:
-one absolute sample per complete cluster-tz day, re-emitted on every run so
-the trailing window stays visible. Each by-day tile is a **fixed-lookback**
-instant query, `max by (day) (last_over_time(<gauge>[26h]))` — 26h keeps a
-day's last sample alive across the daily cadence, and a day drops out of its
-table once the sample ages past it (a missed run shows as a gap, not a stale
-number). The three tables need their joinByField(`day`) transformation for
-the same reason: the instant queries return one frame per day series, and
-without the join the table falls back to a per-series frame picker instead
-of one row per day.
+The `PR flow` row reads the daily macmini export job's `pr_flow_daily` events
+from Loki. The job re-emits the trailing window at 00:25 cluster time. The
+instant query takes the last value per day and percentile in a 26h lookback,
+so a missed run leaves a gap. Grafana turns the query's `percentile` values
+into the median and p90 columns.
 
 The dashboard now has 92 panel entries (82 panels + 10 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are

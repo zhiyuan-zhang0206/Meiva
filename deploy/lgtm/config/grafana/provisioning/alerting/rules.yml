@@ -4961,19 +4961,20 @@ groups:
               expression: A
               reducer: mean
           - refId: B
-            datasourceUid: prometheus
+            datasourceUid: loki
             queryType: ""
             model:
               refId: B
               datasource:
-                type: prometheus
-                uid: prometheus
+                type: loki
+                uid: loki
               editorMode: code
               expr: >-
-                count(histogram_quantile(0.95, sum by (le, agent_id)
-                (rate(meiva_turn_end_duration_seconds_bucket[10m]))) > 75) or vector(0)
-              instant: true
-              range: false
+                count(quantile_over_time(0.95,
+                {service_name="unknown_service", event_name="turn_end", agent_id!=""}
+                | json | cluster=".meiva" | category="telemetry"
+                | unwrap attributes_duration_seconds | __error__="" [10m]) by (agent_id) > 75) or vector(0)
+              queryType: instant
             relativeTimeRange:
               from: 600
               to: 0

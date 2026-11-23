@@ -20,11 +20,12 @@ from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, V
 from opentelemetry.sdk.resources import Resource
 
 from base.telemetry.delivery.loss import install_exporter_drop_observer
+from base.telemetry.delivery.state import process_name
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
+from base.telemetry.otlp.plans import LOG_ONLY_PROCESSES
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    EVENT_LOOP_LAG_BUCKETS_MS,
     LLM_LATENCY_BUCKETS_MS,
     metrics_resource_attributes,
     provider_build_plan,
@@ -39,28 +40,14 @@ _LOGS_HTTP_TIMEOUT_S = 3.5
 
 
 # meiva:note
-# Shape long LLM latencies and recovered gateway event-loop stalls.
-# LLM percentiles are read per model/fleet, never per agent, so dropping `agent_id` removes the
-# per-(agent, model) histogram fan-out. Event-loop lag retains minute-scale stalls that the OTel
-# 10s default clips. Views match the INSTRUMENT name (unit suffix already stripped).
+# Preserve the tail of LLM call latency used by the fleet p95 rule.
 def metric_views() -> list[View]:
-    llm_aggregation = ExplicitBucketHistogramAggregation(list(LLM_LATENCY_BUCKETS_MS))
-    views = [
+    return [
         View(
-            instrument_name=name,
-            aggregation=llm_aggregation,
-            attribute_keys={"machine", "process", "model"},
+            instrument_name="meiva_llm_usage_latency",
+            aggregation=ExplicitBucketHistogramAggregation(list(LLM_LATENCY_BUCKETS_MS)),
         )
-        for name in ("meiva_llm_usage_latency", "meiva_llm_usage_decode")
     ]
-    views.append(
-        View(
-            instrument_name="meiva_gateway_event_loop_lag",
-            aggregation=ExplicitBucketHistogramAggregation(list(EVENT_LOOP_LAG_BUCKETS_MS)),
-            attribute_keys={"machine", "process"},
-        )
-    )
-    return views
 
 
 # meiva:note
@@ -109,16 +96,19 @@ def build_providers(
     # process's tail record — stays mirror-only (task #4314 triage / #4320).
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
-    reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
-        export_interval_millis=plan.metrics_interval_millis,
-        export_timeout_millis=plan.export_timeout_millis,
-    )
-    if keep_reader is not None:
-        keep_reader(reader)
+    readers: list[PeriodicExportingMetricReader] = []
+    if process_name() not in LOG_ONLY_PROCESSES:
+        reader = PeriodicExportingMetricReader(
+            OTLPMetricExporter(endpoint=plan.metrics_endpoint, timeout=plan.http_timeout_s),
+            export_interval_millis=plan.metrics_interval_millis,
+            export_timeout_millis=plan.export_timeout_millis,
+        )
+        readers.append(reader)
+        if keep_reader is not None:
+            keep_reader(reader)
     metrics = MeterProvider(
         shutdown_on_exit=plan.shutdown_on_exit,
-        metric_readers=[reader],
+        metric_readers=readers,
         resource=metrics_resource(home=home, instance_id=instance_id),
         views=metric_views(),
     )
