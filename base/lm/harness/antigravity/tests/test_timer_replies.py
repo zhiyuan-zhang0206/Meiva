@@ -11,12 +11,15 @@ from base.lm.harness.antigravity.tests.support import Harness, release_timer, st
 from base.lm.harness.delivery import HarnessInput, Reconciliation
 from base.lm.harness.events import (
     AssistantText,
+    HarnessCause,
     InputInContext,
     SessionFailed,
     ToolResult,
     ToolUse,
     TurnCompleted,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
     Usage,
 )
@@ -147,5 +150,79 @@ async def test_idle_timer_without_a_reply_releases_waiting_input_on_the_same_pee
         assert await harness.session.reconcile(["next"]) == {"next": Reconciliation.IN_CONTEXT}
         assert harness.session.cli_pid == pid
         assert len(harness.prompts()) == 2
+    finally:
+        await harness.stop()
+
+
+async def test_live_timer_notice_survives_steer_and_keeps_separate_usage(tmp_path: Path) -> None:
+    harness = await start(
+        tmp_path, extra_args=("--test-overlap", "--test-early-hub", "--test-timer-before-steer")
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        await harness.session.deliver([HarnessInput.of("first", "hold")])
+        tool = await harness.wait_for(
+            lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
+        )
+        await release_timer(harness)
+        await harness.session.deliver([HarnessInput.of("steer", "steer")])
+        harness.release("release-steer")
+        done = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == tool.turn_id
+        )
+        begun = await harness.wait_for(
+            lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS
+        )
+        native = await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id
+        )
+        assert done.text == "STEER_DONE" and done.usage == Usage(80, 10, 0, 60)
+        assert begun.cause is HarnessCause.SCHEDULED_WAKE and begun.turn_id != done.turn_id
+        assert native.text == "BACKGROUND" and native.usage == Usage(267, 3, 0, 30)
+        assert [
+            e
+            for e in harness.events
+            if isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS
+        ] == [begun]
+        assert not harness.session.background_work().items
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("stop_reason", ["end_turn", "max_tokens"])
+@pytest.mark.parametrize("case", ["timer-no-usage", "child-fence"])
+async def test_timer_expiry_preserves_fresh_foreground(
+    tmp_path: Path, stop_reason: str, case: str
+) -> None:
+    args = ("--test-early-hub",) if case == "timer-no-usage" else ()
+    harness = await start(tmp_path, extra_args=args, reply_seconds=0.25)
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        pid = harness.session.cli_pid
+        await release_timer(harness)
+        if case == "child-fence":
+            await harness.session.deliver([HarnessInput.of("warmup", "child-seed")])
+            await harness.wait_for(lambda e: isinstance(e, TurnCompleted) and e.text == "OK")
+        await harness.session.deliver([HarnessInput.of("fresh", f"{case}:{stop_reason}")])
+        begun = await harness.wait_for(
+            lambda e: isinstance(e, TurnStarted) and e.keys == ("fresh",)
+        )
+        done = await harness.wait_for(
+            lambda e: (
+                (isinstance(e, TurnCompleted) and e.turn_id == begun.turn_id)
+                or isinstance(e, SessionFailed)
+            )
+        )
+        assert isinstance(done, TurnCompleted), done
+        assert done.text == "FRESH"
+        assert not done.usage_uncertain
+        expected = Usage(240, 3, 0, 30) if case == "timer-no-usage" else Usage(40, 5, 0, 30)
+        assert done.usage == expected
+        assert not any(
+            isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS for e in harness.events
+        )
+        assert harness.session.cli_pid == pid
     finally:
         await harness.stop()

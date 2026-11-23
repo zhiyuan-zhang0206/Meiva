@@ -110,8 +110,11 @@ the same interleaved chunk matcher as live projection. A sole terminal must
 account for all remaining text with its own span. When independent terminals
 exist, other planner rows can account for skipped chunks in either order.
 Above the subset limit, only the whole span is tested. The notice remains
-pending for a separate native reply. Missing input evidence retains
-the attribution failure.
+pending for a separate native reply. A current ACP stop with no usage can
+also verify one terminal planner row when the entire buffered assistant text
+matches it and the timer notice was already present before this prompt and
+matches an expired timer. Independent candidates still need distinguishing
+evidence. Missing input evidence retains the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes
@@ -129,14 +132,19 @@ reader has already passed it. The graph presents the transcript and applies the
 normal reply visibility policy.
 A future timer still allows foreground input. A due or triggered timer keeps
 the process alive and can hold the start of a new prompt until its reply
-deadline. Steering an active prompt continues during that wait. A successful
+deadline. Steering an active prompt continues during that wait. Unanswered
+timer notices stay provisional across steer markers so planner rows on
+either side can be assigned by receipt and transcript evidence. A successful
 schedule tool result can also represent an early provider cancellation. When
 a deadline passes without a verified reply, the adapter removes only the
 expired timers from the keepalive record, wakes any waiting dispatch, and logs
 `agy_acp_timer_reply_expired`. It continues to use transcript evidence for
 unkeyed output on that process, carrying unresolved timer notices across
 input markers so a late reply can still be attributed to its native turn.
-Cron-like calls retain the existing one-day bound. Timers also supply the
+The task ID takes precedence when releasing a timer. A prompt can release
+only one eligible timer without a task ID, provided no expired timer makes
+that match ambiguous. Timers without sufficient identity evidence keep
+their own deadline. Cron-like calls retain the existing one-day bound. Timers also supply the
 foreground watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
 

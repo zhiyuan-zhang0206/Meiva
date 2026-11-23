@@ -20,6 +20,7 @@ from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
 from base.lm.harness.base_session import ActiveTurn
 from base.lm.harness.events import (
     AssistantText,
+    HarnessCause,
     ReasoningDelta,
     ReasoningText,
     TextDelta,
@@ -359,19 +360,24 @@ class PromptTurn:
     def require_projection(
         self, *, required: bool, late_timer_offset: int | None = None
     ) -> OutputProjection | None:
-        if late_timer_offset is not None:
-            return OutputProjection(late_timer_offset, carry_scheduled_notices=True)
-        return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
+        if not required and late_timer_offset is None:
+            return None
+        offset = self.transcript_offset if late_timer_offset is None else late_timer_offset
+        return OutputProjection(offset, fences_replay=required)
 
     def prove_projection(
-        self, projection: OutputProjection, rows: Sequence[dict[str, object]]
+        self,
+        projection: OutputProjection,
+        rows: Sequence[dict[str, object]],
+        *,
+        expired: Callable[[str, str], bool] | None = None,
     ) -> None:
         if self.stop_reason is None or self.verified_steps is not None:
             return
         scope = tuple(step for step in projection.steps(rows) if step.input_key in self.keys)
         known = tuple(step for step in scope if projection.owns(step))
         possible = tuple(step for step in scope if not projection.owns(step))
-        proof = self._confirmed_projection(known, possible, projection)
+        proof = self._confirmed_projection(known, possible, projection, expired)
         if proof is None:
             return
         span, excluded = proof
@@ -397,21 +403,57 @@ class PromptTurn:
         known: tuple[PlannerRow, ...],
         possible: tuple[PlannerRow, ...],
         projection: OutputProjection,
+        expired: Callable[[str, str], bool] | None,
     ) -> tuple[tuple[PlannerRow, ...], tuple[PlannerRow, ...]] | None:
         if self.stop_reason == "cancelled":
             return known, ()
         reports = self._projection_reports()
-        if (
-            known
-            and self._proves_end(known[-1])
-            and (not reports or (projection.fences_replay and not possible))
-        ):
-            return known, tuple(step for step in possible if step.index > known[-1].index)
+        if not reports:
+            return self._projection_without_receipt(known, possible, projection, expired)
+        if known and not possible and projection.fences_replay and self._proves_end(known[-1]):
+            return known, ()
         span = self._receipt_span(known, possible, reports)
         if span is None:
             return None
         chosen = {step.index for step in span}
         return span, tuple(step for step in possible if step.index not in chosen)
+
+    def _projection_without_receipt(
+        self,
+        known: tuple[PlannerRow, ...],
+        possible: tuple[PlannerRow, ...],
+        projection: OutputProjection,
+        expired: Callable[[str, str], bool] | None,
+    ) -> tuple[tuple[PlannerRow, ...], tuple[PlannerRow, ...]] | None:
+        if known and self._proves_end(known[-1]):
+            return known, tuple(step for step in possible if step.index > known[-1].index)
+        if (
+            not known
+            and expired is not None
+            and self._proves_text_only_span(possible, projection, expired)
+        ):
+            return possible, ()
+        return None
+
+    def _proves_text_only_span(
+        self,
+        possible: tuple[PlannerRow, ...],
+        projection: OutputProjection,
+        expired: Callable[[str, str], bool],
+    ) -> bool:
+        if len(possible) != 1:
+            return False
+        (step,) = possible
+        notice = step.notice
+        return (
+            notice is not None
+            and notice.cause is HarnessCause.SCHEDULED_WAKE
+            and notice.index < self.transcript_offset - projection.offset
+            and expired(notice.sender, notice.prompt)
+            and step.final
+            and self._proves_end(step)
+            and self._stop_text.corroborates(possible, possible)
+        )
 
     def _receipt_span(
         self,

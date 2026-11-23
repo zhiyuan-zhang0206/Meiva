@@ -298,7 +298,6 @@ class ForegroundBoundary:
 class OutputProjection:
     offset: int
     fences_replay: bool = False
-    carry_scheduled_notices: bool = False
     keys: list[str] = field(default_factory=list[str])
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
@@ -320,7 +319,7 @@ class OutputProjection:
                 self.keys,
                 boundaries=self._boundaries,
                 answered_at=self._answered_at,
-                carry_scheduled_notices=self.carry_scheduled_notices,
+                carry_scheduled_notices=True,
             )
         )
 
@@ -374,7 +373,7 @@ class OutputProjection:
             self.keys,
             self._boundaries,
             self._answered_at,
-            carry_scheduled_notices=self.carry_scheduled_notices,
+            carry_scheduled_notices=True,
         ):
             if event is None or isinstance(event, BackgroundNotice):
                 notice = event

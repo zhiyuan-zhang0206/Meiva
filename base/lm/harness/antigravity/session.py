@@ -501,9 +501,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _replay(self, projection: OutputProjection, transcript: TranscriptSnapshot) -> None:
         rows, turn = transcript.rows, self._prompt_turn
-        projection.carry_scheduled_notices = self._schedules.reply_expired
         if turn is not None:
-            turn.prove_projection(projection, rows)
+            turn.prove_projection(projection, rows, expired=self._schedules.is_expired_reply)
         for item in projection.project(rows):
             if turn is not None and item.input_key in turn.keys:
                 self._project_update(turn, item.frame, finished=item.text_finished)
@@ -523,9 +522,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         for event in (begun, text, completed):
             self._emit(event)
-        remaining = self._schedules.reply_finished(reply.notice.sender, reply.timer_prompt)
-        if remaining is not self._schedules:
-            self._schedules = remaining
+        before = self._schedules
+        self._schedules = before.reply_finished(
+            reply.notice.sender, reply.timer_prompt, now=self._clock.now().timestamp()
+        )
+        if self._schedules is not before:
             self._schedule_changed()
 
     def _tool_update(self, turn: PromptTurn | None, update: dict[str, object]) -> None:

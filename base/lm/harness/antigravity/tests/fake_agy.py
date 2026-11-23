@@ -106,6 +106,13 @@ def finish_steer(request: int, transcript: Path) -> None:
     result(request)
 
 
+def finish_timer_steer(request: int, transcript: Path) -> None:
+    finish_background(transcript, early_notice=True, early_planner=False)
+    record(transcript, planner_row("STEER_DONE"))
+    message("STEER_DONE")
+    result(request)
+
+
 def declare_child(transcript: Path) -> str:
     sender = "child-conv"
     descriptors = transcript.parent.parent / "subagents"
@@ -377,6 +384,13 @@ def foreground_with_preamble(transcript: Path, request: int) -> None:
     )
 
 
+def timer_review_prompt(transcript: Path, request: int, command: str) -> None:
+    case, reason = command.split(":", 1)
+    record(transcript, planner_row("FRESH", tokens=210))
+    message("FRESH")
+    result(request, reason, usage=case == "child-fence")
+
+
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command in {"resumed-command-completion", "unresolved-attribution"}:
         resumed_command_completion(transcript, request, command)
@@ -535,7 +549,15 @@ def complete_steer(transcript: Path, request: int) -> None:
     if "--test-early-command-result" in sys.argv:
         update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     gate = "release-steer" if "--test-overlap" in sys.argv else "release"
-    after_release(Path(gate), lambda: finish_steer(request, transcript))
+    finish = finish_timer_steer if "--test-timer-before-steer" in sys.argv else finish_steer
+    after_release(Path(gate), lambda: finish(request, transcript))
+
+
+def regular_prompt(transcript: Path, request: int, command: str) -> None:
+    if command.startswith(("child-fence:", "timer-no-usage:")):
+        timer_review_prompt(transcript, request, command)
+    else:
+        plain_prompt(transcript, request, command)
 
 
 def handle_prompt(
@@ -595,7 +617,7 @@ def handle_prompt(
     elif command == "broken":
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
-        plain_prompt(transcript, request, command)
+        regular_prompt(transcript, request, command)
     return original, permission_prompt
 
 
