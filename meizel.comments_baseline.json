@@ -4431,7 +4431,7 @@
   "ui/web/src/components/timeline/anchor/saved.ts": 3,
   "ui/web/src/components/timeline/anchor/use-placement.ts": 11,
   "ui/web/src/components/timeline/anchor/use-viewport-anchor.test.tsx": 6,
-  "ui/web/src/components/timeline/anchor/use-viewport-anchor.ts": 32,
+  "ui/web/src/components/timeline/anchor/use-viewport-anchor.ts": 30,
   "ui/web/src/components/timeline/buttons.tsx": 3,
   "ui/web/src/components/timeline/card.test.tsx": 11,
   "ui/web/src/components/timeline/card.tsx": 6,

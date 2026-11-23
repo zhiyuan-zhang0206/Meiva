@@ -13,14 +13,13 @@ only on a return to a kept entry; a first visit keeps its own default, and a
 search-param-only switch (e.g. `?agent_id=`) shares the previous home
 visit's slot. The record carries a content key (agent / agent+session): a
 mismatch drops the position instead of restoring it onto other content.
-The home timeline keeps its own place record instead
-(`components/timeline/anchor/saved.ts`): the view anchor of the row on screen
-(`itemId`, `rank`, whether it is a whole turn, the viewport offset, its
-`reading_locator` and whether it stood in a header toggle's reserve) under the same entry key. Conversation
-switches always save it, including when leaving the tail. Returning places that
-row in the first painted frame and keeps it anchored through subsequent output.
-First visits keep their default placement. Scrolling or explicitly navigating
-to the bottom resumes following.
+The home timeline keeps its own place record under the same entry key
+(`components/timeline/anchor/saved.ts`). A reader who left in history returns
+to their exact row, viewport offset and any header-toggle reserve they used.
+A reader who left at the tail keeps the latest human message or visible reply
+as a watermark. On return the timeline opens at the tail bounded by unread
+content, as described in [Timeline sticky scroll](../frontend-components/timeline-view/sticky-scroll.md).
+Reaching the natural end or using the down arrow resumes following.
 
 When `feature.reloadReadingRestore` is enabled (default `true`), the home
 timeline also persists a bounded per-tab bookmark map in `Browser.session`

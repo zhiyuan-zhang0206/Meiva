@@ -19,7 +19,7 @@ import type { SharedContextPanel as ContextPanelComponent } from "@/components/c
 import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
-import { hasSavedTimelinePlace, type ReloadRestoreConfig, type TimelineView as TimelineViewComponent } from "@/components/timeline";
+import { hasSavedTimelinePlace, hasTailDeparture, type ReloadRestoreConfig, type TimelineView as TimelineViewComponent } from "@/components/timeline";
 import { InlineError } from "@/components/ui/inline-error";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
@@ -485,20 +485,26 @@ function HomeContent({
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
   // meiva:note
-  // A first visit opens on the first unseen delivery, and keeps its rows hidden until that is
-  // decided. The roster already says whether the agent had unread deliveries when it was opened;
-  // without any, the decision is the tail at once instead of after a fresh feed read.
+  // A tail return waits for the entry feed even if the roster still shows the previous look's
+  // unread state. A known-quiet first visit can show its tail as soon as the timeline is ready.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const openedState = () => ({
-    agentId: activeId,
-    rosterRow: activeAgent !== undefined,
-    unread: activeAgent?.has_unread_user_messages,
-    savedPlace: hasSavedTimelinePlace(`${bfcacheId}:agent:${activeId ?? "unselected"}`, activeId != null ? String(activeId) : undefined, reloadRestore),
-  });
-  const [openedUnread, setOpenedUnread] = useState(openedState);
-  if (openedUnread.agentId !== activeId || (!openedUnread.rosterRow && activeAgent !== undefined)) {
-    setOpenedUnread(openedState());
-  }
+  const openedState = () => {
+    const contentKey = activeId == null ? undefined : String(activeId);
+    const entryKey = `${bfcacheId}:agent:${activeId ?? "unselected"}`;
+    return {
+      agentId: activeId,
+      rosterRow: activeAgent !== undefined,
+      shown: false,
+      quiet: activeAgent?.has_unread_user_messages === false && !hasTailDeparture(entryKey, contentKey),
+      savedPlace: hasSavedTimelinePlace(entryKey, contentKey, reloadRestore),
+    };
+  };
+  const [opened, setOpened] = useState(openedState);
+  if (opened.agentId !== activeId) setOpened(openedState());
+  else if (!opened.rosterRow && activeAgent !== undefined) setOpened({ ...openedState(), shown: opened.shown });
+  const onOpeningShown = useCallback(() => {
+    setOpened((current) => current.agentId === activeId && !current.shown ? { ...current, shown: true } : current);
+  }, [activeId]);
   const seenReveal = useSeenPosition({
     agentId: activeId,
     feed: {
@@ -512,7 +518,8 @@ function HomeContent({
     hasMoreOlder,
     loadingOlder,
     loadOlder: loadOlderForReveal,
-    revealWanted: !openedUnread.savedPlace,
+    revealWanted: !opened.savedPlace,
+    openingShown: opened.agentId === activeId && opened.shown,
   });
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
@@ -576,7 +583,8 @@ function HomeContent({
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
-            reveal={openedUnread.agentId === activeId && openedUnread.unread === false ? NO_UNREAD_REVEAL : seenReveal}
+            onOpeningShown={onOpeningShown}
+            reveal={opened.agentId === activeId && opened.quiet ? NO_UNREAD_REVEAL : seenReveal}
             onQuote={acceptQuote}
             bottomOverlayHeight={bottomOverlayHeight}
           />

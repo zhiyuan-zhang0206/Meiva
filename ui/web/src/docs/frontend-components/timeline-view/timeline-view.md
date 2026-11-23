@@ -9,14 +9,12 @@ Memoization, clock ownership and announcements:
 
 ## Returning to an agent
 
-The page keys each mounted timeline by agent and scopes its in-memory bookmark
-by page-entry plus agent. Every departure saves the visible message coordinate
-and viewport offset, including a reader watching the tail. Returning
-materializes the prefix before restoring that anchor and remains at the reading
-position as new output arrives. Work/detail expansion choices are retained
-under the same identity. The bookmark survives resize, tail repair and trim
-until the reader scrolls or explicitly requests the bottom. A first visit starts
-at the bottom. A send moves nothing: see [sending and the bottom edge](send-anchor.md).
+The page keys each mounted timeline by agent and scopes its in-memory place
+by page entry plus agent. A reader who left in history returns to their exact
+row and offset. A reader who left at the tail returns to the dock-safe end
+bounded by any unread content. A first visit with unread content uses the same
+placement. Work and detail expansion choices are retained under the same
+identity. A send moves nothing: see [sending and the bottom edge](send-anchor.md).
 
 The centered down arrow takes the reader to the current tail ([sending and the
 bottom edge](send-anchor.md)). Older paging
@@ -26,7 +24,12 @@ the inline first-step `Working…` row until the source is ready — follows
 
 ## Scroll ownership and one scrollport
 
-The reader's place is one view anchor (the tail, or a row at an offset) with one writer that re-applies it after every commit and layout change, so following the tail pins growth in the same pre-paint tick and a reader in history never moves when rows change above them ([sticky scroll](sticky-scroll.md)). Work and detail headers stay in normal document flow without `position: sticky` (user rulings 2026-11-01 & 2026-11-22), and the timeline has exactly one scrollport: an expanded `TurnBlock` renders its body at its natural height instead of wrapping it in a capped `ScrollArea`, so a finished block is as tall as the work really was and the reader scrolls the timeline itself. An automatically expanded live block grows in the current reading mode. Manually opening or closing a block keeps its header where it is (user ruling 2026-11-17). The wheel and touch gestures for older history are described in [Timeline history paging](history-paging.md).
+One writer reapplies the [view anchor](sticky-scroll.md) after every commit
+and layout change. An expanded `TurnBlock` header sticks below the conversation
+bar while its body flows at natural height inside the timeline's single
+scrollport. Its header can be toggled in place, including while it is sticky.
+The wheel and touch gestures for older history are described in
+[Timeline history paging](history-paging.md).
 
 ## Continuous segments
 

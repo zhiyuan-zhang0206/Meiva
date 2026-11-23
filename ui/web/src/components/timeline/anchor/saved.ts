@@ -12,8 +12,8 @@ import type { RowIdentity } from "./rows";
 // A saved place is the anchor itself, kept twice:
 // - per history entry in memory, so switching between agents in one page returns exactly;
 // - per agent in `sessionStorage`, so a reload in the same tab returns too.
-// Leaving from the tail saves the row on screen (user ruling 2026-10-17). A reload from the tail
-// keeps no bookmark and opens on the latest rows.
+// Leaving the tail keeps a delivery watermark in page memory. A reload from the tail
+// keeps no bookmark.
 // meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
 export interface SavedPlace {
   identity: RowIdentity;
@@ -23,15 +23,22 @@ export interface SavedPlace {
   holdReserve: boolean;
 }
 
-const memory = new Map<string, { contentKey: string; place: SavedPlace }>();
+export interface TailDeparture {
+  last: RowIdentity | null;
+  partialPayload?: string;
+}
 
-export function readMemoryPlace(entryKey: string | undefined, contentKey: string | undefined): SavedPlace | null {
+type MemoryPlace = SavedPlace | TailDeparture;
+
+const memory = new Map<string, { contentKey: string; place: MemoryPlace }>();
+
+export function readMemoryPlace(entryKey: string | undefined, contentKey: string | undefined): MemoryPlace | null {
   if (!entryKey || contentKey === undefined) return null;
   const saved = memory.get(entryKey);
   return saved?.contentKey === contentKey ? saved.place : null;
 }
 
-export function writeMemoryPlace(entryKey: string | undefined, contentKey: string | undefined, place: SavedPlace): void {
+export function writeMemoryPlace(entryKey: string | undefined, contentKey: string | undefined, place: MemoryPlace): void {
   if (!entryKey || contentKey === undefined) return;
   memory.set(entryKey, { contentKey, place });
 }
@@ -73,9 +80,15 @@ export function writeSessionPlace(contentKey: string | undefined, config: Reload
 // meiva:note
 // Whether a conversation opens on a saved place rather than its tail or first unseen delivery.
 export function hasSavedPlace(entryKey: string | undefined, contentKey: string | undefined, config: ReloadRestoreConfig): boolean {
-  return readMemoryPlace(entryKey, contentKey) !== null || readSessionPlace(contentKey, config) !== null;
+  const memory = readMemoryPlace(entryKey, contentKey);
+  return memory ? "identity" in memory : readSessionPlace(contentKey, config) !== null;
 }
 
 export function rowAnchor(place: SavedPlace, row = place.identity.row): Extract<ViewAnchor, { kind: "row" }> {
   return { kind: "row", row, offset: place.offset };
+}
+
+export function hasTailDeparture(entryKey: string | undefined, contentKey: string | undefined): boolean {
+  const memory = readMemoryPlace(entryKey, contentKey);
+  return memory !== null && "last" in memory;
 }
