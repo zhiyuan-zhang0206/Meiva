@@ -20,12 +20,7 @@ from base.daemon.health import DaemonProbe
 from base.host.boundary.untyped import object_of
 from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
-from base.paths import (
-    otel_collector_binary,
-    otel_collector_config,
-    otel_collector_fallback_config,
-    run_dir,
-)
+from base.paths import otel_collector_active_config, otel_collector_binary, run_dir
 from services.supervision.roster import plugin_services
 from services.supervision.roster.field_values import optional_text, real, text, texts, whole
 from services.supervision.roster.gate_plan import GateSettings
@@ -154,10 +149,7 @@ def build_services(
     browser_cdp_port = whole(setting("browser_cdp_port"), "browser_cdp_port")
     browser_profile = profile_dir(home)
     telemetry_otlp_port = whole(setting("telemetry_otlp_port"), "telemetry_otlp_port")
-    collector_fallback = otel_collector_fallback_config(home)
-    collector_config = (
-        collector_fallback if collector_fallback.is_file() else otel_collector_config(home)
-    )
+    collector_config = otel_collector_active_config(home)
     probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
     gateway_services = (

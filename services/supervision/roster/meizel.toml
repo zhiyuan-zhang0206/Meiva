@@ -18,4 +18,4 @@ exports = ["__main__.py", "composition.py", "field_values.py", "healthz.py", "pl
 
 [roots]
 "__main__.py" = { kinds = ["home"], why = "`python -m services.supervision.roster` resolves the home whose plugins declare the services it prints" }
-"composition.py" = { kinds = ["filesystem", "settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis URLs, the gateway settings that the service specs take, and the enablement flags the roster gates judge; builds the health-endpoint table for the supplied home and selects its converged Collector launch input" }
+"composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis URLs, the gateway settings that the service specs take, and the enablement flags the roster gates judge; builds the health-endpoint table for the supplied home" }

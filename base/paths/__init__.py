@@ -154,8 +154,8 @@ def otel_collector_config(home: Path) -> Path:
     return otel_collector_dir(home) / "config.yaml"
 
 
-def otel_collector_fallback_config(home: Path) -> Path:
-    return otel_collector_dir(home) / "config-without-harness.yaml"
+def otel_collector_active_config(home: Path) -> Path:
+    return otel_collector_dir(home) / "config-active.yaml"
 
 
 def vault_dir(*, home: Path) -> Path:

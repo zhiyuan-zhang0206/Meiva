@@ -25,7 +25,7 @@ from base.deploy.release.collector import plan as collector_plan
 from base.host.db_authority.api import ensure_telemetry_token
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
-from base.paths import meiva_home, otel_collector_config, otel_collector_dir
+from base.paths import meiva_home, otel_collector_active_config, otel_collector_dir
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.converge.steps import ensure_meiva_home_dirs
 from cli.commands.lifecycle.converge_host import CONVERGE_STEPS, live_root_steps
@@ -217,11 +217,11 @@ def test_optional_harness_otlp_conflict_does_not_block_cold_or_live_start(
         run.command.config.set_field("gateway_otlp_endpoint", "http://10.0.0.10:4318")
         roster = run.roster(RUNNER, only=("pty-sessions", "otel-collector"))
         assert prepare_cold_start(cold, roster, retained_children=run.children) == 0
-        before = otel_collector_config(run.home).read_bytes()
+        before = otel_collector_active_config(run.home).read_bytes()
         assert b"otlp/harness" not in before
         assert f"endpoint: 127.0.0.1:{ordinary}".encode() in before
         assert prepare_live_start(cold, roster) == 0
-        assert otel_collector_config(run.home).read_bytes() == before
+        assert otel_collector_active_config(run.home).read_bytes() == before
         with socket.create_connection(("127.0.0.1", occupied)):
             accepted, _ = occupant.accept()
             accepted.close()

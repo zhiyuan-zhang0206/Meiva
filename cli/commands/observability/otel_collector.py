@@ -36,9 +36,9 @@ from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.deploy.release.collector import artifact as collector_artifact
 from base.deploy.release.collector import plan as collector_plan
-from base.host.atomic_io import write_text_atomic
+from base.host.atomic_io import write_bytes_atomic
 from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
-from base.paths import otel_collector_config, otel_collector_dir, otel_collector_fallback_config
+from base.paths import otel_collector_active_config, otel_collector_config, otel_collector_dir
 from base.paths.scratch import ScratchSpace
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
@@ -255,7 +255,6 @@ def generate_config(
     settings: CollectorSettings,
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
-    harness_enabled: bool = True,
 ) -> str:
     from base.cluster import home_label
     from base.host.db_authority.unit import telemetry_bearer
@@ -277,9 +276,7 @@ def generate_config(
         retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port("127.0.0.1", obs.telemetry_otlp_port),
-        harness_ingress_endpoint=(
-            host_port("127.0.0.1", obs.harness_otlp_port) if harness_enabled else None
-        ),
+        harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
         data_plane_receivers=receivers,
         data_plane_pipeline=pipeline,
         exporters=_exporters(
@@ -328,7 +325,7 @@ def _harness_port_problem(home: Path, obs: ObservabilityConfig) -> str | None:
         failure = str(exc)
 
     binary = otel_collector_dir(home) / collector_plan.BINARY_NAME
-    config = otel_collector_config(home)
+    config = otel_collector_active_config(home)
     try:
         listeners = strict_listeners_on(port)
         if len(listeners) == 1:
@@ -406,28 +403,22 @@ def ensure_otel_collector(
             settings=settings,
             database_factory=database_factory,
             machine=machine,
-            harness_enabled=harness_problem is None,
         ),
     )
     if wrote:
         warn_sealed_inputs(meiva_home, (config_path,), writer="converge")
-    fallback_path = otel_collector_fallback_config(meiva_home)
-    fallback = (
-        without_harness_receiver(config_path.read_text(encoding="utf-8"))
-        if harness_problem is not None and not wrote
-        else None
-    )
-    if fallback is not None:
-        if not fallback_path.is_file() or fallback_path.read_text(encoding="utf-8") != fallback:
-            write_text_atomic(fallback_path, fallback, encoding="utf-8", suffix="")
-            warn_sealed_inputs(meiva_home, (config_path, fallback_path), writer="converge")
-    elif fallback_path.is_file():
-        fallback_path.unlink()
-        warn_sealed_inputs(meiva_home, (fallback_path,), writer="converge")
+    active_path = otel_collector_active_config(meiva_home)
+    active = config_path.read_bytes()
     if harness_problem is not None:
-        launch_path = fallback_path if fallback is not None else config_path
+        fallback = without_harness_receiver(active.decode("utf-8"))
+        if fallback is not None:
+            active = fallback.encode("utf-8")
+    if not active_path.is_file() or active_path.read_bytes() != active:
+        write_bytes_atomic(active_path, active, mode=0o600, suffix="")
+        warn_sealed_inputs(meiva_home, (active_path,), writer="converge")
+    if harness_problem is not None:
         print(
-            f"  ! otel-collector: harness OTLP disabled: {harness_problem}; using {launch_path}",
+            f"  ! otel-collector: harness OTLP disabled: {harness_problem}; using {active_path}",
             file=sys.stderr,
         )
 

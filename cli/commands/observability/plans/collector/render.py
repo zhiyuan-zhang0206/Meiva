@@ -104,45 +104,39 @@ def _node_value(node: Node) -> object:
     return object_of(getattr, node, "value")
 
 
-def _entries(node: MappingNode) -> list[tuple[Node, Node]]:
+def _entries(loader: yaml.SafeLoader, node: MappingNode) -> dict[str, tuple[ScalarNode, Node]]:
+    loader.flatten_mapping(node)
     pairs = _node_value(node)
     if not is_object_list(pairs):
         raise ValueError("expected YAML mapping entries")
-    entries: list[tuple[Node, Node]] = []
+    entries: dict[str, tuple[ScalarNode, Node]] = {}
     for pair in pairs:
         match pair:
-            case (Node() as key, Node() as value):
-                entries.append((key, value))
+            case (ScalarNode() as key, Node() as value):
+                entries[loader.construct_scalar(key)] = (key, value)
             case _:
                 raise ValueError("invalid YAML mapping entry")
+    node.value = list(entries.values())
     return entries
 
 
-def _mapping_at(node: Node | None, name: str) -> MappingNode | None:
-    if isinstance(node, MappingNode):
-        for key, value in _entries(node):
-            if (
-                isinstance(key, ScalarNode)
-                and _node_value(key) == name
-                and isinstance(value, MappingNode)
-            ):
-                return value
-    return None
+def _mapping_at(loader: yaml.SafeLoader, node: Node | None, name: str) -> MappingNode | None:
+    if not isinstance(node, MappingNode):
+        return None
+    entry = _entries(loader, node).get(name)
+    return entry[1] if entry is not None and isinstance(entry[1], MappingNode) else None
 
 
-def _drop_harness_pipelines(pipelines: MappingNode) -> None:
-    pipelines.value = [
-        (key, value)
-        for key, value in _entries(pipelines)
-        if _node_value(key) not in ("traces/harness", "logs/harness", "metrics/harness")
-    ]
-    for _, pipeline in _entries(pipelines):
+def _drop_harness_pipelines(loader: yaml.SafeLoader, pipelines: MappingNode) -> None:
+    entries = _entries(loader, pipelines)
+    for signal in ("traces", "logs", "metrics"):
+        _ = entries.pop(f"{signal}/harness", None)
+    pipelines.value = list(entries.values())
+    for _, pipeline in entries.values():
         if not isinstance(pipeline, MappingNode):
             continue
-        for key, components in _entries(pipeline):
-            if _node_value(key) in ("receivers", "exporters") and isinstance(
-                components, SequenceNode
-            ):
+        for name, (_, components) in _entries(loader, pipeline).items():
+            if name in ("receivers", "exporters") and isinstance(components, SequenceNode):
                 _drop_harness_components(components)
 
 
@@ -167,27 +161,31 @@ def _serialize(root: Node) -> str:
     return rendered
 
 
-def without_harness_receiver(content: str) -> str | None:
-    try:
-        root = yaml.SafeLoader(content).get_single_node()
-    except yaml.YAMLError:
-        raise ValueError("cannot prepare collector fallback: config.yaml is invalid YAML") from None
+def _without_harness(loader: yaml.SafeLoader) -> str | None:
+    root = loader.get_single_node()
     if root is None:
         return None
-    receivers = _mapping_at(root, "receivers")
-    if receivers is None or _mapping_at(receivers, "otlp/harness") is None:
+    receivers = _mapping_at(loader, root, "receivers")
+    if receivers is None:
         return None
-    receivers.value = [
-        (key, value) for key, value in _entries(receivers) if _node_value(key) != "otlp/harness"
-    ]
-    connectors = _mapping_at(root, "connectors")
+    entries = _entries(loader, receivers)
+    if entries.pop("otlp/harness", None) is None:
+        return None
+    receivers.value = list(entries.values())
+    connectors = _mapping_at(loader, root, "connectors")
     if connectors is not None:
-        connectors.value = [
-            (key, value)
-            for key, value in _entries(connectors)
-            if _node_value(key) != "forward/harness"
-        ]
-    pipelines = _mapping_at(_mapping_at(root, "service"), "pipelines")
+        entries = _entries(loader, connectors)
+        _ = entries.pop("forward/harness", None)
+        connectors.value = list(entries.values())
+    service = _mapping_at(loader, root, "service")
+    pipelines = _mapping_at(loader, service, "pipelines")
     if pipelines is not None:
-        _drop_harness_pipelines(pipelines)
+        _drop_harness_pipelines(loader, pipelines)
     return _serialize(root)
+
+
+def without_harness_receiver(content: str) -> str | None:
+    try:
+        return _without_harness(yaml.SafeLoader(content))
+    except (yaml.YAMLError, RecursionError):
+        raise ValueError("cannot prepare collector fallback: config.yaml is invalid YAML") from None

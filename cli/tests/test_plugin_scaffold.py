@@ -51,7 +51,7 @@ def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) ->
     collector = next(
         service for service in build_services(home=home) if service.session == "otel-collector"
     )
-    assert collector.config_inputs == (paths.otel_collector_config(home),)
+    assert collector.config_inputs == (paths.otel_collector_active_config(home),)
 
 
 def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntime) -> None:
