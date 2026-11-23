@@ -1,17 +1,6 @@
 // meiva:note
-// The timeline's bottom zone: how close to the natural end a reader must be to follow the tail.
-//
-// The timeline's position has one owner, the view anchor
-// (components/timeline/anchor/use-viewport-anchor.ts): the tail or a row at an offset. This
-// module only sizes the zone in which a reader's own scroll reads back as "the tail". The width is
-// pointer-dependent (the component picks the preset from `(pointer: coarse)`):
-//   - touch: bottomPxRatio * clientHeight clamped to [80, 200]. The wide
-//     zone absorbs iOS WebKit momentum + overscroll bounce, which leaves
-//     scrollTop 100-150px short of the bottom even when the user clearly
-//     means "at the bottom".
-//   - mouse / trackpad: a much tighter zone (no overscroll bounce exists),
-//     so a small deliberate scroll-up to read a message escapes the tail
-//     instead of being yanked back on the next streamed item.
+// The timeline's down arrow hides inside a pointer-dependent zone near the natural end.
+// The viewport only resumes following once the reader reaches the natural end itself.
 
 export interface StickyThresholds {
   // "At the bottom" zone = bottomPxRatio * clientHeight, clamped to
@@ -28,9 +17,7 @@ export const TOUCH_STICKY_THRESHOLDS: StickyThresholds = {
   bottomPxMax: 200,
 };
 
-// Mouse / trackpad: tight zone. No overscroll bounce to absorb, so a
-// deliberate scroll-up of one wheel notch leaves the bottom zone and
-// unsticks — the timeline stops yanking the user back while they read.
+// Mouse and trackpad: a tighter visibility zone for wheel and trackpad scrolling.
 export const POINTER_STICKY_THRESHOLDS: StickyThresholds = {
   bottomPxRatio: 0.05,
   bottomPxMin: 24,

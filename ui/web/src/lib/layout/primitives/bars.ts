@@ -1,5 +1,6 @@
 export const BAR_HEIGHT_PX = 44;
 export const BAR_HEIGHT_CLASS = "h-11";
+export const BAR_STICKY_TOP_CLASS = "top-11";
 export const BAR_DIVIDER_CLASS =
   "after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:h-px after:bg-border";
 export const BAR_MIN_HEIGHT_CLASS = "min-h-11";

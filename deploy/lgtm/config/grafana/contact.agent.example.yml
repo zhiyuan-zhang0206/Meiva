@@ -1,0 +1,122 @@
+# Optional site policy. Copy to $MEIVA_HOME/lgtm/alerting/contact.yml and
+# replace 1234 with the on-duty agent's ID before converging.
+# Keep the agent route first so continuing siblings preserves every ingest route.
+# Native alerts use the authenticated gateway webhook. Retired direct receivers are tombstoned.
+apiVersion: 1
+contactPoints:
+- orgId: 1
+  name: meiva-alerts-webhook
+  receivers:
+  - uid: meiva-alerts-webhook
+    type: webhook
+    disableResolveMessage: false
+    settings:
+      url: $__env{MEIVA_ALERTS_WEBHOOK_URL}
+      httpMethod: POST
+      authorization_scheme: Bearer
+      authorization_credentials: $__env{MEIVA_ALERTS_WEBHOOK_TOKEN}
+- orgId: 1
+  name: meiva-agent-webhook
+  receivers:
+  - uid: meiva-agent-webhook
+    type: webhook
+    disableResolveMessage: false
+    settings:
+      url: $__env{MEIVA_ALERTS_WEBHOOK_URL}/agents/1234
+      httpMethod: POST
+      authorization_scheme: Bearer
+      authorization_credentials: $__env{MEIVA_ALERTS_WEBHOOK_TOKEN}
+policies:
+- orgId: 1
+  receiver: meiva-alerts-webhook
+  group_by:
+  - alertname
+  matchers: []
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+  - receiver: meiva-agent-webhook
+    object_matchers:
+    - - severity
+      - =~
+      - critical|error
+    continue: true
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - attributes_check
+      - '='
+      - gateway_liveness
+    continue: false
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 4h
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - metric
+      - '='
+      - health_probe_silent
+    continue: false
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 4h
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - metric
+      - '='
+      - root_unit_restart_attempts_exhausted
+    continue: false
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 4h
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - metric
+      - '='
+      - alert_pipeline_watchdog
+    continue: false
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 5m
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - metric
+      - '='
+      - alert_pipeline_silent
+    continue: false
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 5m
+    repeat_interval: 1h
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - severity
+      - '='
+      - critical
+    group_by:
+    - alertname
+    group_wait: 0s
+    group_interval: 1m
+    repeat_interval: 1h
+  - receiver: meiva-alerts-webhook
+    object_matchers:
+    - - alertname
+      - =~
+      - .+
+    group_by:
+    - alertname
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+deleteContactPoints:
+- orgId: 1
+  uid: meiva-alerts-telegram

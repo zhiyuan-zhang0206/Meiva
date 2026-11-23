@@ -2,8 +2,8 @@
 
 // meiva:note
 // Unified collapsible TurnBlock for secondary agent steps (both live "Working…"
-// turns and completed "Worked for Xs" turns): inline unboxed header in normal
-// document flow (never sticky) with live/settled duration summary. An expanded
+// turns and completed "Worked for Xs" turns): an unboxed header with a live/settled
+// duration summary that sticks below the conversation bar while expanded. An expanded
 // body always flows at its natural height in the timeline - there is no inner
 // scrollport and no height cap - so a finished block is as tall as it really
 // was and a running one extends downward from a fixed top edge while the reader
@@ -17,6 +17,7 @@ import { memo, type ReactNode } from "react";
 import { formatWholeSecondsDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
+  BAR_STICKY_TOP_CLASS,
   FLEX,
   FLEX_1,
   FLEX_COL,
@@ -181,9 +182,11 @@ export const TurnBlock = memo(function TurnBlock({
         className={cn(
           "group/disclosure w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 rounded-md bg-background text-left text-muted-foreground select-none",
           FLEX,
+          expanded && cn("sticky z-20", BAR_STICKY_TOP_CLASS),
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
+        data-turn-header
         data-expanded={expanded}
       >
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
