@@ -30,9 +30,6 @@ function unpublishedReply(
     : item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
       item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
   if (watermark === -1 && last !== null) return -1;
-  // meiva:note
-  // A stream can appear (or grow in place) before it has a delivery cursor. Once it has
-  // a delivery, the entry's server seen cursor is authoritative for that row.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   return items.findIndex((item, index) => item.userDelivery === undefined && isReply(item) &&
     (index > watermark || (index === watermark && partialPayload !== undefined && item.payload !== partialPayload)));
