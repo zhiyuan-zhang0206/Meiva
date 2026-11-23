@@ -184,7 +184,6 @@ processors:
       - meiva.machine
       - meiva.agent_id
       - harness
-      - event.name
       - event.kind
       - event.sequence
       - duration_ms
@@ -210,11 +209,7 @@ processors:
       - cached_tokens
       - reasoning_tokens
       - type
-      - tool
-      - tool_name
       - tool_use_id
-      - tool_namespace
-      - gen_ai.tool.name
       - gen_ai.tool.call.id
       - interaction.sequence
       - parent.source
@@ -222,15 +217,30 @@ processors:
       - thread.id
       - turn.id
       - session.id
-  # The redaction processor covers attributes, while log bodies and span
-  # status messages are separate OTLP fields that can also carry free text.
+  # The redaction allowlist covers attributes. OTLP also has independent
+  # fields for free text, span links and metric exemplars.
   transform/harness_payload:
     error_mode: propagate
     log_statements:
-      - set(log.body, log.attributes["event.name"]) where log.attributes["event.name"] != nil
-      - set(log.body, "harness event") where log.attributes["event.name"] == nil
+      - set(scope.name, "harness")
+      - set(scope.version, "")
+      - set(log.body, log.event_name) where IsMatch(log.event_name, "^claude_code[.](user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start)$$")
+      - set(log.body, "harness event") where not IsMatch(log.event_name, "^claude_code[.](user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start)$$")
+      - set(log.event_name, log.body)
+      - set(log.severity_text, "")
     trace_statements:
+      - set(scope.name, "harness")
+      - set(scope.version, "")
       - set(span.status.message, "")
+      - set(span.trace_state, "")
+      - set(span.links, nil)
+      - set(span.name, "harness.operation") where not IsMatch(span.name, "^(claude_code[.](interaction|llm_request|llm_request[.]attempt|tool|tool[.]execution|tool[.]blocked_on_user)|turn/start|turn/steer|thread/start|thread/resume|run_turn|agent_turn|app_server[.]request)$$")
+      - set(spanevent.name, "harness event")
+    metric_statements:
+      - set(scope.name, "harness")
+      - set(scope.version, "")
+      - set(metric.description, "")
+      - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # returns retryable backpressure and bounds shedding instead of letting the
   # collector balloon on a 16GB shared box. Because it precedes file/traces,
@@ -382,7 +392,7 @@ service:
       exporters: [forward/harness]
     metrics/harness:
       receivers: [otlp/harness]
-      processors: [redaction/harness]
+      processors: [redaction/harness, transform/harness_payload]
       exporters: [forward/harness]
     traces:
       receivers: [otlp, forward/harness]

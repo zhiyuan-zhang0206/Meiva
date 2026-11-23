@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from collections.abc import Callable, Iterable, Mapping
@@ -108,13 +109,14 @@ def open_session(
     trace_enabled: bool = False,
 ) -> HarnessSession:
     if otlp_endpoint is not None:
-        environ = {
-            **environ,
-            **{
-                key: ",".join(filter(None, (environ.get(key), "127.0.0.1")))
-                for key in ("NO_PROXY", "no_proxy")
-            },
-        }
+        proxy_exceptions = (
+            environ.get("NO_PROXY", "").split(",")
+            + environ.get("no_proxy", "").split(",")
+            + ["127.0.0.1"]
+        )
+        entries = dict.fromkeys(entry.strip() for entry in proxy_exceptions if entry.strip())
+        bypass = "*" if "*" in entries else ",".join(entries)
+        environ = {**environ, "NO_PROXY": bypass, "no_proxy": bypass}
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)
@@ -234,15 +236,29 @@ class HarnessOtlp:
 
     async def available(self) -> bool:
         try:
-            async with httpx.AsyncClient(trust_env=False, timeout=0.5) as client:
-                response = await client.post(
+            async with (
+                asyncio.timeout(0.5),
+                httpx.AsyncClient(trust_env=False) as client,
+                client.stream(
+                    "POST",
                     f"{self.endpoint}/v1/traces",
                     content=b"",
                     headers={"Content-Type": "application/x-protobuf"},
-                )
-        except httpx.HTTPError:
+                ) as response,
+            ):
+                if (
+                    not response.is_success
+                    or response.headers.get("X-Meiva-Harness-Redaction") != "1"
+                ):
+                    return False
+                size = 0
+                async for chunk in response.aiter_raw():
+                    size += len(chunk)
+                    if size > 16:
+                        return False
+        except (TimeoutError, httpx.HTTPError):
             return False
-        return response.is_success and response.headers.get("X-Meiva-Harness-Redaction") == "1"
+        return True
 
 
 # meiva:note

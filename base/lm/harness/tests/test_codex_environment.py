@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ from base.lm.harness.registration import HANDLE_ENV
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.roots import bridge_root_values
-from base.lm.harness.wiring import bridge_for
+from base.lm.harness.wiring import HarnessOtlp, bridge_for, open_session
 
 SAMPLE_KEY = "sk-proj-sample-value"
 
@@ -139,3 +140,81 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
     finally:
         await bridge.close()
     assert bridge.exit_code is not None
+
+
+@pytest.mark.parametrize(
+    ("proxy_env", "expected"),
+    [
+        ({"NO_PROXY": "127.0.0.2"}, "127.0.0.2,127.0.0.1"),
+        ({"no_proxy": ".test.invalid"}, ".test.invalid,127.0.0.1"),
+        (
+            {"NO_PROXY": "127.0.0.2", "no_proxy": ".test.invalid"},
+            "127.0.0.2,.test.invalid,127.0.0.1",
+        ),
+        ({"NO_PROXY": "*"}, "*"),
+    ],
+)
+async def test_native_otlp_preserves_proxy_exceptions(
+    tmp_path: Path, proxy_env: dict[str, str], expected: str
+) -> None:
+    binary = Path(_stub_codex(tmp_path / "bin"))
+    receipt = tmp_path / "environment.json"
+    session = open_session(
+        Harness.CODEX,
+        agent_id=7,
+        cwd=tmp_path,
+        registry=FileSessionRegistry(tmp_path / "registry"),
+        environ={
+            "PATH": str(binary.parent),
+            "HOME": str(tmp_path),
+            "MEIVA_TEST_ENV_RECEIPT": str(receipt),
+            **proxy_env,
+        },
+        clock=system_clock(),
+        otlp_endpoint="http://127.0.0.1:20702/meiva-harness",
+    )
+    try:
+        await session.start()
+        observed = json.loads(receipt.read_text())
+        for child in (observed["environment"], observed["descendant"]):
+            assert child["NO_PROXY"] == child["no_proxy"] == expected
+    finally:
+        await session.close()
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"), [("normal", True), ("large", False), ("drip", False)]
+)
+async def test_native_otlp_probe_bounds_total_read_and_response_size(
+    mode: str, expected: bool
+) -> None:
+    finished = asyncio.Event()
+
+    async def respond(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            _ = await reader.readuntil(b"\r\n\r\n")
+            length = 2 if mode == "normal" else 17
+            writer.write(
+                f"HTTP/1.1 200 OK\r\nX-Meiva-Harness-Redaction: 1\r\n"
+                f"Content-Length: {length}\r\n\r\n".encode()
+            )
+            if mode == "drip":
+                for _ in range(length):
+                    await asyncio.sleep(0.1)
+                    writer.write(b"x")
+                    await writer.drain()
+            else:
+                writer.write(b"x" * length)
+                await writer.drain()
+        except ConnectionError:
+            return
+        finally:
+            writer.close()
+            finished.set()
+
+    async with await asyncio.start_server(respond, "127.0.0.1", 0) as server:
+        addr = server.sockets[0].getsockname()
+        telemetry = HarnessOtlp(f"http://127.0.0.1:{addr[1]}/meiva-harness", True)
+        async with asyncio.timeout(1.4):
+            assert await telemetry.available() is expected
+        await asyncio.wait_for(finished.wait(), 2)

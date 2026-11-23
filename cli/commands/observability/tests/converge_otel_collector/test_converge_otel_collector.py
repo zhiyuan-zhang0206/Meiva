@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import socket
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,37 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
         attempts=limits.otel_collector_download_attempts,
         retry_backoff_s=limits.otel_collector_download_retry_backoff_s,
         progress_interval_s=limits.otel_collector_download_progress_interval_s,
+    )
+
+
+def test_occupied_harness_port_never_rewrites_the_collector_config(
+    collector_unit: CollectorUnit,
+) -> None:
+    _ = collector_unit.install_pinned_binary()
+    collector_unit.ensure(GATEWAY)
+    path = otel_collector_config(collector_unit.home)
+    current = path.read_bytes()
+    with socket.socket() as occupant:
+        occupant.bind(("127.0.0.1", 0))
+        occupant.listen()
+        port = occupant.getsockname()[1]
+        with pytest.raises(RuntimeError, match=r"Harness OTLP port .* config was preserved"):
+            collector_unit.ensure(GATEWAY, observability=observability(harness_otlp_port=port))
+    assert path.read_bytes() == current
+
+
+def test_harness_processor_removes_non_attribute_payloads(
+    collector_unit: CollectorUnit,
+) -> None:
+    config = collector_unit.render(GATEWAY)
+    processors = mapping_at(config, "processors")
+    allowed = sequence_at(processors, "redaction/harness", "allowed_keys")
+    assert all(key not in allowed for key in ("tool_name", "tool", "gen_ai.tool.name"))
+    transform = mapping_at(processors, "transform/harness_payload")
+    assert "set(span.links, nil)" in sequence_at(transform, "trace_statements")
+    assert any(
+        isinstance(statement, str) and statement.startswith("set(datapoint.exemplars, nil)")
+        for statement in sequence_at(transform, "metric_statements")
     )
 
 

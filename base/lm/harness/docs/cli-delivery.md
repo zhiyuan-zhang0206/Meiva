@@ -54,8 +54,11 @@ Hosted Codex sessions export metrics and traces. Hosted Claude Code sessions
 export metrics, events and beta traces. The host uses a dedicated loopback
 receiver at `/meiva-harness/v1/*`. Its port is derived from the unit's local
 OTLP port by shifting within the unprivileged range, keeping adjacent unit
-ports distinct. Before starting a CLI, the host sends an empty OTLP request
-and verifies the live receiver's redaction marker. It logs a warning and starts
+ports distinct. Converge checks for conflicts before replacing the collector
+configuration and recognizes an existing listener owned by the same unit.
+Before starting a CLI, the host sends an empty OTLP request
+and verifies the live receiver's redaction marker within a half-second total
+budget. The probe accepts at most 16 response bytes. It logs a warning and starts
 the CLI with export disabled if the probe fails. During collector replacement,
 a CLI that already has the dedicated endpoint can only send to the redacted
 receiver. It enables these exporters
@@ -78,3 +81,6 @@ The harnesses' content controls are disabled at launch, and the collector
 applies a diagnostic attribute allowlist to their native signals before local
 storage or relay. The collector also replaces log bodies with an event label
 and clears free-text span status messages.
+
+The privacy filter also normalizes diagnostic names and removes span links,
+trace state and metric exemplars before export.
