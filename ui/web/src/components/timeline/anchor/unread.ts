@@ -1,5 +1,6 @@
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { standingHeadNoteIds } from "@/lib/timeline/timeline";
 
 import { isSilentTimelineItem } from "../model/runs";
 import type { RowRef } from "./dom";
@@ -46,10 +47,12 @@ export function unreadBoundary(
   const reply = items[index];
   const row = refOf(reply, buffer);
   if (reply.kind !== "agent_chat" || reply.nonHumanWake) return { row, needsOlder: missingDeparture };
+  const headNotes = standingHeadNoteIds(items);
   for (let before = index - 1; before >= 0; before--) {
     const item = items[before];
     if (rankOf(item, buffer) === row.rank) {
       if (isHumanMessage(item) && !isSilentTimelineItem(item)) return { row: refOf(item, buffer), needsOlder: missingDeparture };
+      if (item.kind === "system_prompt" || headNotes.has(item.item_id)) continue;
       if (item.kind === "agent_reasoning" || item.kind === "agent_code" || item.kind === "code_output" ||
           item.kind === "attach" || (item.kind === "system_marker" && item.source === "reply_visibility")) continue;
     }

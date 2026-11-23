@@ -42,8 +42,10 @@ The boundary includes the previous human prompt when it belongs to the same
 continuous question and answer: the prompt is on the same compact rank and
 only reasoning, code, code output, attachments or reply visibility metadata
 intervene. An earlier chat, another inbound message, a wake or a lifecycle
-marker ends the search. If the watermark is missing or the scan reaches the
-first loaded row through continuous work, placement uses the same bounded
+marker ends the search. The scan passes over the system prompt and standing
+head notes that the gateway reattaches to the page. If the watermark is
+missing or the scan reaches the first loaded row through continuous work,
+placement uses the same bounded
 older-page search as bookmark restore. Pages read to locate the delivery
 count toward the five-page limit. At the bound, the best loaded reply can
 still serve as the boundary. With no loaded candidate, the opening falls

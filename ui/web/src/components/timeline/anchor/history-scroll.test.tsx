@@ -652,6 +652,34 @@ describe("bounded unread return geometry", () => {
     expect(shownTops()).toEqual([300 - READING_TOP_PX]);
   });
 
+  it.each([false, true])("treats reattached standing context as a page edge and respects a real wake (%s)", (wake) => {
+    const system: BackendTimelineItem = { ...history, item_id: "0.0", kind: "system_prompt" };
+    const note: BackendTimelineItem = { ...history, item_id: "0.1", kind: "system_marker", source: "agent_id" };
+    const scheduled: BackendTimelineItem = { ...history, item_id: "2.1", kind: "inbound_chat", source: "schedule:2" };
+    const work: BackendTimelineItem = { ...history, item_id: "2.2", kind: "agent_reasoning" };
+    const partial = { ...reply, partial: true, payload: "A short reply" };
+    const head = [system, note];
+    const suffix = [...(wake ? [scheduled] : []), work];
+    const latest = [...head, ...suffix, reply];
+    const loadOlder = vi.fn();
+    const entry = `paged-standing-boundary-${wake}`;
+    const view = renderWithBrowser(host(<TimelineView items={[...latest.slice(0, -1), partial]}
+      threadKey="42" scrollMemoryKey={entry} />));
+    view.rerender(shell());
+    top = 0;
+    const present = (rows: BackendTimelineItem[]) => host(<TimelineView items={rows}
+      threadKey="42" scrollMemoryKey={entry} hasMoreOlder onLoadOlder={loadOlder} />);
+    view.rerender(present(latest));
+    expect(loadOlder).toHaveBeenCalledTimes(wake ? 0 : 1);
+    if (!wake) {
+      expect(rowsShown()).toBe(false);
+      view.rerender(present([...head, history, human, ...suffix, reply]));
+    }
+    expect(rowsShown()).toBe(true);
+    expect(readingOffset(wake ? reply.item_id : human.item_id)).toBe(READING_TOP_PX);
+    expect(loadOlder).toHaveBeenCalledTimes(wake ? 0 : 1);
+  });
+
   it("opens a 1500px reply with the 100px prompt at the safe top of a 1000px viewport", () => {
     mountReturn(1500);
     expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
