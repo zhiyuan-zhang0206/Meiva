@@ -28,7 +28,7 @@
 # numbers. The pure decisions are in ``tab_groups/page_ledger`` (read its header
 # for the rules); this module reads Chrome, closes targets and writes the file.
 #
-# The record is the one basis for closing. The ``Meiva #<id>`` tab group is the
+# The record is the one basis for closing. The ``M #<id>`` tab group is the
 # check that the user has not taken the page: a grouped page that left its owner's
 # group is not closed and loses its record. A page in an agent group with no
 # record is never closed (the group worker files tabs by URL on a layout restore,

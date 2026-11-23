@@ -302,7 +302,7 @@ async def test_a_grouped_page_without_a_record_is_never_adopted_or_closed(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     rig = Rig()
-    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #9")
+    stray = rig.browser.add_tab("https://stray.example/", title="M #9")
     d, _ = rig.start()
     rig.wall.advance(100 * TTL)
     for _ in range(4):
@@ -318,7 +318,7 @@ async def test_the_first_run_migrates_pages_in_agent_groups_once_and_logs_each(
     # no ledger file yet: the first run of this mechanism
     rig = Rig(store=MemoryStore())
     rig.browser.add_tab("https://old.example/secret/path?token=x", title="Meiva #9")
-    rig.browser.add_tab("https://old2.example/", title="Meiva #4")
+    rig.browser.add_tab("https://old2.example/", title="M #4")
     d, _ = rig.start()
 
     assert await _sweep(d) == 0
@@ -329,7 +329,7 @@ async def test_the_first_run_migrates_pages_in_agent_groups_once_and_logs_each(
     assert any("agent 9" in m and "https://old.example" in m for m in migration)
     assert not any("secret" in m or "token" in m for m in migration)
 
-    later = rig.browser.add_tab("https://later.example/", title="Meiva #9")
+    later = rig.browser.add_tab("https://later.example/", title="M #9")
     # meiva:note
     # a later daemon: the migration is not run again
     d2, _ = rig.start()
@@ -345,7 +345,7 @@ async def test_a_corrupt_ledger_file_reads_as_empty_and_migrates_nothing(
 ) -> None:
     path = tmp_path / "browser-pages.json"
     rig = Rig()
-    rig.browser.add_tab("https://old.example/", title="Meiva #9")
+    rig.browser.add_tab("https://old.example/", title="M #9")
     for garbage in ("{not json", "[]", '{"version": 2, "pages": {}}', "", '{"version": 1}'):
         path.write_text(garbage, encoding="utf-8")
         loguru_records.clear()
@@ -576,8 +576,8 @@ async def test_user_tabs_and_stale_records_naming_them_are_never_closed_in_any_p
     await open_page(d1, 7, "https://mine.example/")
     plain = rig.browser.add_tab("https://plain.example/")
     in_work = rig.browser.add_tab("https://work.example/", title="Work")
-    bad_title = rig.browser.add_tab("https://bad.example/", title="Meiva #07")
-    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #7")
+    bad_title = rig.browser.add_tab("https://bad.example/", title="M #07")
+    stray = rig.browser.add_tab("https://stray.example/", title="M #7")
     # meiva:note
     # grouped records naming tabs that are not in their owner's group: the user's, not ours
     stale = {t: PageRecord(7, 0.0, grouped=True) for t in (plain, in_work, bad_title)}
@@ -675,7 +675,7 @@ async def test_the_migration_is_decided_at_start_so_an_early_write_ends_it() -> 
     # meiva:note
     # no ledger file when the first daemon starts
     rig = Rig(store=MemoryStore())
-    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #9")
+    stray = rig.browser.add_tab("https://stray.example/", title="M #9")
     d1, _ = rig.start()
     # meiva:note
     # writes the ledger before any reconciliation
@@ -694,7 +694,7 @@ async def test_a_migration_that_adopted_nothing_still_marks_the_ledger() -> None
     d, _ = rig.start()
     await _sweep(d)
     assert rig.store.file is not None and rig.store.file.migrated
-    late = rig.browser.add_tab("https://late.example/", title="Meiva #9")
+    late = rig.browser.add_tab("https://late.example/", title="M #9")
     d2, _ = rig.start()
     await _sweep(d2)
     assert late not in rig.store.records
@@ -702,7 +702,7 @@ async def test_a_migration_that_adopted_nothing_still_marks_the_ledger() -> None
 
 async def test_a_migrated_record_is_left_to_the_sweep_not_to_a_release() -> None:
     rig = Rig(store=MemoryStore())
-    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #9")
+    stray = rig.browser.add_tab("https://stray.example/", title="M #9")
     d, _ = rig.start()
     await _sweep(d)
     assert rig.store.records[stray].adopted

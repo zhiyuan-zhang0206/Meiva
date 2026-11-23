@@ -48,23 +48,28 @@ def test_agent_id_of_title_is_the_exact_inverse_of_group_title() -> None:
         assert agent_id_of_title(group_title(agent_id)) == agent_id
 
 
+def test_agent_id_of_title_accepts_legacy_titles() -> None:
+    assert agent_id_of_title("Meiva #7") == 7
+    assert agent_id_of_title("Meiva #07") is None
+
+
 @pytest.mark.parametrize(
     "title",
     [
         None,
         "",
         "Work",
-        "Meiva #",
-        "Meiva #x",
-        "Meiva #07",
-        "Meiva #7 ",
-        " Meiva #7",
+        "M #",
+        "M #x",
+        "M #07",
+        "M #7 ",
+        " M #7",
         "meiva #7",
-        "Meiva #-1",
-        "Meiva #+7",
-        "Meiva #7.0",
-        "Meiva #٣",
-        "Meiva #7 (old)",
+        "M #-1",
+        "M #+7",
+        "M #7.0",
+        "M #\u0663",
+        "M #7 (old)",
         7,
     ],
 )

@@ -3763,7 +3763,6 @@
   "services/desktop/browser/protocol.py": 9,
   "services/desktop/browser/session.py": 13,
   "services/desktop/browser/session_restore.py": 29,
-  "services/desktop/browser/tab_groups/extension/group-54e0a7a25e31.js": 14,
   "services/desktop/browser/tab_groups/grouping.py": 35,
   "services/desktop/browser/tab_groups/page_ledger.py": 14,
   "services/desktop/browser/tab_groups/page_registry.py": 10,

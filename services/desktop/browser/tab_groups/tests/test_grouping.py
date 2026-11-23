@@ -86,7 +86,7 @@ class ChromeModel:
         # merge it wants to see reported, or the failure `converge_all` must degrade.
         # meiva:link services/desktop/browser/docs/tab-groups.md
         self.report = report or {
-            "title": "Meiva #7",
+            "title": "M #7",
             "windowId": 1,
             "groups": [11],
             "kept": 11,
@@ -340,7 +340,7 @@ def _warnings(records: list[dict[str, Any]]) -> list[str]:
 
 
 def test_group_title_identifies_the_agent_and_only_the_agent() -> None:
-    assert group_title(405) == "Meiva #405"
+    assert group_title(405) == "M #405"
     assert len({group_title(i) for i in range(1, 50)}) == 49  # unique per agent id
 
 
@@ -394,7 +394,7 @@ def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None
     assert not re.search(r"\bcolor\s*:", source)
     assert not re.search(r"tabs\.remove|tabGroups\.remove|storage\.", source)
     assert "self.meivaUngroupLast" in source
-    assert "group.title !== title" in source
+    assert "meivaShortTitle(group.title) !== title" in source
     assert "members.length !== 1" in source
     # meiva:note
     # The ungroup is the last thing the function does, and nothing else calls it.
@@ -455,7 +455,7 @@ async def test_group_new_page_files_the_new_target_into_the_agent_group(
     evaluate = ws.sent[5]
     assert evaluate["sessionId"] == "S1"
     assert evaluate["params"] == {
-        "expression": 'meivaGroup("T2", "Meiva #7")',
+        "expression": 'meivaGroup("T2", "M #7")',
         "awaitPromise": True,
         "returnByValue": True,
     }
@@ -474,7 +474,7 @@ async def test_waits_for_the_worker_script_to_run_after_a_fresh_load(
     evaluations = [
         r["params"]["expression"] for r in chrome.ws.sent if r["method"] == "Runtime.evaluate"
     ]
-    assert evaluations == ["typeof meivaGroup"] * 4 + ['meivaGroup("T2", "Meiva #7")']
+    assert evaluations == ["typeof meivaGroup"] * 4 + ['meivaGroup("T2", "M #7")']
     assert _warnings(loguru_records) == []
 
 
@@ -665,7 +665,7 @@ async def test_cdp_failure_warns_with_cause_and_never_raises(
 
     messages = _warnings(loguru_records)
     assert len(messages) == 1
-    assert needle in messages[0] and "Meiva #7" in messages[0]
+    assert needle in messages[0] and "M #7" in messages[0]
     assert "still open" in messages[0]  # tells the reader the page itself is fine
 
 
@@ -794,4 +794,4 @@ async def test_back_to_back_pages_of_one_agent_make_one_group() -> None:
     assert len(groups._tasks) == 2  # both in flight together
     await asyncio.gather(*groups._tasks)
 
-    assert created == ["Meiva #7"]
+    assert created == ["M #7"]

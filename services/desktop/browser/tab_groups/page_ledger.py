@@ -9,7 +9,7 @@
 # -- live in ``page_lifecycle``; this module only decides.
 #
 # The record is the one basis for closing a page, and it is written when the stack
-# CREATES the page (an isolated-context page too). The ``Meiva #<id>`` tab group is
+# CREATES the page (an isolated-context page too). The ``M #<id>`` tab group is
 # only the check that the user has not taken the page: a record is ``grouped`` once
 # Chrome has shown the page in its owner's group, and from then on a page that is
 # no longer in that group was taken by the user -- its record is dropped and the
@@ -63,7 +63,7 @@ LEDGER_VERSION = 1
 # Chrome's tabs as the ledger needs them, read fresh and never remembered.
 #
 # ``pages``: every open page target with its URL. ``agent_groups``: the agent
-# each page target belongs to by its tab group's title (``Meiva #<id>``); a
+# each page target belongs to by its tab group's title (``M #<id>``); a
 # target missing from it is in no agent group. ``other_groups``: page targets in
 # a tab group whose title is not an agent's (the user's own groups).
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 # Per-agent tab groups
 
-Every page an agent creates is filed into the tab group titled `Meiva #<id>`
+Every page an agent creates is filed into the tab group titled `M #<id>`
 (`tab_groups/grouping.py`, extension worker `extension/group-*.js`). The title
 is the whole identity: nothing maps an agent to a group id, so a daemon restart
 or a Chrome restart needs no repair. The same fact is what lets the page TTL
@@ -11,12 +11,12 @@ stack's and whose it is (see "Page TTL across restarts" below).
 
 **An agent's pages sit in at most one open group across the entire browser.**
 Multiple Chrome windows in the shared browser are accidental edge cases rather
-than separate workspaces, so `Meiva #<id>` titles converge globally across all
+than separate workspaces, so `M #<id>` titles converge globally across all
 windows. Every entry point **converges** instead of assuming, reading Chrome's
 own state:
 
-1. list every open group with the agent's title across all windows
-   (`chrome.tabGroups.query({ title })`);
+1. list every open group for that agent across all windows, matching both the
+   short title and the legacy `Meiva #<id>` title;
 2. keep one: the group with the most tabs, ties going to the lowest group id
    (a function of Chrome's state alone, so the choice is deterministic and a
    second pass has nothing left to do);
@@ -25,20 +25,26 @@ own state:
    `chrome.tabs.group` can otherwise pull the group into the moved tab's window
    — measured on Chrome 156). Chrome deletes a group when its last tab leaves
    it, so the emptied duplicates disappear with the move;
-4. report what it found and did (the group ids, the keeper, its window, how many
+4. rename the keeper to `M #<id>` in place if it still has the legacy title;
+5. report what it found and did (the group ids, the keeper, its window, how many
    were merged, how many tabs moved), which the daemon logs as a WARNING.
 
-A tab that already sits in a group this stack did not make (`!MEIVA_TITLE`) is
-left alone, and session-restore layout reapplication keeps non-`Meiva #<digits>`
-user groups scoped per window: a group the user made is theirs, and grouping is
-presentation only.
+Groups with user titles stay scoped per window during session restore. New
+agent groups and restored legacy agent layouts use the short title. Closed
+groups saved by Chrome stay outside the extension API and can be renamed
+by convergence once reopened and visible to the worker.
+
+When adding a tab, the worker resolves the CDP target with
+`chrome.debugger.getTargets` without attaching a debugger. It converges again
+after creating and titling a group to catch another creator that searched
+during the brief interval when the new group had no title.
 
 ### Triggers
 
 | Trigger | Where |
 | --- | --- |
 | every page creation | `meivaGroup(targetId, title)` converges that title across the browser before filing (`AgentTabGroups.group_new_page`) |
-| session layout restore | `meivaApplyLayout(spec)` converges `Meiva #<digits>` groups through `meivaConvergeTitle` (`session_restore.reapply`) |
+| session layout restore | `meivaApplyLayout(spec)` converges `M #<digits>` groups through `meivaConvergeTitle` (`session_restore.reapply`) |
 | daemon start and every upstream reconnect | `AgentTabGroups.converge_all()` -> `meivaConvergeAll()` (`mcp_daemon._serve_generation`) |
 | page ledger reconciliation (first sweep, every sweep, every release) | read-only `meivaGroupedTargets()` -> `AgentTabGroups.tab_state()` |
 | Chrome start and extension update/install | `chrome.runtime.onStartup` / `onInstalled` call `meivaConvergeAll()` inside the worker |
@@ -87,7 +93,7 @@ ids are not): owner, wall-clock deadline, whether Chrome has shown the page in i
 owner's group (`grouped`) and the URL last seen. The record is written when the
 stack **creates** the page, an isolated-context page included, and it is the one
 basis for closing it. The tab group only answers "did the user take it?": a record
-is `grouped` once Chrome shows the page in `Meiva #<owner>` (the background grouping
+is `grouped` once Chrome shows the page in `M #<owner>` (the background grouping
 reports it, or the next reconciliation sees it), and a `grouped` page that is no
 longer in that group is the user's now -- its record is dropped and it is never
 closed. An ungrouped record whose page shows up in **any** group that is not its
@@ -96,7 +102,8 @@ owner's group it becomes `grouped`. A record that never became `grouped` (an iso
 failed) is closed at its deadline. Every sweep and release first reconciles the file
 with Chrome's tabs (`AgentTabGroups.tab_state()`: `/json/list` plus
 `meivaGroupedTargets()`, group titles parsed by `agent_id_of_title`, which accepts
-only an exact `Meiva #<id>` round trip).
+an exact `M #<id>` or legacy `Meiva #<id>` title). The last-tab cleanup
+also recognizes either spelling for the same owner.
 
 **A page in an agent group with no record is not adopted and not closed.** The
 worker's `meivaApplyLayout` files tabs by URL when it restores a layout, so a user's
@@ -143,7 +150,7 @@ and grants no right to close it, so a user tab the agent merely selected stays o
 every close path (see [operations](operations.md)).
 
 **Interaction with the layout restore.** `meivaApplyLayout` matches tabs by URL
-and is unchanged. Its one hazard for this mechanism is the same-URL user tab above;
+in strip order. Its one hazard for this mechanism is the same-URL user tab above;
 the rules above make it a leaked page at worst, never a closed user tab, except one
 residual case: the one-time migration adopts whatever sat in an agent group at that
 moment, including a user's tab a past layout restore filed there by mistake.
