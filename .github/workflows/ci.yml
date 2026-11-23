@@ -95,6 +95,8 @@ jobs:
       shards: ${{ steps.selector.outputs.shards }}
       groups: ${{ steps.selector.outputs.groups }}
       static_matrix: ${{ steps.static_plan.outputs.matrix }}
+      classify_attempt: ${{ steps.static_plan.outputs.classify_attempt }}
+      run_id: ${{ steps.static_plan.outputs.run_id }}
       count: ${{ steps.selector.outputs.count }}
       est_seconds: ${{ steps.selector.outputs.est_seconds }}
       full_est_seconds: ${{ steps.selector.outputs.full_est_seconds }}
@@ -208,6 +210,7 @@ jobs:
         env:
           IS_PR_SELECTED: ${{ steps.selector.outputs.mode == 'enforce' && steps.selector.outputs.decision == 'SELECTED' }}
         run: |
+          printf "classify_attempt=%s\nrun_id=%s\n" "$GITHUB_RUN_ATTEMPT" "$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
           if [[ "$IS_PR_SELECTED" == "true" ]]; then
             python3 -m scripts.ci.pull_requests.test_cache plan-static \
               --in "$RUNNER_TEMP/selected-tests/tests.txt" --github-output "$GITHUB_OUTPUT"
@@ -934,6 +937,7 @@ jobs:
       MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
       MEIVA_REDIS_URL: redis://127.0.0.1:1/0
       COVERAGE_FILE: coverage-data-static-${{ matrix.group }}
+      STATIC_PASS: static-pass-${{ github.run_id }}-${{ needs.classify.outputs.classify_attempt }}-${{ github.run_attempt }}-${{ matrix.group }}-${{ matrix.digest || 'full' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1037,14 +1041,6 @@ jobs:
           min-tests: ${{ matrix.min_tests || '1' }}
           count-skipped: ${{ needs.classify.outputs.mode == 'enforce' && needs.classify.outputs.decision == 'SELECTED' }}
 
-      - name: Publish static shard pass
-        if: ${{ success() && steps.validate-static.outcome == 'success' }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: static-pass-${{ github.run_attempt }}-${{ matrix.group }}-${{ matrix.digest || 'full' }}
-          path: tmp/junit-backend-static-${{ matrix.group }}.xml
-          if-no-files-found: error
-
       - name: Upload static failure diagnostics
         if: ${{ !cancelled() && failure() }}
         continue-on-error: true
@@ -1081,6 +1077,37 @@ jobs:
           else
             echo "::warning title=coverage upload failed::coverage-data-static-${{ matrix.group }} could not be published after a retry — artifact-service failure, not a test failure; the coverage gate scores the data that arrived"
           fi
+
+      - name: Name the validated static shard report
+        if: ${{ success() && steps.validate-static.outcome == 'success' }}
+        run: cp "tmp/junit-backend-static-${{ matrix.group }}.xml" "tmp/$STATIC_PASS.xml"
+
+      - name: Publish static shard pass
+        id: static-pass-upload
+        if: ${{ success() && steps.validate-static.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.STATIC_PASS }}
+          path: tmp/${{ env.STATIC_PASS }}.xml
+          if-no-files-found: error
+
+      - name: Retry static shard pass upload
+        id: static-pass-retry
+        if: ${{ steps.static-pass-upload.outcome == 'failure' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.STATIC_PASS }}
+          path: tmp/${{ env.STATIC_PASS }}.xml
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Require static shard pass publication
+        if: ${{ !cancelled() && steps.static-pass-upload.outcome == 'failure' && steps.static-pass-retry.outcome != 'success' }}
+        run: |
+          echo "::error::Could not publish the validated static shard pass after retrying."
+          exit 1
 
   backend-structure:
     name: backend structure (pre-commit lint + codegen freshness)
@@ -2035,21 +2062,32 @@ jobs:
           fi
           echo "backend jobs verified (mode=$TEST_SELECTION_MODE decision=$DECISION)"
 
-      # Previous attempts can contain a pass for a shard cancelled in this attempt.
-      - name: Download current static shard passes
+      # Partial retries retain classify outputs; re-running classify starts a new set of passes.
+      - name: Download static shard passes
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with: &static-pass-download
-          pattern: static-pass-${{ github.run_attempt }}-*
+          pattern: static-pass-${{ github.run_id }}-${{ needs.classify.outputs.classify_attempt }}-*
           path: tmp/static-passes
+          merge-multiple: true
 
       - name: Verify static shard passes
         env: &static-pass-env
           STATIC_MATRIX: ${{ needs.classify.outputs.static_matrix }}
+          CLASSIFY_ATTEMPT: ${{ needs.classify.outputs.classify_attempt }}
+          CLASSIFY_RUN_ID: ${{ needs.classify.outputs.run_id }}
         run: &verify-static-passes |
           python3 - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
+          from shutil import copyfile
+
+          run_id = os.environ["GITHUB_RUN_ID"]
+          first = int(os.environ["CLASSIFY_ATTEMPT"])
+          current = int(os.environ["GITHUB_RUN_ATTEMPT"])
+          if os.environ["CLASSIFY_RUN_ID"] != run_id or not 1 <= first <= current:
+              raise SystemExit("::error::Invalid static shard plan run or attempt")
 
           matrix = json.loads(os.environ["STATIC_MATRIX"])
           shards = matrix["include"] if "include" in matrix else [
@@ -2057,21 +2095,31 @@ jobs:
           ]
           if not shards or sorted(shard["group"] for shard in shards) != list(range(1, len(shards) + 1)):
               raise SystemExit("::error::Invalid expected static shard groups")
-          attempt = os.environ["GITHUB_RUN_ATTEMPT"]
-          root = Path("tmp/static-passes")
-          expected = {
-              root / f"static-pass-{attempt}-{shard['group']}-{shard['digest']}"
-              / f"junit-backend-static-{shard['group']}.xml"
-              for shard in shards
-          }
-          received = {report for report in root.glob("*/*.xml") if report.is_file() and report.stat().st_size}
-          if received != expected:
-              for report in sorted(expected - received):
-                  print(f"::error::Missing static shard pass: {report.parent.name}")
-              for report in sorted(received - expected):
-                  print(f"::error::Unexpected static shard pass: {report.parent.name}")
-              raise SystemExit(1)
-          print(f"Verified {len(received)} static shard passes")
+          expected = {shard["group"]: shard["digest"] for shard in shards}
+          prefix = f"static-pass-{run_id}-{first}-"
+          latest = {}
+          for report in Path("tmp/static-passes").glob(f"{prefix}*.xml"):
+              match = re.fullmatch(r"([1-9][0-9]*)-([1-9][0-9]*)-(full|[0-9a-f]{64})", report.stem[len(prefix):])
+              if match is None:
+                  raise SystemExit(f"::error::Invalid static shard pass name: {report.name}")
+              attempt, group = map(int, match.group(1, 2))
+              if not first <= attempt <= current or expected.get(group) != match[3]:
+                  raise SystemExit(f"::error::Unexpected static shard pass: {report.name}")
+              if group not in latest or attempt > latest[group][0]:
+                  latest[group] = attempt, report
+
+          verified = Path("tmp/static-verified")
+          verified.mkdir(parents=True, exist_ok=True)
+          missing = []
+          for group in sorted(expected):
+              receipt = latest.get(group)
+              if receipt is None or not receipt[1].is_file() or not receipt[1].stat().st_size:
+                  missing.append(group)
+              else:
+                  copyfile(receipt[1], verified / f"junit-backend-static-{group}.xml")
+          if missing:
+              raise SystemExit(f"::error::Missing static shard passes for groups: {missing}")
+          print(f"Verified {len(latest)} static shard passes")
           PY
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2348,7 +2396,7 @@ jobs:
           key: test-pass-pr-${{ github.event.pull_request.number }}-none-${{ github.run_id }}
           restore-keys: test-pass-pr-${{ github.event.pull_request.number }}-
 
-      - name: Download current static shard passes
+      - name: Download static shard passes
         id: static-pass-download
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -2381,11 +2429,12 @@ jobs:
           set -euo pipefail
           mkdir -p tmp/test-cache
           shopt -s nullglob
-          pass_reports=()
-          for report in tmp/static-passes/*/*.xml; do pass_reports+=(--junit "$report"); done
-          reports=("${pass_reports[@]}")
+          reports=()
+          for report in tmp/static-verified/*.xml; do reports+=(--junit "$report"); done
           if [[ "$STATIC_PASSES" != "success" ]]; then
-            for report in tmp/junit/*.xml; do reports+=(--junit "$report"); done
+            for report in tmp/junit/*.xml; do
+              if [[ ! -f "tmp/static-verified/${report##*/}" ]]; then reports+=(--junit "$report"); fi
+            done
           fi
           [[ "${#reports[@]}" -gt 0 ]] || { echo "no static test reports this run"; exit 0; }
 

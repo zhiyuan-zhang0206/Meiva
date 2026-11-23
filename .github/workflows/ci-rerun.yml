@@ -1,4 +1,4 @@
-name: CI retry
+name: CI failed-job rerun
 
 on:
   workflow_run:
@@ -34,7 +34,7 @@ jobs:
       HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
       PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
     steps:
-      - name: Rerun CI once
+      - name: Rerun failed CI jobs once
         id: rerun
         shell: bash
         run: |
@@ -87,8 +87,9 @@ jobs:
             exit 0
           fi
 
-          # The backend gate requires static shard passes from the current attempt.
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/rerun"
+          # The first job-level rerun starts a new attempt, making later calls fail with 403.
+          # Rerun all failed jobs and their dependents atomically at the run level instead.
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/rerun-failed-jobs"
           echo "reran=true" >> "$GITHUB_OUTPUT"
 
       - name: Remind maintainers after a PR rerun
@@ -104,4 +105,4 @@ jobs:
           fi
           gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
             -f body="$marker
-          CI was re-run once. Inspect the current PR head and remaining failures before requesting another action. This workflow does not change merge-queue membership."
+          Failed jobs were re-run once. Inspect the current PR head and remaining failures before requesting another action. This workflow does not change merge-queue membership."

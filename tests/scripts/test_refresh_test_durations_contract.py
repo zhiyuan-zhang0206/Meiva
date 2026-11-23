@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -17,12 +20,39 @@ def _workflow_matrix_groups(workflow_name: str, job_name: str) -> list[int]:
     return document["jobs"][job_name]["strategy"]["matrix"]["group"]
 
 
-def test_shard_counts_track_both_workflow_matrices() -> None:
-    ci_document = yaml.safe_load(
-        (_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+def _ci_full_static_groups(tmp_path: Path) -> list[int]:
+    document = yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    jobs = document["jobs"]
+    assert jobs["backend-static-tests"]["strategy"]["matrix"] == (
+        "${{ fromJSON(needs.classify.outputs.static_matrix) }}"
     )
-    static_expr = ci_document["jobs"]["backend-static-tests"]["strategy"]["matrix"]
-    ci_static = json.loads(static_expr.split(" || '", 1)[1].split("'", 1)[0])["group"]
+    classify = jobs["classify"]
+    assert classify["outputs"]["static_matrix"] == "${{ steps.static_plan.outputs.matrix }}"
+    (planner,) = (step["run"] for step in classify["steps"] if step.get("id") == "static_plan")
+    output = tmp_path / "outputs"
+    ran = subprocess.run(  # noqa: S603 - execute the checked-in FULL planner
+        ["bash", "-e", "-c", planner],
+        cwd=_REPO_ROOT,
+        env={
+            **os.environ,
+            "IS_PR_SELECTED": "false",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_RUN_ATTEMPT": "2",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert outputs["classify_attempt"] == "2"
+    assert outputs["run_id"] == "42"
+    return cast("dict[str, list[int]]", json.loads(outputs["matrix"]))["group"]
+
+
+def test_shard_counts_track_both_workflow_matrices(tmp_path: Path) -> None:
+    ci_static = _ci_full_static_groups(tmp_path)
     nightly_static = _workflow_matrix_groups("refresh-test-durations.yml", "measure-static")
     release_static = _workflow_matrix_groups("release-gate.yml", "backend-static")
     ci_backend = _workflow_matrix_groups("ci.yml", "backend-shard")
@@ -30,8 +60,9 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
     ci_e2e = _workflow_matrix_groups("ci.yml", "e2e-shard")
     nightly_e2e = _workflow_matrix_groups("refresh-test-durations.yml", "measure-e2e")
 
+    assert refresh.STATIC_SHARDS == 8
     assert (
-        refresh.STATIC_SHARDS == 8 == len(ci_static) == len(nightly_static) == len(release_static)
+        ci_static == nightly_static == release_static == list(range(1, refresh.STATIC_SHARDS + 1))
     )
     assert refresh.BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
     assert refresh.E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)

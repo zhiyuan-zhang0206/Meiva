@@ -291,13 +291,31 @@ def test_warm_workflow_concurrency_and_dep_gate_contract() -> None:
         )
 
 
-def _shard_reports(tmp_path: Path, *, attempt: int, digests: list[str]) -> None:
-    for group, digest in enumerate(digests, 1):
-        artifact = tmp_path / f"tmp/static-passes/static-pass-{attempt}-{group}-{digest}"
-        artifact.mkdir(parents=True)
-        (artifact / f"junit-backend-static-{group}.xml").write_text(
-            '<testsuite><testcase name="passes"/></testsuite>'
-        )
+def _shard_report(
+    tmp_path: Path,
+    group: int,
+    digest: str,
+    *,
+    attempt: int = 1,
+    classify: int = 1,
+    run_id: int = 42,
+    contents: str = '<testsuite><testcase name="passes"/></testsuite>',
+) -> Path:
+    destination = tmp_path / "tmp/static-passes"
+    destination.mkdir(parents=True, exist_ok=True)
+    report = destination / f"static-pass-{run_id}-{classify}-{attempt}-{group}-{digest}.xml"
+    report.write_text(contents)
+    return report
+
+
+def _pass_environment(matrix: object, *, classify: int = 1, current: int = 1) -> dict[str, str]:
+    return {
+        "STATIC_MATRIX": json.dumps(matrix),
+        "GITHUB_RUN_ID": "42",
+        "GITHUB_RUN_ATTEMPT": str(current),
+        "CLASSIFY_RUN_ID": "42",
+        "CLASSIFY_ATTEMPT": str(classify),
+    }
 
 
 def _run_workflow_script(
@@ -318,60 +336,173 @@ def test_static_pass_is_published_and_required_after_junit_validation() -> None:
     static_job = jobs["backend-static-tests"]
     publish = _step(static_job, "Publish static shard pass")
     assert publish["if"] == "${{ success() && steps.validate-static.outcome == 'success' }}"
-    assert "continue-on-error" not in publish
     steps = cast("list[object]", static_job["steps"])
     assert steps.index(publish) > steps.index(_step(static_job, "Validate static test results"))
     backend = jobs["backend"]
-    download = _step(backend, "Download current static shard passes")
-    assert _mapping(download["with"], "artifact download")["pattern"] == (
-        "static-pass-${{ github.run_attempt }}-*"
+    download = _step(backend, "Download static shard passes")
+    download_inputs = _mapping(download["with"], "artifact download")
+    assert download_inputs["pattern"] == (
+        "static-pass-${{ github.run_id }}-${{ needs.classify.outputs.classify_attempt }}-*"
     )
+    assert download_inputs["merge-multiple"] is True
+    upload_inputs = _mapping(publish["with"], "artifact upload")
+    assert upload_inputs["name"] == "${{ env.STATIC_PASS }}"
+    assert upload_inputs["path"] == "tmp/${{ env.STATIC_PASS }}.xml"
+    stage = _step(static_job, "Name the validated static shard report")
+    assert stage["if"] == publish["if"]
+    assert steps.index(stage) < steps.index(publish)
     assert "continue-on-error" not in download
     verify = _step(backend, "Verify static shard passes")
     assert "continue-on-error" not in verify and "if" not in verify
 
 
-@pytest.mark.parametrize("decision", ["FULL", "SELECTED"])
-@pytest.mark.parametrize("defect", ["none", "missing", "wrong-plan", "old-attempt"])
-def test_backend_demands_every_current_static_pass_even_when_matrix_is_green(
-    tmp_path: Path, decision: str, defect: str
-) -> None:
+def test_static_pass_publication_failure_makes_the_shard_eligible_for_retry() -> None:
+    jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
+    static = jobs["backend-static-tests"]
+    publish = _step(static, "Publish static shard pass")
+    retry = _step(static, "Retry static shard pass upload")
+    required = _step(static, "Require static shard pass publication")
+    assert publish["id"] == "static-pass-upload" and publish["continue-on-error"] is True
+    assert retry["if"] == "${{ steps.static-pass-upload.outcome == 'failure' }}"
+    assert retry["id"] == "static-pass-retry" and retry["continue-on-error"] is True
+    assert _mapping(retry["with"], "retry inputs") == {
+        **_mapping(publish["with"], "publish inputs"),
+        "overwrite": True,
+    }
+    assert required["if"] == (
+        "${{ !cancelled() && steps.static-pass-upload.outcome == 'failure' "
+        "&& steps.static-pass-retry.outcome != 'success' }}"
+    )
+    assert "continue-on-error" not in required and "exit 1" in _string(required["run"], "gate")
+
+
+def _backend_pass_script(*, matrix_result: str = "success") -> str:
     jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
     backend = jobs["backend"]
-    verify = _step(backend, "Verify static shard passes")
-
-    digests = ["full"] * 8 if decision == "FULL" else ["a" * 64, "b" * 64]
-    matrix = (
-        {"group": list(range(1, 9))}
-        if decision == "FULL"
-        else {
-            "include": [
-                {"group": index, "digest": digest} for index, digest in enumerate(digests, 1)
-            ]
-        }
-    )
-    reports = digests.copy()
-    if defect == "missing":
-        reports.pop()
-    if defect == "wrong-plan":
-        reports[-1] = "different"
-    _shard_reports(tmp_path, attempt=1 if defect == "old-attempt" else 2, digests=reports)
     aggregate = _string(_step(backend, "Verify backend job results")["run"], "aggregate gate")
+    aggregate = aggregate.replace("${{ needs.backend-static-tests.result }}", matrix_result)
     aggregate = re.sub(r"\$\{\{ needs\.[\w-]+\.result \}\}", "success", aggregate)
     aggregate = re.sub(r"\$\{\{ needs\.classify\.outputs\.[\w-]+ \}\}", "true", aggregate)
-    script = aggregate + "\n" + _string(verify["run"], "static pass gate")
+    verify = _step(backend, "Verify static shard passes")
+    return aggregate + "\n" + _string(verify["run"], "static pass gate")
+
+
+def _matrix(digests: list[str]) -> dict[str, object]:
+    if digests[0] == "full":
+        return {"group": list(range(1, len(digests) + 1))}
+    return {
+        "include": [{"group": group, "digest": digest} for group, digest in enumerate(digests, 1)]
+    }
+
+
+@pytest.mark.parametrize("decision", ["FULL", "SELECTED"])
+@pytest.mark.parametrize(
+    ("case", "verdict"),
+    [
+        ("initial", 0),
+        ("full-rerun", 0),
+        ("old-attempt", 1),
+        ("partial-retry", 0),
+        ("missing", 1),
+        ("wrong-plan", 1),
+        ("wrong-run", 1),
+        ("future-attempt", 1),
+        ("cancelled", 1),
+        ("failure", 1),
+    ],
+)
+def test_backend_requires_passes_for_the_active_plan(
+    tmp_path: Path, decision: str, case: str, verdict: int
+) -> None:
+    digests = ["full"] * 8 if decision == "FULL" else ["a" * 64, "b" * 64]
+    classify = 2 if case in {"old-attempt", "full-rerun"} else 1
+    current = 1 if case == "initial" else 2
+    for group, digest in enumerate(digests[:-1], 1):
+        _shard_report(tmp_path, group, digest, classify=classify, attempt=classify)
+    reports = {
+        "initial": (1, 1, 42),
+        "full-rerun": (2, 2, 42),
+        "old-attempt": (1, 1, 42),
+        "partial-retry": (1, 2, 42),
+        "missing": None,
+        "wrong-plan": (1, 2, 42),
+        "wrong-run": (1, 2, 43),
+        "future-attempt": (1, 3, 42),
+        "cancelled": (1, 2, 42),
+        "failure": (1, 2, 42),
+    }
+    digest = "f" * 64 if case == "wrong-plan" else digests[-1]
+    if (receipt := reports[case]) is not None:
+        plan_attempt, attempt, run = receipt
+        _shard_report(
+            tmp_path, len(digests), digest, classify=plan_attempt, attempt=attempt, run_id=run
+        )
+    matrix_result = case if case in {"cancelled", "failure"} else "success"
     ran = _run_workflow_script(
         tmp_path,
-        script,
+        _backend_pass_script(matrix_result=matrix_result),
         TEST_SELECTION_MODE="enforce",
         DECISION=decision,
-        STATIC_MATRIX=json.dumps(matrix),
-        GITHUB_RUN_ATTEMPT="2",
+        **_pass_environment(_matrix(digests), classify=classify, current=current),
     )
-    assert "backend jobs verified" in ran.stdout
-    assert ran.returncode == (0 if defect == "none" else 1), ran.stdout + ran.stderr
-    if defect != "none":
-        assert "Missing static shard pass:" in ran.stdout
+    assert ran.returncode == verdict, ran.stdout + ran.stderr
+    assert ("backend jobs verified" in ran.stdout) == (matrix_result == "success")
+
+
+@pytest.mark.parametrize(
+    "contents",
+    ['<testsuite><testcase name="passes"/></testsuite>', '<testsuite tests="0"/>'],
+)
+def test_single_download_accepts_flat_junit_including_an_empty_selection(
+    tmp_path: Path, contents: str
+) -> None:
+    jobs = _jobs(_load_workflow(_CI_WORKFLOW), "ci.yml")
+    stage = _string(
+        _step(jobs["backend-static-tests"], "Name the validated static shard report")["run"],
+        "receipt staging shell",
+    ).replace("${{ matrix.group }}", "1")
+    upload_dir = tmp_path / "tmp"
+    upload_dir.mkdir()
+    (upload_dir / "junit-backend-static-1.xml").write_text(contents)
+    digest = hashlib.sha256(b"" if 'tests="0"' in contents else b"test_a.py\n").hexdigest()
+    name = f"static-pass-42-1-1-1-{digest}"
+    staged = _run_workflow_script(tmp_path, stage, STATIC_PASS=name)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    download = upload_dir / "static-passes"
+    download.mkdir()
+    (upload_dir / f"{name}.xml").rename(download / f"{name}.xml")
+    ran = _run_workflow_script(
+        tmp_path,
+        _backend_pass_script(),
+        TEST_SELECTION_MODE="enforce",
+        DECISION="SELECTED",
+        **_pass_environment(_matrix([digest])),
+    )
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert (upload_dir / "static-verified/junit-backend-static-1.xml").read_text() == contents
+
+
+@pytest.mark.parametrize("latest_exists", [False, True])
+def test_partial_retry_takes_latest_receipt_for_each_shard(
+    tmp_path: Path, latest_exists: bool
+) -> None:
+    digest = "a" * 64
+    _shard_report(tmp_path, 1, digest)
+    latest = '<testsuite><testcase name="retried"/></testsuite>' if latest_exists else ""
+    _shard_report(tmp_path, 1, digest, attempt=2, contents=latest)
+    ran = _run_workflow_script(
+        tmp_path,
+        _backend_pass_script(),
+        TEST_SELECTION_MODE="enforce",
+        DECISION="SELECTED",
+        **_pass_environment(_matrix([digest]), current=2),
+    )
+    assert (ran.returncode == 0) == latest_exists, ran.stdout + ran.stderr
+    normalized = tmp_path / "tmp/static-verified/junit-backend-static-1.xml"
+    if latest_exists:
+        assert normalized.read_text() == latest
+    else:
+        assert not normalized.exists()
 
 
 @pytest.mark.parametrize("complete", [False, True])
@@ -380,12 +511,12 @@ def test_full_cache_recording_requires_all_static_reports(tmp_path: Path, comple
     job = jobs["test-cache-report"]
     verify = _string(_step(job, "Verify static shard passes")["run"], "report pass gate")
     assert verify == _step(jobs["backend"], "Verify static shard passes")["run"]
-    _shard_reports(tmp_path, attempt=1, digests=["full"] * (8 if complete else 1))
+    for group in range(1, 9 if complete else 2):
+        _shard_report(tmp_path, group, "full")
     checked = _run_workflow_script(
         tmp_path,
         verify,
-        STATIC_MATRIX=json.dumps({"group": list(range(1, 9))}),
-        GITHUB_RUN_ATTEMPT="1",
+        **_pass_environment(_matrix(["full"] * 8)),
     )
     assert (checked.returncode == 0) == complete, checked.stdout + checked.stderr
 
@@ -424,6 +555,7 @@ def test_full_cache_recording_requires_all_static_reports(tmp_path: Path, comple
         STATIC_PASSES="success" if complete else "failure",
     )
     assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert (tmp_path / "tmp/test-cache/report.json").is_file()
     assert (tmp_path / "recorded").exists() == complete
     assert restore.read_text() == ("fresh pass\n" if complete else "restored pass\n")
     assert outputs.exists() == complete

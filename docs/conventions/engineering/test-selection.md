@@ -381,9 +381,11 @@ list's digest to its job. Jobs verify their lists before pytest and require
 readable JUnit. Selected static shards count skipped cases toward the minimum. A
 zero-target selection has one explicitly empty shard. Full and shadow runs retain
 eight static pytest-split shards and coverage. Every successful static shard
-publishes its validated JUnit under its attempt, group and plan digest. The required
-backend check verifies the entire planned set from the current attempt, so a retry
-that includes the backend check must rerun all jobs.
+publishes its validated JUnit under a unique run, classify attempt, execution
+attempt, group and plan digest. The required backend check verifies the entire
+plan, using the latest pass per group since that plan was published. A failed-job
+retry keeps passes from successful siblings under the same plan. Re-running
+classify requires a complete new set of passes.
 
 ## Duration estimates
 
@@ -452,7 +454,7 @@ input is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`
   written **exclusively** by `refs/heads/main` (`cache-warm.yml` incrementally seeds missing static
   passes on pushes to `main`, and the nightly / `workflow_dispatch` full run of `ci.yml` writes a
   fresh baseline after clearing meizel's local SQLite cache and verifying all FULL static
-  shard reports from the current attempt). Pull requests never write `test-pass-main-*`.
+  shard reports for the active plan). Pull requests never write `test-pass-main-*`.
 - **PR-isolated prefix (`test-pass-pr-<pr>-<run_id>-<attempt>`, path `tmp/test-cache/pr-passes.jsonl`)**:
   written **exclusively** by pull requests, physically scoped by GitHub Actions to `refs/pull/<pr>/merge`.
   Planning imports both `main` and PR passes; recording clears meizel's local SQLite cache, carries

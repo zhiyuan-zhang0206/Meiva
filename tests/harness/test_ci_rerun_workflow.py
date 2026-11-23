@@ -150,7 +150,9 @@ def test_current_head_retries_once(tmp_path: Path) -> None:
     result, calls = run_retry(tmp_path)
     assert result.returncode == 0, result.stderr
     posts = [call for call in calls if "POST" in call]
-    assert posts == [["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun"]]
+    assert posts == [
+        ["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun-failed-jobs"]
+    ]
 
 
 def test_cap_cancelled_run_reruns_once(tmp_path: Path) -> None:
@@ -160,7 +162,9 @@ def test_cap_cancelled_run_reruns_once(tmp_path: Path) -> None:
     result, calls = run_retry(tmp_path, RUN_CONCLUSION="cancelled")
     assert result.returncode == 0, result.stderr
     posts = [call for call in calls if "POST" in call]
-    assert posts == [["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun"]]
+    assert posts == [
+        ["api", "--method", "POST", f"repos/{REPO}/actions/runs/100/rerun-failed-jobs"]
+    ]
 
 
 def test_verified_fork_head_is_not_confused_with_base_repository(tmp_path: Path) -> None:
