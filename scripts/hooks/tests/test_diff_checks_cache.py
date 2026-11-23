@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
@@ -39,6 +42,9 @@ from scripts.hooks.meizel_run import (
     git_config_identity,
     git_executable_digest,
     safe_environment,
+)
+from scripts.hooks.meizel_run import (
+    main as run_full_meizel,
 )
 
 # meiva:note
@@ -711,3 +717,53 @@ def test_unrelated_upstream_updates_keep_the_git_config_identity(tmp_path: Path)
 
     _git(tmp_path, "config", "merge.renames", "false")
     assert git_config_identity(tmp_path) != before
+
+
+def test_full_meizel_cache_reads_bytes_even_when_git_reports_clean(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "consumer.py"
+    (tmp_path / ".gitignore").write_text(".cache/\n")
+    (tmp_path / "meizel.toml").write_text('[uses]\n"consumer.py" = ["mod.py"]\n')
+    (tmp_path / "mod.py").write_text("value = 1\n")
+    source.write_text("import math\nfrom mod import value\nother = math.pi + value\n")
+    os.utime(source, (1_700_000_000, 1_700_000_000))
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "core.trustctime", "false")
+    _git(tmp_path, "add", "-A")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "base",
+    )
+    pushed = _git(tmp_path, "rev-parse", "HEAD")
+    environment = {"PATH": os.environ["PATH"]}
+    assert run_full_meizel(tmp_path, python=_PYTHON, environment=environment, pushed=pushed) == 0
+    _ = capsys.readouterr()
+    assert run_full_meizel(tmp_path, python=_PYTHON, environment=environment, pushed=pushed) == 0
+    assert "reused full meizel check" in capsys.readouterr().out
+
+    before = source.stat()
+    source.write_bytes(source.read_bytes().replace(b"import math", b"import 0000", 1))
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert source.stat().st_size == before.st_size
+    assert _git(tmp_path, "status", "--porcelain") == ""
+    assert _git(tmp_path, "ls-files", "-v", "consumer.py") == "H consumer.py"
+
+    assert run_full_meizel(tmp_path, python=_PYTHON, environment=environment, pushed=pushed) != 0
+    captured = capsys.readouterr()
+    assert "reused" not in captured.out
+    assert "working-tree bytes differ from the index for 'consumer.py'" in captured.err
+    for argv in (full_meizel_argv(_PYTHON), (_PYTHON, "-m", "meizel", "debt", "diff")):
+        code, output, _ = run_child(argv, tmp_path, environment=environment)
+        assert code != 0 and "working-tree bytes differ" in output
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+    _git(tmp_path, "add", "consumer.py")
+    assert run_full_meizel(tmp_path, python=_PYTHON, environment=environment, pushed=pushed) != 0
+    captured = capsys.readouterr()
+    assert "syntax" in (captured.out + captured.err).lower()

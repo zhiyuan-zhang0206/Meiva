@@ -1,12 +1,13 @@
 # CI retry and concurrency safety
 
-Automatic failed-job retries require an open PR whose current head and base/head
+Automatic retries require an open PR whose current head and base/head
 repository identities match the completed run. CI runs on pull requests only
 (main has no push run), so no other event is retried. Missing identity or API errors do not authorize a retry. Only the
 first failed attempt is retried; a cap-cancelled run (`cancelled`) follows the
 same single-attempt policy as a failure, never a second rerun (task #3239). The
 trigger whitelist is per-workflow: only CI is retried; every other workflow is
-left to manual triage.
+left to manual triage. A retry reruns the whole workflow so the backend check
+can collect every static shard's pass in the new attempt.
 
 Re-runs are admissible only once the run reads `completed`: while any job is
 still going, the job-level endpoint answers 403 "The workflow run containing
@@ -49,12 +50,7 @@ retry path, with no extra mechanism:
    treats like a failure (attempt 1, `pull_request` event).
 2. The head check now passes for it (it is the current head), and it is the
    newest CI run for that SHA, so the guards admit it.
-3. `rerun-failed-jobs` re-runs its cancelled and failed jobs and their
-   dependents. The REST reference describes the endpoint only as re-running
-   "all of the failed jobs and their dependent jobs"
-   ([docs](https://docs.github.com/en/rest/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run));
-   that cancelled jobs count is not stated there but is the premise of the
-   cap-cancel policy above and has been observed on this repository's CI runs.
+3. The run-level retry starts all jobs in a new attempt.
 4. The new attempt enters the same group, where `cancel-in-progress` cancels the
    still-running rerun of the old head. That old attempt has `run_attempt > 1`,
    so `ci-rerun.yml` does not retry it.

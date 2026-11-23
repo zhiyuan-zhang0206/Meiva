@@ -49,5 +49,9 @@ Dry-run still resolves the commit through a read-only Git query.
 ## Notes
 
 - `hooks/prepush-base.sh` refreshes `origin/main` once per push and passes the resolved merge base to the seven contribution checks. The dispatcher runs their existing hook IDs in the `manual` stage. If no base is available, selectors without a fallback fail and artifact freshness checks all deletion-sensitive hooks. Frontend selection includes known filesystem consumers and reports global/deletion closure as CI-only.
-- The full Meizel check shares a passing preflight or push receipt for the same clean tree, checkout and analyzer installation. A scoped check never supplies this receipt. Debt comparison pins the base commit and keys its cache on that commit and the merge base.
+- The full Meizel check shares a passing preflight or push receipt when the checkout source and
+  configuration bytes and the analyzer installation match. A scoped check never supplies this
+  receipt. Before an uncached full or debt run, the hook verifies actual bytes against the index
+  blobs Meizel's scan cache uses for apparently clean files. Debt comparison pins the base commit
+  and keys its cache on that commit and the merge base.
 - Hooks run lints, codegen, types and frontend checks. Full pytest and migration smoke stay in CI; local tests are targeted.

@@ -8,8 +8,11 @@ inputs:
     description: JSON list of required JUnit glob patterns.
     required: true
   min-tests:
-    description: Minimum executed test cases; zero is permitted only for an explicitly optional bucket.
+    description: Minimum test cases; zero is permitted only for an explicitly optional bucket.
     default: '1'
+  count-skipped:
+    description: Include skipped cases in the minimum test count.
+    default: 'false'
   latest-report:
     description: Read only the final attempt matched by each pattern, retaining earlier reports as artifacts.
     default: 'false'
@@ -21,6 +24,7 @@ runs:
         TEST_OUTCOME: ${{ inputs.test-outcome }}
         JUNIT_PATTERNS: ${{ inputs.junit-patterns }}
         MIN_TESTS: ${{ inputs.min-tests }}
+        COUNT_SKIPPED: ${{ inputs.count-skipped }}
         LATEST_REPORT: ${{ inputs.latest-report }}
       run: |
         python3 - <<'EOF'
@@ -66,8 +70,11 @@ runs:
                     failed += 1
                     identity = "::".join(filter(None, (case.get("classname"), case.get("name"))))
                     print("  FAILED " + identity)
-        if executed < int(os.environ["MIN_TESTS"]):
-            problems.append("too few executed tests: " + str(executed))
+        count_skipped = os.environ["COUNT_SKIPPED"] == "true"
+        counted = executed + skipped if count_skipped else executed
+        if counted < int(os.environ["MIN_TESTS"]):
+            label = "reported" if count_skipped else "executed"
+            problems.append(f"too few {label} tests: {counted}")
         if failed:
             problems.append(str(failed) + " failing test cases")
         print(f"Native JUnit results: {executed} executed, {skipped} skipped, {failed} failed")

@@ -378,8 +378,12 @@ placement and fan-out only.
 Classify checks that the shards cover each selected static file exactly once,
 stores their path lists in the same artifact as `tests.txt`, and passes each
 list's digest to its job. Jobs verify their lists before pytest and require
-readable JUnit. A zero-target selection has one explicitly empty shard. Full
-and shadow runs retain eight static pytest-split shards and coverage.
+readable JUnit. Selected static shards count skipped cases toward the minimum. A
+zero-target selection has one explicitly empty shard. Full and shadow runs retain
+eight static pytest-split shards and coverage. Every successful static shard
+publishes its validated JUnit under its attempt, group and plan digest. The required
+backend check verifies the entire planned set from the current attempt, so a retry
+that includes the backend check must rerun all jobs.
 
 ## Duration estimates
 
@@ -447,14 +451,15 @@ input is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`
 - **`main` prefix (`test-pass-main-<run_id>-<attempt>`, path `tmp/test-cache/passes.jsonl`)**:
   written **exclusively** by `refs/heads/main` (`cache-warm.yml` incrementally seeds missing static
   passes on pushes to `main`, and the nightly / `workflow_dispatch` full run of `ci.yml` writes a
-  fresh baseline after clearing meizel's local SQLite cache without importing stale entries). Pull
-  requests never write `test-pass-main-*`.
+  fresh baseline after clearing meizel's local SQLite cache and verifying all FULL static
+  shard reports from the current attempt). Pull requests never write `test-pass-main-*`.
 - **PR-isolated prefix (`test-pass-pr-<pr>-<run_id>-<attempt>`, path `tmp/test-cache/pr-passes.jsonl`)**:
   written **exclusively** by pull requests, physically scoped by GitHub Actions to `refs/pull/<pr>/merge`.
   Planning imports both `main` and PR passes; recording clears meizel's local SQLite cache, carries
   forward only that PR's prior `pr-passes.jsonl` (never `main`'s), records newly passed static tests
-  (including partial runs where another test failed), and saves a new PR cache entry only when
-  `recorded > 0`.
+  (including partial SELECTED runs where another file failed), and saves a new PR cache entry
+  only when `recorded > 0`. FULL runs require every shard to pass before publishing whole-file
+  records because pytest-split distributes cases from the same file across shards.
 
 ## Skipping e2e for changes outside the e2e inputs
 

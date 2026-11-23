@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 
 import meizel
-from meizel.api import MeizelError
+from meizel.api import GitRepo, MeizelError, tracked_files
 from meizel.installation import typescript_toolchain
 
 from scripts.hooks.diff_checks_cache import (
@@ -35,21 +35,55 @@ def git(root: Path, *argv: str) -> str:
     return subprocess.check_output(["git", *argv], cwd=root, text=True).strip()  # noqa: S603
 
 
-def _file_stamp(path: Path) -> tuple[str, int, int, int, int, int]:
-    target = path.resolve(strict=True)
-    info = target.stat()
-    return str(target), info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+def _file_digest(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _checkout_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for name in sorted(set(tracked_files(root, include_untracked=True, regular=True))):
+        digest.update(name.encode() + b"\0")
+        digest.update(hashlib.sha256((root / name).read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def index_scan_problem(root: Path) -> str | None:
+    try:
+        repo = GitRepo(root)
+        algorithm = git(root, "rev-parse", "--show-object-format")
+        dirty = set(repo.run_bytes("diff-files", "--name-only", "-z", "--").split(b"\0"))
+        regular = set(tracked_files(root, regular=True))
+        for record in repo.run_bytes("ls-files", "--stage", "-z").split(b"\0"):
+            if not record:
+                continue
+            header, name = record.split(b"\t", 1)
+            _, indexed, stage = header.split()
+            path = name.decode()
+            if stage != b"0" or name in dirty or path not in regular:
+                continue
+            data = (root / path).read_bytes()
+            digest = hashlib.new(algorithm, f"blob {len(data)}\0".encode())
+            digest.update(data)
+            if digest.hexdigest().encode() != indexed:
+                return (
+                    f"meizel: working-tree bytes differ from the index for {path!r}, "
+                    "which git diff-files reports as clean. Update the file mtime and "
+                    "stage the intended edit before retrying."
+                )
+    except (OSError, ValueError, subprocess.SubprocessError, MeizelError) as error:
+        return f"meizel: could not verify scan input against the Git index: {error}"
+    return None
 
 
 def git_executable_digest(path: str) -> str:
     executable = shutil.which("git", path=path)
     if executable is None:
         raise FileNotFoundError("Git executable is missing")
-    with Path(executable).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+    return _file_digest(Path(executable))
 
 
-def _toolchain(root: Path, python: str, path: str) -> list[tuple[str, int, int, int, int, int]]:
+def _toolchain(root: Path, python: str, path: str) -> list[tuple[str, str]]:
     node = shutil.which("node", path=path)
     if node is None:
         raise FileNotFoundError("Node executable is missing")
@@ -68,7 +102,7 @@ def _toolchain(root: Path, python: str, path: str) -> list[tuple[str, int, int, 
     checker = sorted(
         path for path in installed_meizel.rglob("*") if path.suffix in {".py", ".mjs", ".toml"}
     )
-    return [_file_stamp(path) for path in (*required, *checker)]
+    return [(str(path.resolve(strict=True)), _file_digest(path)) for path in (*required, *checker)]
 
 
 _GIT_PATH_QUERIES = {
@@ -147,12 +181,13 @@ def input_fingerprint(
             return None
         inputs = (
             str(root),
+            _checkout_digest(root),
             git_config_identity(root),
             git(root, "--exec-path"),
             git_executable_digest(environment.get("PATH", "")),
             _toolchain(root, python, environment.get("PATH", "")),
         )
-    except (OSError, RuntimeError, subprocess.CalledProcessError, MeizelError, UnicodeError):
+    except (OSError, RuntimeError, subprocess.SubprocessError, MeizelError, UnicodeError):
         return None
     return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
@@ -202,6 +237,10 @@ def main(root: Path, *, python: str, environment: Mapping[str, str], pushed: str
         if cached is not None:
             print(f"pre-push: reused full meizel check {cached['meizel']}")
             return 0
+
+    if (problem := index_scan_problem(root)) is not None:
+        print(problem, file=sys.stderr)
+        return 1
 
     ran = subprocess.run(  # noqa: S603
         argv, cwd=root, env=dict(environment), capture_output=True, text=True, check=False

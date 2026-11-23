@@ -95,6 +95,7 @@ from scripts.hooks.diff_checks_scratch import (  # noqa: E402
 from scripts.hooks.meizel_run import (  # noqa: E402
     cached_full_meizel,
     child_environment,
+    index_scan_problem,
     input_fingerprint,
 )
 
@@ -235,6 +236,14 @@ def run_child(
     argv: Sequence[str], root: Path, *, environment: Mapping[str, str]
 ) -> tuple[int, str, float]:
     started = time.monotonic()
+    full_scan = full_meizel_run("meizel", argv) or tuple(argv[1:5]) == (
+        "-m",
+        "meizel",
+        "debt",
+        "diff",
+    )
+    if full_scan and (problem := index_scan_problem(root)) is not None:
+        return 1, problem, time.monotonic() - started
     result = subprocess.run(
         list(argv),
         cwd=root,
