@@ -26,6 +26,7 @@ export interface SavedPlace {
 export interface TailDeparture {
   last: RowIdentity | null;
   partialPayload?: string;
+  sourceMessageId?: string;
 }
 
 type MemoryPlace = SavedPlace | TailDeparture;

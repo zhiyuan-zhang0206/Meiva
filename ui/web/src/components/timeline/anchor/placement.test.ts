@@ -342,6 +342,33 @@ describe("unread boundary", () => {
     machine.step(inputs({ items: [human, { ...reply, partial: true }] }), fx);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });
+
+  it("opens on the first unread reply when compaction reused the partial departure's row id", () => {
+    const partial = row("6.0", { partial: true, payload: "Short start", source_message_id: "departure" });
+    const archived = { ...partial, item_id: "s1.boundary.5.0", partial: false, payload: "Completed before compaction" };
+    const reused = row("6.0", { source_message_id: "different-reply", source_block_idx: 0 });
+    const secondPrompt = { ...human, item_id: "5.0" };
+    const machine = machineFor(tailDeparture([partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [archived, human, work, delivered(reply, 1), secondPrompt, delivered(reused, 2)],
+      reveal: { ...showReply, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }, { hold: false });
+  });
+
+  it("recognizes the same streaming block when it finalizes and an older delivery leads the feed", () => {
+    const older = delivered(row("0.0"), 1);
+    const finalReply = delivered({ ...reply, source_message_id: "departure", source_block_idx: 0, reading_locator: "loc-final" }, 2);
+    const partial = { ...reply, source_message_id: "departure", partial: true, payload: "Short start" };
+    const machine = machineFor(tailDeparture([older, human, work, partial], null));
+    const fx = effects();
+    machine.step(inputs({
+      items: [older, human, work, finalReply],
+      reveal: { ...showReply, itemId: older.item_id, entrySeenId: 0 },
+    }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }, { hold: false });
+  });
 });
 
 describe("memory place", () => {

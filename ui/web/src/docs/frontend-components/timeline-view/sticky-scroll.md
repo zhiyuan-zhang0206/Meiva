@@ -30,6 +30,8 @@ content or compact coordinate. The search can read up to 5 older pages
 A reader who left at the tail keeps a watermark of the last human message or
 visible reply, including a partial reply's text. If native compaction archives
 that row, its epoch and message or inbound identity with block still locate it.
+Before a streaming row has a locator, a match on rank and row id also checks
+the departure's source message id when known. The row id includes the block.
 On return, the entry seen cursor identifies unread deliveries, including those
 that arrive during the opening's older-page reads after an initially empty feed.
 When the watermark is loaded, the

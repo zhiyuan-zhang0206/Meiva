@@ -19,6 +19,7 @@ export function tailDeparture(items: readonly BackendTimelineItem[], buffer: Com
   return last ? {
     last: identify(refOf(last, buffer), items, buffer),
     ...(last.partial ? { partialPayload: last.payload } : {}),
+    ...(last.source_message_id ? { sourceMessageId: last.source_message_id } : {}),
   } : { last: null };
 }
 
@@ -60,14 +61,15 @@ function archivedDepartureIndex(items: readonly BackendTimelineItem[], locator: 
 function departureIndex(
   items: readonly BackendTimelineItem[], departure: TailDeparture, buffer: CompactTransitionBuffer | null,
 ): number {
-  const { last, partialPayload } = departure;
+  const { last, partialPayload, sourceMessageId } = departure;
   if (last === null) return -1;
   if (last.locator) {
     const exact = items.findIndex((item) => item.reading_locator === last.locator);
     return exact >= 0 ? exact : archivedDepartureIndex(items, last.locator);
   }
   return items.findIndex((item) => item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
-    item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
+    item.kind === last.content?.kind && (sourceMessageId === undefined || item.source_message_id === sourceMessageId) &&
+    (partialPayload !== undefined || item.payload === last.content.payload));
 }
 
 export function unreadBoundary(
