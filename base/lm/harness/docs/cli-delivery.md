@@ -59,9 +59,10 @@ ports distinct. Converge checks for conflicts before replacing the collector
 configuration and recognizes an existing listener owned by the same unit.
 Converge preserves operator edits in `config.yaml` and atomically publishes
 `config-active.yaml`, the Collector's fixed launch path. If the derived port
-is occupied, converge warns and removes the harness ingress from the launch
-copy. The next converge with a free port copies the source back to the same
-launch path. A root already admitted with the previous release's Collector
+is occupied or reserved by another selected service, converge warns and
+removes the harness ingress from the launch copy. The next converge with no
+port conflict copies the source back to the same launch path. A root already
+admitted with the previous release's Collector
 command needs a normal stop before adopting the fixed path.
 When enabling launchers, each existing proxy bypass variable keeps its own
 entries and adds the collector's loopback address. If an explicitly empty

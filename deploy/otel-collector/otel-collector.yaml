@@ -223,18 +223,26 @@ processors:
       - set(log.body, log.event_name)
       - set(log.severity_text, "")
     trace_statements:
-      - set(scope.name, "harness")
-      - set(scope.version, "")
-      - set(span.status.message, "")
-      - set(span.trace_state, "")
-      - set(span.links, nil)
-      - set(span.name, "harness.operation") where not IsMatch(span.name, "^(claude_code[.](interaction|llm_request|llm_request[.]attempt|tool|tool[.]execution|tool[.]blocked_on_user)|turn/start|turn/steer|thread/start|thread/resume|run_turn|agent_turn|app_server[.]request)$$")
-      - set(spanevent.name, "harness event")
+      - context: span
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(span.status.message, "")
+          - set(span.trace_state, "")
+          - set(span.links, nil)
+          - set(span.name, "harness.operation") where not IsMatch(span.name, "^(claude_code[.](interaction|llm_request|llm_request[.]attempt|tool|tool[.]execution|tool[.]blocked_on_user)|turn/start|turn/steer|thread/start|thread/resume|run_turn|agent_turn|app_server[.]request)$$")
+      - context: spanevent
+        statements:
+          - set(spanevent.name, "harness event")
     metric_statements:
-      - set(scope.name, "harness")
-      - set(scope.version, "")
-      - set(metric.description, "")
-      - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
+      - context: metric
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(metric.description, "")
+      - context: datapoint
+        statements:
+          - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # returns retryable backpressure and bounds shedding instead of letting the
   # collector balloon on a 16GB shared box. Because it precedes file/traces,

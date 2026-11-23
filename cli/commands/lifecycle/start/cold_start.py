@@ -196,6 +196,7 @@ def _run_step(
                     cold.repo,
                     cold.roles,
                     services=frozenset(spec.session for spec in roster),
+                    planned_services=roster,
                     database_factory=cold.database_factory,
                     producer=cold.producer,
                     command=command,

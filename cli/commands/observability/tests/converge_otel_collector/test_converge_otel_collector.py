@@ -183,10 +183,20 @@ def test_harness_processor_removes_non_attribute_payloads(
         "transform/harness_payload",
         "redaction/harness",
     ]
-    assert "set(span.links, nil)" in sequence_at(transform, "trace_statements")
+    assert value_at(transform, "trace_statements", 0, "context") == "span"
+    assert "set(span.links, nil)" in sequence_at(transform, "trace_statements", 0, "statements")
+    assert 'set(span.status.message, "")' in sequence_at(
+        transform, "trace_statements", 0, "statements"
+    )
+    assert value_at(transform, "trace_statements", 1, "context") == "spanevent"
+    assert sequence_at(transform, "trace_statements", 1, "statements") == [
+        'set(spanevent.name, "harness event")'
+    ]
+    assert value_at(transform, "metric_statements", 0, "context") == "metric"
+    assert value_at(transform, "metric_statements", 1, "context") == "datapoint"
     assert any(
         isinstance(statement, str) and statement.startswith("set(datapoint.exemplars, nil)")
-        for statement in sequence_at(transform, "metric_statements")
+        for statement in sequence_at(transform, "metric_statements", 1, "statements")
     )
 
 
