@@ -78,7 +78,7 @@ describe("TurnBlock component", () => {
     expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
 
-  it("renders an expanded turn with a non-sticky header and a natural-height body", () => {
+  it("renders an expanded turn with a sticky header and a natural-height body", () => {
     const { container } = render(
       <TurnBlock
         id="turn-1"
@@ -97,8 +97,9 @@ describe("TurnBlock component", () => {
 
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.className).not.toContain("sticky");
-    expect(toggle.className).not.toContain("top-11");
+    expect(toggle.classList).toContain("sticky");
+    expect(toggle.classList).toContain("top-11");
+    expect(toggle.classList).toContain("bg-background");
     expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
 
     // meiva:note

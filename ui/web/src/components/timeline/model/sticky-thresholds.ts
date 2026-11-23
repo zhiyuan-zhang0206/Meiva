@@ -6,11 +6,8 @@ import { useMediaQuery } from "@/lib/layout/use-media-query";
 import { POINTER_STICKY_THRESHOLDS, TOUCH_STICKY_THRESHOLDS } from "@/lib/layout/sticky";
 
 // meiva:note
-// The bottom zone width is pointer-dependent: a touch device gets the wide zone
-// that absorbs iOS WebKit momentum and overscroll bounce, a wheel device a tight
-// one so a small deliberate scroll-up escapes. The answer comes from the media
-// query hook, so a server render uses its snapshot (the touch preset) and a
-// client mount reads the real pointer in its first render.
+// The down arrow's visibility zone is wider on touch to cover momentum and overscroll bounce.
+// The server snapshot uses the touch preset, then the client reads its pointer media query.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function useStickyThresholds() {
   const coarse = useMediaQuery("(pointer: coarse)");

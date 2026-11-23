@@ -37,6 +37,10 @@ from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs
 from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.observability._lgtm_alert_contact import (
+    AlertContactOverride,
+    read_alert_contact_override,
+)
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
 from cli.commands.observability.inputs import LgtmSettings, lgtm_settings_from_boot
@@ -84,6 +88,7 @@ from cli.commands.observability.plans.lgtm.render import (
     tempo_topology_warning,
 )
 from cli.commands.observability.plans.lgtm.urls import (
+    AlertWebhook,
     alerts_webhook,
     datasource_urls,
     normalize_gateway_base,
@@ -403,17 +408,31 @@ def _grafana_endpoints(
     )
     if pg.warning is not None:
         print(pg.warning, file=sys.stderr)
+    webhook = _grafana_webhook(settings, machine)
+    if webhook.notice is not None:
+        print(webhook.notice, file=sys.stderr)
+    return loki_url, prometheus_url, pg.host_port, webhook.url
+
+
+def _grafana_webhook(settings: LgtmSettings, machine: MachineIdentityReader) -> AlertWebhook:
     gateway_base = normalize_gateway_base(settings.webhook.gateway_url)
-    webhook = alerts_webhook(
-        remote_observatory=bool(obs.observability_url),
+    return alerts_webhook(
+        remote_observatory=bool(settings.observability.observability_url),
         gateway_base=gateway_base,
         gateway=split_url(gateway_base),
         gateway_port=settings.webhook.gateway_port,
         machine_host=machine.host(),
     )
-    if webhook.notice is not None:
-        print(webhook.notice, file=sys.stderr)
-    return loki_url, prometheus_url, pg.host_port, webhook.url
+
+
+def _station_alert_contact(
+    home: Path, settings: LgtmSettings, machine: MachineIdentityReader
+) -> AlertContactOverride:
+    return read_alert_contact_override(
+        home,
+        webhook_url=_grafana_webhook(settings, machine).url,
+        webhook_token=settings.credentials.webhook_token,
+    )
 
 
 # meiva:note
@@ -436,7 +455,10 @@ def render_configs(
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentityReader,
+    alert_contact: AlertContactOverride | None = None,
 ) -> tuple[Path, ...]:
+    if alert_contact is None:
+        alert_contact = _station_alert_contact(meiva_home, settings, machine)
     source_dir = repo / "deploy/lgtm/native/config"
     obs = settings.observability
     tempo_query_url = obs.telemetry_tempo_query_url.rstrip("/")
@@ -501,7 +523,11 @@ def render_configs(
         changed.append(rendered_run_script)
     rendered_run_script.chmod(0o755)
     return tuple(changed) + render_provisioning(
-        repo, native_dir, dashboard=dashboard, producer=producer
+        repo,
+        native_dir,
+        dashboard=dashboard,
+        producer=producer,
+        site_contact=alert_contact.content,
     )
 
 
@@ -550,6 +576,7 @@ def ensure_lgtm_native(
     tag = platform_tag(host.platform.system, host.platform.machine)
     if tag is None:
         raise RuntimeError("Native LGTM has no pinned binaries for this platform")
+    alert_contact = _station_alert_contact(meiva_home, settings, machine)
     native_dir = meiva_home / "lgtm/native"
     for directory in ("bin", "config", "logs"):
         (native_dir / directory).mkdir(parents=True, exist_ok=True)
@@ -594,6 +621,7 @@ def ensure_lgtm_native(
             dashboard=render_dashboard(database_factory, scratch=scratch),
             producer=producer,
             machine=machine,
+            alert_contact=alert_contact,
         )
     )
     if "grafana" in services:

@@ -16,22 +16,23 @@ back to the process environment.
 session delivery point (`wiring.session_environ`): the host's own entries first,
 then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,
 `~/.bun/bin`, `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`), then the
-system dirs. `wiring.session_environ` also stamps `MEIVA_PYTHON` (`sys.executable`)
-and `_SESSION_DELIVERY_KEYS` preserves it across `ClaudeSession`'s allowlist so
-`"$MEIVA_PYTHON" -c ...` always runs Meiva's interpreter even when a CLI's shell
-tool spawns a login shell (`/bin/zsh -lc`) that reorders `PATH` or works inside a
-repository with a foreign `.venv`. The same binary directory list feeds the probe in
-`base/agents/birth/harness.py` and the `launchd` job PATH in
-`base/host/system/cron/mechanics.py`, so all three agree on where the CLIs live.
+system dirs. `wiring.session_environ` sets `MEIVA_PYTHON` to the absolute path
+of `meiva_python.sh` and pins the host's `sys.executable` in
+`MEIVA_PYTHON_EXECUTABLE`. The Claude session allowlist preserves both
+values. Managed SDK shell sessions pin their own interpreter the same way,
+including sessions created by `meiva.shell.run_background`.
 
-The pinned interpreter fixes which `python` runs, not which code it imports:
-`python -c` puts the working directory first on `sys.path`, so that command run
-inside a clone of this repository imports that clone's `base`/`meiva` and the
-home's ledger refuses the process it then is (`this process runs <cwd>, not the
-home's source checkout <source>`). Run the command outside any checkout
-(`cd /tmp`), or pin `PYTHONSAFEPATH=1` on that one command; never export it, since
-every child inherits it and a checkout's `pytest` imports its own tree from the
-working directory.
+The launcher runs the pinned interpreter with `-P` for `-c`, `-m`, and script
+invocations. Python skips its implicit working-directory or script-directory
+import entry, so running the SDK from a different checkout uses the package
+installed in the pinned interpreter's environment. The launcher leaves
+`PYTHONSAFEPATH` unset in a clean environment, so a child Python process uses
+its usual import behavior. Scripts that need sibling modules must make those
+imports available explicitly.
+
+The same binary directory list feeds the probe in `base/agents/birth/harness.py`
+and the `launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three
+agree on where the CLIs live.
 
 Every unit this repository installs composes its PATH through
 `harness_binaries.harness_unit_path`, which appends the table and then refuses a

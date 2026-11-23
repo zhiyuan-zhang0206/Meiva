@@ -160,7 +160,10 @@ export function HeaderBarMock({ label, children, maxWidthCss }: ComponentProps<t
 
 // meiva:note
 // The stand-in shows the item the page asked the timeline to bring into view.
-export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal, footer }: ComponentProps<typeof TimelineViewComponent>) {
+export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal, footer, loading, onOpeningShown }: ComponentProps<typeof TimelineViewComponent>) {
+  useEffect(() => {
+    if (!loading && reveal?.decided) onOpeningShown?.();
+  }, [loading, onOpeningShown, reveal?.decided]);
   return (
     <div
       data-testid="timeline"

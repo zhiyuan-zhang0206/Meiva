@@ -1,5 +1,9 @@
 import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from base.lm.harness import wiring
 from base.lm.harness.codex import CodexConfig
@@ -51,6 +55,53 @@ def test_a_given_environment_is_never_dropped(tmp_path: Path) -> None:
     environment = wiring.session_environ({"HOME": str(tmp_path), "MEIVA_HOME": str(tmp_path)})
 
     assert environment["MEIVA_HOME"] == str(tmp_path)
-    assert Path(environment["MEIVA_PYTHON"]).name.startswith("python")
+    assert Path(environment["MEIVA_PYTHON"]).name == "meiva_python.sh"
+    assert environment["MEIVA_PYTHON_EXECUTABLE"] == sys.executable
     assert environment["SHELL"].endswith("noninteractive_bash.sh")
     assert Path(environment["SHELL"]).is_file()
+
+
+@pytest.mark.parametrize("script_mode", [False, True])
+def test_meiva_python_imports_installed_sdk_from_a_foreign_checkout(
+    tmp_path: Path, script_mode: bool
+) -> None:
+    shadow = tmp_path / "meiva"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text('raise RuntimeError("shadowed")\n')
+    code = 'import meiva, os; print(meiva.__file__, "PYTHONSAFEPATH" in os.environ)'
+    script = tmp_path / "probe.py"
+    script.write_text(code)
+    environment = wiring.session_environ(
+        {"HOME": str(tmp_path), "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"}
+    )
+    environment["PATH"] = str(tmp_path)
+    args = [str(script)] if script_mode else ["-c", code]
+
+    result = subprocess.run(  # noqa: S603
+        [environment["MEIVA_PYTHON"], *args],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    source = Path(__file__).resolve().parents[4] / "meiva" / "__init__.py"
+    assert result.stdout.strip() == f"{source} False"
+
+
+def test_meiva_python_runs_modules_from_the_pinned_environment(tmp_path: Path) -> None:
+    (tmp_path / "json.py").write_text('raise RuntimeError("shadowed")\n')
+    environment = wiring.session_environ({"HOME": str(tmp_path)})
+    result = subprocess.run(  # noqa: S603
+        [environment["MEIVA_PYTHON"], "-m", "json.tool"],
+        cwd=tmp_path,
+        env=environment,
+        input="{}",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    assert result.stdout.strip() == "{}"

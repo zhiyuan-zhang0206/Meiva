@@ -6,7 +6,9 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
+from starlette.routing import compile_path
 
+from base.api_contracts.contracts import ALERT_AGENT_WEBHOOK_PATH
 from base.host.net.auth import cookie_name
 from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT
 from gateway.http.auth.router import AuthAppState
@@ -27,7 +29,11 @@ _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
 _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/api/alerts"),
+        ("POST", ALERT_AGENT_WEBHOOK_PATH),
     }
+)
+_AUTH_BYPASS_ROUTES = tuple(
+    (method, compile_path(path)[0]) for method, path in _AUTH_BYPASS_METHOD_PATHS
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -97,13 +103,10 @@ async def cluster_auth_middleware(
 
     if request.method == "OPTIONS":
         return await call_next(request)
-    if (
-        request.url.path in _AUTH_BYPASS_PATHS
-        or (
-            request.method,
-            request.url.path,
-        )
-        in _AUTH_BYPASS_METHOD_PATHS
+    path = request.url.path
+    if path in _AUTH_BYPASS_PATHS or any(
+        request.method == method and pattern.fullmatch(path)
+        for method, pattern in _AUTH_BYPASS_ROUTES
     ):
         return await call_next(request)
 
