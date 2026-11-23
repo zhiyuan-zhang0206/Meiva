@@ -96,9 +96,13 @@ generation. Pending tracked background work can still drain the echo or
 complete on the old peer. Every resumed generation projects the first prompt
 against its own transcript markers and planner steps. agy can emit history
 after the setup responses, even after the first prompt is written.
-Idle replay keeps a pending notice while its child descriptor or terminal
-planner row is missing. It also retains early idle text independently from
-foreground frames until a transcript snapshot can match it. An unresolved native notice stays in the projection
+Idle replay keeps each completed native span while its child descriptor is
+missing, even across other replies or foreground inputs. It keeps the current
+notice while its terminal row is missing. An idle frame can drain an echo
+only against planner evidence present when the frame is scanned. A retained
+partial can finish only against that same planner row. When stdout arrives
+before the planner evidence, idle replay can still publish the transcript
+reply and fence the old peer before the next prompt. An unresolved native notice stays in the projection
 across foreground settlement. When a prompt omits ACP usage, a terminal
 planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete

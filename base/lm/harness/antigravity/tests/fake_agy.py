@@ -11,13 +11,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from base.lm.harness.antigravity.tests.fake_idle import prepare_idle, replay_late_idle_echo
 from base.lm.harness.antigravity.tests.fake_wire import (
     SID,
     STAMP,
     USAGE,
     after_release,
+    background_notice,
+    declare_child,
     frame,
     message,
+    planner_row,
     record,
     result,
     update,
@@ -47,17 +51,6 @@ class LocalRPC(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
-
-
-def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
-    return {
-        "type": "PLANNER_RESPONSE",
-        "status": "DONE",
-        "input_tokens": tokens,
-        "cache_read_tokens": 30,
-        "output_tokens": 3,
-        "content": text,
-    }
 
 
 def finish_steer(request: int, transcript: Path) -> None:
@@ -91,25 +84,6 @@ def finish_timer_steer(request: int, transcript: Path) -> None:
     record(transcript, planner_row("STEER_DONE"))
     message("STEER_DONE")
     result(request)
-
-
-def declare_child(transcript: Path) -> str:
-    sender = "child-conv"
-    descriptors = transcript.parent.parent / "subagents"
-    descriptors.mkdir(exist_ok=True)
-    _ = (descriptors / "child.json").write_text(json.dumps({"conversationId": sender}))
-    return sender
-
-
-def background_notice(transcript: Path) -> None:
-    sender = declare_child(transcript) if "--test-native-child" in sys.argv else SID + "/task-1"
-    record(
-        transcript,
-        {
-            "type": "SYSTEM_MESSAGE",
-            "content": f"[Message] timestamp={STAMP} sender={sender} priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
-        },
-    )
 
 
 def finish_background(transcript: Path, early_notice: bool, early_planner: bool) -> None:
@@ -410,10 +384,10 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
 
 def followup_prompt(transcript: Path, request: int, command: str) -> None:
     if command.startswith("prepare-idle-"):
-        after_release(
-            Path("send-early-idle"),
-            lambda: early_idle_native(transcript, child=command.endswith("-child")),
-        )
+        prepare_idle(transcript, request, command.removeprefix("prepare-idle-"))
+        return
+    if command == "next-with-idle-echo":
+        replay_late_idle_echo()
     if command == "child-seed":
         _ = declare_child(transcript)
     if command == "next-with-delayed-native-frame" and (
@@ -438,6 +412,10 @@ def followup_prompt(transcript: Path, request: int, command: str) -> None:
         frame({"id": "foreground-stop", "method": "test/frame_barrier"})
         after_release(Path("write-foreground"), lambda: record(transcript, planner_row("OK")))
         return
+    complete_followup(transcript, request, command)
+
+
+def complete_followup(transcript: Path, request: int, command: str) -> None:
     if command == "same-tool":
         record_native_tool(transcript, "foreground-tool")
     native = command.startswith("native-")
@@ -445,37 +423,13 @@ def followup_prompt(transcript: Path, request: int, command: str) -> None:
     record(transcript, planner_row(reply))
     message(reply)
     result(request, usage=command != "same-tool")
+    if command == "idle-intervening":
+        update("usage_update", used=2, size=10)
+        frame({"id": "foreground-stop", "method": "test/frame_barrier"})
     if native:
         message(reply)
         update("usage_update", used=2, size=10)
         after_release(Path("release"), lambda: native_reply(transcript, command))
-
-
-def early_idle_native(transcript: Path, *, child: bool) -> None:
-    if child:
-        record(
-            transcript,
-            {
-                "type": "SYSTEM_MESSAGE",
-                "content": (
-                    f"[Message] timestamp={STAMP} sender=child-conv "
-                    "priority=MESSAGE_PRIORITY_HIGH content=early child callback"
-                ),
-            },
-        )
-    message("NATIVE RESPONSE")
-    update("usage_update", used=2, size=10)
-    frame({"id": "collision-receipt", "method": "test/frame_barrier"})
-
-    def finish() -> None:
-        if child:
-            declare_child(transcript)
-        else:
-            background_notice(transcript)
-        record(transcript, planner_row("NATIVE RESPONSE", tokens=237))
-        update("usage_update", used=3, size=10)
-
-    after_release(Path("finish-early-idle"), finish)
 
 
 def native_reply(transcript: Path, command: str) -> None:

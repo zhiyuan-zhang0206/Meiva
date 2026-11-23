@@ -54,3 +54,33 @@ def after_release(path: Path, action: Any) -> None:
         action()
 
     threading.Thread(target=wait, daemon=True).start()
+
+
+def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
+    return {
+        "type": "PLANNER_RESPONSE",
+        "status": "DONE",
+        "input_tokens": tokens,
+        "cache_read_tokens": 30,
+        "output_tokens": 3,
+        "content": text,
+    }
+
+
+def declare_child(transcript: Path) -> str:
+    sender = "child-conv"
+    descriptors = transcript.parent.parent / "subagents"
+    descriptors.mkdir(exist_ok=True)
+    _ = (descriptors / "child.json").write_text(json.dumps({"conversationId": sender}))
+    return sender
+
+
+def background_notice(transcript: Path) -> None:
+    sender = declare_child(transcript) if "--test-native-child" in sys.argv else SID + "/task-1"
+    record(
+        transcript,
+        {
+            "type": "SYSTEM_MESSAGE",
+            "content": f"[Message] timestamp={STAMP} sender={sender} priority=MESSAGE_PRIORITY_HIGH content=timer prompt",
+        },
+    )

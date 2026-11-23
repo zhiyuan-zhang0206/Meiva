@@ -525,7 +525,7 @@ async def test_fenced_reload_projects_first_prompt(
         await harness.stop()
 
 
-@pytest.mark.parametrize("case", ["child", "drained"])
+@pytest.mark.parametrize("case", ["child", "drained", "recorded"])
 async def test_early_native_output_survives_idle_snapshot(tmp_path: Path, case: str) -> None:
     harness = await start(tmp_path)
     try:
@@ -546,12 +546,97 @@ async def test_early_native_output_survives_idle_snapshot(tmp_path: Path, case: 
                 and e.turn_id not in {first.turn_id, native.turn_id}
             )
         )
-        assert harness.session.cli_pid == pid and second.generation == first.generation
+        needs_fence = case != "recorded"
+        assert (harness.session.cli_pid != pid) is needs_fence
+        assert (second.generation > first.generation) is needs_fence
+        assert _assistant_texts(harness, second.turn_id) == ["OK"]
         assert [e.text for e in harness.events if isinstance(e, TurnCompleted)] == [
             "OK",
             "NATIVE RESPONSE",
             "OK",
         ]
+    finally:
+        await harness.stop()
+
+
+async def _send_input(harness: Harness, key: str, command: str) -> TurnCompleted:
+    await harness.session.deliver([HarnessInput.of(key, command)])
+    turn: object = await harness.wait_for(
+        lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.INPUT and key in e.keys
+    )
+    assert isinstance(turn, TurnStarted)
+    done: object = await harness.wait_for(
+        lambda e: isinstance(e, TurnCompleted) and e.turn_id == turn.turn_id
+    )
+    assert isinstance(done, TurnCompleted)
+    return done
+
+
+async def _native_completion(harness: Harness, text: str) -> TurnCompleted:
+    done: object = await harness.wait_for(
+        lambda e: (
+            isinstance(e, TurnCompleted)
+            and e.text == text
+            and any(
+                isinstance(started, TurnStarted)
+                and started.turn_id == e.turn_id
+                and started.origin is TurnOrigin.HARNESS
+                for started in harness.events
+            )
+        )
+    )
+    assert isinstance(done, TurnCompleted)
+    return done
+
+
+async def test_unmatched_idle_echo_cannot_discharge_a_later_native_reply(tmp_path: Path) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", "prepare-idle-stale")
+        assert first.text == "READY"
+        pid = harness.session.cli_pid
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("finish-early-idle")
+        native = await _native_completion(harness, "READY")
+        assert native.generation == first.generation
+        following = await _send_input(harness, "next", "next-with-idle-echo")
+        assert following.text == "OK"
+        assert _assistant_texts(harness, following.turn_id) == ["OK"]
+        assert following.generation > first.generation and harness.session.cli_pid != pid
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("interruption", ["adjacent", "intervening"])
+async def test_other_completed_work_does_not_delete_unknown_child_notice(
+    tmp_path: Path, interruption: str
+) -> None:
+    harness = await start(tmp_path, reply_seconds=0.2)
+    try:
+        first = await _send_input(harness, "first", f"prepare-idle-{interruption}")
+        harness.release("send-early-idle")
+        await harness.wait_for_marker("collision-receipt-read")
+        if interruption == "adjacent":
+            await _native_completion(harness, "TIMER RESPONSE")
+        else:
+            bridge = await _send_input(harness, "bridge", "idle-intervening")
+            assert bridge.text == "OK" and bridge.generation == first.generation
+            await harness.wait_for_marker("foreground-stop-read")
+        harness.release("finish-early-idle")
+        child = await _native_completion(harness, "CHILD RESPONSE")
+        assert child.generation == first.generation
+        following = await _send_input(harness, "next", "next")
+        assert following.text == "OK" and following.generation == first.generation
+        assert [
+            e.text
+            for e in harness.events
+            if isinstance(e, AssistantText) and e.text in {"CHILD RESPONSE", "TIMER RESPONSE"}
+        ] == (
+            ["TIMER RESPONSE", "CHILD RESPONSE"]
+            if interruption == "adjacent"
+            else ["CHILD RESPONSE"]
+        )
     finally:
         await harness.stop()
 

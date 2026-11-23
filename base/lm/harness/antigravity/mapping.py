@@ -303,6 +303,7 @@ class OutputProjection:
     confirmed: set[int] = field(default_factory=set[int])
     excluded: set[int] = field(default_factory=set[int])
     _native_echoes: set[Evidence] = field(default_factory=set[Evidence])
+    _native_prefix: tuple[Frame, int] | None = None
     _answered_at: dict[int, int] = field(default_factory=dict[int, int])
     _boundaries: dict[str, ForegroundBoundary] = field(
         default_factory=dict[str, ForegroundBoundary]
@@ -378,36 +379,43 @@ class OutputProjection:
                     notice,
                     transcript,
                     self.offset,
-                    tuple(span),
+                    tuple(pending.pop(notice)),
                     incomplete_span=notice.index in unresolved,
                 )
                 self._native_echoes.update(e for e in reply.echo_evidence() if e not in self.seen)
                 yield reply
-                del pending[notice]
 
     @property
     def has_undrained_native(self) -> bool:
         return bool(self._native_echoes)
 
     def retain_native_prefix(self, rows: Sequence[Frame]) -> None:
-        frames = deque(
-            frame for frame in self.pending if frame.get("sessionUpdate") == "agent_message_chunk"
+        raw = "".join(
+            content_text(frame.get("content"))
+            for frame in self.pending
+            if frame.get("sessionUpdate") == "agent_message_chunk"
         )
-        prefix = _echo_text("".join(content_text(frame.get("content")) for frame in frames))
-        expected = (
-            value
+        prefix = _echo_text(raw)
+        saved = self._native_prefix
+        anchored = saved[1] if saved and self.pending and self.pending[0] is saved[0] else None
+        matching = (
+            index
             for index, field, _ in self._native_echoes
             if field == "content"
+            and (anchored is None or anchored == index)
             and self.offset + index < len(rows)
-            and isinstance(value := rows[self.offset + index].get(field), str)
+            and _proper_echo_prefix(rows[self.offset + index].get(field), prefix)
         )
-        if prefix and any(_echo_text(text).startswith(prefix) for text in expected):
-            self.pending = frames
-        else:
-            self.pending.clear()
+        self.pending.clear()
+        self._native_prefix = None
+        if prefix and (index := min(matching, default=None)) is not None:
+            frame = text_update(raw)
+            self.pending.append(frame)
+            self._native_prefix = (frame, index)
 
-    def pending_notice(self, rows: Sequence[Frame]) -> BackgroundNotice | None:
-        notice = None
+    def pending_notices(self, rows: Sequence[Frame]) -> set[BackgroundNotice]:
+        notices: set[BackgroundNotice] = set()
+        latest = None
         for event in _attribution_events(
             rows[self.offset :],
             self.keys,
@@ -416,8 +424,12 @@ class OutputProjection:
             carry_scheduled_notices=True,
         ):
             if event is None or isinstance(event, BackgroundNotice):
-                notice = event
-        return notice if notice is not None and notice.index not in self._answered_at else None
+                latest = event
+            elif event.final and isinstance(owner := self._route(event), BackgroundNotice):
+                notices.add(owner)
+        if latest is not None:
+            notices.add(latest)
+        return {notice for notice in notices if notice.index not in self._answered_at}
 
     def expects_tool(self, tool_id: object) -> bool:
         return isinstance(tool_id, str) and (
@@ -427,12 +439,10 @@ class OutputProjection:
 
     def project(self, rows: Sequence[Frame], *, idle: bool = False) -> Iterator[ProjectedFrame]:
         steps = self.steps(rows)
-        while self.pending:
-            count = len(self.pending)
+        while count := len(self.pending):
             yield from self._project_pass(steps, idle=idle, interleave=False)
-            if len(self.pending) != count:
-                continue
-            yield from self._project_pass(steps, idle=idle, interleave=True)
+            if len(self.pending) == count:
+                yield from self._project_pass(steps, idle=idle, interleave=True)
             if len(self.pending) == count:
                 return
 
@@ -462,6 +472,8 @@ class OutputProjection:
         interleave: bool,
     ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
         frame = frames[index]
+        if idle and (saved := self._native_prefix) and frame is saved[0]:
+            steps = tuple(step for step in steps if step.index == saved[1])
         kind = frame.get("sessionUpdate")
         tool_id = frame.get("toolCallId")
         if kind == "tool_call_update" and isinstance(tool_id, str):
@@ -557,6 +569,11 @@ class OutputProjection:
 
 def _echo_text(text: str) -> str:
     return " ".join(text.split())
+
+
+def _proper_echo_prefix(value: object, prefix: str) -> bool:
+    expected = _echo_text(value) if isinstance(value, str) else ""
+    return expected != prefix and expected.startswith(prefix)
 
 
 def _text_chunks(
@@ -727,7 +744,7 @@ class IdleReplies:
     pending: bool = False
     _signature: tuple[int, ...] | None = None
     _frames: deque[Frame] = field(init=False)
-    _unregistered: BackgroundNotice | None = None
+    _unregistered: tuple[BackgroundNotice, ...] = ()
 
     def __post_init__(self) -> None:
         self._frames = deque(maxlen=self.max_buffered_events)
@@ -749,7 +766,7 @@ class IdleReplies:
         *,
         home: Path | None,
     ) -> tuple[OutputProjection, tuple[NativeReply, ...], bool] | None:
-        if self._unregistered and self._unregistered.belongs_to(session_id, subagents):
+        if any(notice.belongs_to(session_id, subagents) for notice in self._unregistered):
             self._signature = None
         transcript = self.changed(session_id, home=home, projecting=projection is not None)
         if transcript is None:
@@ -759,13 +776,10 @@ class IdleReplies:
         self._frames.clear()
         _ = deque(projection.project(transcript.rows, idle=True), maxlen=0)
         replies = tuple(projection.background_replies(transcript, session_id, subagents))
-        self._frames.extend(projection.pending)
-        projection.pending.clear()
-        notice = projection.pending_notice(transcript.rows)
-        self._unregistered = (
-            notice if notice and not notice.belongs_to(session_id, subagents) else None
-        )
-        needed = notice is not None or projection.has_undrained_native
+        projection.retain_native_prefix(transcript.rows)
+        notices = projection.pending_notices(transcript.rows)
+        self._unregistered = tuple(n for n in notices if not n.belongs_to(session_id, subagents))
+        needed = bool(notices) or projection.has_undrained_native
         if not needed:
             self.offset = len(transcript.rows)
         return projection, replies, needed
