@@ -89,7 +89,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 
 
 # meiva:note
-# The health ports among `specs` that another unit already answers on.
+# Report terminal listener conflicts for daemons with home healthz and for Tempo.
 #
 # `meiva start` probes before it binds because the alternative is worse in both directions.
 # A daemon launched onto a taken port dies on `[Errno 48] Address already in use` and is
@@ -107,13 +107,14 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
 # Nothing is remembered: the check is a fresh dial every start, so once the occupant leaves,
 # the next start proceeds with no state to clear.
 #
-# Only an occupant that answers HTTP on `/healthz` is detectable. The verdict comes from
+# For the healthz-based daemons, only an occupant that answers HTTP on `/healthz` is
+# detectable. The verdict comes from
 # reading a health payload, so a listener speaking any other protocol (a Postgres or redis
 # on the port), one that accepts and stays silent, and an HTTP server that 404s the path all
 # read DOWN, indistinguishable from an empty port, and the start proceeds into the
 # `EADDRINUSE` this gate exists to prevent. The gate narrows the failure it was built for
 # (issue #977's relay, which answers) and leaves the generic taken-port case where it
-# already was.
+# already was. Tempo's probe inspects its TCP listeners directly, independent of HTTP.
 def occupied_health_ports(specs: tuple[ServiceSpec, ...]) -> tuple[OccupiedPort, ...]:
     occupied: list[OccupiedPort] = []
     for spec in specs:
