@@ -14,9 +14,12 @@ the collector sidecar owns durable mirroring after acceptance.
   the loss outside the saturated log lane. In-memory metric recording never waits on the
   exporter queue.
 - SDK-owned log and metric threads perform network I/O. The OTLP log exporter
-  shares a 3.5-second deadline across one SDK batch's requests, leaving room
-  within the five-second process-exit budget for local loss reporting. Metrics
-  retain a two-second HTTP budget. The SDK owns HTTP retry and backoff.
+  shares a 3.5-second deadline across one SDK batch's requests. At normal exit,
+  the pipeline also applies its shutdown deadline to every pending SDK batch,
+  reserving 500 ms for counting failures and flushing metrics. One owned socket
+  watcher interrupts a connected request at that cutoff, including a response
+  whose headers and body arrive separately. Metrics retain a two-second HTTP
+  budget. The SDK owns HTTP retry and backoff.
 - The log exporter measures uncompressed protobuf size and splits requests
   above 16 MiB, allowing for the collector's 20 MiB request limit. An individual
   record above the request ceiling is dropped and counted. Harness stderr lines

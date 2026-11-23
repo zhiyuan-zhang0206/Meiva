@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import random
 import sys
+import time
 from functools import partial
 
 from base import telemetry
@@ -38,7 +39,18 @@ def main() -> None:
     telemetry.init_telemetry(home=meiva_home(), process="exit-seam-probe", pipeline=pipeline)
     telemetry.emit("log", "log", attributes={"seq": "early", "marker": marker})
     telemetry.sync()
-    telemetry.emit("log", "log", attributes={"seq": "tail", "marker": marker})
+    if len(sys.argv) > 2:
+        ready = meiva_home() / "first-batch"
+        for _ in range(512):
+            telemetry.emit("log", "log", attributes={"seq": "bulk", "marker": marker})
+        for _ in range(400):
+            if ready.exists():
+                break
+            time.sleep(0.02)
+        else:
+            raise RuntimeError("receiver never saw the first batch")
+    for _ in range(3 if len(sys.argv) > 2 else 1):
+        telemetry.emit("log", "log", attributes={"seq": "tail", "marker": marker})
 
 
 if __name__ == "__main__":

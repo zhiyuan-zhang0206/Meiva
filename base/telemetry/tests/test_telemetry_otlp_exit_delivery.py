@@ -23,6 +23,7 @@ import contextlib
 import http.server
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -33,6 +34,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceResponse
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 
 _POSTS: list[tuple[str, bytes]] = []
 _POSTS_LOCK = threading.Lock()
@@ -129,7 +132,7 @@ def _sent_pairs() -> set[tuple[object, object]]:
 
 
 def _run_child(
-    home: Path, marker: str, server: http.server.ThreadingHTTPServer
+    home: Path, marker: str, server: http.server.ThreadingHTTPServer, *, multi_batch: bool = False
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
@@ -148,7 +151,15 @@ def _run_child(
     # environment out; `import base` resolves through the checkout's
     # editable install.
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-X", "utf8", str(_CHILD_SCRIPT), marker],
+        [
+            sys.executable,
+            "-I",
+            "-X",
+            "utf8",
+            str(_CHILD_SCRIPT),
+            marker,
+            *(["multi"] if multi_batch else []),
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -193,19 +204,28 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
     assert mirror_tail, "the JSONL mirror must hold the tail record"
 
 
-def test_stalled_log_acknowledgement_is_accounted_before_exit(tmp_path: Path) -> None:
+@pytest.mark.parametrize("header_delay", [0.0, 2.8])
+def test_stalled_log_acknowledgement_is_accounted_before_exit(
+    tmp_path: Path, header_delay: float
+) -> None:
     stalled = threading.Event()
     release = threading.Event()
 
     class StalledReceiver(_ReceiverHandler):
         def acknowledge(self, body: bytes) -> None:
             if self.path == "/v1/logs" and b'"seq":"tail"' in body:
+                _ = release.wait(header_delay)
+                acknowledgement = ExportLogsServiceResponse()
+                acknowledgement.partial_success.error_message = "fixture acknowledgement"
+                payload = acknowledgement.SerializeToString()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/x-protobuf")
-                self.send_header("Content-Length", "1")
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 stalled.set()
-                release.wait(10)
+                if not release.wait(2.8 if header_delay else 10):
+                    with contextlib.suppress(OSError):
+                        _ = self.wfile.write(payload)
                 self.close_connection = True
             else:
                 super().acknowledge(body)
@@ -226,5 +246,73 @@ def test_stalled_log_acknowledgement_is_accounted_before_exit(tmp_path: Path) ->
                 f"OTLP log export failed for {count} record(s), error.type=Timeout" in result.stderr
             )
             assert "unfinished" not in result.stderr
+            assert _metric_export_failures() == count
     finally:
         release.set()
+
+
+def _metric_export_failures() -> int:
+    totals: dict[str, int] = {}
+    with _POSTS_LOCK:
+        posts = list(_POSTS)
+    for path, raw in posts:
+        if path != "/v1/metrics":
+            continue
+        metrics = ExportMetricsServiceRequest.FromString(raw)
+        points = (
+            point
+            for resource in metrics.resource_metrics
+            for scope in resource.scope_metrics
+            for metric in scope.metrics
+            if metric.name == "otel.sdk.exporter.log.exported"
+            for point in metric.sum.data_points
+        )
+        for point in points:
+            attributes = {attr.key: attr.value.string_value for attr in point.attributes}
+            if cause := attributes.get("error.type"):
+                totals[cause] = max(totals.get(cause, 0), point.as_int)
+    return sum(totals.values())
+
+
+def test_shutdown_accounts_for_both_inflight_and_pending_batches(tmp_path: Path) -> None:
+    release = threading.Event()
+    home = tmp_path / "home"
+
+    class SlowReceiver(_ReceiverHandler):
+        def acknowledge(self, body: bytes) -> None:
+            if self.path == "/v1/logs" and (b'"seq":"bulk"' in body or b'"seq":"tail"' in body):
+                if b'"seq":"bulk"' in body:
+                    (home / "first-batch").touch()
+                _ = release.wait(7)
+                self.close_connection = True
+            else:
+                super().acknowledge(body)
+
+    try:
+        with _serve_receiver(SlowReceiver) as receiver:
+            result = _run_child(home, uuid.uuid4().hex, receiver, multi_batch=True)
+            assert result.returncode == 0, result.stderr
+            assert (home / "first-batch").exists()
+            _assert_shutdown_batch_counts(result)
+    finally:
+        release.set()
+
+
+def _assert_shutdown_batch_counts(result: subprocess.CompletedProcess[str]) -> None:
+    with _POSTS_LOCK:
+        pending = [
+            (path, raw) for path, raw in _POSTS if b'"seq":"bulk"' in raw or b'"seq":"tail"' in raw
+        ]
+    assert len(pending) == 2
+    batches = [_received_log_records([post]) for post in pending]
+    tagged = [_marker_seq_of(record)[1] for batch in batches for record in batch]
+    assert tagged.count("bulk") == 512
+    assert tagged.count("tail") == 3
+    counts = sorted(map(len, batches))
+    losses = sorted(
+        int(count)
+        for count in re.findall(r"OTLP log export failed for (\d+) record", result.stderr)
+    )
+    assert losses == counts, result.stderr
+    assert "unfinished" not in result.stderr
+    assert _metric_export_failures() == sum(counts)

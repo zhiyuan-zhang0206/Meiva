@@ -22,6 +22,7 @@ from opentelemetry.sdk.resources import Resource
 from base.telemetry.delivery.loss import install_exporter_drop_observer
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 from base.telemetry.otlp.http_log_exporter import BoundedHTTPLogExporter
+from base.telemetry.otlp.log_export_deadline import LogExportDeadline
 from base.telemetry.otlp.telemetry_otlp_metrics import (
     EVENT_LOOP_LAG_BUCKETS_MS,
     LLM_LATENCY_BUCKETS_MS,
@@ -89,6 +90,7 @@ def build_providers(
     mirror_dir: Path,
     home: Path,
     instance_id: str,
+    log_deadline: LogExportDeadline | None = None,
 ) -> tuple[LoggerProvider, MeterProvider]:
     queue_losses = install_exporter_drop_observer(mirror_dir=mirror_dir)
     os.environ.setdefault(OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED, "true")
@@ -132,7 +134,12 @@ def build_providers(
             monotonic=time.monotonic,
             meter=metrics.get_meter("meiva.telemetry.otlp"),
             flush_queue_losses=queue_losses.flush,
+            deadline=log_deadline,
         )
     )
-    logs.add_log_record_processor(BatchLogRecordProcessor(log_exporter, meter_provider=metrics))
+    try:
+        logs.add_log_record_processor(BatchLogRecordProcessor(log_exporter, meter_provider=metrics))
+    except BaseException:
+        log_exporter.shutdown()
+        raise
     return logs, metrics
