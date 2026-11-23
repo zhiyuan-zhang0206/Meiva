@@ -33,20 +33,61 @@ dashboards).
   which are substring searches), so multi-alternative `event_name=~"a|b"`
   matches exact event names.
 
-### Retired rules (tombstones)
+### Retired rules
 
-Grafana does not delete a file-provisioned rule that disappears from
-`rules.yml`; the rule survives as an orphan and keeps evaluating. A rule
-removed here must also be listed in `delete-rules.yml` (a `deleteRules:`
-tombstone): file provisioning deletes the UID on the next alerting reload or
-restart, and entries are idempotent, so tombstones stay after the rule is
-gone. Tombstoned so far: R23 (`meiva-ops-pitr-storage-growth`, retired
-2026-10-02, removed from the station 2026-10-05) and R3
-(`meiva-ops-agent-restart-spike`, which counted an event nothing emits),
-plus the two absolute checkpoint_blobs size tiers (`…-warning` / `…-error`,
-retired 2026-10-17 under T5280 when full retention made them fire forever), and
-`meiva-ops-agent-continuation-lost` / `meiva-ops-maintenance-hold-overdue`, which
-read events only the deleted maintenance hold raised.
+Grafana keeps file-provisioned rules after their definition is removed.
+Record retired UIDs in the [retirement inventory](../../retired-alert-rules.json),
+including any older names. The inventory lives outside the provisioning tree.
+Grafana's `deleteRules` directive deletes by organization and UID regardless of
+ownership, so routine converge and reload never apply this inventory directly.
+
+To clean the station during a rollout, converge the new release and verify
+that the normal rendered alerting directory carries no `deleteRules` entries.
+Then execute the following maintenance sequence:
+
+1. Stop normal Grafana and back up its database. Use the installed launcher
+   with the same data directory, a fresh temporary provisioning root containing
+   an empty `alerting` directory, and a private loopback listener. Disable
+   anonymous access and evaluation during cleanup. For example, in a private
+   terminal with `staging` and `native` set to those directories:
+
+   ```bash
+   GF_PATHS_PROVISIONING="$staging" GF_SERVER_HTTP_ADDR=127.0.0.1 \
+     GF_SERVER_HTTP_PORT=53004 GF_SERVER_ROOT_URL=http://127.0.0.1:53004 \
+     GF_SERVER_SERVE_FROM_SUB_PATH=false GF_AUTH_ANONYMOUS_ENABLED=false \
+     GF_UNIFIED_ALERTING_EXECUTE_ALERTS=false "$native/grafana/run.sh"
+   ```
+
+2. Keep that maintenance listener exclusive to the operator. From another
+   terminal, fetch the existing rule list with Grafana admin authentication.
+   Select only organization 1 rules whose UID is in the retirement inventory
+   and whose live provenance is `file`. Use the inventory from the new release.
+
+   ```bash
+   curl --fail --silent --show-error --user admin \
+     http://127.0.0.1:53004/api/v1/provisioning/alert-rules > "$staging/live.json"
+   jq --exit-status --slurpfile retired "$inventory" '
+     if type != "array" then error("expected the Grafana rule list") else
+       {apiVersion: 1, deleteRules: [
+         .[] | select(.orgID == 1 and .provenance == "file")
+         | .uid as $uid | select($retired[0] | index($uid))
+         | {orgId: .orgID, uid: $uid}
+       ]}
+     end
+   ' "$staging/live.json" > "$staging/plan.json"
+   ```
+
+3. Inspect the plan. When it has entries, move it into the temporary
+   `alerting` directory as `delete-rules.json`. Reload the maintenance
+   instance with `curl --fail --user admin --request POST http://127.0.0.1:53004/api/admin/provisioning/alerting/reload`.
+   Verify that planned UIDs are gone and that any non-file rule remains.
+   Discard the temporary provisioning root
+   after stopping the maintenance instance and start the normal service.
+   A subsequent normal reload or restart never sees the one-time directives.
+
+Run `meiva lgtm status` on the station after reloading. It exits nonzero
+and lists the UIDs present on only one side of the comparison between
+rendered provisioning and Grafana, including any locally managed rules.
 
 ## Interval collector silence
 
@@ -58,8 +99,8 @@ and failed cycles establish liveness.
 The existing 35-minute window accommodates the current slowest collector's
 30-minute refresh. This is a fleet-wide dead-man signal: one collector still
 emitting prevents the rule from firing. Per-collector freshness requires a
-separate expected-set policy. Restoring this rule removes its tombstone in
-the same change so provisioning keeps it active.
+separate expected-set policy. Restoring this rule removes its UID from the
+retirement inventory in the same change.
 
 ## Where these run (LGTM stack)
 
@@ -329,8 +370,6 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-machine-stopped-too-long` | `machine_stopped_too_long` per machine (an announced stop, 20m+ old, no `--maintenance-for` window) | 0m | error | nothing: an intentionally stopped host leaves the probe target set, so a forgotten stop was invisible inside the cluster (10-14: 53 minutes) |
 | `meiva-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
 | `meiva-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
-| `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
-| `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine (the agent host's shared pools; a borrow carries no agent) | 2m | warning | the per-host cooldown marker |
@@ -347,6 +386,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` per agent (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
 | `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period |
 | `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
+| `meiva-ops-grafana-rule-evaluation-failed` | At least one terminal Grafana rule evaluation failure in 5m, aggregated across rules | 0m | error | rule evaluation health in Grafana and its alerting logs |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
 (Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an
@@ -356,11 +396,21 @@ the events travel the very path it would watch. An ingress that rejects events a
 down both surface as the health probe's `health_probe_ran` going absent; a whole-machine outage is the
 out-of-band probe's.
 
+## Rule evaluation failures
+
+Prometheus scrapes Grafana's `grafana_alerting_rule_evaluation_failures_total`
+counter. The meta-alert reports increments within five minutes as one error
+instance, so a datasource outage affecting many rules produces one alert. With
+the station's agent inbox policy installed, this error reaches the on-call agent.
+Grafana gives a query failure a DatasourceError state for this one meta-alert.
+The external sentinel has an independent agent-message path when it cannot
+query Prometheus or when the watchdog heartbeat disappears.
+
 ## The alert pipeline's own dead-man pair
 
-Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
-stopped gateway, a contact point pointing at the wrong port — **all 70 rules go quiet together**, and
-the silence looks exactly like a quiet night. Two rules close that hole and nothing else:
+Grafana delivers alerts to the gateway at `POST /api/alerts`. A webhook token
+rotation, stopped gateway, or wrong contact point can break that path for every
+rule. The watchdog sends a heartbeat to make failures visible on a quiet night.
 
 - `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
   nothing about the system; its only job is to walk the whole path and refresh one row. Its route
@@ -369,19 +419,19 @@ the silence looks exactly like a quiet night. Two rules close that hole and noth
 - `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
   accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
-  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path.
+  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path and treats a
+  previously observed heartbeat series disappearing as silence.
 
 The judgment is on the *age of the last accepted ingest*, not on how many alerts fired: a quiet night
 cannot trip it and a broken token cannot hide behind one. The period (5 m) and the threshold (3 × 5 m)
 are asserted together in `tests/scripts/test_alert_notification_policy.py`, so one cannot drift from the
 other.
 
-What this pair still cannot see: (a) the Grafana alert engine itself — if it stops evaluating, neither
-rule runs, and that gap is covered outside Grafana (a 15-minute host cron that asks whether the watchdog
-row arrived; task #6220), not by another rule; (b) a gateway that stopped entirely — the gauge rides the
-gateway's own OTLP push, so it disappears with its emitter and the silent rule reads *no data*, which it
-treats as silence. That case is `meiva-ops-gateway-metrics-silent`'s report. The pair's subject is the
-path between Grafana and the `alerts` table, not the gateway process.
+The host sentinel runs every 15 minutes (task #6220) and can observe a stopped
+Grafana engine. When the gateway stops, the ingest gauge can disappear with it.
+Grafana's silent-pipeline rule leaves an empty query in the OK state, while the
+sentinel checks for the loss of a previously observed series. The separate
+`meiva-ops-gateway-metrics-silent` rule tracks gateway metric freshness.
 
 ## Notifications — the policy, the webhook, the window silence
 

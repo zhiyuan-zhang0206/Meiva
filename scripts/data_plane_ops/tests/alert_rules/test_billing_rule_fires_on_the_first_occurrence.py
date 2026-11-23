@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 import yaml
 
@@ -202,10 +204,13 @@ def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 
-def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
-    for rule in load_rules():
-        assert rule["noDataState"] == "OK", rule["uid"]
-        assert rule["execErrState"] == "OK", rule["uid"]
+def test_only_the_evaluation_meta_alert_reports_a_datasource_error() -> None:
+    rules = load_rules()
+    assert all(rule["noDataState"] == "OK" for rule in rules)
+    non_silent = {
+        rule["uid"]: rule["execErrState"] for rule in rules if rule["execErrState"] != "OK"
+    }
+    assert non_silent == {"meiva-ops-grafana-rule-evaluation-failed": "Error"}
 
 
 @pytest.mark.parametrize(
@@ -361,16 +366,19 @@ def test_telemetry_queue_loss_is_an_immediate_error_on_independent_metrics() -> 
     assert threshold["model"]["conditions"][0]["evaluator"] == {"type": "lt", "params": [300]}
 
 
-def test_delete_rules_tombstones_never_name_live_rules() -> None:
-    doc = yaml.safe_load((RULES.parent / "delete-rules.yml").read_text(encoding="utf-8"))
-    assert doc["apiVersion"] == 1
-    entries = doc["deleteRules"]
-    assert entries, "an empty deleteRules re-orphans every retired rule"
+def test_retired_rule_inventory_is_disjoint_and_outside_provisioning() -> None:
+    inventory = RULES.parents[2] / "retired-alert-rules.json"
+    uids = json.loads(inventory.read_text(encoding="utf-8"))
+    assert uids and len(uids) == len(set(uids))
     live = {r["uid"] for r in load_rules()}
-    for entry in entries:
-        assert set(entry) == {"orgId", "uid"} and entry["orgId"] == 1
-        assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
-    assert {"orgId": 1, "uid": "meiva-ops-pitr-storage-growth"} in entries
-    assert {"orgId": 1, "uid": "meiva-ops-agent-restart-spike"} in entries
-    assert {"orgId": 1, "uid": "meiva-ops-root-diagnostic-task-telemetry"} in entries
-    assert {"orgId": 1, "uid": "meiva-ops-plugin-collector-silent"} not in entries
+    assert all(uid and len(uid) <= 40 and uid not in live for uid in uids)
+    assert {
+        "meiva-ops-pitr-storage-growth",
+        "meiva-ops-agent-restart-spike",
+        "meiva-ops-root-diagnostic-task-telemetry",
+        "meiva-ops-impersonation-capture-failed",
+    } <= set(uids)
+    assert "meiva-ops-plugin-collector-silent" not in uids
+    for path in RULES.parent.iterdir():
+        if path.suffix in {".yaml", ".yml", ".json"}:
+            assert "deleteRules" not in yaml.safe_load(path.read_text(encoding="utf-8"))

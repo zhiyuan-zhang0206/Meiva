@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import TypeGuard, assert_never
 
 import httpx
+import yaml
 
 from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
@@ -376,3 +378,62 @@ def verify_dashboard_provisioning(native_dir: Path, *, grafana_url: str) -> list
             _grafana_get(f"{grafana_url}/api/folders"),
         ),
     ]
+
+
+def _alert_rule_uids(rules: object) -> set[str]:
+    if not _is_object_list(rules):
+        raise ValueError("expected a list of alert rules")
+    uids: set[str] = set()
+    for rule in rules:
+        uid = rule.get("uid") if _is_object_dict(rule) else None
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("an alert rule has no UID")
+        uids.add(uid)
+    return uids
+
+
+def _rendered_alert_rule_uids(alerting_dir: Path) -> set[str]:
+    uids: set[str] = set()
+    for path in sorted(alerting_dir.iterdir()):
+        if not path.is_file() or path.suffix not in {".yaml", ".yml", ".json"}:
+            continue
+        try:
+            document = object_of(yaml.safe_load, path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path.name}: invalid provisioning YAML") from exc
+        groups = document.get("groups", []) if _is_object_dict(document) else None
+        if not _is_object_list(groups):
+            raise ValueError(f"{path.name}: expected an alert provisioning document")
+        for group in groups:
+            if not _is_object_dict(group):
+                raise ValueError(f"{path.name}: expected an alert rule group")
+            if group.get("orgId", 1) == 1:
+                uids.update(_alert_rule_uids(group.get("rules")))
+    if not uids:
+        raise ValueError("no rules for Grafana's default organization")
+    return uids
+
+
+def verify_alert_rule_provisioning(native_dir: Path, *, grafana_url: str) -> list[str]:
+    alerting_dir = native_dir / "config/provisioning/alerting"
+    try:
+        expected = _rendered_alert_rule_uids(alerting_dir)
+    except (OSError, ValueError) as exc:
+        return [f"could not read rendered alert rules in {alerting_dir}: {exc}"]
+
+    reply = _grafana_get(f"{grafana_url}/api/v1/provisioning/alert-rules")
+    if reply.status == 0:
+        return [f"Grafana is unreachable at {grafana_url}: {reply.payload}"]
+    if reply.status != 200:
+        return [f"Grafana answered {reply.status} for alert rules"]
+    try:
+        loaded = _alert_rule_uids(reply.payload)
+    except ValueError:
+        return ["Grafana returned an invalid alert rule list"]
+
+    problems: list[str] = []
+    if orphaned := loaded - expected:
+        problems.append(f"only in Grafana: {', '.join(sorted(orphaned))}")
+    if missing := expected - loaded:
+        problems.append(f"only in rendered provisioning: {', '.join(sorted(missing))}")
+    return problems
