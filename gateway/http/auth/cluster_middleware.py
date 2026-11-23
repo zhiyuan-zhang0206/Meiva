@@ -3,15 +3,20 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from opentelemetry.context import Context, attach, detach
+from opentelemetry.propagate import get_global_textmap
+from starlette.datastructures import Headers
 from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
 
+from base.host.db_authority.model import AuthorityRefusedError
 from base.host.net.auth import cookie_name
-from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT
+from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, cluster_credential
 from gateway.http.auth.router import AuthAppState
 from gateway.http.auth.session_store import SessionTouchThrottle, touch_session
-from gateway.http.config import GatewayConfig, state_as
+from gateway.http.config import GatewayConfig, app_state_as, state_as
 from gateway.http.middleware.cors import request_host
 from gateway.http.middleware.error_envelope import error_response
 
@@ -30,6 +35,43 @@ _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+class TraceIngressApp(FastAPI):
+    def _accept_machine_parent(self, scope: Scope) -> bool:
+        authorization = Headers(scope=scope).get("authorization")
+        if authorization is None:
+            return False
+        state = app_state_as(self, AuthAppState)
+        try:
+            fact = cluster_credential(
+                authorization,
+                state.gateway_config.cluster_secret,
+                home=state.gateway_process.home,
+                cache=state.machine_token_acceptance,
+            )
+        except (AuthorityRefusedError, OSError):
+            return False
+        return fact is not None and fact.startswith("machine_token:")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in {"http", "websocket"}:
+            await super().__call__(scope, receive, send)
+            return
+        fields = {name.lower().encode("ascii") for name in get_global_textmap().fields}
+        headers = Headers(scope=scope).raw
+        if any(name.lower() in fields for name, _ in headers) and not self._accept_machine_parent(
+            scope
+        ):
+            scope = {
+                **scope,
+                "headers": [(name, value) for name, value in headers if name.lower() not in fields],
+            }
+        token = attach(Context())
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            detach(token)
 
 
 async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
@@ -88,7 +130,7 @@ async def cluster_auth_middleware(
 ) -> Response:
     state = state_as(request, AuthAppState)
 
-    from gateway.http.auth.request_principal import AuthPrincipal, cluster_credential
+    from gateway.http.auth.request_principal import AuthPrincipal
 
     request.state.auth_principal = None
     request.state.source_verified_by = None

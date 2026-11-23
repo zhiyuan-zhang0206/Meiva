@@ -1,3 +1,4 @@
 [uses]
 "_host_death_host.py" = ["_host_death_child.py"]
+"test_exec_child_telemetry_delivery.py" = ["_exec_trace_drain_child.py"]
 "test_host_death.py" = ["_host_death_child.py", "_host_death_host.py"]

@@ -8,6 +8,40 @@ from collections.abc import Callable
 
 from base.telemetry.delivery.reporting import report_no_pipeline
 
+_EXEC_TRACE_DRAIN_WAIT_S = 0.1
+
+
+class ExecTraceDrain:
+    def __init__(self, shutdown: Callable[[], None]) -> None:
+        self._shutdown = shutdown
+        self._stop_requested = threading.Event()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, daemon=True, name="exec-trace-drain")
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            _ = self._stop_requested.wait()
+            self._shutdown()
+        except BaseException as exc:
+            self._error = exc
+            report_no_pipeline("[exec-trace-drain] worker failed: {err}", err=repr(exc), exc=exc)
+
+    def _stop(self) -> bool:
+        self._stop_requested.set()
+        self._thread.join(timeout=_EXEC_TRACE_DRAIN_WAIT_S)
+        alive = self._thread.is_alive()
+        if self._error is not None:
+            raise self._error
+        return not alive
+
+    def close(self) -> None:
+        try:
+            _ = self._stop()
+        except BaseException as exc:
+            if exc is not self._error:
+                raise
+
 
 class TraceArm:
     """One arm attempt; late success remains allowed until its real stop request."""

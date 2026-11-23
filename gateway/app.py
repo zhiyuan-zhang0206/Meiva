@@ -86,7 +86,7 @@ from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.http.auth import rejection_log
 from gateway.http.auth import router as auth_router
-from gateway.http.auth.cluster_middleware import cluster_auth_middleware
+from gateway.http.auth.cluster_middleware import TraceIngressApp, cluster_auth_middleware
 from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.request_principal import SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle
@@ -449,7 +449,8 @@ def create_app(
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
-    app = FastAPI(
+    application = TraceIngressApp if process.tracer_provider is not None else FastAPI
+    app = application(
         title="Meiva",
         lifespan=partial(
             lifespan,

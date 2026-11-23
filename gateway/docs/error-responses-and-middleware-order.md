@@ -12,6 +12,13 @@ Within user middleware, CORS surrounds auth so an early authentication response
 can still be read by an allowed browser client. The request-trace layer supplies
 the error envelope's correlation identity.
 
+The Gateway's ASGI entry verifies the active generation's machine API bearer
+before allowing OpenTelemetry to extract an incoming trace. Requests with
+human credentials, browser sessions or no machine credential get a new trace
+using local sampling. The boundary clears the configured propagator's headers
+before any trace extraction for those requests, including authentication
+rejections.
+
 Task-assignment authentication tests use fixed isolated test credentials, including a deliberately rotated credential. A previously accepted request cannot replay under the revoked credential, and the denied replay creates no additional business rows. These literals are fixture input, not deployed secrets.
 
 ## Relationship to Other Nodes

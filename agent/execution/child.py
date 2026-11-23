@@ -629,6 +629,7 @@ def _run_child_process(
         config.boot()
         machine = ConfiguredMachineIdentity(config)
         if trace.get_current_span().get_span_context().is_valid:
+            from base.telemetry.otlp.trace_workers import ExecTraceDrain
             from base.telemetry.tracing import build_process_tracer
 
             provider = build_process_tracer(
@@ -640,7 +641,7 @@ def _run_child_process(
             )
             if provider is not None:
                 trace.set_tracer_provider(provider)
-                _ = tracing.callback(provider.shutdown)
+                _ = tracing.callback(ExecTraceDrain(provider.shutdown).close)
                 _ = tracing.enter_context(
                     provider.get_tracer("meiva.exec").start_as_current_span(
                         "execute_code", record_exception=False, set_status_on_exception=False
