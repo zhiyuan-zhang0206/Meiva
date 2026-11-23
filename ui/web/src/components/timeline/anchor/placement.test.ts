@@ -228,6 +228,20 @@ describe("unread boundary", () => {
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "4.0", rank: 0 } }, { hold: false });
   });
 
+  it("stops prompt association at a real compact cursor in an older rank", () => {
+    const machine = machineFor(null);
+    const fx = effects();
+    const archived = [
+      { ...human, item_id: "s1.cp.1.0" },
+      row("s1.cp.2.0", { kind: "inbound_compact_summary" }),
+      { ...work, item_id: "s1.cp.3.0" },
+      { ...reply, item_id: "s1.cp.4.0" },
+    ];
+    machine.step(inputs({ items: archived, reveal: { decided: true, itemId: "s1.cp.4.0" }, hasMoreOlder: true }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "s1.cp.4.0", rank: 1 } }, { hold: false });
+  });
+
   it("waits for qualified rows on a tail return, then includes the new unpublished reply", () => {
     const machine = machineFor(tailDeparture([human, work], null));
     const fx = effects();
