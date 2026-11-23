@@ -31,7 +31,7 @@ describe("memory place", () => {
     writeMemoryPlace("entry-switch", "42", place());
     writeMemoryPlace("entry-switch", "43", place({ offset: 0 }));
     expect(readMemoryPlace("entry-switch", "42")).toBeNull();
-    expect(readMemoryPlace("entry-switch", "43")?.offset).toBe(0);
+    expect(readMemoryPlace("entry-switch", "43")).toMatchObject({ offset: 0 });
   });
 
   it("needs both an entry and a content key", () => {

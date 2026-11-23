@@ -2,7 +2,8 @@ import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 
 // meiva:note
 // The reader's place is one value: the tail, or a row whose top edge sits `offset` px below the
-// viewport's top edge (negative while a tall row is scrolled into). A row is a timeline item or a
+// viewport's top edge (negative while a tall row is scrolled into), or the tail bounded by an
+// unread row. A row is a timeline item or a
 // whole turn block; the two share the turn's first item id, so `turn` tells them apart.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export interface RowRef {
@@ -13,6 +14,7 @@ export interface RowRef {
 
 export type ViewAnchor =
   | { kind: "tail" }
+  | { kind: "bounded-tail"; row: RowRef }
   | { kind: "row"; row: RowRef; offset: number };
 
 export const TAIL: ViewAnchor = { kind: "tail" };

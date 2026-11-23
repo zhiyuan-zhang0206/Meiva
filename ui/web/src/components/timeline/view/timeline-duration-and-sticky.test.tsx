@@ -419,13 +419,14 @@ describe("TimelineView expanded work block height", () => {
     expect(earlier.querySelector('[data-turn-scroll="true"]')).toBeNull();
     expect(earlier.querySelector('[class*="max-h-"]')).toBeNull();
     expect(screen.getByText("Earlier progress")).toBeTruthy();
-    expect(historical.className).not.toContain("sticky");
+    expect(historical.classList).toContain("sticky");
     fireEvent.click(trailing);
     expect(trailing.getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
     expect(container.querySelector('[data-turn-id="3.0"]')).not.toBeNull();
     fireEvent.click(historical);
     expect(historical.getAttribute("aria-expanded")).toBe("false");
+    expect(historical.classList).not.toContain("sticky");
     expect(screen.queryByText("Earlier progress")).toBeNull();
   });
 
@@ -442,7 +443,7 @@ describe("TimelineView expanded work block height", () => {
     expect(container.querySelectorAll("[data-virtual-row]")).toHaveLength(1);
   });
 
-  it("renders the expanded trailing work block without a sticky header and with no height cap", () => {
+  it("renders the expanded trailing work block with a sticky header and no height cap", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
@@ -452,7 +453,7 @@ describe("TimelineView expanded work block height", () => {
     const toggle = screen.getByTestId("turn-toggle");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.className).not.toContain("sticky");
+    expect(toggle.classList).toContain("sticky");
     const turn = container.querySelector<HTMLElement>('[data-turn-id="1.0"]')!;
     expect(turn.querySelector('[class*="max-h-"]')).toBeNull();
     expect(container.querySelectorAll("[data-virtual-row]")).toHaveLength(3);
@@ -552,7 +553,7 @@ describe("TimelineView header scrolling scope", () => {
     makeItem({ item_id: "2.2", kind: "code_output", payload: "result" }),
     makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Agent reply" }),
   ];
-  it("keeps primary messages headerless and keeps all work and detail headers non-sticky", () => {
+  it("keeps primary messages headerless and only expanded work headers sticky", () => {
     const { container } = render(<TimelineView items={items} />);
     revealCollapsedCards();
     const titles = [...screen.getAllByTestId("card-toggle"), ...screen.getAllByTestId("turn-toggle")];
@@ -562,7 +563,7 @@ describe("TimelineView header scrolling scope", () => {
       expect(row.querySelector('[data-testid="card-toggle"]')).toBeNull();
     }
     for (const title of titles) {
-      expect(title.className).not.toContain("sticky");
+      expect(title.classList.contains("sticky")).toBe(title.dataset.testid === "turn-toggle" && title.getAttribute("aria-expanded") === "true");
       expect(container.contains(title)).toBe(true);
     }
     const viewport = screen.getByTestId("scroll-viewport");

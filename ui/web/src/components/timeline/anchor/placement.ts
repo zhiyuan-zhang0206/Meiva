@@ -3,9 +3,10 @@ import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { findOldestTimelineCursor } from "@/lib/timeline/timeline";
 
 import type { ReloadRestoreConfig } from "../model/reading-position";
-import { READING_TOP_PX, sameRow, TAIL, type RowRef, type ViewAnchor } from "./dom";
-import { locate, rankOf } from "./rows";
-import { readSessionPlace, rowAnchor, type SavedPlace } from "./saved";
+import { sameRow, TAIL, type RowRef, type ViewAnchor } from "./dom";
+import { locate } from "./rows";
+import { readSessionPlace, rowAnchor, type SavedPlace, type TailDeparture } from "./saved";
+import { unreadBoundary } from "./unread";
 
 // meiva:note
 // Where a mounted conversation opens, and when its rows may be seen. The goal is the saved place
@@ -68,9 +69,9 @@ interface Search {
 
 type Goal =
   | { kind: "settings" }
-  | { kind: "first"; readySince?: number }
+  | { kind: "first"; readySince?: number; departure?: TailDeparture }
   | { kind: "tail" }
-  | { kind: "row"; place: SavedPlace; fromSession: boolean; search: Search | null; waitingSince?: number }
+  | { kind: "row"; place: SavedPlace; fromSession: boolean; search: Search | null; waitingSince?: number; bounded?: boolean }
   | { kind: "placed" };
 
 export interface PlacementSnapshot {
@@ -82,7 +83,8 @@ export interface PlacementSnapshot {
   fillAllowed: boolean;
 }
 
-export function initialGoal(memory: SavedPlace | null, threadKey: string | undefined, reloadRestore: ReloadRestoreConfig): Goal {
+export function initialGoal(memory: SavedPlace | TailDeparture | null, threadKey: string | undefined, reloadRestore: ReloadRestoreConfig): Goal {
+  if (memory && "last" in memory) return { kind: "first", departure: memory };
   if (memory) return { kind: "row", place: memory, fromSession: false, search: null };
   if (threadKey === undefined) return { kind: "tail" };
   if (reloadRestore.state === "loading") return { kind: "settings" };
@@ -92,7 +94,7 @@ export function initialGoal(memory: SavedPlace | null, threadKey: string | undef
 
 export class PlacementMachine {
   private goal: Goal;
-  private requested: { anchor: ViewAnchor; smooth: boolean } | null = null;
+  private requested: { anchor: ViewAnchor; hold: boolean; smooth?: boolean } | null = null;
   private placedRow: RowRef | null = null;
   private snap: PlacementSnapshot;
   private readonly listeners = new Set<() => void>();
@@ -114,9 +116,8 @@ export class PlacementMachine {
   goalRow(inputs: Pick<PlacementInputs, "items" | "compactBuffer" | "reveal">): RowRef | null {
     const goal = this.goal;
     if (goal.kind === "row") return locate(goal.place.identity, inputs.items, inputs.compactBuffer);
-    if (goal.kind === "first" && inputs.reveal.decided && inputs.reveal.itemId !== null) {
-      const item = inputs.items.find((candidate) => candidate.item_id === inputs.reveal.itemId);
-      return item ? { itemId: item.item_id, rank: rankOf(item, inputs.compactBuffer) } : null;
+    if (goal.kind === "first" && inputs.reveal.decided) {
+      return unreadBoundary(inputs.items, inputs.reveal.itemId, goal.departure, inputs.compactBuffer);
     }
     return null;
   }
@@ -126,18 +127,18 @@ export class PlacementMachine {
   step(inputs: PlacementInputs, effects: PlacementEffects): void {
     for (let guard = 0; guard < 4 && this.advance(inputs, effects); guard++);
     if (this.goal.kind === "placed" && this.requested) {
-      const { anchor, smooth } = this.requested;
+      const { anchor, hold, smooth } = this.requested;
       this.requested = null;
-      this.placedRow = anchor.kind === "row" ? anchor.row : null;
-      effects.place(anchor, { hold: false, smooth });
+      this.placedRow = anchor.kind === "tail" ? null : anchor.row;
+      effects.place(anchor, { hold, smooth });
     }
     this.publish(inputs);
   }
 
   // meiva:note
   // A placement the reader asked for (quote, send, the arrow): lands once its row is mounted.
-  request(anchor: ViewAnchor, inputs: PlacementInputs, smooth = false): void {
-    this.requested = { anchor, smooth };
+  request(anchor: ViewAnchor, inputs: PlacementInputs, { hold = false, smooth = false }: { hold?: boolean; smooth?: boolean } = {}): void {
+    this.requested = { anchor, hold, smooth };
     this.publish(inputs);
   }
 
@@ -153,14 +154,14 @@ export class PlacementMachine {
 
   // meiva:note
   // A placed row left the loaded rows: resolve it again (hidden) or move to where it went.
-  lost(place: SavedPlace, inputs: PlacementInputs, effects: PlacementEffects): void {
+  lost(place: SavedPlace, inputs: PlacementInputs, effects: PlacementEffects, bounded = false): void {
     if (this.goal.kind !== "placed") return;
     const moved = locate(place.identity, inputs.items, inputs.compactBuffer);
     if (moved) {
-      if (!sameRow(moved, place.identity.row)) effects.place(rowAnchor(place, moved), { hold: place.holdReserve });
+      if (!sameRow(moved, place.identity.row)) effects.place(bounded ? { kind: "bounded-tail", row: moved } : rowAnchor(place, moved), { hold: place.holdReserve });
       return;
     }
-    this.goal = { kind: "row", place, fromSession: false, search: null };
+    this.goal = { kind: "row", place, fromSession: false, search: null, bounded };
     this.step(inputs, effects);
   }
 
@@ -170,7 +171,7 @@ export class PlacementMachine {
 
   private settle(target: ViewAnchor, options: { hold: boolean }, effects: PlacementEffects): void {
     this.goal = { kind: "placed" };
-    this.placedRow = target.kind === "row" ? target.row : null;
+    this.placedRow = target.kind === "tail" ? null : target.row;
     effects.place(target, options);
   }
 
@@ -188,18 +189,18 @@ export class PlacementMachine {
         return true;
       }
       case "first": {
-        if (loading && items.length === 0) return false;
+        if (loading && (goal.departure || items.length === 0)) return false;
         if (!inputs.reveal.decided || inputs.filling?.() === true) {
           // meiva:note
           // The rows are in but the reveal decision or the fill is not: wait, within the same time bound.
           if (goal.readySince === undefined) {
-            this.goal = { kind: "first", readySince: inputs.now };
+            this.goal = { ...goal, readySince: inputs.now };
             return false;
           }
           if (inputs.now - goal.readySince < this.bounds.timeoutMs) return false;
         }
         const row = this.goalRow(inputs);
-        this.settle(row ? { kind: "row", row, offset: READING_TOP_PX } : TAIL, { hold: false }, effects);
+        this.settle(row ? { kind: "bounded-tail", row } : TAIL, { hold: false }, effects);
         return false;
       }
       case "tail": {
@@ -210,7 +211,7 @@ export class PlacementMachine {
       case "row": {
         const row = this.goalRow(inputs);
         if (row) {
-          this.settle(rowAnchor(goal.place, row), { hold: goal.place.holdReserve }, effects);
+          this.settle(goal.bounded ? { kind: "bounded-tail", row } : rowAnchor(goal.place, row), { hold: goal.place.holdReserve }, effects);
           return false;
         }
         if (loading) return false;

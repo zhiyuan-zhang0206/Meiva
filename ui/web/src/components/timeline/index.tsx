@@ -29,7 +29,7 @@ import { TimelineImageScope, useTimelineInitialImageGate } from "./model/image-l
 
 export type { ReloadRestoreConfig } from "./model/reading-position";
 export type { RevealDecision } from "./anchor/use-placement";
-export { hasSavedPlace as hasSavedTimelinePlace } from "./anchor/saved";
+export { hasSavedPlace as hasSavedTimelinePlace, hasTailDeparture } from "./anchor/saved";
 
 // meiva:note
 // Cold fill: a conversation whose first page does not fill the viewport reads at most this many
@@ -350,10 +350,13 @@ export const TimelineView = memo(function TimelineView({
     (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => {
       const viewport = controls.viewport();
       const header = viewport ? readTurnAnchor(viewport, button) : null;
-      if (header) controls.place(header, { hold: true });
+      if (header) {
+        if (currentlyExpanded) placement.request(header, { hold: true });
+        else controls.place(header, { hold: true });
+      }
       toggleTurn(id, currentlyExpanded);
     },
-    [controls, toggleTurn],
+    [controls, placement, toggleTurn],
   );
 
   // meiva:note
@@ -427,7 +430,7 @@ export const TimelineView = memo(function TimelineView({
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
         viewportRef={viewportRef}
-        viewportClassName="[overflow-anchor:none] overscroll-y-contain"
+        viewportClassName="[overflow-anchor:none] overscroll-y-contain data-unread-bounded:[align-content:safe_end]"
         scrollbarClassName="z-30"
         scrollbarActivity="input"
       >

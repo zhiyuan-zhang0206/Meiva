@@ -2,78 +2,79 @@
 
 ## One anchor, one writer
 
-The reader's place is one value per conversation, the view anchor (`components/timeline/anchor`):
-the tail, or a row (an item, or a whole turn block) whose top edge sits a given number of pixels
-below the viewport top. One writer (`use-viewport-anchor`) applies it after every commit and on a
-ResizeObserver over the viewport and the content: the anchor row goes back to its offset, the tail
-goes to the natural end. Every layout change is therefore the same case and needs no code of its
-own: older pages prepended, a compact re-keying rows, a width change re-wrapping them, an image or a
-late height, a virtual-window spacer estimate. Chrome's own scroll anchoring stays off
-(`overflow-anchor: none`) so there is no second hand.
+The view anchor (`components/timeline/anchor`) holds the tail, an exact row and
+viewport offset, or the tail bounded by an unread row. One writer
+(`use-viewport-anchor`) applies it after each commit and through ResizeObserver
+on the viewport and log. The same pass handles older pages, compaction, image
+size, a streaming reply, and virtual spacer estimates. The viewport uses
+`overflow-anchor: none` so the browser does not also anchor the content.
 
-Only the reader moves the anchor. A scroll the writer did not cause (wheel, touch, keys, scrollbar,
-find-in-page) is read back from the DOM: the tail when standing at the natural end (`<= 1px`,
-including iOS overscroll bouncing back) or moving downward into the bottom zone of the natural end
-(pointer-dependent, wider on touch for bounce tolerance), otherwise the first row below the header
-bar. Moving upward away from the end always leaves the tail, even inside the wide touch bottom
-zone, so a small mobile scroll-up never snaps back. Both an upward wheel notch and an
-upward-scrolling vertical touch drag release the tail before their scroll event or finger lift, so
-a chunk landing first cannot pin the reader back. While a finger is down without upward drag, the
-writer stands still on the tail. Placements only set the anchor:
-returning, reloading, the first-unseen reveal, a quote, a send, a header toggle and the down arrow
-(the one animated move, interrupted by any reader input).
+A reader's scroll is read back from the DOM. Within 1px of the natural end,
+the reader resumes following the tail. Before reaching it, the first readable
+row and its offset preserve the reader's exact scroll position. The
+pointer-dependent visibility zone for the down arrow is independent of tail
+following. Upward wheel and touch intent release the tail before the scroll
+event so a concurrent stream cannot pull back the reader. Placements set the
+anchor through the same writer, including a quote, a toggle and the down arrow.
+The arrow animates the move and releases the unread boundary.
 
 ## Opening a conversation
 
-Each agent mounts its own view. Its opening place is the saved place (this page entry's memory,
-else the tab's reload bookmark), else the first delivery past the reader's seen position, else the
-tail (`anchor/placement.ts`). Rows render hidden under the one loading ring until that place
-resolves in the loaded rows, so the first painted frame is the destination:
+Each agent mounts its own view. A reader who left in history returns to the
+saved row and offset. A memory bookmark takes precedence over a per-tab reload
+bookmark. Retained rows can open on the saved row while the authority read is in
+flight. A missing bookmark row is resolved by id and rank, then source locator,
+content or compact coordinate. The search can read up to 5 older pages
+(250 items, 10 s). An unreachable bookmark falls back to the tail.
 
-- Retained rows that hold the saved row open on it at once, while the authority read is still in
-  flight. The read then merges under the anchor, and a surviving row does not move.
-- A first visit waits for its rows and for the reveal decision. When the roster said the agent had
-  no unread deliveries, the decision is the tail without waiting for the feed.
-- A saved row that is not loaded (a reload into older history, or rows replaced while away) is
-  looked up by id and rank, then by its source `reading_locator`, then by its content (a compact
-  re-keys rows but keeps their text), then by its compact coordinate, and searched for in at most 5
-  background older pages (250 items, 10 s). An id is never matched across ranks: a compact's new
-  segment restarts message numbers, so the anchor takes its new rank before the rows change. An unreachable row opens the
-  tail and drops its reload bookmark.
+A reader who left at the tail keeps a watermark of the last human message or
+visible reply, including a partial reply's text. On return, the fresh entry
+seen cursor identifies the first unread delivery. The watermark can also
+identify a new or extended reply that has yet to be published. The timeline
+waits for the qualified snapshot on a tail return. The entry cursor remains
+fixed even if the seen acknowledgement succeeds before the snapshot lands.
+With no new reply or unread delivery the view opens at the tail. A first visit
+with unread deliveries uses the same unread placement. The existing fast path
+opens a known-quiet first visit at the tail.
 
-Leaving saves the row on screen and its offset, including when leaving the tail (user ruling
-2026-10-17): a return continues reading there while newer output stays below. A reader who
-reaches the bottom follows again. A first page shorter than the viewport stays hidden while the
-cold fill reads its older pages ([history paging](history-paging.md)), so history never lands
-above rows already on screen.
+The boundary includes the previous human prompt when it belongs to the same
+continuous question and answer: the prompt is on the same compact rank and
+only reasoning, code, code output, attachments or reply visibility metadata
+intervene. An earlier chat, another inbound message, a wake or a lifecycle
+marker ends the search. When no prompt qualifies, the first unread reply
+itself is the boundary.
 
-Across a full tab reload (`feature.reloadReadingRestore`, default `true`) the place is a per-agent
-`Browser.session` bookmark; a reload from the tail keeps none and opens on the latest rows.
+The writer opens as far down as the boundary permits. The scroll target is
+`max(0, min(dockSafeEnd, boundaryTop - topSafeInset))`. The top clearance is
+56px. The resting composer band is outside the viewport. The dock-safe end
+includes the measured overlap of any footer or grown composer dock. Short
+content aligns to that safe end, including when the whole conversation fits.
+Long content keeps the boundary at the top and lets the reply continue below.
+The writer reapplies the bound as the reply grows or layout changes. Manual
+scrolling takes over from the boundary.
 
-A `reveal` (the first delivery past the seen position) is a first-visit opening place only; a saved
-place always wins over it, including when the reader returns to the bottom.
+The rows remain hidden under the loading ring while their opening location
+resolves. [Cold fill](history-paging.md) can load older pages when the initial
+page does not fill the viewport. A reload from the tail keeps no session
+bookmark and uses the normal opening rules.
 
-Wheel, touch, keyboard scrolling and track interaction reveal the timeline scrollbar. Placements
-and layout updates keep an idle scrollbar hidden.
+## Expanded turn headers
 
-## Non-sticky headers and natural-height TurnBlock bodies
-Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
-in normal document flow without `position: sticky` (user ruling 2026-11-01,
-replacing frosted sticky work and detail headers). An expanded `TurnBlock` — the
-historical one and the active `Working` one alike — has no scrollport and no
-height cap of its own: its indented body flows at its natural height inside the
-timeline, so a finished block is as tall as the work really was and the reader
-scrolls the timeline itself (user ruling 2026-11-09, revoking the 50%/80%
-view caps and the nested wheel chaining that served them). The one
-scrollport is the message list; nothing inside it can swallow a gesture, so a
-scroll over an expanded block is a scroll of the timeline.
+An expanded Work, Context or Details `TurnBlock` has an opaque header that
+sticks at the 44px lower edge of `HeaderBar` and releases at the end of the
+block. The toggle stays clickable there. Closing the block positions the
+collapsed header at the clicked height after the body is removed, using toggle
+reserve when needed. The header sits above ordinary rows and below the
+scrollbar and floating controls. Primary-message and nested card headers stay
+in normal flow.
 
-The expanded live block's edge rule has its own node:
-[The expanded live block](live-block.md).
+The block body uses the timeline's single scrollport at its natural height.
+The outer and inner virtual windows keep their spacer elements in that flow,
+so the sticky header's containing block includes the unmounted rows. See
+[the expanded live block](live-block.md) for the live case.
 
-Event timestamps remain visible in message-card headers at narrow widths;
-headers and timestamp text wrap when needed. Standing context notes continue
-to omit timestamps according to their timeline item metadata.
+Event timestamps remain visible in message-card headers at narrow widths.
+Standing context notes omit timestamps according to their item metadata.
 
 ## Relationship to Other Nodes
 

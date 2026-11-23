@@ -6,7 +6,8 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { readReloadBookmark, saveReloadBookmark, type ReloadRestoreConfig } from "../model/reading-position";
 import { READING_TOP_PX, TAIL, type ViewAnchor } from "./dom";
 import { initialGoal, PlacementMachine, type PlacementEffects, type PlacementInputs, type SearchBounds } from "./placement";
-import type { SavedPlace } from "./saved";
+import type { SavedPlace, TailDeparture } from "./saved";
+import { tailDeparture } from "./unread";
 
 const BOUNDS: SearchBounds = { maxPages: 5, maxItems: 250, timeoutMs: 10_000 };
 
@@ -55,7 +56,7 @@ function sessionWith(id: string, extra: { readingLocator?: string; turn?: true; 
   return { session: browser.session, config };
 }
 
-function machineFor(memory: SavedPlace | null, config: ReloadRestoreConfig = { state: "disabled" }) {
+function machineFor(memory: SavedPlace | TailDeparture | null, config: ReloadRestoreConfig = { state: "disabled" }) {
   return new PlacementMachine(initialGoal(memory, "42", config), BOUNDS);
 }
 
@@ -131,11 +132,11 @@ describe("first visit", () => {
     expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
-  it("opens the revealed row at the reading offset", () => {
+  it("opens with the first unread row as the tail bound", () => {
     const machine = machineFor(null);
     const fx = effects();
     machine.step(inputs({ reveal: { decided: true, itemId: "5.0" } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false });
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "5.0", rank: 0 } }, { hold: false });
     expect(machine.snapshot()).toMatchObject({ visible: true, pin: { itemId: "5.0", rank: 0 } });
   });
 
@@ -188,7 +189,7 @@ describe("first visit", () => {
     const fx = effects();
     machine.step(inputs({ reveal: { decided: false, itemId: null }, now: 0 }), fx);
     machine.step(inputs({ reveal: { decided: true, itemId: "5.0" }, now: BOUNDS.timeoutMs - 1 }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false });
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "5.0", rank: 0 } }, { hold: false });
     expect(machine.snapshot().searching).toBe(false);
   });
 
@@ -198,6 +199,49 @@ describe("first visit", () => {
     machine.step(inputs({ reveal: { decided: true, itemId: "7.0" } }), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
     expect(fx.place).toHaveBeenCalledWith(at("3.0", -20), { hold: false });
+  });
+});
+
+describe("unread boundary", () => {
+  const human = row("1.0", { kind: "inbound_chat", source: "user" });
+  const work = row("2.0", { kind: "agent_reasoning" });
+  const reply = row("4.0");
+  const showReply = { decided: true, itemId: reply.item_id };
+
+  it("includes the adjacent human prompt across ordinary work within the same turn", () => {
+    const machine = machineFor(null);
+    const fx = effects();
+    machine.step(inputs({ items: [human, work, reply], reveal: showReply }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
+  });
+
+  it.each([
+    row("3.0"),
+    row("3.0", { kind: "inbound_chat", source: "agent:7" }),
+    row("3.0", { kind: "inbound_chat", source: "schedule:2" }),
+    row("3.0", { kind: "system_marker", source: "non_human_wake" }),
+    row("3.0", { kind: "system_marker", source: "lifecycle_restart" }),
+  ])("keeps the reply as the boundary after a prior chat or wake (%o)", (boundary) => {
+    const machine = machineFor(null);
+    const fx = effects();
+    machine.step(inputs({ items: [human, work, boundary, reply], reveal: showReply }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "4.0", rank: 0 } }, { hold: false });
+  });
+
+  it("waits for qualified rows on a tail return, then includes the new unpublished reply", () => {
+    const machine = machineFor(tailDeparture([human, work], null));
+    const fx = effects();
+    machine.step(inputs({ items: [human, work], loading: true }), fx);
+    expect(fx.place).not.toHaveBeenCalled();
+    machine.step(inputs({ items: [human, work, { ...reply, partial: true }] }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
+  });
+
+  it("keeps the boundary when a reply visible at departure grew before the return", () => {
+    const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Short" }], null));
+    const fx = effects();
+    machine.step(inputs({ items: [human, { ...reply, partial: true }] }), fx);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });
 });
 
@@ -405,7 +449,7 @@ describe("requested placements", () => {
     const fx = effects();
     machine.step(inputs(), fx);
     fx.place.mockClear();
-    machine.request(TAIL, inputs(), true);
+    machine.request(TAIL, inputs(), { smooth: true });
     machine.step(inputs(), fx);
     machine.step(inputs(), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
