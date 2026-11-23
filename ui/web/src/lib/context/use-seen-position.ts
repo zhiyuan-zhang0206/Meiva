@@ -216,7 +216,7 @@ export function useSeenPosition({
   return session.decided ? {
     decided: true,
     itemId: session.reveal?.itemId ?? null,
-    ...(session.reveal && session.entry !== null ? { entrySeenId: session.entry } : {}),
+    ...(session.entry !== null ? { entrySeenId: session.entry } : {}),
     ...(session.olderPages > 0 ? { olderPages: session.olderPages } : {}),
   } : UNDECIDED;
 }

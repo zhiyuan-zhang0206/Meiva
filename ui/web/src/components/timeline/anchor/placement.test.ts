@@ -281,16 +281,38 @@ describe("unread boundary", () => {
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "5.0", rank: 0 } }, { hold: false });
   });
 
-  it.each([true, false])("reads the prompt across a page boundary (delivered: %s)", (delivered) => {
+  it.each([false, true])("ignores an old delivery after archiving the departure row (new reply: %s)", (hasNewReply) => {
+    const old = rows(101, 102);
+    const locator = (message_id: string, checkpoint_id?: string) => btoa(JSON.stringify({
+      version: 1, source: "native", agent_id: 42, epoch: "initial", checkpoint_id, message_id, block: 0,
+    })).replace(/=+$/, "");
+    const before = old.map((item) => ({ ...item, reading_locator: locator(item.item_id) }));
+    const [earlier, watermark] = before.map((item) => ({
+      ...item, item_id: `s1.boundary.${item.item_id}`, reading_locator: locator(item.item_id, "boundary"),
+    }));
+    const machine = machineFor(tailDeparture(before, null));
+    const fx = effects();
+    const archived = [delivered(earlier, 1), watermark];
+    const items = hasNewReply ? [...archived, human, delivered(reply, 2)] : archived;
+    machine.step(inputs({ items, reveal: { decided: true, itemId: earlier.item_id, entrySeenId: 0 } }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith(hasNewReply
+      ? { kind: "bounded-tail", row: { itemId: human.item_id, rank: 0 } }
+      : TAIL, { hold: false });
+  });
+
+  it.each(["published", "unpublished", "published while paging"])("reads the prompt across a page boundary (%s)", (publication) => {
     const machine = machineFor(tailDeparture([human], null));
     const fx = effects();
-    const reveal = delivered ? showReply : { decided: true, itemId: null };
+    const reveal = publication === "published" ? showReply : { decided: true, itemId: null, entrySeenId: 0 };
     const latest = { items: [work, reply], hasMoreOlder: true, reveal };
     machine.step(inputs(latest), fx);
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
     expect(machine.snapshot()).toMatchObject({ visible: false, fillAllowed: false });
-    machine.step(inputs({ ...latest, loadingOlder: true }), fx);
-    machine.step(inputs({ ...latest, items: [human, work, reply] }), fx);
+    const finalReply = publication === "published while paging" ? delivered(reply, 2) : reply;
+    machine.step(inputs({ ...latest, items: [work, finalReply], loadingOlder: true }), fx);
+    expect(fx.place).not.toHaveBeenCalled();
+    machine.step(inputs({ ...latest, items: [human, work, finalReply] }), fx);
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });

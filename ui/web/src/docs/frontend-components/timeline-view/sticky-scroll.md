@@ -28,8 +28,11 @@ content or compact coordinate. The search can read up to 5 older pages
 (250 items, 10 s). An unreachable bookmark falls back to the tail.
 
 A reader who left at the tail keeps a watermark of the last human message or
-visible reply, including a partial reply's text. On return, the fresh entry
-seen cursor identifies unread deliveries. When the watermark is loaded, the
+visible reply, including a partial reply's text. If native compaction archives
+that row, its epoch and message or inbound identity with block still locate it.
+On return, the entry seen cursor identifies unread deliveries, including those
+that arrive during the opening's older-page reads after an initially empty feed.
+When the watermark is loaded, the
 earliest new reply bounds placement. Eligible replies come after the watermark
 or extend the partial reply at it, and are either unpublished or unread at
 entry. A late delivery for an earlier row or the unchanged watermark still

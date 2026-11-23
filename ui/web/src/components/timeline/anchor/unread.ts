@@ -22,14 +22,52 @@ export function tailDeparture(items: readonly BackendTimelineItem[], buffer: Com
   } : { last: null };
 }
 
+interface NativeLocator {
+  version: 1;
+  source: "native";
+  agent_id: number;
+  epoch: string;
+  checkpoint_id?: string;
+  message_id?: string;
+  inbound_id?: number;
+  block: number;
+}
+
+function nativeLocator(value: string): NativeLocator | null {
+  try {
+    const bytes = Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (byte) => byte.charCodeAt(0));
+    const locator = JSON.parse(new TextDecoder().decode(bytes)) as Partial<Record<keyof NativeLocator, unknown>> | null;
+    return locator?.version === 1 && locator.source === "native" && typeof locator.agent_id === "number" &&
+      typeof locator.epoch === "string" && typeof locator.block === "number" &&
+      (typeof locator.message_id === "string" || typeof locator.inbound_id === "number") ? locator as NativeLocator : null;
+  } catch {
+    return null;
+  }
+}
+
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+function archivedDepartureIndex(items: readonly BackendTimelineItem[], locator: string): number {
+  const before = nativeLocator(locator);
+  if (!before || before.checkpoint_id != null) return -1;
+  return items.findIndex((item) => {
+    const after = item.reading_locator ? nativeLocator(item.reading_locator) : null;
+    return after?.checkpoint_id != null && after.agent_id === before.agent_id &&
+      after.epoch === before.epoch && after.block === before.block &&
+      after.message_id === before.message_id && after.inbound_id === before.inbound_id;
+  });
+}
+
 function departureIndex(
   items: readonly BackendTimelineItem[], departure: TailDeparture, buffer: CompactTransitionBuffer | null,
 ): number {
   const { last, partialPayload } = departure;
-  return last === null ? -1 : items.findIndex((item) => last.locator
-    ? item.reading_locator === last.locator
-    : item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
-      item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
+  if (last === null) return -1;
+  if (last.locator) {
+    const exact = items.findIndex((item) => item.reading_locator === last.locator);
+    return exact >= 0 ? exact : archivedDepartureIndex(items, last.locator);
+  }
+  return items.findIndex((item) => item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
+    item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
 }
 
 export function unreadBoundary(
