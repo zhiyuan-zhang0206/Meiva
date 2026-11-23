@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { subscribeBeforeCompactDisplayChange, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
@@ -12,7 +12,7 @@ import {
   RELOAD_RESTORE_SEARCH_TIMEOUT_MS,
   type ReloadRestoreConfig,
 } from "../model/reading-position";
-import { READING_TOP_PX, readRowAnchor, sameRow, type RowRef, type ViewAnchor } from "./dom";
+import { findRowNode, offsetOf, READING_TOP_PX, readRowAnchor, sameRow, type RowRef, type ViewAnchor } from "./dom";
 import { initialGoal, PlacementMachine, type PlacementEffects, type PlacementInputs, type RevealDecision, type SearchBounds } from "./placement";
 import { identify, shiftForCompact, type RowIdentity } from "./rows";
 import { readMemoryPlace, writeMemoryPlace, writeSessionPlace, type SavedPlace } from "./saved";
@@ -39,6 +39,7 @@ interface Args {
   onLoadOlder?: (origin: OlderLoadOrigin) => void;
   onCancelBackgroundLoadOlder?: () => boolean;
   reveal: RevealDecision;
+  openingShown: RefObject<boolean>;
   anchor: ViewportAnchor;
   filling: () => boolean;
 }
@@ -49,7 +50,7 @@ export interface Placement {
   visible: boolean;
   // meiva:note
   // The cold fill may read older pages now.
-  fillAllowed: boolean;
+  canColdFill: () => boolean;
   // meiva:note
   // Older pages are being read to find the opening row.
   searching: boolean;
@@ -71,7 +72,7 @@ export interface Placement {
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function usePlacement({
   threadKey, entryKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder,
-  onLoadOlder, onCancelBackgroundLoadOlder, reveal, anchor, filling,
+  onLoadOlder, onCancelBackgroundLoadOlder, reveal, openingShown, anchor, filling,
 }: Args): Placement {
   const [machine] = useState(() => new PlacementMachine(initialGoal(readMemoryPlace(entryKey, threadKey), threadKey, reloadRestore), BOUNDS));
   const snapshot = useSyncExternalStore(machine.subscribe, machine.snapshot, machine.snapshot);
@@ -130,11 +131,11 @@ export function usePlacement({
     anchor.rekey(shifted.row);
   }), [anchor]);
 
-  const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => ({
-    identity,
-    offset: row.offset,
-    holdReserve: anchor.holdReserve(),
-  }), [anchor]);
+  const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => {
+    const vp = row.clearTurnHeader ? anchor.viewport() : null;
+    const hit = vp ? findRowNode(vp, row.row) : null;
+    return { identity, offset: hit && vp ? offsetOf(vp, hit.node) : row.offset, holdReserve: anchor.holdReserve() };
+  }, [anchor]);
 
   const saveFrame = useRef(0);
   const onAnchorChange = useCallback((next: ViewAnchor, cause: AnchorChangeCause) => {
@@ -143,7 +144,7 @@ export function usePlacement({
     if (cause === "reader") machine.readerMoved(current(), next.kind !== "tail" ? next.row : null);
     cancelAnimationFrame(saveFrame.current);
     saveFrame.current = requestAnimationFrame(() => {
-      if (!machine.isPlaced()) return;
+      if (!machine.isPlaced() || !openingShown.current) return;
       const config = live.current.inputs.reloadRestore;
       const now = anchor.current();
       const vp = anchor.viewport();
@@ -158,7 +159,7 @@ export function usePlacement({
       writeMemoryPlace(entryKey, threadKey, place);
       writeSessionPlace(threadKey, config, place, vp?.scrollTop ?? 0);
     });
-  }, [anchor, current, entryKey, machine, placeOf, threadKey]);
+  }, [anchor, current, entryKey, machine, openingShown, placeOf, threadKey]);
 
   const onUnresolved = useCallback((row: RowRef) => {
     const now = anchor.current();
@@ -169,7 +170,7 @@ export function usePlacement({
 
   useLayoutEffect(() => () => {
     cancelAnimationFrame(saveFrame.current);
-    if (!machine.isPlaced()) return;
+    if (!machine.isPlaced() || !openingShown.current) return;
     const vp = anchor.viewport();
     const now = anchor.current();
     const { items: rows, compactBuffer: buffer, reloadRestore: config } = live.current.inputs;
@@ -186,7 +187,7 @@ export function usePlacement({
     const place = placeOf(row, identity);
     writeMemoryPlace(entryKey, threadKey, place);
     writeSessionPlace(threadKey, config, place, vp?.scrollTop ?? 0);
-  }, [anchor, entryKey, machine, placeOf, threadKey]);
+  }, [anchor, entryKey, machine, openingShown, placeOf, threadKey]);
 
   const onFree = useCallback(() => machine.readerMoved(current(), null), [current, machine]);
 
@@ -196,7 +197,7 @@ export function usePlacement({
 
   return {
     visible: snapshot.visible,
-    fillAllowed: snapshot.fillAllowed,
+    canColdFill: () => machine.snapshot().fillAllowed,
     searching: snapshot.searching,
     // meiva:note
     // Before the first pass the machine has published nothing: the opening row is pinned from the start.

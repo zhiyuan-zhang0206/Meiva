@@ -21,38 +21,39 @@ export function tailDeparture(items: readonly BackendTimelineItem[], buffer: Com
   } : { last: null };
 }
 
-function unpublishedReply(
+function departureIndex(
   items: readonly BackendTimelineItem[], departure: TailDeparture, buffer: CompactTransitionBuffer | null,
 ): number {
   const { last, partialPayload } = departure;
-  const watermark = last === null ? -1 : items.findIndex((item) => last.locator
+  return last === null ? -1 : items.findIndex((item) => last.locator
     ? item.reading_locator === last.locator
     : item.item_id === last.row.itemId && rankOf(item, buffer) === last.row.rank &&
       item.kind === last.content?.kind && (partialPayload !== undefined || item.payload === last.content.payload));
-  if (watermark === -1 && last !== null) return -1;
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  return items.findIndex((item, index) => item.userDelivery === undefined && isReply(item) &&
-    (index > watermark || (index === watermark && partialPayload !== undefined && item.payload !== partialPayload)));
 }
 
 export function unreadBoundary(
   items: readonly BackendTimelineItem[], itemId: string | null, departure: TailDeparture | undefined,
   buffer: CompactTransitionBuffer | null,
-): RowRef | null {
+): { row: RowRef | null; needsOlder: boolean } {
   const delivery = itemId === null ? -1 : items.findIndex((item) => item.item_id === itemId);
-  const stream = departure ? unpublishedReply(items, departure, buffer) : -1;
-  const index = delivery === -1 ? stream : stream === -1 ? delivery : Math.min(stream, delivery);
-  if (index < 0) return null;
+  const watermark = departure ? departureIndex(items, departure, buffer) : -1;
+  const missingDeparture = departure?.last != null && watermark === -1;
+  const stream = departure ? items.findIndex((item, index) => item.userDelivery === undefined && isReply(item) &&
+    (index > watermark || (index === watermark && departure.partialPayload !== undefined && item.payload !== departure.partialPayload))) : -1;
+  const index = delivery === -1 ? stream : stream === -1 ? delivery :
+    missingDeparture ? delivery : Math.min(stream, delivery);
+  if (index < 0) return { row: null, needsOlder: missingDeparture };
   const reply = items[index];
-  const boundary = refOf(reply, buffer);
-  if (reply.kind !== "agent_chat" || reply.nonHumanWake) return boundary;
+  const row = refOf(reply, buffer);
+  if (reply.kind !== "agent_chat" || reply.nonHumanWake) return { row, needsOlder: missingDeparture };
   for (let before = index - 1; before >= 0; before--) {
     const item = items[before];
-    if (rankOf(item, buffer) !== boundary.rank) break;
-    if (isHumanMessage(item) && !isSilentTimelineItem(item)) return refOf(item, buffer);
-    if (item.kind === "agent_reasoning" || item.kind === "agent_code" || item.kind === "code_output" ||
-        item.kind === "attach" || (item.kind === "system_marker" && item.source === "reply_visibility")) continue;
-    break;
+    if (rankOf(item, buffer) === row.rank) {
+      if (isHumanMessage(item) && !isSilentTimelineItem(item)) return { row: refOf(item, buffer), needsOlder: missingDeparture };
+      if (item.kind === "agent_reasoning" || item.kind === "agent_code" || item.kind === "code_output" ||
+          item.kind === "attach" || (item.kind === "system_marker" && item.source === "reply_visibility")) continue;
+    }
+    return { row, needsOlder: missingDeparture };
   }
-  return boundary;
+  return { row, needsOlder: true };
 }

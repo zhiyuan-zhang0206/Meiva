@@ -186,6 +186,7 @@ export const TurnBlock = memo(function TurnBlock({
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
+        data-turn-header
         data-expanded={expanded}
       >
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>

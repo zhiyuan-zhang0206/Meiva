@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { bottomZone, type StickyThresholds } from "@/lib/layout/sticky";
 
-import { findRowNode, offsetOf, READING_TOP_PX, readRowAnchor, rowOf, TAIL, type RowRef, type ViewAnchor } from "./dom";
+import { expandedTurnHeader, findRowNode, offsetOf, READING_TOP_PX, readRowAnchor, rowOf, TAIL, type RowRef, type ViewAnchor } from "./dom";
 import { rideClock, rideDuration, rideProgress } from "./ride";
 
 // meiva:note
@@ -196,7 +196,7 @@ export function useViewportAnchor({
     }
     const same = previous?.kind === anchor.kind && (anchor.kind === "tail" ||
       (previous.kind !== "tail" && previous.row === anchor.row &&
-        (anchor.kind === "bounded-tail" || (previous.kind === "row" && previous.offset === anchor.offset))));
+        (anchor.kind === "bounded-tail" || (previous.kind === "row" && previous.offset === anchor.offset && previous.clearTurnHeader === anchor.clearTurnHeader))));
     if (!same) latest.current.onChange(anchor, cause);
   }, [viewport]);
 
@@ -236,7 +236,7 @@ export function useViewportAnchor({
     const last = lastWrittenRef.current;
     const clamped = last !== null && last > max + 0.5 && Math.abs(vp.scrollTop - max) < 0.5;
     const drift = last === null || clamped ? 0 : vp.scrollTop - last;
-    if (anchor.kind === "bounded-tail" && Math.abs(drift) >= 0.5) {
+    if ((anchor.kind === "bounded-tail" || (anchor.kind === "row" && anchor.clearTurnHeader)) && Math.abs(drift) >= 0.5) {
       const row = readRow(vp);
       if (row) setAnchor(row, "reader");
       else {
@@ -291,7 +291,9 @@ export function useViewportAnchor({
       // anchor takes the identity the row has now, so the next re-key can still trace it.
       const current = rowOf(hit.node, anchor.row, hit.collapsed);
       if (current !== anchor.row) setAnchor({ ...anchor, row: current }, "reader");
-      const preferredOffset = anchor.kind === "bounded-tail" ? READING_TOP_PX : anchor.offset;
+      const clearTurn = anchor.kind === "bounded-tail" || anchor.clearTurnHeader;
+      const headerHeight = clearTurn ? expandedTurnHeader(hit.node)?.getBoundingClientRect().height ?? 0 : 0;
+      const preferredOffset = (anchor.kind === "bounded-tail" ? READING_TOP_PX : anchor.offset) + headerHeight;
       const offset = hit.collapsed ? Math.max(COLLAPSED_MIN_OFFSET_PX, preferredOffset) : preferredOffset;
       const rowTop = vp.scrollTop + offsetOf(vp, hit.node) - offset;
       write(vp, anchor.kind === "bounded-tail" ? Math.min(boundedEnd(vp), rowTop) : rowTop);

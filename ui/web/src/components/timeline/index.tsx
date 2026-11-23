@@ -20,7 +20,7 @@ import type { ReloadRestoreConfig } from "./model/reading-position";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { useTimelineExpansion } from "./view/use-timeline-expansion";
 import { useStickyThresholds } from "./model/sticky-thresholds";
-import { READING_TOP_PX, readTurnAnchor, TAIL, type RowRef, type ViewAnchor } from "./anchor/dom";
+import { findRowNode, READING_TOP_PX, readTurnAnchor, TAIL, type RowRef, type ViewAnchor } from "./anchor/dom";
 import { rankOf } from "./anchor/rows";
 import { usePlacement, type RevealDecision } from "./anchor/use-placement";
 import { useViewportAnchor, type AnchorChangeCause } from "./anchor/use-viewport-anchor";
@@ -84,6 +84,7 @@ interface Props {
   // decided. A saved place always wins over it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   reveal?: RevealDecision;
+  onOpeningShown?: () => void;
 }
 
 const DEFAULT_RELOAD_RESTORE: ReloadRestoreConfig = { state: "disabled" };
@@ -108,6 +109,7 @@ export const TimelineView = memo(function TimelineView({
   loading = false,
   maxWidthCss,
   reveal = DECIDED_NO_REVEAL,
+  onOpeningShown,
   onQuote,
   footer,
   bottomOverlayHeight = 0,
@@ -226,6 +228,7 @@ export const TimelineView = memo(function TimelineView({
     const inFlight = loadingOlder || (fill.requested !== null && fill.requested === (findOldestTimelineCursor(canonicalItems)?.item_id ?? null));
     return fill.pages < COLD_FILL_MAX_PAGES || inFlight;
   }, [canonicalItems, controls, hasMoreOlder, loading, loadingOlder, onLoadOlder]);
+  const openingShown = useRef(false);
   const placement = usePlacement({
     threadKey,
     entryKey: scrollMemoryKey,
@@ -238,6 +241,7 @@ export const TimelineView = memo(function TimelineView({
     onLoadOlder,
     onCancelBackgroundLoadOlder,
     reveal,
+    openingShown,
     anchor: controls,
     filling,
   });
@@ -259,6 +263,12 @@ export const TimelineView = memo(function TimelineView({
   // The writer applies after placement has seen this commit's rows and before the window measures it.
   useLayoutEffect(() => {
     controls.apply();
+    if (!visible || loading || openingShown.current) return;
+    const viewport = controls.viewport();
+    const current = controls.current();
+    if (!viewport || !current || (current.kind !== "tail" && !findRowNode(viewport, current.row))) return;
+    openingShown.current = true;
+    onOpeningShown?.();
   });
 
   const isFollowing = useCallback(() => controls.current()?.kind === "tail", [controls]);
@@ -318,7 +328,7 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => {
     const fill = coldFill.current;
     const viewport = controls.viewport();
-    if (!fill.open || !placement.fillAllowed || loading || !viewport || viewport.clientHeight <= 0 || canonicalItems.length === 0) return;
+    if (!fill.open || !placement.canColdFill() || loading || !viewport || viewport.clientHeight <= 0 || canonicalItems.length === 0) return;
     if (loadingOlder) {
       if (fill.requested !== null) fill.sawLoading = true;
       return;
@@ -397,7 +407,7 @@ export const TimelineView = memo(function TimelineView({
       if (entry && !entry.runExpanded) toggleTurn(entry.groupKey, false);
       toggleExpanded(item.item_id, false);
       setQuoteTarget((previous) => ({ itemId: item.item_id, token: (previous?.token ?? 0) + 1 }));
-      placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX });
+      placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX, clearTurnHeader: true });
       setQuoteRequest(null);
     } else if (!loadingOlder && hasMoreOlder && onLoadOlder && pages < 3) {
       setQuoteRequest({ quote, pages: pages + 1 });

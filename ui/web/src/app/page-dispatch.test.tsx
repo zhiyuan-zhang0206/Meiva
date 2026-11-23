@@ -695,7 +695,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     expect(current?.isLoading).toBe(false);
   });
 
-  it("restores the unread boundary on a tail return even if seen advances before the snapshot arrives", async () => {
+  it("keeps the unread boundary through two returns before a qualified snapshot", async () => {
     const authority = deferred<ConversationSnapshotResponse>();
     const empty: TimelineResponse = { items: [], msg_count: 0, has_more: false };
     const newer: BackendTimelineItem = { ...items[0], item_id: "17.0", payload: "Newer output" };
@@ -751,14 +751,19 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     // meiva:note
     // A delivery arrived while the reader was away; the authority read of the return is held.
     unread = true; holdAuthority = true;
-    const frames = recordShownFrames();
     view.rerender(surface(42));
-    frames.sample();
-    expect(rowsShown()).toBe(false);
-    await waitFor(() => expect(client.getQueryData<{ seen_id: number }>(["user-messages", 42])?.seen_id).toBe(1));
+    await waitFor(() => expect(client.getQueryData<UserMessageFeed>(["user-messages", 42])?.items).toHaveLength(1));
     expect(current?.sourceReady).toBe(false);
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
     expect(rowsShown()).toBe(false);
+    expect(seen).toBe(0);
+
+    view.rerender(surface(43));
+    await waitFor(() => expect(current?.sourceReady).toBe(true));
+    const frames = recordShownFrames();
+    view.rerender(surface(42));
+    expect(rowsShown()).toBe(false);
+    expect(seen).toBe(0);
     act(() => {
       freshHeight = 6300;
       authority.resolve(composed({ items: [...items, newer], msg_count: 18, has_more: false }));
@@ -772,6 +777,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     expect(readingOffset("17.0")).toBe(56);
     expect(atBottom()).toBe(false);
     expect(new Set(frames.tops)).toEqual(new Set([4744]));
+    await waitFor(() => expect(seen).toBe(1));
   });
 
 });

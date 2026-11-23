@@ -629,6 +629,29 @@ describe("bounded unread return geometry", () => {
     view.rerender(host(<TimelineView items={[history, human, reply]} threadKey="42" scrollMemoryKey={entry} bottomOverlayHeight={dockOverlap} />));
   }
 
+  it.each([false, true])("brings a prompt from an older page into the first visible return (delivered: %s)", (delivered) => {
+    const work: BackendTimelineItem = { ...items[3], item_id: "2.1", kind: "agent_reasoning" };
+    const loadOlder = vi.fn();
+    const entry = `paged-boundary-${delivered}`;
+    const opening = [history, human];
+    const reveal = { decided: true, itemId: delivered ? reply.item_id : null };
+    const presenting = (rows: BackendTimelineItem[], loadingOlder = false) => host(<TimelineView items={rows}
+      threadKey="42" scrollMemoryKey={entry} hasMoreOlder onLoadOlder={loadOlder} loadingOlder={loadingOlder} reveal={reveal} />);
+    const view = renderWithBrowser(host(<TimelineView items={opening} threadKey="42" scrollMemoryKey={entry} />));
+    view.rerender(shell());
+    top = 0;
+    frames.length = 0;
+    view.rerender(presenting([work, reply]));
+    expect(rowsShown()).toBe(false);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    view.rerender(presenting([work, reply], true));
+    view.rerender(presenting([...opening, work, reply]));
+    expect(rowsShown()).toBe(true);
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+    expect(shownTops()).toEqual([300 - READING_TOP_PX]);
+  });
+
   it("opens a 1500px reply with the 100px prompt at the safe top of a 1000px viewport", () => {
     mountReturn(1500);
     expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);

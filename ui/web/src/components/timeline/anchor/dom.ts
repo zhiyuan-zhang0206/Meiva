@@ -15,7 +15,7 @@ export interface RowRef {
 export type ViewAnchor =
   | { kind: "tail" }
   | { kind: "bounded-tail"; row: RowRef }
-  | { kind: "row"; row: RowRef; offset: number };
+  | { kind: "row"; row: RowRef; offset: number; clearTurnHeader?: true };
 
 export const TAIL: ViewAnchor = { kind: "tail" };
 
@@ -67,6 +67,11 @@ export function offsetOf(viewport: HTMLElement, node: HTMLElement): number {
   return node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
+export function expandedTurnHeader(node: HTMLElement): HTMLElement | null {
+  const turn = node.closest('[data-turn-expanded="true"]');
+  return turn && turn !== node ? turn.querySelector<HTMLElement>(":scope > [data-turn-header]") : null;
+}
+
 const READABLE_ROWS = ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]";
 
 // meiva:note
@@ -87,6 +92,8 @@ export function readRowAnchor(
     if (!id || id.startsWith("_")) continue;
     const rect = node.getBoundingClientRect();
     if (rect.bottom <= box.top + BAR_HEIGHT_PX || rect.top >= box.bottom) continue;
+    const header = expandedTurnHeader(node);
+    if (header && rect.bottom <= header.getBoundingClientRect().bottom) continue;
     const collapsedTurn = node.dataset.turnExpanded === "false";
     const anchor: Extract<ViewAnchor, { kind: "row" }> = {
       kind: "row",

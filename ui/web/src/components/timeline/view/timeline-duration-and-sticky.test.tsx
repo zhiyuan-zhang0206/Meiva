@@ -570,6 +570,31 @@ describe("TimelineView header scrolling scope", () => {
     act(() => { viewport.scrollTop = 450; fireEvent.scroll(viewport); });
     for (const title of titles) expect(container.contains(title)).toBe(true);
   });
+  it("opens a quote source below the 100px sticky header measured on a 390px timeline", () => {
+    let headerHeight = 100;
+    const layout = timelineLayout({
+      rowHeight: 100,
+      height: (node) => node.hasAttribute("data-turn-header") ? headerHeight : undefined,
+    });
+    const work = Array.from({ length: 15 }, (_, index) => ({
+      ...makeItem({ item_id: `2.${index}`, kind: "agent_reasoning", payload: `Step ${index}` }),
+      source_message_id: `work-${index}`, source_block_idx: 0,
+    }));
+    const { container } = render(<div style={{ width: 390 }}><TimelineView threadKey="42" items={[
+      ...work,
+      makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Ready" }),
+      { ...makeItem({ item_id: "4.0", kind: "inbound_chat", source: "user", payload: "Question" }), quote: {
+        source_agent_id: 42, source_item_id: "2.4", source_message_id: "work-4", author: "Agent", created_at: "", text: "Step 4", source_block_idx: 0,
+      } },
+    ]} /></div>);
+    fireEvent.click(container.querySelector('[data-quote-exclude] button')!);
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(layout.rowTop("2.4")).toBe(156);
+    headerHeight = 76;
+    layout.resize();
+    expect(layout.rowTop("2.4")).toBe(132);
+  });
+
   // meiva:note
   // Collapsing shortens the scroll range and the browser clamps scrollTop during layout. The writer does
   // not count that clamp as reader drift, so the collapsed header stays where the reader clicked it.

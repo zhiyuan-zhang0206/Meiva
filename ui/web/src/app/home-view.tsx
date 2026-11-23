@@ -494,12 +494,17 @@ function HomeContent({
     return {
       agentId: activeId,
       rosterRow: activeAgent !== undefined,
+      shown: false,
       quiet: activeAgent?.has_unread_user_messages === false && !hasTailDeparture(entryKey, contentKey),
       savedPlace: hasSavedTimelinePlace(entryKey, contentKey, reloadRestore),
     };
   };
   const [opened, setOpened] = useState(openedState);
-  if (opened.agentId !== activeId || (!opened.rosterRow && activeAgent !== undefined)) setOpened(openedState());
+  if (opened.agentId !== activeId) setOpened(openedState());
+  else if (!opened.rosterRow && activeAgent !== undefined) setOpened({ ...openedState(), shown: opened.shown });
+  const onOpeningShown = useCallback(() => {
+    setOpened((current) => current.agentId === activeId && !current.shown ? { ...current, shown: true } : current);
+  }, [activeId]);
   const seenReveal = useSeenPosition({
     agentId: activeId,
     feed: {
@@ -514,6 +519,7 @@ function HomeContent({
     loadingOlder,
     loadOlder: loadOlderForReveal,
     revealWanted: !opened.savedPlace,
+    openingShown: opened.agentId === activeId && opened.shown,
   });
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
@@ -577,6 +583,7 @@ function HomeContent({
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
+            onOpeningShown={onOpeningShown}
             reveal={opened.agentId === activeId && opened.quiet ? NO_UNREAD_REVEAL : seenReveal}
             onQuote={acceptQuote}
             bottomOverlayHeight={bottomOverlayHeight}

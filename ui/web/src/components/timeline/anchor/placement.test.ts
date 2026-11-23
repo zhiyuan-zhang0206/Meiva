@@ -237,6 +237,39 @@ describe("unread boundary", () => {
     expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
   });
 
+  it.each([true, false])("reads the prompt across a page boundary (delivered: %s)", (delivered) => {
+    const machine = machineFor(tailDeparture([human], null));
+    const fx = effects();
+    const reveal = delivered ? showReply : { decided: true, itemId: null };
+    const latest = { items: [work, reply], hasMoreOlder: true, reveal };
+    machine.step(inputs(latest), fx);
+    expect(fx.loadOlder).toHaveBeenCalledTimes(1);
+    expect(machine.snapshot()).toMatchObject({ visible: false, fillAllowed: false });
+    machine.step(inputs({ ...latest, loadingOlder: true }), fx);
+    machine.step(inputs({ ...latest, items: [human, work, reply] }), fx);
+    expect(fx.loadOlder).toHaveBeenCalledTimes(1);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "1.0", rank: 0 } }, { hold: false });
+  });
+
+  it("keeps the first loaded reply visible when the unread search expires without a watermark", () => {
+    const machine = machineFor(tailDeparture([human], null));
+    const fx = effects();
+    const latest = { items: [work, reply], hasMoreOlder: true };
+    machine.step(inputs(latest), fx);
+    machine.step(inputs({ ...latest, now: BOUNDS.timeoutMs, loadingOlder: true }), fx);
+    expect(fx.loadOlder).toHaveBeenCalledTimes(1);
+    expect(fx.cancelOlder).toHaveBeenCalledTimes(1);
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "4.0", rank: 0 } }, { hold: false });
+  });
+
+  it("shares the older-page limit with the delivery lookup", () => {
+    const machine = machineFor(null);
+    const fx = effects();
+    machine.step(inputs({ items: [work, reply], hasMoreOlder: true, reveal: { ...showReply, olderPages: BOUNDS.maxPages } }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(fx.place).toHaveBeenCalledWith({ kind: "bounded-tail", row: { itemId: "4.0", rank: 0 } }, { hold: false });
+  });
+
   it("keeps the boundary when a reply visible at departure grew before the return", () => {
     const machine = machineFor(tailDeparture([human, { ...reply, partial: true, payload: "Short" }], null));
     const fx = effects();
