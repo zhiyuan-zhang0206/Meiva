@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base.agents.context import MeivaContext
 from base.agents.model.harness_models import resolve_harness_catalog_model
-from base.db.usage_record import UsageLedgerWriteError
+from base.api_contracts.usage import UsageLedgerWriteError
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import Usage
 from base.lm.harness.engine import HarnessTurn

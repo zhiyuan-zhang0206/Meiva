@@ -12,16 +12,15 @@ can supply.
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Unpack
 
 from base.agents.context.clients import ClientSet
+from base.api_contracts.usage import UsageLedger
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
-from base.db.usage_ledger import bind_usage_ledger
-from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.lm.catalog import ModelCatalog
-from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
@@ -102,9 +101,25 @@ def build_sdk_model_catalog(
     clients: ClientSet,
     machine: MachineIdentityReader,
 ) -> ModelCatalog:
+    from base.packages.plugin_providers import build_model_catalog
+
     catalog = build_model_catalog(home=home)
+    return replace(catalog, usage_ledger=partial(_sdk_usage_ledger, home, config, clients, machine))
+
+
+def _sdk_usage_ledger(
+    home: Path,
+    config: ConfigBoot,
+    clients: ClientSet,
+    machine: MachineIdentityReader,
+) -> UsageLedger | None:
+    from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+
     if config.view.data_plane.db_url in ("", PLACEHOLDER_DB_URL):
-        return catalog
-    if config.view.env_boot.db_authority_refusal is not None:
-        return catalog
-    return replace(catalog, usage_ledger=bind_usage_ledger(clients.database, machine.name, home))
+        return None
+    from base.db.config import db_config_from_boot
+    from base.db.usage_ledger import bind_usage_ledger
+
+    if db_config_from_boot(config).db_authority_refusal is not None:
+        return None
+    return bind_usage_ledger(clients.database, machine.name, home)

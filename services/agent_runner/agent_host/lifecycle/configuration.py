@@ -5,6 +5,7 @@
 import random
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from base.agents.context.clients import ClientSet
@@ -153,8 +154,8 @@ def load_installation(
         )
     catalog = replace(
         build_model_catalog(home=home),
-        usage_ledger=bind_usage_ledger(
-            clients.database, ConfiguredMachineIdentity(config).name, home
+        usage_ledger=partial(
+            bind_usage_ledger, clients.database, ConfiguredMachineIdentity(config).name, home
         ),
     )
     load_extensions(

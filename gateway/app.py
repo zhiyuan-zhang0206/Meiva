@@ -482,7 +482,9 @@ def create_app(
     if isinstance(catalog, ModelCatalog):
         catalog = replace(
             catalog,
-            usage_ledger=bind_usage_ledger(process.database, process.machine.name, process.home),
+            usage_ledger=partial(
+                bind_usage_ledger, process.database, process.machine.name, process.home
+            ),
         )
         state.memory_embedder = memory_router.build_embedder(
             config.memory_search, catalog, now=state.clock.now, rng=config.rng

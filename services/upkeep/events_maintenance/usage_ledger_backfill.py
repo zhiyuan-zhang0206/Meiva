@@ -9,8 +9,8 @@ from psycopg.rows import class_row
 
 from base.agents.model.harness_models import resolve_harness_catalog_model
 from base.api_contracts.agent_contract import harness_billing_of_source
+from base.api_contracts.usage import UsageLedgerEntry
 from base.db.usage_ledger import insert_usage
-from base.db.usage_record import UsageLedgerEntry
 from base.lm.pricing import CacheTokens, PriceBook, quote
 
 _SELECT = """

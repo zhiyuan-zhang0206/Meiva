@@ -153,6 +153,8 @@ _DECLARED_PAYLOAD_KEYS = {
         "attribution",
         "source",
         "parent_call_id",
+        "call_id",
+        "complete",
     ),
     "sse_drop": ("kind", "n"),
     "spawn": ("machine", "fork_from", "fork_checkpoint"),

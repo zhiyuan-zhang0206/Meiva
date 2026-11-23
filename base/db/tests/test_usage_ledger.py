@@ -4,9 +4,13 @@ from decimal import Decimal
 
 import pytest
 
+from base.api_contracts.usage import (
+    UsageLedgerConflictError,
+    UsageLedgerEntry,
+    UsageLedgerWriteError,
+)
 from base.db import Database
 from base.db.usage_ledger import usage_writer
-from base.db.usage_record import UsageLedgerConflictError, UsageLedgerEntry, UsageLedgerWriteError
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 

@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 
 from base.api_contracts.agent_contract import harness_billing_of_source
-from base.db.usage_record import UsageLedgerEntry
+from base.api_contracts.usage import UsageLedgerEntry
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
@@ -323,7 +323,7 @@ def _log_usage(
             write_1h=event.cache_write_1h,
             write_30m=event.cache_write_30m,
         ),
-        at=event.priced_at or event.now,
+        at=event.priced_at or _utc_usage_time(event.now),
         prices=event.catalog.prices,
     )
     if priced is not None:
@@ -409,12 +409,19 @@ def _emit_usage_span(event: _UsageEvent, priced: CostQuote | None, vendor: str |
         )
 
 
+def _utc_usage_time(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        return now.replace(tzinfo=UTC)
+    return now.astimezone(UTC)
+
+
 def _write_usage(
     event: _UsageEvent,
     priced: CostQuote | None,
     vendor: str | None,
 ) -> tuple[str | None, bool]:
-    ledger = event.catalog.usage_ledger
+    resolve_ledger = event.catalog.usage_ledger
+    ledger = resolve_ledger() if resolve_ledger is not None else None
     if ledger is None:
         return None, True
     call_id = event.call_id if event.call_id is not None else ledger.new_call_id()
@@ -422,14 +429,14 @@ def _write_usage(
     if priced is not None:
         price_snapshot.update(_price_snapshot(priced))
         del price_snapshot["cost_usd"]
-        price_snapshot["priced_at"] = (event.priced_at or event.now).isoformat()
+        price_snapshot["priced_at"] = (event.priced_at or _utc_usage_time(event.now)).isoformat()
         provenance = event.catalog.prices.provenance(event.model)
         if provenance is not None:
             price_snapshot["source_url"], price_snapshot["source_checked_at"] = provenance
     inserted = ledger.write(
         UsageLedgerEntry(
             call_id=call_id,
-            occurred_at=event.now,
+            occurred_at=_utc_usage_time(event.now),
             agent_id=event.for_agent_id if event.for_agent_id is not None else ambient_agent_id(),
             machine=ledger.machine(),
             cluster=ledger.cluster,

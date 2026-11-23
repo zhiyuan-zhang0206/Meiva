@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import assert_never
 
@@ -527,7 +528,9 @@ async def run(
     try:
         catalog = replace(
             build_model_catalog(home=home),
-            usage_ledger=bind_usage_ledger(database, ConfiguredMachineIdentity(config).name, home),
+            usage_ledger=partial(
+                bind_usage_ledger, database, ConfiguredMachineIdentity(config).name, home
+            ),
         )
         provider = get_provider(
             inputs.embedding_name,

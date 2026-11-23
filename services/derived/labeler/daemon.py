@@ -22,6 +22,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -265,8 +266,8 @@ async def run(
     pool = db.pool()
     catalog = replace(
         build_model_catalog(home=home),
-        usage_ledger=bind_usage_ledger(
-            database, ConfiguredMachineIdentity(process_config).name, home
+        usage_ledger=partial(
+            bind_usage_ledger, database, ConfiguredMachineIdentity(process_config).name, home
         ),
     )
     bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng(), timers=timers)

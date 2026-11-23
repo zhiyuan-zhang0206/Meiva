@@ -1,4 +1,4 @@
-exports = ["agent_contract.py", "ask.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "question.py", "op_envelope.py", "reading.py", "status.py", "user_delivery.py"]
+exports = ["agent_contract.py", "ask.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "question.py", "op_envelope.py", "reading.py", "status.py", "usage.py", "user_delivery.py"]
 
 [purity]
 "." = "ratchet"
@@ -16,6 +16,7 @@ exports = ["agent_contract.py", "ask.py", "caller_identity.py", "config.py", "co
 "reading.py" = "strict"
 "op_envelope.py" = "strict"
 "status.py" = "strict"
+"usage.py" = "strict"
 
 [uses]
 "tests" = ["agent_contract.py", "contracts.py", "idempotency.py", "question.py", "reading.py"]

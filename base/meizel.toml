@@ -7,11 +7,11 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "cluster" = ["api_contracts", "clock", "config", "db", "host", "log", "native_process", "paths"]
 "config" = ["api_contracts", "host", "log", "native_process", "paths"]
 "daemon" = ["clock", "cluster", "config", "db", "host", "log", "native_process", "packages", "paths", "telemetry"]
-"db" = ["config", "host", "log", "native_process", "paths"]
+"db" = ["api_contracts", "config", "host", "log", "native_process", "paths"]
 "deploy" = ["clock", "cluster", "config", "db", "host", "log", "native_process", "paths", "sessions"]
 "events" = ["api_contracts", "clock", "cluster", "config", "db", "host", "log"]
 "host" = ["log", "native_process", "paths"]
-"lm" = ["api_contracts", "clock", "config", "db", "host", "log", "telemetry"]
+"lm" = ["api_contracts", "clock", "config", "host", "log", "telemetry"]
 
 "log" = ["paths"]
 "native_process" = ["log", "paths"]

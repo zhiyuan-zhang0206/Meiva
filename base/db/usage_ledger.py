@@ -10,13 +10,13 @@ from psycopg import sql
 from psycopg.rows import class_row
 from psycopg.types.json import Jsonb
 
-from base.db.handle import Database
-from base.db.usage_record import (
+from base.api_contracts.usage import (
     UsageLedger,
     UsageLedgerConflictError,
     UsageLedgerEntry,
     UsageLedgerWriteError,
 )
+from base.db.handle import Database
 
 _COLUMNS = sql.SQL("""
     call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind, model,

@@ -20,7 +20,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
 from loguru import logger
 
-from base.db.usage_record import UsageLedgerWriteError
+from base.api_contracts.usage import UsageLedgerWriteError
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import UsageOptions, log_usage_from_message
 from base.lm.usage.reporting import FAILURE_REPORT_EVERY, should_report

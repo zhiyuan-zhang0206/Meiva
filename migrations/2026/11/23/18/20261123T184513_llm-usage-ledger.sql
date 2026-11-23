@@ -1,4 +1,4 @@
-CREATE TABLE llm_usage_ledger (
+CREATE TABLE IF NOT EXISTS llm_usage_ledger (
     call_id text PRIMARY KEY CHECK (call_id <> ''),
     occurred_at timestamptz NOT NULL,
     recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -27,8 +27,8 @@ CREATE TABLE llm_usage_ledger (
     CHECK ((cost_usd IS NULL) = (price_source IS NULL))
 );
 
-CREATE INDEX llm_usage_ledger_occurred_at ON llm_usage_ledger (occurred_at);
-CREATE INDEX llm_usage_ledger_agent_occurred_at ON llm_usage_ledger (agent_id, occurred_at);
+CREATE INDEX IF NOT EXISTS llm_usage_ledger_occurred_at ON llm_usage_ledger (occurred_at);
+CREATE INDEX IF NOT EXISTS llm_usage_ledger_agent_occurred_at ON llm_usage_ledger (agent_id, occurred_at);
 
 COMMENT ON TABLE llm_usage_ledger IS
     'One usage report per source identity. API and subscription sums are disjoint. Rows have no retention expiry.';
