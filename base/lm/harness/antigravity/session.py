@@ -253,25 +253,15 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         return transport
 
     async def _await_background_reply(self) -> None:
-        while not self._closed:
+        while not self._closed and self._prompt_turn is None:
             self._background_changed.clear()
-            deadline = self._schedules.reply_deadline(self._clock.now().timestamp())
-            if deadline is None:
-                return
-            try:
-                async with asyncio.timeout(max(0.0, deadline - self._clock.now().timestamp())):
-                    await self._background_changed.wait()
-                if self._transport_failed:
-                    raise SessionClosedError(
-                        "agy ACP session failed while waiting for a background reply"
-                    )
-            except TimeoutError as exc:
-                if (transport := self._transport) is not None:
-                    if (error := self._watch_output(transport)) is None:
-                        continue
-                    self._fail_transport(transport, RuntimeError(error))
-                raise SessionClosedError("agy ACP background reply timed out") from exc
-        raise SessionClosedError("session is closed")
+            if self._schedules.reply_deadline(self._clock.now().timestamp()) is None:
+                break
+            await self._background_changed.wait()
+            if self._transport_failed:
+                raise SessionClosedError("agy ACP session failed during timer wait")
+        if self._closed:
+            raise SessionClosedError("session is closed")
 
     async def _flush_prompt(self, transport: AgyTransport) -> None:
         if self._transport is not transport or self._transport_failed or self._closed:
@@ -294,10 +284,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._baseline = self._probe.tool_processes(pid) if pid is not None else {}
             turn = PromptTurn(ticket, len(self._transcript().rows))
             if self._projection is None:
-                needs_projection = self._resume_projection or self._subagents.has_children(
-                    self._session_id
+                required = self._resume_projection or self._subagents.has_children(self._session_id)
+                offset = self._idle_replies.offset if self._schedules.reply_expired else None
+                self._projection = turn.require_projection(
+                    required=required, late_timer_offset=offset
                 )
-                self._projection = turn.require_projection(required=needs_projection)
             self._resume_projection = False
             self._prompt_turn = turn
             ticket.started_at = self._monotonic()
@@ -510,6 +501,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _replay(self, projection: OutputProjection, transcript: TranscriptSnapshot) -> None:
         rows, turn = transcript.rows, self._prompt_turn
+        projection.carry_scheduled_notices = self._schedules.reply_expired
         if turn is not None:
             turn.prove_projection(projection, rows)
         for item in projection.project(rows):
@@ -685,20 +677,27 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if not transport.alive:
             return "agy ACP stream ended"
         projection, turn, mono = self._projection, self._prompt_turn, self._monotonic()
+        now = self._clock.now().timestamp()
+        deadline = self._schedules.reply_deadline(now)
         if turn is None:
             self._replay_idle()
-        elif projection is not None and (projection.pending or turn.stop_reason):
+        elif projection is not None and (
+            projection.pending or turn.stop_reason or (deadline is not None and deadline <= now)
+        ):
             self._replay(projection, self._transcript())
             turn = self._prompt_turn
         if turn is not None and turn.stop_reason and mono >= turn.stop_deadline:
             return "agy ACP output attribution timed out"
-        now = self._clock.now().timestamp()
-        deadline = self._schedules.reply_deadline(now)
-        return (
-            "agy ACP background reply timed out"
-            if deadline is not None and deadline <= now
-            else None
-        )
+        self._schedules, expired = self._schedules.expire_replies(now)
+        if expired:
+            self._schedule_changed()
+            logger.warning(
+                "Expired agy ACP timer keepalive without a verified reply",
+                event="agy_acp_timer_reply_expired",
+                timer_count=expired,
+                foreground_active=turn is not None,
+            )
+        return None
 
     async def _ack_adopted(self, transport: AgyTransport) -> None:
         try:

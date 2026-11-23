@@ -99,7 +99,8 @@ def planner_row(text: str | None, *, tokens: int = 10) -> dict[str, object]:
 
 def finish_steer(request: int, transcript: Path) -> None:
     record(transcript, planner_row("ORIGINAL_DONE\nSTEER_DONE"))
-    update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    if "--test-early-command-result" not in sys.argv:
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
     message("ORIGINAL_DONE\n")
     message("STEER_DONE")
     result(request)
@@ -147,7 +148,15 @@ def trigger_background(transcript: Path) -> None:
         background_notice(transcript)
     if early_planner:
         record(transcript, planner_row("BACKGROUND", tokens=237))
-    update("tool_call_update", toolCallId="timer", status="completed")
+    if "--test-four-minute-timer" in sys.argv:
+        update(
+            "tool_call_update",
+            toolCallId="timer",
+            status="completed",
+            rawOutput="Timer cancelled early: its early-termination condition (any) was met by a message from user.",
+        )
+    else:
+        update("tool_call_update", toolCallId="timer", status="completed")
     after_release(
         Path("release"), lambda: finish_background(transcript, early_notice, early_planner)
     )
@@ -385,6 +394,8 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         _ = declare_child(transcript)
     if command == "late-native":
         send_late_native(transcript)
+    if command == "late-timer":
+        finish_background(transcript, early_notice=True, early_planner=False)
     if command == "tool-then-foreground":
         record_native_tool(transcript)
     if command == "foreground-preamble":
@@ -508,6 +519,25 @@ def exit_peer() -> None:
     sys.exit(0)
 
 
+def arm_background(transcript: Path, request: int) -> None:
+    params = (
+        {"DurationSeconds": 240, "Prompt": "timer prompt", "TimerCondition": "any"}
+        if "--test-four-minute-timer" in sys.argv
+        else {"DurationSeconds": 5, "Prompt": "timer prompt"}
+    )
+    update("tool_call", toolCallId="timer", name="schedule", status="in_progress", rawInput=params)
+    message("TIMER_SET")
+    result(request)
+    after_release(Path("release-tool"), lambda: trigger_background(transcript))
+
+
+def complete_steer(transcript: Path, request: int) -> None:
+    if "--test-early-command-result" in sys.argv:
+        update("tool_call_update", toolCallId="tool-1", status="completed", rawOutput="WORK_DONE")
+    gate = "release-steer" if "--test-overlap" in sys.argv else "release"
+    after_release(Path(gate), lambda: finish_steer(request, transcript))
+
+
 def handle_prompt(
     transcript: Path,
     data: dict[str, Any],
@@ -525,8 +555,7 @@ def handle_prompt(
         assert original is not None
         result(original)
         original = None
-        gate = "release-steer" if "--test-overlap" in sys.argv else "release"
-        after_release(Path(gate), lambda: finish_steer(request, transcript))
+        complete_steer(transcript, request)
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
@@ -536,16 +565,7 @@ def handle_prompt(
         hold_prompt(transcript, command)
         return request, permission_prompt
     if command == "background":
-        update(
-            "tool_call",
-            toolCallId="timer",
-            name="schedule",
-            status="in_progress",
-            rawInput={"DurationSeconds": 5, "Prompt": "timer prompt"},
-        )
-        message("TIMER_SET")
-        result(request)
-        after_release(Path("release-tool"), lambda: trigger_background(transcript))
+        arm_background(transcript, request)
     elif command == "overlap-first":
         after_release(Path("release-foreground"), lambda: foreground_first(transcript, request))
     elif command == "permission":

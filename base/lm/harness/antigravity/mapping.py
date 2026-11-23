@@ -136,8 +136,15 @@ def planner_rows(
     *,
     boundaries: Mapping[str, ForegroundBoundary] | None = None,
     answered_at: Mapping[int, int] | None = None,
+    carry_scheduled_notices: bool = False,
 ) -> Iterator[PlannerRow]:
-    for event in _attribution_events(rows, keys, boundaries or {}, answered_at or {}):
+    for event in _attribution_events(
+        rows,
+        keys,
+        boundaries or {},
+        answered_at or {},
+        carry_scheduled_notices=carry_scheduled_notices,
+    ):
         if isinstance(event, PlannerRow):
             yield event
 
@@ -147,6 +154,8 @@ def _attribution_events(
     keys: Sequence[str],
     boundaries: Mapping[str, ForegroundBoundary],
     answered_at: Mapping[int, int],
+    *,
+    carry_scheduled_notices: bool,
 ) -> Iterator[PlannerRow | BackgroundNotice | None]:
     marks = {input_marker(key): key for key in keys}
     foreground: str | None = None
@@ -163,7 +172,13 @@ def _attribution_events(
             foreground = marks.get(marker)
             boundary = boundaries.get(foreground or "")
             commands = set() if foreground is not None else None
-            background = _carry_notice(background, notice_boundary, answered_at, index)
+            background = _carry_notice(
+                background,
+                notice_boundary,
+                answered_at,
+                index,
+                carry_scheduled_notices=carry_scheduled_notices,
+            )
             yield background
         elif kind == "GENERIC":
             _remember_launched_command(row, commands)
@@ -184,12 +199,14 @@ def _carry_notice(
     boundary: ForegroundBoundary | None,
     answered_at: Mapping[int, int],
     marker_index: int,
+    *,
+    carry_scheduled_notices: bool,
 ) -> BackgroundNotice | None:
-    if notice is None or boundary is None or not boundary.degraded:
+    if notice is None or answered_at.get(notice.index, marker_index) < marker_index:
         return None
-    if answered_at.get(notice.index, marker_index) < marker_index:
-        return None
-    return notice
+    if carry_scheduled_notices and notice.cause is HarnessCause.SCHEDULED_WAKE:
+        return notice
+    return notice if boundary is not None and boundary.degraded else None
 
 
 def _remember_launched_command(row: Frame, commands: set[str] | None) -> None:
@@ -281,6 +298,7 @@ class ForegroundBoundary:
 class OutputProjection:
     offset: int
     fences_replay: bool = False
+    carry_scheduled_notices: bool = False
     keys: list[str] = field(default_factory=list[str])
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
@@ -302,6 +320,7 @@ class OutputProjection:
                 self.keys,
                 boundaries=self._boundaries,
                 answered_at=self._answered_at,
+                carry_scheduled_notices=self.carry_scheduled_notices,
             )
         )
 
@@ -351,7 +370,11 @@ class OutputProjection:
     ) -> bool:
         notice = None
         for event in _attribution_events(
-            rows[self.offset :], self.keys, self._boundaries, self._answered_at
+            rows[self.offset :],
+            self.keys,
+            self._boundaries,
+            self._answered_at,
+            carry_scheduled_notices=self.carry_scheduled_notices,
         ):
             if event is None or isinstance(event, BackgroundNotice):
                 notice = event

@@ -356,7 +356,11 @@ class PromptTurn:
             seen=frozenset(index for index, field, _ in projection.seen if field == "content"),
         )
 
-    def require_projection(self, *, required: bool) -> OutputProjection | None:
+    def require_projection(
+        self, *, required: bool, late_timer_offset: int | None = None
+    ) -> OutputProjection | None:
+        if late_timer_offset is not None:
+            return OutputProjection(late_timer_offset, carry_scheduled_notices=True)
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
 
     def prove_projection(

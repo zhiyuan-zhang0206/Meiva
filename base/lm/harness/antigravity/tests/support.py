@@ -14,7 +14,9 @@ from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
 from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.events import BridgeEvent, UnsolicitedSink
+from base.lm.harness.events import BridgeEvent, ToolResult, UnsolicitedSink
+from base.lm.harness.registry import SessionRegistry
+from base.lm.harness.session import SessionClock
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 
@@ -68,6 +70,11 @@ class Harness:
         await asyncio.wait_for(self._drain, timeout=3)
 
 
+async def release_timer(harness: Harness) -> ToolResult:
+    harness.release("release-tool")
+    return await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
+
+
 async def start(
     tmp_path: Path,
     *,
@@ -77,9 +84,11 @@ async def start(
     cancel_seconds: float = 1.0,
     write_seconds: float = 1.0,
     reply_seconds: float = 30.0,
+    clock: SessionClock | None = None,
+    registry: SessionRegistry | None = None,
 ) -> Harness:
     env = {"HOME": str(tmp_path / "home")}
-    clock = system_clock()
+    clock = clock if clock is not None else system_clock()
     config = AntigravityConfig(
         cwd=tmp_path,
         model="gemini-4-hydrogen-low",
@@ -95,7 +104,9 @@ async def start(
         transport_factory=lambda: AgyTransport(
             config, environ=env, owner_uid=os.getuid(), generation_id=uuid4().hex, clock=clock
         ),
-        binding=SessionBinding(unsolicited=unsolicited),
+        binding=SessionBinding(
+            agent_id=1 if registry is not None else None, registry=registry, unsolicited=unsolicited
+        ),
         clock=clock,
         home=tmp_path / "home",
         timing_refresh_interval=0,

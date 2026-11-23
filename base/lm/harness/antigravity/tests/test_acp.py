@@ -17,7 +17,7 @@ from base.lm.harness.antigravity.foreground import (
 )
 from base.lm.harness.antigravity.mapping import OutputProjection
 from base.lm.harness.antigravity.session import ActiveTurn
-from base.lm.harness.antigravity.tests.support import Harness, start
+from base.lm.harness.antigravity.tests.support import release_timer, start
 from base.lm.harness.antigravity.timing_store import timing_path
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
 from base.lm.harness.events import (
@@ -93,11 +93,6 @@ def _is_background(event: object) -> bool:
     return isinstance(event, TurnCompleted) and event.text == "BACKGROUND"
 
 
-async def _release_timer(harness: Harness) -> ToolResult:
-    harness.release("release-tool")
-    return await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
-
-
 @pytest.mark.parametrize("extra_args", [(), ("--test-early-hub",)])
 async def test_cancel_keeps_process_and_next_turn_works(
     tmp_path: Path, extra_args: tuple[str, ...]
@@ -112,7 +107,7 @@ async def test_cancel_keeps_process_and_next_turn_works(
             lambda e: isinstance(e, ToolUse) and e.tool_use_id == "tool-1"
         )
         if extra_args:
-            await _release_timer(harness)
+            await release_timer(harness)
         report = await harness.session.interrupt(turn_id=tool.turn_id)
         assert report.cli_alive and report.cli_pid == pid and report.settled
         cancel = [frame for frame in harness.frames() if frame.get("method") == "session/cancel"]
@@ -121,7 +116,7 @@ async def test_cancel_keeps_process_and_next_turn_works(
         ]
         await harness.wait_for(lambda e: isinstance(e, InterruptConfirmed))
         assert harness.session.background_work().items
-        timer = await _release_timer(harness)
+        timer = await release_timer(harness)
         assert timer.turn_id == timer_turn.turn_id and not timer.is_error
         harness.release()
         background = await harness.wait_for(_is_background)
@@ -273,63 +268,6 @@ async def test_foreground_waits_for_verified_tail_after_hub_notice(tmp_path: Pat
         assert done.text == "FIRST\nTRUE FINAL" and done.num_turns == 2
         detached = await harness.wait_for(_is_background)
         assert detached.text == "BACKGROUND"
-    finally:
-        await harness.stop()
-
-
-async def test_unverified_background_tail_cannot_hold_foreground_completion(tmp_path: Path) -> None:
-    harness = await start(
-        tmp_path, extra_args=("--test-missing-background-planner",), reply_seconds=2
-    )
-    try:
-        await harness.session.deliver([HarnessInput.of("timer", "background")])
-        timer = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
-        await harness.session.deliver([HarnessInput.of("first", "overlap-first")])
-        await harness.wait_for(lambda e: isinstance(e, InputInContext) and e.key == "first")
-        harness.release("release-tool")
-        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
-        harness.release("release-foreground")
-        await harness.wait_for(lambda e: isinstance(e, AssistantText) and e.text == "FOREGROUND")
-        harness.release()
-        await harness.wait_for_marker("background-sent")
-        harness.release("release-front-result")
-        done = await harness.wait_for(
-            lambda e: (
-                isinstance(e, TurnCompleted)
-                and e.turn_id != timer.turn_id
-                and e.text != "BACKGROUND"
-            )
-        )
-        assert done.text == "FOREGROUND"
-        assert harness.session.background_work().items
-        failure = await harness.wait_for(lambda e: isinstance(e, SessionFailed))
-        assert "background reply timed out" in failure.error
-        assert (
-            sum(isinstance(e, TurnCompleted) and e.turn_id == done.turn_id for e in harness.events)
-            == 1
-        )
-        assert not any(isinstance(e, UnsolicitedOutput) for e in harness.events)
-    finally:
-        await harness.stop()
-
-
-async def test_stuck_background_reply_retires_before_sending_the_waiting_input(
-    tmp_path: Path,
-) -> None:
-    harness = await start(tmp_path, reply_seconds=0.25)
-    try:
-        await harness.session.deliver([HarnessInput.of("timer", "background")])
-        await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
-        harness.release("release-tool")
-        await harness.wait_for(lambda e: isinstance(e, ToolResult) and e.tool_use_id == "timer")
-        async with asyncio.timeout(2):
-            with pytest.raises(InputsNotWrittenError, match="background reply") as failure:
-                await harness.session.deliver([HarnessInput.of("next", "next")])
-        assert failure.value.keys == {"next"}
-        await harness.wait_for(lambda e: isinstance(e, SessionFailed))
-        await harness.wait_for(lambda e: isinstance(e, InputRejected) and e.key == "next")
-        assert await harness.session.reconcile(["next"]) == {"next": Reconciliation.NOT_FOUND}
-        assert len(harness.prompts()) == 1
     finally:
         await harness.stop()
 

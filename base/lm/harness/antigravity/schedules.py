@@ -58,6 +58,7 @@ class Schedules:
     reply_wait_seconds: float = BACKGROUND_REPLY_SECONDS
     pending_kills: tuple[_PendingKill, ...] = ()
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
+    reply_expired: bool = False
 
     def tool_used(
         self,
@@ -213,6 +214,24 @@ class Schedules:
         due = tuple(timer.work.until for timer in self.background_timers if timer.due <= now)
         deadlines = (*due, *(reply.work.until for reply in self.replies))
         return min((end for end in deadlines if end is not None), default=None)
+
+    def expire_replies(self, now: float) -> tuple[Schedules, int]:
+        expired = {
+            timer.tool_id
+            for timer in (*self.background_timers, *self.replies)
+            if not timer.work.pending_at(now)
+        }
+        if not expired:
+            return self, 0
+        return replace(
+            self,
+            reply_expired=True,
+            calls=tuple(call for call in self.calls if call[0] not in expired),
+            background_timers=tuple(
+                timer for timer in self.background_timers if timer.tool_id not in expired
+            ),
+            replies=tuple(timer for timer in self.replies if timer.tool_id not in expired),
+        ), len(expired)
 
     def reply_finished(self, sender: str, prompt: str | None) -> Schedules:
         if prompt is None:

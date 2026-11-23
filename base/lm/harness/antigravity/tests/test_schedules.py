@@ -61,6 +61,27 @@ def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> N
     assert work.reply_deadline(NOW + 14) is None
 
 
+def test_expiring_one_detached_timer_keeps_other_timers_and_ignores_its_late_completion() -> None:
+    work = Schedules()
+    for tool_id, duration in (("expired", 5), ("live", 60)):
+        work = work.tool_used(
+            tool_id,
+            "schedule",
+            {"DurationSeconds": duration, "Prompt": tool_id},
+            turn_id="turn",
+            monotonic_now=100,
+        )
+    work = work.finish_turn("turn", now=NOW, monotonic_now=100)
+
+    remaining, expired = work.expire_replies(NOW + 35)
+    assert expired == 1 and remaining.reply_expired
+    assert remaining.has_detached and remaining.reply_deadline(NOW + 35) is None
+    [item] = remaining.pending_at(NOW + 35)
+    assert item.until == NOW + 90
+    assert remaining.tool_returned("expired", is_error=False, now=NOW + 40) is remaining
+    assert remaining.expire_replies(NOW + 40) == (remaining, 0)
+
+
 def test_a_failed_or_other_tool_call_schedules_nothing() -> None:
     assert not _scheduled({"Prompt": "x"}, is_error=True).pending_at(NOW)
     other = Schedules().tool_used("t", "run_command", {"x": 1})

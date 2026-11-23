@@ -127,11 +127,17 @@ native notice and reply offsets and planner usage when available. Both buffered
 and live starts point the graph to the exact reply row, even when the timeline
 reader has already passed it. The graph presents the transcript and applies the
 normal reply visibility policy.
-A future timer still allows foreground input.
-A due or triggered timer holds new dispatch and keeps the process alive, and
-an unverified reply at its deadline retires the generation. Cron-like
-calls retain the existing one-day bound. Timers also supply the foreground
-watchdog's silence floor while a prompt is active. See
+A future timer still allows foreground input. A due or triggered timer keeps
+the process alive and can hold the start of a new prompt until its reply
+deadline. Steering an active prompt continues during that wait. A successful
+schedule tool result can also represent an early provider cancellation. When
+a deadline passes without a verified reply, the adapter removes only the
+expired timers from the keepalive record, wakes any waiting dispatch, and logs
+`agy_acp_timer_reply_expired`. It continues to use transcript evidence for
+unkeyed output on that process, carrying unresolved timer notices across
+input markers so a late reply can still be attributed to its native turn.
+Cron-like calls retain the existing one-day bound. Timers also supply the
+foreground watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
 
 The local, read-only `GetCascadeTrajectory` RPC remains the source of live
