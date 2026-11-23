@@ -138,8 +138,8 @@ def test_flush_while_deferred_keeps_hold(deferred_backend: Any) -> None:
 
 def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any) -> None:
     backend, log_exporter, metric_reader = deferred_backend
-    backend.export_batch([_event(attributes={"tokens": 5})])
-    backend.export_batch([_event(attributes={"tokens": 7})])
+    backend.export_batch([_event(event_name="gateway_latency", attributes={"count": 5})])
+    backend.export_batch([_event(event_name="gateway_latency", attributes={"count": 7})])
 
     backend.finalize()
 
@@ -147,8 +147,7 @@ def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any)
     logs = log_exporter.get_finished_logs()
     assert len(logs) == 2
     metrics = _metrics(metric_reader)
-    name = next(n for n in metrics if n.endswith("tokens"))
-    assert sum(dp.value for dp in metrics[name].data.data_points) == 12
+    assert metrics["meiva_gateway_latency_count"].data.data_points[0].value == 12
     # Flushed exactly-once after completion: a second finalize is a no-op.
     backend.finalize()
     assert len(log_exporter.get_finished_logs()) == 2

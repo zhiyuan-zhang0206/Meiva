@@ -3,46 +3,36 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
-_NO_METRIC_ATTRS = frozenset({"body"})
-_MAX_METRIC_ATTR_CHARS = 64
-
-BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
-    ("event_log_drop", "last_dropped_at"): "gauge",
-    ("llm_usage", "price_miss"): None,
-    ("llm_usage", "price_hit"): None,
-    ("llm_usage", "price_out"): None,
-    ("llm_usage", "cost_usd"): "counter",
-    ("compaction_completed", "history_chars"): "histogram",
-    ("compaction_completed", "summary_chars"): "histogram",
-    ("pr_flow_daily", "merged_count"): "gauge",
-    ("pr_flow_daily", "ready_to_merge_median_seconds"): "gauge",
-    ("pr_flow_daily", "ready_to_merge_p90_seconds"): "gauge",
-    ("agent_registry", "max_id"): "gauge",
-    ("memory_search_stats", "rows"): "gauge",
-    ("memory_search_stats", "last_save_seconds"): "gauge",
-    ("root_health_tick", "last_tick_timestamp_seconds"): "gauge",
-    ("root_health_expected", "expected_since_timestamp_seconds"): "gauge",
-    ("checkpoint_table_sizes", "blobs_bytes"): "gauge",
-    ("checkpoint_table_sizes", "checkpoints_bytes"): "gauge",
-    ("checkpoint_table_sizes", "writes_bytes"): "gauge",
-    ("checkpoint_table_sizes", "blobs_live"): "gauge",
-    ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
-    ("checkpoint_table_sizes", "writes_live"): "gauge",
-    ("alerts", "last_ingest_timestamp_seconds"): "gauge",
-    ("sse", "active_connections"): "gauge",
-    ("gateway_process", "cpu_percent"): "gauge",
-    ("gateway_process", "rss_bytes"): "gauge",
-    ("gateway_process", "fd_count"): "gauge",
-    ("trace_recording", "disabled"): "gauge",
-    ("backup_dump_status", "last_run_ok"): "gauge",
-    ("recovery_drill_status", "last_run_ok"): "gauge",
-    ("schedule_manager_state", "stalled"): "gauge",
-    ("schedule_manager_state", "process_lost"): "gauge",
-    ("schedule_manager_state", "convergence_abandoned"): "gauge",
+METRIC_DISPOSITION: dict[str, dict[str, Literal["counter", "histogram", "gauge"]]] = {
+    "agent_registry": {"max_id": "gauge"},
+    "alerts": {"last_ingest_timestamp_seconds": "gauge"},
+    "backup_dump_status": {"last_run_ok": "gauge"},
+    "checkpoint_table_sizes": {
+        "blobs_bytes": "gauge",
+        "checkpoints_bytes": "gauge",
+        "writes_bytes": "gauge",
+    },
+    "event_log_drop": {"last_dropped_at": "gauge"},
+    "gateway_latency": {"count": "counter"},
+    "llm_usage": {"latency_ms": "histogram"},
+    "memory_search_stats": {"last_save_seconds": "gauge", "rows": "gauge"},
+    "recovery_drill_status": {"last_run_ok": "gauge"},
+    "root_health_expected": {"expected_since_timestamp_seconds": "gauge"},
+    "root_health_tick": {"last_tick_timestamp_seconds": "gauge"},
+    "schedule_manager_state": {
+        "convergence_abandoned": "gauge",
+        "process_lost": "gauge",
+        "stalled": "gauge",
+    },
+    "trace_recording": {"disabled": "gauge"},
+    "turn_end": {"duration_seconds": "histogram"},
 }
+
+LOSS_ONLY_PROCESSES = frozenset({"agent-exec", "sdk", "schedule-runner", "cli-health-probe"})
 
 
 # meiva:note
@@ -96,26 +86,25 @@ def strip_unit_suffix(field: str) -> str:
     return field
 
 
-# meiva:note
-# Select bounded datapoint attributes from an event's dimensions and declared payload.
 def select_metric_attributes(
-    *,
-    machine: str,
-    process: str,
-    agent_id: int | None,
-    attributes: Mapping[str, object],
-    allowed_keys: Collection[str] | None,
+    event_name: str, process: str, attributes: Mapping[str, object]
 ) -> dict[str, str | int | float | bool]:
-    attrs: dict[str, str | int | float | bool] = {"machine": machine, "process": process}
-    if agent_id is not None:
-        attrs["agent_id"] = agent_id
-    if not allowed_keys:
+    """Select the dimensions Grafana uses. The source collector stamps machine."""
+    if event_name == "event_log_drop":
+        queue = attributes.get("queue")
+        attrs: dict[str, str | int | float | bool] = {"process": process}
+        if isinstance(queue, str) and queue in {"emitter", "otlp", "otel-sdk"}:
+            attrs["queue"] = queue
         return attrs
-    for key, value in attributes.items():
-        if key in _NO_METRIC_ATTRS or key not in allowed_keys:
-            continue
-        if isinstance(value, bool) or (
-            isinstance(value, str) and len(value) <= _MAX_METRIC_ATTR_CHARS
+    if event_name == "recovery_drill_status" and attributes.get("drill") == "logical_dump":
+        return {"drill": "logical_dump"}
+    if event_name in {"root_health_expected", "root_health_tick"}:
+        home_id = attributes.get("home_id")
+        if (
+            isinstance(home_id, str)
+            and len(home_id) == 64
+            and all(char in "0123456789abcdef" for char in home_id)
         ):
-            attrs[key] = value
-    return attrs
+            return {"process": process, "home_id": home_id}
+        return {"process": process}
+    return {}

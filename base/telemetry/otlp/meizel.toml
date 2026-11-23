@@ -6,7 +6,7 @@ exports = ["collector_listeners.py", "event_resource_exporter.py", "http_logs", 
 "telemetry_otlp_logs.py" = ["telemetry_otlp_worker.py"]
 "telemetry_otlp_exporting.py" = ["telemetry_otlp.py"]
 "telemetry_otlp_metrics.py" = ["plans.py"]
-"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "http_logs", "telemetry_otlp_metrics.py"]
+"telemetry_otlp_sdk.py" = ["event_resource_exporter.py", "http_logs", "plans.py", "telemetry_otlp_metrics.py"]
 "telemetry_otlp_worker.py" = ["telemetry_otlp_barrier.py", "telemetry_otlp_gauges.py"]
 "tests" = ["telemetry_otlp.py", "trace_readiness.py", "trace_workers.py"]
 

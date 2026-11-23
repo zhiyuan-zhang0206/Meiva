@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
-import types
-from typing import Any, NotRequired, Required, Union, get_args, get_origin, get_type_hints
+from pathlib import Path
 
 import pytest
 
-from base.events.contract import EVENTS, payload_keys, telemetry_events
+from base.events.contract import payload_keys
 from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 from base.telemetry.otlp.telemetry_otlp_metrics import strip_unit_suffix, unit_for
 from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
@@ -329,51 +329,9 @@ _KIND_EXTENSIONS = {
     "histogram": ("_bucket", "_count", "_sum"),
 }
 
-_RUNTIME_KIND_FIELDS: dict[tuple[str, str], str | None] = {
-    ("delivery_stalled", "age_s"): "counter",
-    ("shell_ttl_renewed", "ttl_s"): "counter",
-    ("heartbeat_paused", "duration_s"): "counter",
-}
-
-_UNLISTED_METRIC_NAMES: dict[str, str] = {}
-
-
-def _strip_optional(hint: Any) -> Any:
-    while True:
-        origin = get_origin(hint)
-        if origin in (NotRequired, Required):
-            hint = get_args(hint)[0]
-            continue
-        if origin in (Union, types.UnionType):
-            args = [arg for arg in get_args(hint) if arg is not type(None)]
-            if len(args) == 1:
-                hint = args[0]
-                continue
-        return hint
-
-
-def _metric_kind(event: str, field: str) -> str | None:
-    override = METRIC_DISPOSITION.get((event, field), "default")
-    if override != "default":
-        return override
-    if (event, field) in _RUNTIME_KIND_FIELDS:
-        return _RUNTIME_KIND_FIELDS[(event, field)]
-    spec = EVENTS[event]
-    if spec.payload is None:
-        return None
-    hint = get_type_hints(spec.payload).get(field)
-    if hint is None:
-        return None
-    hint = _strip_optional(hint)
-    if hint is float:
-        return "histogram"
-    if hint is int:
-        return "counter"
-    return None
-
 
 def _rendered_names(event: str, field: str) -> set[str]:
-    kind = _metric_kind(event, field)
+    kind = METRIC_DISPOSITION.get(event, {}).get(field)
     if kind is None:
         return set()
     base = f"meiva_{event}_{strip_unit_suffix(field)}"
@@ -387,36 +345,31 @@ def _rendered_names(event: str, field: str) -> set[str]:
     return {base + suffix + extension for extension in _KIND_EXTENSIONS[kind]}
 
 
-def _emitted_metric_names() -> dict[str, str]:
-    names: dict[str, str] = {}
-    for event in sorted(telemetry_events()):
-        for field in payload_keys(event):
-            for name in _rendered_names(event, field):
-                names[name] = f"{event}.{field}"
-    return names
+def test_prometheus_rule_and_dashboard_references_match_explicit_exports() -> None:
+    emitted: set[str] = set()
+    for event, fields in METRIC_DISPOSITION.items():
+        assert fields.keys() <= set(payload_keys(event) or ()), event
+        for field in fields:
+            emitted.update(_rendered_names(event, field))
 
-
-def _rule_metric_tokens() -> set[str]:
-    tokens: set[str] = set()
-    for rule in load_rules():
-        for query in rule["data"]:
-            expr = query["model"].get("expr")
-            if isinstance(expr, str):
-                tokens.update(re.findall(r"meiva_[a-z0-9_]+", expr))
-    return tokens
-
-
-def test_rule_metric_references_match_the_prometheus_translation() -> None:
-    emitted = _emitted_metric_names()
-    unknown: list[str] = []
-    for token in sorted(_rule_metric_tokens()):
-        if token in emitted or token in _UNLISTED_METRIC_NAMES:
-            continue
-        near = sorted(name for name in emitted if name.startswith(token) or token.startswith(name))[
-            :3
-        ]
-        unknown.append(f"{token} (nearest emitted: {near})")
-    assert not unknown, "rule metric names the translation cannot render: " + "; ".join(unknown)
+    rule_exprs = [expr for rule in load_rules() for expr in rule_query_exprs(rule, "prometheus")]
+    dashboard = (
+        Path(__file__).resolve().parents[2]
+        / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
+    )
+    dashboard_exprs = [
+        target["expr"]
+        for panel in json.loads(dashboard.read_text(encoding="utf-8"))["panels"]
+        for target in panel.get("targets", [])
+        if target.get("datasource", panel.get("datasource", {})).get("uid") == "prometheus"
+    ]
+    referenced = {
+        token
+        for expr in [*rule_exprs, *dashboard_exprs]
+        for token in re.findall(r"\bmeiva_\w+", _strip_string_literals(expr))
+    }
+    assert rule_exprs and dashboard_exprs and referenced
+    assert referenced <= emitted, sorted(referenced - emitted)
 
 
 def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
@@ -435,19 +388,6 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
         "meiva_turn_end_duration_seconds_count",
         "meiva_turn_end_duration_seconds_sum",
     }
-
-
-def test_runtime_typed_fields_pin_their_emitted_kind() -> None:
-    assert _rendered_names("delivery_stalled", "age_s") == {"meiva_delivery_stalled_age_s_total"}
-    assert _rendered_names("shell_ttl_renewed", "ttl_s") == {"meiva_shell_ttl_renewed_ttl_s_total"}
-    assert _rendered_names("heartbeat_paused", "duration_s") == {
-        "meiva_heartbeat_paused_duration_s_total"
-    }
-
-
-def test_unlisted_metric_names_have_no_stale_entries() -> None:
-    stale = sorted(set(_UNLISTED_METRIC_NAMES) - _rule_metric_tokens())
-    assert not stale, f"stale _UNLISTED_METRIC_NAMES entries: {stale}"
 
 
 def test_trace_watermark_rule_reads_recording_disabled_gauge() -> None:
@@ -544,7 +484,6 @@ _AGENT_COUNT_RULES = (
     "meiva-ops-sse-drop-backlog",
     "meiva-ops-delivery-stalled-backlog",
     "meiva-ops-inbound-consumed-unknown",
-    "meiva-ops-turn-duration-p95",
 )
 
 
@@ -558,18 +497,11 @@ def test_a_fleet_volume_rule_reports_its_distinct_agents(uid: str) -> None:
     windows = re.compile(r"\[(\d+[smhd])\]")
     assert windows.findall(count) == windows.findall(nodes["A"]["model"]["expr"]), count
     assert nodes["B"]["relativeTimeRange"] == nodes["A"]["relativeTimeRange"]
-    assert nodes["B"]["datasourceUid"] == nodes["A"]["datasourceUid"]
+    assert nodes["B"]["datasourceUid"] == "loki"
     assert nodes["N"]["model"]["type"] == "reduce"
     assert nodes["N"]["model"]["expression"] == "B"
     assert "{{ $values.N }} agent(s)" in rule["annotations"]["summary"]
     assert rule["condition"] == "D" and nodes["D"]["model"]["expression"] == "C"
-
-
-def test_the_turn_duration_agent_count_uses_the_alert_threshold() -> None:
-    rule = {r["uid"]: r for r in load_rules()}["meiva-ops-turn-duration-p95"]
-    (_, count) = rule_query_exprs(rule, "prometheus")
-    ((threshold,),) = threshold_params(rule)
-    assert " ".join(count.split()).endswith(f") > {threshold}) or vector(0)")
 
 
 # meiva:note

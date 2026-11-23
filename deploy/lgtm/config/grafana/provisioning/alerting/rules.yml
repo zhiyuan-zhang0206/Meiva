@@ -4990,14 +4990,12 @@ groups:
           team: meiva-ops
           notify_im: "false"
         annotations:
-          summary: "Turn duration p95 at {{ $values.C }} s (threshold 75 s, 2x 24h baseline); {{ $values.N }} agent(s) individually above 75 s"
+          summary: "Turn duration p95 at {{ $values.C }} s (threshold 75 s, 2x 24h baseline)"
           description: >-
             The agent-wide turn duration p95 (meiva_turn_end_duration_seconds
             histogram, 10m rate) stayed above 75s — 2x the 2026-08-23 24h
-            baseline of 37.6s — for 10 minutes. Signals collective slowdown
-            ("runs slower and slower"), not a single long task. {{ $values.N }} is
-            how many agents' own 10m p95 is above 75s: one agent means its own long
-            turns skew the fleet p95, many means the slowdown is shared.
+            baseline of 37.6s — for 10 minutes. The alerting runbook has a
+            per-agent Turn p95 query for investigating the slowdown in Loki.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -5026,34 +5024,6 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
-              reducer: mean
-          - refId: B
-            datasourceUid: prometheus
-            queryType: ""
-            model:
-              refId: B
-              datasource:
-                type: prometheus
-                uid: prometheus
-              editorMode: code
-              expr: >-
-                count(histogram_quantile(0.95, sum by (le, agent_id)
-                (rate(meiva_turn_end_duration_seconds_bucket[10m]))) > 75) or vector(0)
-              instant: true
-              range: false
-            relativeTimeRange:
-              from: 600
-              to: 0
-          - refId: N
-            datasourceUid: __expr__
-            queryType: ""
-            model:
-              refId: N
-              datasource:
-                type: __expr__
-                uid: __expr__
-              type: reduce
-              expression: B
               reducer: mean
           - refId: D
             datasourceUid: __expr__

@@ -30,4 +30,4 @@ def test_the_entry_builds_its_parser_and_prints_usage(
     assert stopped.value.code == 0
     printed = capsys.readouterr().out
     assert "--window-days" in printed
-    assert "OTLP gauges" in printed
+    assert "telemetry events" in printed

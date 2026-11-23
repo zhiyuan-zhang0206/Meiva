@@ -169,7 +169,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
         _assert_dashboard_panel_matches_spec(panels_by_title[render_title(spec)], spec)
 
 
-def test_dashboard_has_141_loki_targets() -> None:
+def test_dashboard_has_142_loki_targets() -> None:
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -178,7 +178,7 @@ def test_dashboard_has_141_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 141
+    assert len(loki_targets) == 142
 
 
 def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
@@ -186,7 +186,7 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION, strip_unit_suffix
 
     specs = {spec.name: spec for spec in _load_core()}
-    assert METRIC_DISPOSITION[("agent_registry", "max_id")] == "gauge"
+    assert METRIC_DISPOSITION["agent_registry"]["max_id"] == "gauge"
     gauge = f"meiva_agent_registry_{strip_unit_suffix('max_id')}_ratio"
     assert specs["core_agent_max_id"].query == f"max({gauge})"
     assert specs["core_agent_max_id"].query_type == "promql"
@@ -195,61 +195,30 @@ def test_agent_max_id_gauge_names_match_the_otlp_contract() -> None:
     assert f"deriv(max({gauge})[1h:])" in (specs["core_agent_max_id_growth_rate"].query)
 
 
-def _pr_flow_daily_query(field: str, unit: str) -> str:
-    from base.telemetry.otlp.telemetry_otlp import strip_unit_suffix
-
-    name = f"meiva_pr_flow_daily_{strip_unit_suffix(field)}_{unit}"
-    return f"max by (day) (last_over_time({name}[26h]))"
-
-
-def _assert_pr_flow_payload_fields_are_gauges() -> None:
-    from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
-
-    for field in (
-        "ready_to_merge_median_seconds",
-        "ready_to_merge_p90_seconds",
-    ):
-        assert METRIC_DISPOSITION[("pr_flow_daily", field)] == "gauge"
-
-
-def _assert_pr_flow_specs_match_the_export_job(specs: dict[str, MetricSpec]) -> MetricSpec:
-    latency = specs["core_pr_flow_ready_to_merge"]
-    assert latency.query_type == "promql"
+def test_pr_flow_table_uses_the_latest_event_for_each_day_and_percentile() -> None:
+    latency = next(spec for spec in _load_core() if spec.name == "core_pr_flow_ready_to_merge")
+    assert latency.query_type == "logql"
     assert latency.panel == "table"
     assert latency.unit == "s"
-    assert latency.query == _pr_flow_daily_query("ready_to_merge_median_seconds", "seconds")
-    assert (latency.targets or []) == [
-        _pr_flow_daily_query("ready_to_merge_p90_seconds", "seconds")
+    query = render_query(latency)
+    for percentile in ("median", "p90"):
+        assert f"attributes.ready_to_merge_{percentile}_seconds" in query
+        assert f'label_format percentile="{percentile}"' in query
+    assert query.count('event_name="pr_flow_daily"') == 2
+    assert query.count("last_over_time(") == 2
+    assert query.count("[26h]) by (day, percentile)") == 2
+    assert latency.transformations == [
+        {"id": "labelsToFields", "options": {}},
+        {
+            "id": "groupingToMatrix",
+            "options": {
+                "columnField": "percentile",
+                "rowField": "day",
+                "valueField": "Value #A",
+            },
+        },
+        {"id": "organize", "options": {"renameByName": {"day\\percentile": "day"}}},
     ]
-    assert latency.target_names == ["median", "p90"]
-    return latency
-
-
-def _assert_pr_flow_tiles_mirror_specs(
-    by_title: dict[Any, dict[str, Any]],
-    all_specs: tuple[MetricSpec, ...],
-    joined_specs: tuple[MetricSpec, ...],
-) -> None:
-    for spec in all_specs:
-        assert by_title[render_title(spec)]["description"] == spec.description
-    for spec in joined_specs:
-        joins = [
-            t
-            for t in by_title[render_title(spec)].get("transformations", [])
-            if t["id"] == "joinByField"
-        ]
-        assert joins, render_title(spec)
-        assert joins[0]["options"] == {"byField": "day", "mode": "outer"}
-
-
-def test_pr_flow_panels_match_the_otlp_contract() -> None:
-    specs = {spec.name: spec for spec in _load_core()}
-    path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
-    by_title = {panel.get("title"): panel for panel in json.loads(path.read_text())["panels"]}
-
-    _assert_pr_flow_payload_fields_are_gauges()
-    latency = _assert_pr_flow_specs_match_the_export_job(specs)
-    _assert_pr_flow_tiles_mirror_specs(by_title, (latency,), (latency,))
 
 
 def test_dashboard_legends_and_time_ranges_are_explicit() -> None:

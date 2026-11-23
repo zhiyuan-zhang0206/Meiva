@@ -214,13 +214,16 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
 def test_shutdown_replays_deferred_metrics_before_logs_once(tmp_path: Path) -> None:
     calls: list[tuple[str, int]] = []
     logs = FakeProvider(
-        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
+        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["count"])))
     )
     metrics = FakeProvider(on_metric=lambda v: calls.append(("metric", int(v))))
     backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch(
-        [otlp_test_event(attributes={"in_total": 1}), otlp_test_event(attributes={"in_total": 2})]
+        [
+            otlp_test_event(event_name="gateway_latency", attributes={"count": 1}),
+            otlp_test_event(event_name="gateway_latency", attributes={"count": 2}),
+        ]
     )
     assert backend.shutdown().status is DrainStatus.COMPLETED
     assert calls == [("metric", 1), ("metric", 2), ("log", 1), ("log", 2)]
@@ -345,12 +348,12 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay(tmp_p
         return FakeMeter(lambda v: calls.append(("metric", int(v))))
 
     logs = FakeProvider(
-        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
+        on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["count"])))
     )
     metrics = FakeProvider(on_get_meter=get_meter)
     backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     backend.defer_until_exit(CHILD_DEFER)
-    event = otlp_test_event(attributes={"in_total": 5})
+    event = otlp_test_event(event_name="gateway_latency", attributes={"count": 5})
     backend.export_batch([event])
     caller = threading.Thread(target=backend.finalize)
     caller.start()
@@ -386,7 +389,7 @@ def test_admitted_metric_call_retains_provider_until_it_finishes(tmp_path: Path)
     backend, logs, _ = _backend(tmp_path, metrics=metrics)
     caller = threading.Thread(
         target=backend.export_batch,
-        args=([otlp_test_event(attributes={"in_total": 1})],),
+        args=([otlp_test_event(event_name="gateway_latency", attributes={"count": 1})],),
     )
     caller.start()
     try:

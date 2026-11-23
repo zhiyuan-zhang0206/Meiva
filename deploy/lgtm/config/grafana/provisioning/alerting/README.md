@@ -178,7 +178,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
 | `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
-| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2); summary adds how many agents' own p95 is above 75s | 10m | warning |
+| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
 | `meiva-ops-gw-latency-slow-warning` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
 | `meiva-ops-gw-latency-slow-error` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 | `meiva-ops-tempo-backend-down` | `meiva-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
@@ -298,6 +298,19 @@ incident. Its discriminator is the `billing` field the emitter writes from
 vocabulary matched against the response body's `error.type` AND `error.code`) —
 a new provider is covered by adding its string there, with no edit to
 `rules.yml`.
+
+### Turn p95 by agent
+
+In Grafana Explore with the Loki datasource, run this instant query to count
+agents whose own p95 exceeds 75 seconds over the same ten-minute window.
+The fleet Turn p95 alert evaluates against Prometheus independently.
+
+```logql
+count(quantile_over_time(0.95,
+  {service_name="unknown_service", event_name="turn_end", agent_id!=""}
+  | json | cluster=".meiva" | category="telemetry"
+  | unwrap attributes_duration_seconds | __error__="" [10m]) by (agent_id) > 75) or vector(0)
+```
 
 ### Migration notes (Postgres → LGTM, 2026-08-12)
 
@@ -460,16 +473,12 @@ notifies when the silence ends.
 
 ## Events-stream cutover (task #1197, done)
 
-The unified emitter ships every event as an OTLP log (Loki) and every
-telemetry event's numeric payload fields as OTLP metrics (Prometheus); the
-Postgres `events` write was retired with the cutover and the JSONL mirror
-stays as the local copy. These rules read the LGTM side exclusively.
+The unified emitter ships events as OTLP logs to Loki. Explicitly mapped
+telemetry fields feed Prometheus. The JSONL mirror stays as the local copy.
+These rules read LGTM.
 
 ## Metric-name test evidence
 
-Type annotations do not always determine the emitted runtime metric kind.
-`tests/scripts/test_alert_rules.py` keeps explicit runtime-kind pins aligned
-with emit sites. Its non-derived metric table is currently empty. Any proposed addition requires
-a live Prometheus check and a recorded reason; historical samples do not
-establish current emission. Naming and type translation remain owned by the
-[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.md).
+`tests/scripts/test_alert_rules.py` checks the PromQL references in both the
+rules and the Ops dashboard against the instrument names and kinds in the
+[explicit metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.md).
