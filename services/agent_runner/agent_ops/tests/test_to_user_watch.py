@@ -169,8 +169,11 @@ async def test_resync_retries_once_after_a_transient_failure(tmp_path: Path) -> 
         try:
             await asyncio.wait_for(first_failed.wait(), timeout=5)
             _ = (workspace / "ongoing.md").write_text("Changed while resync was pending")
-            assert await next_event(published) == OngoingChanged(agent_id=7)
-            assert await next_event(published) == WorkspacePanelsResync()
+            events = [await next_event(published), await next_event(published)]
+            assert {event.role: event.agent_id for event in events} == {
+                "ongoing_changed": 7,
+                "workspace_panels_resync": 0,
+            }
             for content in ("first", "second", "third"):
                 _ = (workspace / "ongoing.md").write_text(content)
                 assert await next_event(published) == OngoingChanged(agent_id=7)
@@ -178,6 +181,53 @@ async def test_resync_retries_once_after_a_transient_failure(tmp_path: Path) -> 
             assert published.empty()
         finally:
             _ = watcher.cancel()
+
+
+@pytest.mark.asyncio
+async def test_in_flight_resync_leaves_scans_running_and_is_joined_on_exit(tmp_path: Path) -> None:
+    published: asyncio.Queue[PanelEvent] = asyncio.Queue()
+    started = asyncio.Event()
+    cancelling = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleaned_up = asyncio.Event()
+
+    class BlockingPublisher:
+        attempts = 0
+
+        async def publish_best_effort(self, payload: str, *, context: str) -> int | None:
+            if context == "workspace_panels_resync":
+                self.attempts += 1
+                started.set()
+                try:
+                    await asyncio.Future[None]()
+                finally:
+                    cancelling.set()
+                    await release_cleanup.wait()
+                    cleaned_up.set()
+            published.put_nowait(PANEL_EVENT.validate_json(payload))
+            return 0
+
+    bus = BlockingPublisher()
+    workspace = tmp_path / "7"
+    workspace.mkdir()
+    ongoing = workspace / "ongoing.md"
+    async with asyncio.TaskGroup() as group:
+        watcher = group.create_task(watch_to_user(tmp_path, bus))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            for content in ("created", "rewritten"):
+                _ = ongoing.write_text(content)
+                assert await next_event(published) == OngoingChanged(agent_id=7)
+            ongoing.unlink()
+            assert await next_event(published) == OngoingChanged(agent_id=7)
+            assert bus.attempts == 1
+            _ = watcher.cancel()
+            await asyncio.wait_for(cancelling.wait(), timeout=5)
+            assert not watcher.done()
+        finally:
+            release_cleanup.set()
+    assert cleaned_up.is_set()
+    assert watcher.cancelled()
 
 
 @pytest.mark.asyncio
@@ -276,13 +326,11 @@ async def test_removed_watch_root_fails_instead_of_hiding_io_errors(
 ) -> None:
     root = tmp_path / "workspaces"
     root.mkdir()
-    with pytest.raises(ExceptionGroup) as caught:
+    with pytest.RaisesGroup(FileNotFoundError, flatten_subgroups=True):
         async with asyncio.TaskGroup() as group:
             group.create_task(watch_to_user(root, event_bus))
             await asyncio.sleep(0.7)
             root.rmdir()
-    assert len(caught.value.exceptions) == 1
-    assert isinstance(caught.value.exceptions[0], FileNotFoundError)
 
 
 @pytest.mark.asyncio
@@ -295,7 +343,7 @@ async def test_unreadable_workspace_propagates_permission_error(
     workspace.mkdir()
     workspace.chmod(0)
     try:
-        with pytest.raises(PermissionError):
+        with pytest.RaisesGroup(PermissionError):
             await watch_to_user(tmp_path, event_bus)
     finally:
         workspace.chmod(0o700)
