@@ -302,6 +302,7 @@ class OutputProjection:
     pending: deque[Frame] = field(default_factory=deque[Frame])
     confirmed: set[int] = field(default_factory=set[int])
     excluded: set[int] = field(default_factory=set[int])
+    _native_echoes: set[Evidence] = field(default_factory=set[Evidence])
     _answered_at: dict[int, int] = field(default_factory=dict[int, int])
     _boundaries: dict[str, ForegroundBoundary] = field(
         default_factory=dict[str, ForegroundBoundary]
@@ -354,7 +355,7 @@ class OutputProjection:
     def background_replies(
         self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
     ) -> Iterator[NativeReply]:
-        yield from native_replies(
+        for reply in native_replies(
             transcript,
             self.offset,
             self.steps(transcript.rows),
@@ -362,12 +363,33 @@ class OutputProjection:
             subagents,
             self._answered_at,
             route=self._route,
+        ):
+            self._native_echoes.update(e for e in reply.echo_evidence() if e not in self.seen)
+            yield reply
+
+    @property
+    def has_undrained_native(self) -> bool:
+        return bool(self._native_echoes)
+
+    def retain_native_prefix(self, rows: Sequence[Frame]) -> None:
+        frames = deque(
+            frame for frame in self.pending if frame.get("sessionUpdate") == "agent_message_chunk"
         )
+        prefix = _echo_text("".join(content_text(frame.get("content")) for frame in frames))
+        expected = (
+            value
+            for index, field, _ in self._native_echoes
+            if field == "content" and isinstance(value := rows[self.offset + index].get(field), str)
+        )
+        if prefix and any(_echo_text(text).startswith(prefix) for text in expected):
+            self.pending = frames
+        else:
+            self.pending.clear()
 
     def has_pending_reply(
         self, rows: Sequence[Frame], session_id: str | None, subagents: ChildLookup
     ) -> bool:
-        if any((index, "content", 0) not in self.seen for index in self._answered_at.values()):
+        if self.has_undrained_native:
             return True
         notice = None
         for event in _attribution_events(
@@ -391,26 +413,26 @@ class OutputProjection:
             or any(item.get("toolCallId") == tool_id for item in self.pending)
         )
 
-    def project(self, rows: Sequence[Frame]) -> Iterator[ProjectedFrame]:
+    def project(self, rows: Sequence[Frame], *, idle: bool = False) -> Iterator[ProjectedFrame]:
         steps = self.steps(rows)
         while self.pending:
             count = len(self.pending)
-            yield from self._project_pass(steps, interleave=False)
+            yield from self._project_pass(steps, idle=idle, interleave=False)
             if len(self.pending) != count:
                 continue
-            yield from self._project_pass(steps, interleave=True)
+            yield from self._project_pass(steps, idle=idle, interleave=True)
             if len(self.pending) == count:
                 return
 
     def _project_pass(
-        self, steps: Sequence[PlannerRow], *, interleave: bool
+        self, steps: Sequence[PlannerRow], *, idle: bool, interleave: bool
     ) -> Iterator[ProjectedFrame]:
         consumed: set[int] = set()
         frames = list(self.pending)
         for index in range(len(frames)):
             if index in consumed:
                 continue
-            match = self._match(index, frames, consumed, steps, interleave=interleave)
+            match = self._match(index, frames, consumed, steps, idle=idle, interleave=interleave)
             if match is not None:
                 event, indices = match
                 consumed.update(indices)
@@ -424,6 +446,7 @@ class OutputProjection:
         consumed: set[int],
         steps: Sequence[PlannerRow],
         *,
+        idle: bool,
         interleave: bool,
     ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
         frame = frames[index]
@@ -436,7 +459,9 @@ class OutputProjection:
             item = self._take_tool(frame, tool_id, steps)
             return (item, (index,)) if item is not None else None
         field_name = "thinking" if kind == "agent_thought_chunk" else "content"
-        return self._take_text(index, frames, consumed, steps, field_name, interleave=interleave)
+        return self._take_text(
+            index, frames, consumed, steps, field_name, idle=idle, interleave=interleave
+        )
 
     def _owner(
         self, step: PlannerRow, frame: Frame, *, text_finished: bool = False
@@ -465,6 +490,7 @@ class OutputProjection:
         owner = self._owner(step, frame)
         if owner is not None:
             self.seen.add(evidence)
+            self._native_echoes.discard(evidence)
             self._tool_owners[tool_id] = owner
         return owner
 
@@ -476,31 +502,49 @@ class OutputProjection:
         steps: Sequence[PlannerRow],
         name: str,
         *,
+        idle: bool,
         interleave: bool,
     ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
         kind = frames[index].get("sessionUpdate")
         first = content_text(frames[index].get("content"))
+        normal = _echo_text if idle else str.strip
         options = [
             (step, value.strip())
             for step in steps
             if (step.index, name, 0) not in self.seen
             and isinstance(value := step.row.get(name), str)
-            and value.strip().startswith(first.strip())
+            and normal(value).startswith(normal(first))
         ]
         if not options:
             return None
         step, value = options[0]
-        route = self._route(step)
-        if route is None or any(self._route(other) != route for other, _ in options[1:]):
+        if not self._same_text_lane(step, options, idle=idle):
             return None
-        indices = _text_chunks(index, first, value, frames, consumed, interleave=interleave)
+        indices = _text_chunks(
+            index, first, value, frames, consumed, interleave=interleave, normal=normal
+        )
         if indices:
             frame = {"sessionUpdate": kind, "content": {"type": "text", "text": value}}
             owner = self._owner(step, frame, text_finished=name == "content")
             if owner is not None:
-                self.seen.add((step.index, name, 0))
+                evidence = step.index, name, 0
+                self.seen.add(evidence)
+                self._native_echoes.discard(evidence)
                 return owner, indices
         return None
+
+    def _same_text_lane(
+        self, step: PlannerRow, options: Sequence[tuple[PlannerRow, str]], *, idle: bool
+    ) -> bool:
+        route = self._route(step)
+        owners = {self._route(other) for other, _ in options}
+        if idle:
+            return all(isinstance(owner, BackgroundNotice) for owner in owners)
+        return route is not None and owners == {route}
+
+
+def _echo_text(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _text_chunks(
@@ -511,22 +555,24 @@ def _text_chunks(
     consumed: set[int],
     *,
     interleave: bool,
+    normal: Callable[[str], str] = str.strip,
 ) -> tuple[int, ...]:
+    expected = normal(expected)
     kind = frames[index].get("sessionUpdate")
     text = first
     indices = [index]
     for current in range(index + 1, len(frames)):
-        if text.strip() == expected:
+        if normal(text) == expected:
             return tuple(indices)
         if current in consumed or frames[current].get("sessionUpdate") != kind:
             continue
         candidate = text + content_text(frames[current].get("content"))
-        if expected.startswith(candidate.strip()):
+        if expected.startswith(normal(candidate)):
             text = candidate
             indices.append(current)
         elif not interleave:
             break
-    return tuple(indices) if text.strip() == expected else ()
+    return tuple(indices) if normal(text) == expected else ()
 
 
 def corroborates_assistant_chunks(
@@ -615,6 +661,14 @@ class NativeReply:
     def timer_prompt(self) -> str | None:
         return self.notice.prompt if self.notice.cause is HarnessCause.SCHEDULED_WAKE else None
 
+    def echo_evidence(self) -> Iterator[Evidence]:
+        for step in self.steps:
+            for name in ("content", "thinking"):
+                if isinstance(value := step.row.get(name), str) and value.strip():
+                    yield step.index, name, 0
+            for index, _ in enumerate(_calls(step.row)):
+                yield step.index, "tool", index
+
     def events(
         self, turn_id: str, session_id: str | None, generation: int
     ) -> tuple[TurnStarted, AssistantText, TurnCompleted]:
@@ -659,6 +713,7 @@ class IdleReplies:
     offset: int
     pending: bool = False
     _signature: tuple[int, ...] | None = None
+    _frames: deque[Frame] = field(default_factory=deque[Frame])
 
     def bind(self, session_id: str, *, home: Path | None) -> None:
         if not self.offset:
@@ -666,9 +721,29 @@ class IdleReplies:
 
     def note_text(self, frame: Frame, projection: OutputProjection | None) -> None:
         self.pending = True
-        if projection is not None:
-            projection.pending.append(frame)
-            self._signature = None
+        (self._frames if projection is None else projection.pending).append(frame)
+        self._signature = None
+
+    def replay(
+        self,
+        projection: OutputProjection | None,
+        session_id: str | None,
+        subagents: ChildLookup,
+        *,
+        home: Path | None,
+    ) -> tuple[OutputProjection, tuple[NativeReply, ...], bool] | None:
+        transcript = self.changed(session_id, home=home, projecting=projection is not None)
+        if transcript is None:
+            return None
+        projection = projection or OutputProjection(self.offset)
+        projection.pending.extend(self._frames)
+        self._frames.clear()
+        _ = deque(projection.project(transcript.rows, idle=True), maxlen=0)
+        replies = tuple(projection.background_replies(transcript, session_id, subagents))
+        needed = projection.has_pending_reply(transcript.rows, session_id, subagents)
+        if not needed:
+            self.offset = len(transcript.rows)
+        return projection, replies, needed
 
     def changed(
         self, session_id: str | None, *, home: Path | None, projecting: bool
@@ -683,20 +758,6 @@ class IdleReplies:
             return None
         self._signature = signature
         return TranscriptSnapshot.read(path)
-
-    def replies(
-        self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
-    ) -> Iterator[NativeReply]:
-        for reply in native_replies(
-            transcript,
-            self.offset,
-            planner_rows(transcript.rows[self.offset :], ()),
-            session_id,
-            subagents,
-            {},
-        ):
-            self.offset = reply.offset + reply.steps[-1].index + 1
-            yield reply
 
 
 def native_replies(

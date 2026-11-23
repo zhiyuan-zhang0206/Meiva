@@ -73,6 +73,54 @@ async def _wait_for_keepalive_removal(harness: Harness, registry: FileSessionReg
             await asyncio.sleep(0.005)
 
 
+@pytest.mark.parametrize("expires", [False, True])
+async def test_native_echo_fence_preserves_another_live_timer(
+    tmp_path: Path, expires: bool
+) -> None:
+    wall = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=wall.now)
+    harness = await start(tmp_path, clock=clock, reply_seconds=0.2)
+    try:
+        await harness.session.deliver([HarnessInput.of("timer", "background")])
+        await harness.wait_for_type(TurnCompleted)
+        assert harness.session.background_work().items
+        pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "" and e.usage_uncertain
+        )
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await harness.wait_for(
+            lambda e: isinstance(e, TurnCompleted) and e.text == "LATE NATIVE REPLY"
+        )
+        started = asyncio.Event()
+
+        async def send() -> TurnCompleted:
+            started.set()
+            return await _next_prompt(harness, "same-text-without-planner")
+
+        async with asyncio.TaskGroup() as tasks:
+            delivery = tasks.create_task(send())
+            await started.wait()
+            assert not delivery.done() and len(harness.prompts()) == 2
+            assert harness.session.cli_pid == pid and harness.session.background_work().items
+            if expires:
+                wall.advance(6)
+            else:
+                await release_timer(harness)
+                harness.release()
+                native = await harness.wait_for(
+                    lambda e: isinstance(e, TurnCompleted) and e.text == "BACKGROUND"
+                )
+                assert native.generation == 1
+        assert pid is not None
+        _assert_reopened(harness, pid, delivery.result())
+        assert harness.session.take_lost_background() == ()
+    finally:
+        await harness.stop()
+
+
 async def test_unverified_background_tail_cannot_hold_foreground_completion(tmp_path: Path) -> None:
     harness = await start(
         tmp_path, extra_args=("--test-missing-background-planner",), reply_seconds=2

@@ -93,8 +93,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             clock=clock,
         )
         self._environ = dict(environ) if environ else None
-        # meiva:note
-        # The user home the conversation transcript is read from; None is the real one.
         self._home = (
             agy_home(home, environ)
             if home is not None or (environ and environ.get("HOME"))
@@ -104,6 +102,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._transport: AgyTransport | None = None
         self._transport_failed = False
         self._recycle_when_idle = False
+        self._verify_load = True
         self._retirement: asyncio.Task[None] | None = None
         self._retirement_error: Exception | None = None
         self._background_changed = asyncio.Event()
@@ -145,10 +144,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             await self._close_tasks()
             raise
 
+    # meiva:note
+    # A deliberate echo fence uses the ACP load and model responses to bound history playback.
     async def _open_transport(self, resume: str | None) -> AgyTransport:
         generation = self._begin_generation()
         transport = self._factory()
-        self._resume_projection = resume is not None
+        self._resume_projection = resume is not None and self._verify_load
         self._idle_replies = IdleReplies(len(self._transcript(resume).rows) if resume else 0)
         try:
             await transport.start()
@@ -254,7 +255,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         await self._await_background_reply()
         ticket = self._active
         if ticket is None:
-            self._replay_idle()
             ticket = self._start_input_turn(entry, prepare=prepare)
             await ticket.interrupt_ready.wait()
             return self._transport if ticket.started_at is not None else None
@@ -271,7 +271,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _await_background_reply(self) -> None:
         while not self._closed and self._prompt_turn is None:
             self._background_changed.clear()
-            if self._schedules.reply_deadline(self._clock.now().timestamp()) is None:
+            self._replay_idle()
+            now = self._clock.now().timestamp()
+            draining = bool(self._projection and self._projection.has_undrained_native)
+            if not self._schedules.blocks_prompt(now, draining_echo=draining):
                 break
             await self._background_changed.wait()
             if self._transport_failed:
@@ -293,6 +296,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         transport = None
         try:
             await self._await_background_reply()
+            if self._transport and self._projection and self._projection.has_undrained_native:
+                self._retire_transport(self._transport)
             transport = self._transport
             if transport is None:
                 await self._await_retirement()
@@ -417,6 +422,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._lose_schedules()
         self._background_changed.set()
         self._tools.clear()
+        self._verify_load = error is not None or not (
+            self._projection and self._projection.has_undrained_native
+        )
         self._projection = None
         self._idle_replies = IdleReplies(0)
         if error is not None:
@@ -550,23 +558,15 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 )
 
     def _replay_idle(self) -> None:
-        projection = self._projection
-        if (
-            transcript := self._idle_replies.changed(
-                self._session_id, home=self._home, projecting=projection is not None
-            )
-        ) is None:
-            return
-        if projection is None:
-            for reply in self._idle_replies.replies(transcript, self._session_id, self._subagents):
+        result = self._idle_replies.replay(
+            self._projection, self._session_id, self._subagents, home=self._home
+        )
+        if result is not None:
+            projection, replies, needed = result
+            for reply in replies:
                 self._finish_background_reply(reply)
-        else:
-            self._replay(projection, transcript)
-            if not self._schedules.has_detached and not projection.has_pending_reply(
-                transcript.rows, self._session_id, self._subagents
-            ):
-                self._projection = None
-                self._idle_replies.offset = len(transcript.rows)
+            self._projection = projection if needed or self._schedules.has_detached else None
+            self._background_changed.set()
 
     def _handle_result(self, request: int, response: dict[str, object]) -> None:
         turn = self._prompt_turn
@@ -647,7 +647,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._prompt_turn = None
         self._idle_replies = IdleReplies(len(rows))
         if self._projection is not None:
-            turn.close_projection(self._projection, len(rows))
+            turn.close_projection(self._projection, rows)
         elif self._schedules.has_detached:
             self._projection = OutputProjection(len(rows))
         self._complete(ticket)

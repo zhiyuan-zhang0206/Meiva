@@ -17,6 +17,7 @@ from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
     SessionFailed,
+    ToolResult,
     ToolUse,
     TurnCompleted,
     TurnOrigin,
@@ -364,16 +365,22 @@ async def test_resumed_multi_step_command_completion(
         await harness.stop()
 
 
-async def _assert_reused_prompt(
-    harness: Harness, first_turn_id: str, *, native_timing: str
-) -> None:
-    pid = harness.session.cli_pid
+async def _release_native_before_followup(harness: Harness, native_timing: str) -> None:
     if native_timing.startswith("before-marker"):
         if native_timing.endswith("-with-tool"):
             harness.release("include-native-tool")
             harness.release("delay-native-frame")
         harness.release("release-native")
         await harness.wait_for_marker("native-written")
+        if native_timing == "before-marker":
+            await harness.wait_for_marker("collision-receipt-read")
+
+
+async def _assert_reused_prompt(
+    harness: Harness, first_turn_id: str, *, native_timing: str
+) -> None:
+    pid, generation = harness.session.cli_pid, harness.session.generation
+    await _release_native_before_followup(harness, native_timing)
     followup = {
         "after-marker": "late-native",
         "before-marker-with-tool": "next-with-delayed-native-frame",
@@ -400,7 +407,10 @@ async def _assert_reused_prompt(
     )
     expected = ["Working", "OK"] if native_timing == "foreground-preamble" else ["OK"]
     assert again.text == "\n".join(expected)
-    assert not again.usage_uncertain and harness.session.cli_pid == pid
+    assert not again.usage_uncertain
+    fenced = native_timing == "before-marker-with-tool"
+    assert (harness.session.generation > generation) is fenced
+    assert (harness.session.cli_pid != pid) is fenced
     assert _assistant_texts(harness, second.turn_id) == expected
     if native_timing not in {"none", "foreground-preamble"}:
         if native_timing == "tool-after-marker":
@@ -411,6 +421,51 @@ async def _assert_reused_prompt(
             TurnOrigin.INPUT,
             TurnOrigin.INPUT,
         ]
+
+
+@pytest.mark.parametrize(
+    ("case", "followup"), [("text", "same-text-without-planner"), ("tool", "same-tool")]
+)
+async def test_undrained_native_echo_preserves_followup(
+    tmp_path: Path, case: str, followup: str
+) -> None:
+    seed_replay_history(tmp_path)
+    harness = await start(
+        tmp_path,
+        resume="conv-acp",
+        reply_seconds=0.2,
+        extra_args=(f"--test-native-same-{case}", "--test-late-load-replay"),
+    )
+    try:
+        await harness.session.deliver([HarnessInput.of("first", "unresolved-attribution")])
+        first = await harness.wait_for_type(TurnCompleted)
+        harness.release("delay-native-frame")
+        harness.release("release-native")
+        await harness.wait_for_marker("native-written")
+        native = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        pid, generation = harness.session.cli_pid, harness.session.generation
+        await harness.session.deliver([HarnessInput.of("second", followup)])
+        done = await harness.wait_for(
+            lambda event: (
+                isinstance(event, TurnCompleted)
+                and event.turn_id not in {first.turn_id, native.turn_id}
+            )
+        )
+        assert done.text == "OK" and _assistant_texts(harness, done.turn_id) == ["OK"]
+        assert harness.session.cli_pid != pid and done.generation > generation
+        assert [f["method"] for f in harness.frames()].count("session/load") == 2
+        if case == "text":
+            harness.release("write-foreground")
+        else:
+            assert [
+                type(e)
+                for e in harness.events
+                if isinstance(e, (ToolUse, ToolResult)) and e.turn_id == done.turn_id
+            ] == [ToolUse, ToolResult]
+    finally:
+        await harness.stop()
 
 
 async def _assert_native_reply(harness: Harness, *, with_tool: bool) -> None:

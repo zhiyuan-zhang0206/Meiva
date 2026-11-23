@@ -162,6 +162,7 @@ def finish_background(transcript: Path, early_notice: bool, early_planner: bool)
         message("BACK")
         if not missing_tail:
             message("GROUND")
+    frame({"id": "collision-receipt", "method": "test/frame_barrier"})
     Path("background-sent").touch()
 
 
@@ -264,7 +265,7 @@ def resumed_command_completion(transcript: Path, request: int, command: str) -> 
         )
 
 
-def record_native_tool(transcript: Path) -> None:
+def record_native_tool(transcript: Path, tool_id: str | None = "native-tool") -> None:
     args = {"CommandLine": "echo native"}
     record(
         transcript,
@@ -273,18 +274,23 @@ def record_native_tool(transcript: Path) -> None:
             "tool_calls": [{"name": "run_command", "args": args}],
         },
     )
-    update("tool_call", toolCallId="native-tool", name="run_command", rawInput=args)
-    update("tool_call_update", toolCallId="native-tool", status="completed")
+    if tool_id is not None:
+        update("tool_call", toolCallId=tool_id, name="run_command", rawInput=args)
+        update("tool_call_update", toolCallId=tool_id, status="completed")
 
 
 def send_late_native(transcript: Path, *, with_tool: bool = False) -> None:
+    reply = "OK" if "--test-native-same-text" in sys.argv else "LATE NATIVE REPLY"
     if with_tool:
         record_native_tool(transcript)
-    record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
+    if "--test-native-same-tool" in sys.argv:
+        record_native_tool(transcript, None)
+    record(transcript, planner_row(reply, tokens=237))
     if not Path("delay-native-frame").exists():
-        message("LATE NATIVE REPLY")
+        message(reply)
         update("usage_update", used=2, size=10)
-    Path("native-written").touch()
+        frame({"id": "collision-receipt", "method": "test/frame_barrier"})
+    _ = Path("native-written").write_text(str(os.getpid()))
 
 
 def child_overlap(transcript: Path, request: int, command: str) -> None:
@@ -435,9 +441,15 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command.startswith("textless"):
         textless_prompt(transcript, request, command)
         return
+    followup_prompt(transcript, request, command)
+
+
+def followup_prompt(transcript: Path, request: int, command: str) -> None:
     if command == "child-seed":
         _ = declare_child(transcript)
-    if command == "next-with-delayed-native-frame":
+    if command == "next-with-delayed-native-frame" and (
+        Path("native-written").read_text() == str(os.getpid())
+    ):
         message("LATE NATIVE REPLY")
         update("usage_update", used=2, size=10)
     if command == "late-native":
@@ -450,11 +462,19 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command.startswith(("delayed-planner", "usage-tie-")):
         reply_with_delayed_planner(transcript, request, command)
         return
+    if command == "same-text-without-planner":
+        message("OK")
+        update("usage_update", used=2, size=10)
+        result(request)
+        after_release(Path("write-foreground"), lambda: record(transcript, planner_row("OK")))
+        return
+    if command == "same-tool":
+        record_native_tool(transcript, "foreground-tool")
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
     message(reply)
-    result(request)
+    result(request, usage=command != "same-tool")
     if native:
         message(reply)
         update("usage_update", used=2, size=10)
@@ -615,7 +635,6 @@ def handle_prompt(
     original: int | None,
 ) -> tuple[int | None, int | None]:
     request = data["id"]
-    permission_prompt = None
     text = data["params"]["prompt"][0]["text"]
     marker, _, command = text.partition("\n")
     record(
@@ -631,10 +650,11 @@ def handle_prompt(
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
         update("user_message_chunk", content={"type": "text", "text": marker})
     if command == "steer":
-        return original, permission_prompt
+        return original, None
     if command in {"hold", "reactive", "hold-no-stdin"}:
         hold_prompt(transcript, command, request)
-        return request, permission_prompt
+        return request, None
+    permission_prompt = None
     if command == "background":
         arm_background(transcript, request)
     elif command == "overlap-first":

@@ -86,9 +86,17 @@ DONE afterward.
 
 A completed planner reply whose native ownership is proven can be delivered
 before its ACP text arrives. Its notice row identifies the reply for delivery
-within the generation. The projection keeps the native reply's attribution
-evidence until its ACP text has been matched, including when it arrives during
-the next foreground prompt. An unresolved native notice stays in the projection
+within the generation. The projector tracks the ACP echoes of delivered
+native output and matches them during idle replay. Echo matching in idle
+ignores whitespace differences and consumes identical native text in transcript
+order. A partial native echo can survive a fully attributed foreground
+settlement. Before writing the next prompt, an undrained native echo requires
+the idle peer to retire and the same conversation to load in a new process
+generation. Pending tracked background work can still drain the echo or
+complete on the old peer. The clean reload uses the ACP load and model setup
+responses as its replay boundary and handles the first prompt's live stdout
+without requiring a completed planner row. Ordinary resumes and child
+overlap retain their transcript projection. An unresolved native notice stays in the projection
 across foreground settlement. When a prompt omits ACP usage, a terminal
 planner row belonging to its input can still close the prompt before a later
 native notice. Available planner usage stays on its own turn, and incomplete
