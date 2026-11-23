@@ -349,6 +349,7 @@ def values() -> CollectorValues:
         prom_base="http://p",
         retention_days=7,
         self_metrics_port=8888,
+        harness_ingress_endpoint="127.0.0.1:20702",
         local_ingress_endpoint="127.0.0.1:4318",
         data_plane_receivers="[DP]",
         data_plane_pipeline=", redis",

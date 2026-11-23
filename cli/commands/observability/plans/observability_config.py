@@ -25,6 +25,7 @@ class ObservabilityConfig:
     observability_otlp_port: int
     telemetry_otlp_enabled: bool
     telemetry_otlp_port: int
+    harness_otlp_port: int
     gateway_otlp_endpoint: str
     telemetry_tempo_endpoint: str
     telemetry_tempo_query_url: str

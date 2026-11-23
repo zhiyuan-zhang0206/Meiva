@@ -22,18 +22,28 @@
 
 from __future__ import annotations
 
+import socket
 import sys
 from pathlib import Path
 from typing import assert_never
 from urllib.parse import unquote
 
+import psutil
+
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
+from base.cluster.listener_plan import TcpBind
 from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.port_preflight import (
+    ListenerDiscoveryError,
+    resolve_tcp_bind,
+    strict_listeners_on,
+)
 from base.deploy.release.collector import artifact as collector_artifact
 from base.deploy.release.collector import plan as collector_plan
+from base.host.atomic_io import write_bytes_atomic
 from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
-from base.paths import otel_collector_config, otel_collector_dir
+from base.paths import otel_collector_active_config, otel_collector_config, otel_collector_dir
 from base.paths.scratch import ScratchSpace
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
@@ -70,10 +80,12 @@ from cli.commands.observability.plans.collector.remote import (
 from cli.commands.observability.plans.collector.render import (
     CollectorValues,
     render_collector_config,
+    without_harness_receiver,
 )
 from cli.commands.observability.plans.collector.text import yaml_quote
 from cli.commands.observability.plans.observability_config import ObservabilityConfig
 from cli.commands.observability.url_split import split_url
+from services.supervision.roster.service_spec import ServiceSpec
 
 
 def _config_template(repo: Path) -> str:
@@ -271,6 +283,7 @@ def generate_config(
         retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port(LOCAL_INGRESS_HOST, obs.telemetry_otlp_port),
+        harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
         data_plane_receivers=receivers,
         data_plane_pipeline=pipeline,
         exporters=_exporters(
@@ -305,6 +318,52 @@ def write_config(path: Path, rendered: str) -> bool:
     return (path.read_bytes() if path.exists() else None) != before
 
 
+def _harness_port_problem(home: Path, obs: ObservabilityConfig) -> str | None:
+    port = obs.harness_otlp_port
+    if port in (obs.telemetry_otlp_port, obs.otel_collector_metrics_port):
+        return f"port {port} conflicts with this collector's other listeners"
+    try:
+        with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(("127.0.0.1", port))
+            probe.listen()
+        return None
+    except OSError as exc:
+        failure = str(exc)
+
+    binary = otel_collector_dir(home) / collector_plan.BINARY_NAME
+    config = otel_collector_active_config(home)
+    try:
+        listeners = strict_listeners_on(port)
+        if len(listeners) == 1:
+            process = psutil.Process(listeners[0])
+            if Path(process.exe()).resolve() == binary.resolve() and process.cmdline()[1:] == [
+                "--config",
+                str(config),
+            ]:
+                return None
+    except (psutil.Error, ListenerDiscoveryError) as exc:
+        return f"cannot verify ownership of port {port}: {exc}"
+    return f"port {port} is unavailable: {failure}"
+
+
+def _planned_harness_port_problem(port: int, services: tuple[ServiceSpec, ...]) -> str | None:
+    harness = TcpBind("127.0.0.1", port)
+    for service in services:
+        binds = service.listen_binds
+        if binds is None or service.session == "otel-collector":
+            continue
+        try:
+            for bind in binds():
+                if bind.port == port and harness.overlaps(resolve_tcp_bind(bind)):
+                    return (
+                        f"port {port} conflicts with selected service {service.session} at {bind}"
+                    )
+        except (OSError, RuntimeError, ValueError):
+            return f"cannot resolve listeners for selected service {service.session}"
+    return None
+
+
 # meiva:note
 # Idempotent install: the pinned binary present and the config regenerated.
 #
@@ -327,6 +386,7 @@ def ensure_otel_collector(
     tag: str | None,
     platform_label: str,
     scratch: ScratchSpace,
+    planned_services: tuple[ServiceSpec, ...] = (),
 ) -> None:
     dest_dir = otel_collector_dir(meiva_home)
     marker = dest_dir / collector_plan.VERSION_MARKER
@@ -340,6 +400,10 @@ def ensure_otel_collector(
     if isinstance(plan, SkipUnsupportedPlatform):
         print(plan.warning(), file=sys.stderr)
         return
+    obs = settings.observability
+    harness_problem = _planned_harness_port_problem(
+        obs.harness_otlp_port, planned_services
+    ) or _harness_port_problem(meiva_home, obs)
     dest_dir.mkdir(parents=True, exist_ok=True)
     version = collector_plan.OTELCOL_CONTRIB_VERSION
     match plan:
@@ -371,6 +435,20 @@ def ensure_otel_collector(
     )
     if wrote:
         warn_sealed_inputs(meiva_home, (config_path,), writer="converge")
+    active_path = otel_collector_active_config(meiva_home)
+    active = config_path.read_bytes()
+    if harness_problem is not None:
+        fallback = without_harness_receiver(active.decode("utf-8"))
+        if fallback is not None:
+            active = fallback.encode("utf-8")
+    if not active_path.is_file() or active_path.read_bytes() != active:
+        write_bytes_atomic(active_path, active, mode=0o600, suffix="")
+        warn_sealed_inputs(meiva_home, (active_path,), writer="converge")
+    if harness_problem is not None:
+        print(
+            f"  ! otel-collector: harness OTLP disabled: {harness_problem}; using {active_path}",
+            file=sys.stderr,
+        )
 
 
 # meiva:note
@@ -412,6 +490,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         tag=collector_plan.platform_tag_for(platform.system, platform.machine),
         platform_label=f"{platform.system} {platform.machine}",
         scratch=ctx.scratch,
+        planned_services=ctx.planned_services,
     )
 
 

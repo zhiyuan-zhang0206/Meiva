@@ -154,10 +154,22 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             totals=SessionTotals(),
             clock=clock,
         )
+        child_env = build_env(environ, api_key_mode=config.api_key_mode)
+        if config.otlp_endpoint is not None and self.agent_id is not None:
+            child_env.update(
+                OTEL_RESOURCE_ATTRIBUTES=(
+                    f"meiva.agent_id={self.agent_id},harness=codex,"
+                    f"service.instance.id=meiva-agent-{self.agent_id}"
+                ),
+                OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE="cumulative",
+                TRACEPARENT="",
+                TRACESTATE="",
+            )
         self._transport: AppServerTransport = transport or StdioAppServer(
-            config.command(resolved_binary(config, environ)),
+            config.session_command(resolved_binary(config, environ)),
             cwd=config.cwd,
-            environ=build_env(environ, api_key_mode=config.api_key_mode),
+            environ=child_env,
+            trace_requests=config.otlp_endpoint is not None and config.trace_enabled,
             request_timeout=config.startup_timeout_seconds,
         )
         self._home_environ = dict(environ)

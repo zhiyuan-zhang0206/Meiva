@@ -7,6 +7,8 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Coroutine, Mapping, Sequence
 from typing import Protocol
 
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
 from base.lm.harness.codex.frames import (
     ClosedHandler,
     JsonObject,
@@ -117,6 +119,7 @@ class StdioAppServer:
         request_timeout: float = 120.0,
         stderr: int | None = None,
         max_frame_bytes: int = MAX_FRAME_BYTES,
+        trace_requests: bool = False,
     ) -> None:
         self._command = tuple(command)
         self._cwd = str(cwd)
@@ -124,6 +127,7 @@ class StdioAppServer:
         self._request_timeout = request_timeout
         self._stderr = stderr
         self._max_frame_bytes = max_frame_bytes
+        self._trace_propagator = TraceContextTextMapPropagator() if trace_requests else None
         self._process: asyncio.subprocess.Process | None = None
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
@@ -192,7 +196,10 @@ class StdioAppServer:
         future: asyncio.Future[Reply] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         try:
-            await self._write(request_frame(request_id, method, params))
+            trace: dict[str, str] = {}
+            if self._trace_propagator is not None:
+                self._trace_propagator.inject(trace)
+            await self._write(request_frame(request_id, method, params, trace=trace))
             reply = await asyncio.wait_for(
                 future, timeout if timeout is not None else self._request_timeout
             )

@@ -33,6 +33,8 @@ def main() -> None:
         request_id = message.get("id")
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": request_id, "result": {"userAgent": "fake-stdio"}})
+        elif method == "trace":
+            send({"jsonrpc": "2.0", "id": request_id, "result": {"trace": message.get("trace")}})
         elif method == "environment":
             send({"jsonrpc": "2.0", "id": request_id, "result": dict(os.environ)})
         elif method == "emit":

@@ -62,6 +62,7 @@ _DEFAULTS = ObservabilityConfig(
     observability_otlp_port=4318,
     telemetry_otlp_enabled=True,
     telemetry_otlp_port=4318,
+    harness_otlp_port=20702,
     gateway_otlp_endpoint="",
     telemetry_tempo_endpoint="http://127.0.0.1:14318",
     telemetry_tempo_query_url="http://127.0.0.1:3200",

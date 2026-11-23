@@ -277,6 +277,10 @@ class ObservabilitySettings(TempoSettings):
         },
     )
 
+    @property
+    def harness_otlp_port(self) -> int:
+        return 1024 + (self.telemetry_otlp_port - 1024 + 16_384) % (65_536 - 1024)
+
     @model_validator(mode="after")
     def _default_local_otlp_endpoint(self) -> Self:
         """An explicit collector URL wins; otherwise producers use this unit's listener."""

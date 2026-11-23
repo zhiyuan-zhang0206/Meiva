@@ -5,9 +5,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, use_span
 
 from base.lm.harness.codex.frames import JsonObject, JsonRpcError, TransportClosedError, as_object
-from base.lm.harness.codex.transport import StdioAppServer
+from base.lm.harness.codex.transport import MAX_FRAME_BYTES, StdioAppServer
 
 SERVER = Path(__file__).with_name("fake_stdio_server.py")
 
@@ -15,16 +16,13 @@ SERVER = Path(__file__).with_name("fake_stdio_server.py")
 def transport(
     tmp_path: Path, *, timeout: float = 5.0, max_frame_bytes: int | None = None
 ) -> StdioAppServer:
-    kwargs: dict[str, int] = (
-        {"max_frame_bytes": max_frame_bytes} if max_frame_bytes is not None else {}
-    )
     return StdioAppServer(
         [sys.executable, str(SERVER)],
         cwd=tmp_path,
         environ={},
         request_timeout=timeout,
         stderr=asyncio.subprocess.DEVNULL,
-        **kwargs,
+        max_frame_bytes=max_frame_bytes if max_frame_bytes is not None else MAX_FRAME_BYTES,
     )
 
 
@@ -34,6 +32,25 @@ async def test_request_reply_is_correlated_by_id(tmp_path: Path) -> None:
     try:
         assert await server.request("initialize", {}) == {"userAgent": "fake-stdio"}
         assert await server.request("echo", {"x": 1}) == {"echo": "echo"}
+    finally:
+        await server.close()
+
+
+async def test_each_rpc_uses_its_callers_current_trace(tmp_path: Path) -> None:
+    server = StdioAppServer(
+        [sys.executable, str(SERVER)], cwd=tmp_path, environ={}, trace_requests=True
+    )
+    await server.start()
+    try:
+        for parent in (1, 2):
+            span = NonRecordingSpan(
+                SpanContext(parent, parent, False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
+            )
+            with use_span(span):
+                assert await server.request("trace", {}) == {
+                    "trace": {"traceparent": f"00-{parent:032x}-{parent:016x}-01"}
+                }
+        assert await server.request("trace", {}) == {"trace": None}
     finally:
         await server.close()
 

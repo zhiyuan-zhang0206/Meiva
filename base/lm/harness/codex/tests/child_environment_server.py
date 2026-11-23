@@ -26,6 +26,7 @@ def main() -> None:
         "environment": dict(os.environ),
         "descendant": json.loads(descendant),
         "cwd": str(Path.cwd()),
+        "argv": sys.argv[1:],
     }
     for line in sys.stdin:
         message = json.loads(line)

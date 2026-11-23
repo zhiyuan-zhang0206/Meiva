@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
@@ -137,7 +137,7 @@ class HarnessBridge:
         self,
         harness: Harness,
         agent_id: int,
-        factory: Callable[[str], HarnessSession],
+        factory: Callable[[str], HarnessSession | Awaitable[HarnessSession]],
         *,
         timestamp_prefix: Callable[[], str],
         machine: str = "",
@@ -274,7 +274,8 @@ class HarnessBridge:
             self._browser_caller = handle
         self._register("")
         try:
-            session = self._factory(handle)
+            created = self._factory(handle)
+            session = await created if isinstance(created, Awaitable) else created
         except BaseException:
             self._retire_registration()
             raise

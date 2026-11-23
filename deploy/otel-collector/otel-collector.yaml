@@ -40,6 +40,7 @@ receivers:
       http:
         endpoint: $OTLP_RECEIVER_ENDPOINT
 $REMOTE_OTLP_RECEIVER
+$HARNESS_OTLP_RECEIVER
 
   # ── The traditional SRE layer (issue #46) ────────────────────────────────
   # Host metrics come from the collector's own receiver, not a node_exporter
@@ -157,7 +158,91 @@ $REMOTE_OTLP_RECEIVER
     polls_to_archive: 50
     max_concurrent_files: 200
 $DATA_PLANE_RECEIVERS
+$HARNESS_OTLP_CONNECTOR
+
 processors:
+  # The native exporters do not gate every diagnostic field (e.g. raw API
+  # errors). Apply an allowlist before any writes to disk or upstream relays.
+  redaction/harness:
+    summary: silent
+    allowed_keys:
+      - service.name
+      - service.version
+      - service.instance.id
+      - deployment.environment
+      - cluster
+      - host.name
+      - meiva.machine
+      - meiva.agent_id
+      - harness
+      - event.kind
+      - event.sequence
+      - duration_ms
+      - duration.ms
+      - latency_ms
+      - status_code
+      - http.response.status_code
+      - error.type
+      - error_class
+      - error_name
+      - error_category
+      - success
+      - model
+      - gen_ai.request.model
+      - gen_ai.response.model
+      - gen_ai.operation.name
+      - gen_ai.usage.input_tokens
+      - gen_ai.usage.output_tokens
+      - input_tokens
+      - output_tokens
+      - cache_read_tokens
+      - cache_creation_tokens
+      - cached_tokens
+      - reasoning_tokens
+      - type
+      - tool_use_id
+      - gen_ai.tool.call.id
+      - interaction.sequence
+      - parent.source
+      - span.type
+      - thread.id
+      - turn.id
+      - session.id
+  # The redaction allowlist covers attributes. OTLP also has independent
+  # fields for free text, span links and metric exemplars.
+  transform/harness_payload:
+    error_mode: propagate
+    log_statements:
+      - set(scope.name, "harness")
+      - set(scope.version, "")
+      - set(log.event_name, "harness event")
+      - >-
+        set(log.event_name, Concat(["claude_code.", log.attributes["event.name"]], ""))
+        where resource.attributes["service.name"] == "claude-code" and
+        IsMatch(log.attributes["event.name"], "^(user_prompt|assistant_response|api_request|api_error|tool_result|tool_decision|internal_error|session_start|managed_settings_resolved|plugin_loaded|mcp_server_connection)$$")
+      - set(log.body, log.event_name)
+      - set(log.severity_text, "")
+    trace_statements:
+      - context: span
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(span.status.message, "")
+          - set(span.trace_state, "")
+          - set(span.links, nil)
+          - set(span.name, "harness.operation") where not IsMatch(span.name, "^(claude_code[.](interaction|llm_request|llm_request[.]attempt|tool|tool[.]execution|tool[.]blocked_on_user)|turn/start|turn/steer|thread/start|thread/resume|run_turn|agent_turn|app_server[.]request)$$")
+      - context: spanevent
+        statements:
+          - set(spanevent.name, "harness event")
+    metric_statements:
+      - context: metric
+        statements:
+          - set(scope.name, "harness")
+          - set(scope.version, "")
+          - set(metric.description, "")
+      - context: datapoint
+        statements:
+          - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # returns retryable backpressure and bounds shedding instead of letting the
   # collector balloon on a 16GB shared box. Because it precedes file/traces,
@@ -310,12 +395,13 @@ service:
                 port: $SELF_METRICS_PORT
   extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
+$HARNESS_OTLP_PIPELINES
     traces:
-      receivers: [otlp]
+      receivers: [otlp$HARNESS_OTLP_FORWARD]
       processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, batch]
       exporters: [otlphttp/tempo, file/traces]
     logs:
-      receivers: [otlp, filelog/sessions, filelog/services]
+      receivers: [otlp$HARNESS_OTLP_FORWARD, filelog/sessions, filelog/services]
       processors:
         - memory_limiter
         - filter/cluster_allow
@@ -326,7 +412,7 @@ service:
         - batch
       exporters: [otlphttp/loki]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp$HARNESS_OTLP_FORWARD]
       processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, transform/metric_machine, batch]
       exporters: [otlphttp/prometheus]
     # Infra receivers also need OS detection and data-plane dimensions.

@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import dataclasses
+import re
+import socket
 from pathlib import Path
+from textwrap import indent
 
 import pytest
 
@@ -21,7 +24,7 @@ from base.host.db_authority.unit import telemetry_bearer
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.system.tests.fake_commands import fake_host
 from base.native_process.os_platform import Platform
-from base.paths import otel_collector_config, otel_collector_dir
+from base.paths import otel_collector_active_config, otel_collector_config, otel_collector_dir
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.inputs import collector_settings_from_boot
 from cli.commands.observability.plans.collector.data_plane import PEER_PLACEHOLDER
@@ -71,7 +74,10 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
     values = collector_settings_from_boot(command_runtime.config)
 
     for group, expected in (
-        (values.observability, dict(view.observability)),
+        (
+            values.observability,
+            {**dict(view.observability), "harness_otlp_port": view.observability.harness_otlp_port},
+        ),
         (
             values.data_plane,
             {**dict(view.data_plane), "is_remote": view.data_plane.is_remote},
@@ -87,6 +93,110 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
         attempts=limits.otel_collector_download_attempts,
         retry_backoff_s=limits.otel_collector_download_retry_backoff_s,
         progress_interval_s=limits.otel_collector_download_progress_interval_s,
+    )
+
+
+def _assert_harness_disabled(config: ConfigMapping) -> None:
+    assert "otlp/harness" not in mapping_at(config, "receivers")
+    assert "forward/harness" not in mapping_at(config, "connectors")
+    for signal in ("logs", "metrics", "traces"):
+        assert f"{signal}/harness" not in mapping_at(config, "service", "pipelines")
+        receivers = sequence_at(config, "service", "pipelines", signal, "receivers")
+        assert "otlp" in receivers
+        assert "forward/harness" not in receivers
+
+
+def test_occupied_harness_port_renders_only_the_ordinary_receivers(
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _ = collector_unit.install_pinned_binary()
+    collector_unit.ensure(GATEWAY)
+    path = otel_collector_active_config(collector_unit.home)
+    current = config_of(path.read_text())
+    with socket.socket() as occupant:
+        occupant.bind(("127.0.0.1", 0))
+        occupant.listen()
+        port = occupant.getsockname()[1]
+        settings = observability(harness_otlp_port=port)
+        collector_unit.ensure(GATEWAY, observability=settings)
+        fallback = config_of(path.read_text())
+        _assert_harness_disabled(fallback)
+        assert mapping_at(fallback, "receivers", "otlp") == mapping_at(current, "receivers", "otlp")
+        assert occupant.getsockname()[1] == port
+    assert f"harness OTLP disabled: port {port} is unavailable" in capsys.readouterr().err
+    collector_unit.ensure(GATEWAY, observability=settings)
+    assert "otlp/harness" in mapping_at(config_of(path.read_text()), "receivers")
+
+
+@pytest.mark.parametrize("merge", ("direct", "mapping", "sequence"))
+def test_harness_port_conflict_preserves_local_edits_in_the_launch_copy(
+    collector_unit: CollectorUnit, capsys: pytest.CaptureFixture[str], merge: str
+) -> None:
+    _ = collector_unit.install_pinned_binary()
+    path = otel_collector_config(collector_unit.home)
+    active = otel_collector_active_config(collector_unit.home)
+    with socket.socket() as occupant:
+        occupant.bind(("127.0.0.1", 0))
+        occupant.listen()
+        port = occupant.getsockname()[1]
+        settings = observability(harness_otlp_port=port, trace_retention_days=3)
+        rendered = collector_unit.text(GATEWAY, observability=settings)
+        assert oc.write_config(path, rendered)
+        edited = rendered.replace("max_days: 3", "max_days: 19") + "\n# local edit\n"
+        if merge != "direct":
+            block = re.search(r"^  otlp/harness:\n(?:^ {4}[^\n]*\n)+", edited, flags=re.M)
+            assert block is not None
+            if merge == "sequence":
+                replacement = "  <<:\n    -\n" + indent(block[0], "    ") + "    - otlp: {}\n"
+            else:
+                replacement = "  <<:\n" + indent(block[0], "  ")
+            edited = edited.replace(block[0], replacement)
+        assert "otlp/harness" in mapping_at(config_of(edited), "receivers")
+        path.write_text(edited)
+
+        collector_unit.ensure(GATEWAY, observability=settings)
+
+        assert path.read_text() == edited
+        launch = config_of(active.read_text())
+        assert active.stat().st_mode & 0o777 == 0o600
+        assert _rotation(launch)["max_days"] == 19
+        assert mapping_at(launch, "receivers", "otlp") == mapping_at(
+            config_of(rendered), "receivers", "otlp"
+        )
+        _assert_harness_disabled(launch)
+        assert f"using {active}" in capsys.readouterr().err
+
+    collector_unit.ensure(GATEWAY, observability=settings)
+    assert path.read_text() == edited
+    assert active.read_text() == edited
+
+
+def test_harness_processor_removes_non_attribute_payloads(
+    collector_unit: CollectorUnit,
+) -> None:
+    config = collector_unit.render(GATEWAY)
+    processors = mapping_at(config, "processors")
+    allowed = sequence_at(processors, "redaction/harness", "allowed_keys")
+    assert all(key not in allowed for key in ("tool_name", "tool", "gen_ai.tool.name"))
+    transform = mapping_at(processors, "transform/harness_payload")
+    assert sequence_at(config, "service", "pipelines", "logs/harness", "processors") == [
+        "transform/harness_payload",
+        "redaction/harness",
+    ]
+    assert value_at(transform, "trace_statements", 0, "context") == "span"
+    assert "set(span.links, nil)" in sequence_at(transform, "trace_statements", 0, "statements")
+    assert 'set(span.status.message, "")' in sequence_at(
+        transform, "trace_statements", 0, "statements"
+    )
+    assert value_at(transform, "trace_statements", 1, "context") == "spanevent"
+    assert sequence_at(transform, "trace_statements", 1, "statements") == [
+        'set(spanevent.name, "harness event")'
+    ]
+    assert value_at(transform, "metric_statements", 0, "context") == "metric"
+    assert value_at(transform, "metric_statements", 1, "context") == "datapoint"
+    assert any(
+        isinstance(statement, str) and statement.startswith("set(datapoint.exemplars, nil)")
+        for statement in sequence_at(transform, "metric_statements", 1, "statements")
     )
 
 
@@ -279,7 +389,31 @@ def test_the_shipped_template_is_fully_consumed_for_every_role_shape(
         roles, observability=observability(gateway_otlp_endpoint=GATEWAY_INGRESS)
     )
 
-    assert set(config) == {"receivers", "processors", "extensions", "exporters", "service"}
+    assert set(config) == {
+        "receivers",
+        "processors",
+        "extensions",
+        "exporters",
+        "service",
+        "connectors",
+    }
+
+
+@pytest.mark.parametrize("signal", ["logs", "metrics", "traces"])
+def test_harness_redaction_precedes_every_export(
+    collector_unit: CollectorUnit,
+    signal: str,
+) -> None:
+    config = collector_unit.render(GATEWAY)
+    receiver = mapping_at(config, "receivers", "otlp/harness", "protocols", "http")
+    assert receiver[f"{signal}_url_path"] == f"/meiva-harness/v1/{signal}"
+    assert receiver["response_headers"] == {"X-Meiva-Harness-Redaction": "1"}
+    pipelines = mapping_at(config, "service", "pipelines")
+    assert sequence_at(pipelines, f"{signal}/harness", "receivers") == ["otlp/harness"]
+    assert "redaction/harness" in sequence_at(pipelines, f"{signal}/harness", "processors")
+    assert sequence_at(pipelines, f"{signal}/harness", "exporters") == ["forward/harness"]
+    assert "forward/harness" in sequence_at(pipelines, signal, "receivers")
+    assert "redaction/harness" not in sequence_at(pipelines, signal, "processors")
 
 
 def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
@@ -457,7 +591,7 @@ def test_the_host_identity_processors_sit_on_the_infra_pipeline_only(
 ) -> None:
     pipelines = mapping_at(collector_unit.render(GATEWAY), "service", "pipelines")
 
-    assert sequence_at(pipelines, "metrics", "receivers") == ["otlp"]
+    assert sequence_at(pipelines, "metrics", "receivers") == ["otlp", "forward/harness"]
     assert "transform/host_label" not in sequence_at(pipelines, "metrics", "processors")
     assert "transform/host_label" in sequence_at(pipelines, "metrics/infra", "processors")
     assert "resource_detection/host" in sequence_at(pipelines, "metrics/infra", "processors")
@@ -564,6 +698,7 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
     logs = mapping_at(config, "service", "pipelines", "logs")
     assert sequence_at(logs, "receivers") == [
         "otlp",
+        "forward/harness",
         "filelog/sessions",
         "filelog/services",
     ]

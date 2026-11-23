@@ -22,6 +22,7 @@ from base.host.system.job_values import JobRoots
 from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
 from cli.database.runtime import OsRandom, Terminal, UserSession
+from services.supervision.roster.service_spec import ServiceSpec
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -69,6 +70,7 @@ class ConvergeCtx:
     # space and a test hands in a `FakeScratch` over its own directory.
     scratch: ScratchSpace
     services: frozenset[str]
+    planned_services: tuple[ServiceSpec, ...] = ()
 
     # meiva:note
     # The home, checkout and account home every OS job of this converge is anchored to.
