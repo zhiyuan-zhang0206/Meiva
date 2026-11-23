@@ -110,7 +110,7 @@ def _run_owner_child(home: Path, other: Path, *, scenario: str, **pins: str) -> 
 
 
 # meiva:note
-# `$MEIVA_PYTHON -c "import meiva; ..."` run inside another checkout loads that checkout's code
+# A bare `python -c "import meiva; ..."` run inside another checkout loads that checkout's code
 # (`sys.path[0]` is the working directory), so the home's ledger refuses the delivery. An owner
 # created after the boot read only the credential-free URL the refusal left in the environment
 # and reported "no database login was delivered by this process's startup entry".
