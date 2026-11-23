@@ -24,7 +24,14 @@ Python deps, cached on the pin file's hash) and linked into each session's
 temp home by `tests/fixtures/env_bootstrap.py` via `CI_VENDORED_RUNTIME_ROOT`.
 The native cache warmer seeds the same exact-key runtime cache that CI and
 release pgvector smoke jobs restore. Only default-branch jobs save this cache.
-On a cache miss, Zonky fetches try
+On a cache miss, container jobs reuse the runner image's runtime when its
+platform and both version and SHA-256 pins match the checkout. The image
+records the pins after verifying and unpacking both artifacts. For the
+image published by [run 41301530118](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/41301530118)
+from commit `028839a74f50`, the published immutable image digest identifies
+the same verified pins for the preinstalled runtime.
+
+On an image miss, Zonky fetches try
 `repo.maven.apache.org` followed by `repo1.maven.org`, with bounded backoff
 for sources with transient failures and SHA-256 verification before extraction.
 A truncated response falls through to the next source in the same round.

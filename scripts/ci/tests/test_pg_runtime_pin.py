@@ -8,9 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.dataplane.artifact_fetch import fetch_verified
+from base.cluster.dataplane import runtime_binaries as rb
+from base.cluster.dataplane.artifact_fetch import (
+    RUNTIME_PINS_FILENAME,
+    fetch_verified,
+    runtime_pin_manifest,
+)
 from base.cluster.dataplane.runtime_binaries import download_with_opener
 from base.host.net.ports import SYSTEM_URL_OPENER
+from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from scripts.ci.vendor_pg_runtime import prepare_runtime
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WORKFLOWS = _REPO_ROOT / ".github/workflows"
@@ -51,6 +58,8 @@ def test_pgvector_smokes_use_the_cached_runtime() -> None:
     command = "uv run python scripts/ci/pgvector_runtime_smoke.py"
     for name in ("ci.yml", "release-gate.yml"):
         (smoke,) = [job for job in _job_bodies(_WORKFLOWS / name) if command in job]
+        assert "image: &pgvector-smoke-image ghcr.io/" in smoke
+        assert "runner-image: *pgvector-smoke-image" in smoke
         assert smoke.index(_VENDOR_ACTION) < smoke.index(command)
         assert 'MEIVA_HOME="$(dirname "$CI_VENDORED_RUNTIME_ROOT")"' in smoke
 
@@ -136,4 +145,72 @@ def test_ci_image_copies_and_uses_the_artifact_downloader() -> None:
     source = "base/cluster/dataplane/artifact_fetch.py"
     assert f"{source} /tmp/" in dockerfile
     assert f"!{source}" in dockerignore
-    assert "from artifact_fetch import fetch_verified" in dockerfile
+    assert "from artifact_fetch import RUNTIME_PINS_FILENAME, fetch_verified" in dockerfile
+    assert (
+        "runtime_pin_manifest(target_platform, pg_version, pg_sha, pgvector_version, vec_sha)"
+        in dockerfile
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["", "platform", "pg-version", "pg-sha", "vector-version", "vector-sha", "missing"]
+)
+def test_cold_cache_reuses_only_a_pin_matched_image(tmp_path: Path, mismatch: str) -> None:
+    home = tmp_path / "workspace"
+    image = tmp_path / "image/runtime"
+    pg = image / "pg" / rb.PG_VERSION
+    for name in (
+        "bin/initdb",
+        "bin/postgres",
+        "bin/pg_ctl",
+        "lib/postgresql/vector.so",
+        "share/postgresql/extension/vector.control",
+        f"share/postgresql/extension/{rb.PGVECTOR_SQL}",
+    ):
+        path = pg / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    key = "linux-x86_64"
+    fields = [
+        key,
+        rb.PG_VERSION,
+        rb.PG_ARTIFACTS[key][1],
+        rb.PGVECTOR_VERSION,
+        rb.PGVECTOR_ARTIFACTS[key][1],
+    ]
+    for field, index in zip(
+        ("platform", "pg-version", "pg-sha", "vector-version", "vector-sha"), range(5), strict=True
+    ):
+        if mismatch == field:
+            fields[index] = "mismatch"
+    if mismatch != "missing":
+        _ = (image / RUNTIME_PINS_FILENAME).write_text(
+            runtime_pin_manifest(*fields), encoding="ascii"
+        )
+
+    opener = FakeUrlOpener()
+    opener.on("https://repo.maven.apache.org/", Answer(status=429), repeat=True)
+    opener.on("https://repo1.maven.org/", Answer(status=429), repeat=True)
+    sleeps: list[float] = []
+
+    def resolve() -> Path:
+        return prepare_runtime(
+            home=home,
+            system="Linux",
+            machine="x86_64",
+            image_root=image,
+            open_url=opener,
+            sleep=sleeps.append,
+        )
+
+    if mismatch:
+        with pytest.raises(RuntimeError, match="HTTP Error 429"):
+            _ = resolve()
+        assert len(opener.calls) == 2 * rb.DOWNLOAD_ATTEMPTS
+        assert sleeps == [2, 4, 8]
+    else:
+        assert resolve() == image
+        assert opener.calls == []
+        assert sleeps == []
+    assert not rb.runtime_root(home).exists()

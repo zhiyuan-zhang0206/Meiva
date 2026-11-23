@@ -9,6 +9,14 @@ from contextlib import AbstractContextManager
 
 DOWNLOAD_ERRORS = (OSError, http.client.HTTPException)
 
+RUNTIME_PINS_FILENAME = ".artifact-pins"
+
+
+def runtime_pin_manifest(
+    platform: str, pg_version: str, pg_sha: str, vector_version: str, vector_sha: str
+) -> str:
+    return f"{platform}\n{pg_version} {pg_sha}\n{vector_version} {vector_sha}\n"
+
 
 def is_transient_artifact_error(exc: Exception) -> bool:
     if isinstance(exc, urllib.error.HTTPError):

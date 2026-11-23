@@ -176,7 +176,7 @@ import time
 import urllib.request
 import zipfile
 
-from artifact_fetch import fetch_verified
+from artifact_fetch import RUNTIME_PINS_FILENAME, fetch_verified, runtime_pin_manifest
 
 source = pathlib.Path("/tmp/runtime_binaries.py").read_text(encoding="utf-8")
 module = ast.parse(source)
@@ -204,7 +204,8 @@ pgvector_artifacts = constants["PGVECTOR_ARTIFACTS"]
 assert isinstance(pg_artifacts, dict) and isinstance(pgvector_artifacts, dict)
 assert isinstance(maven_bases, tuple)
 
-artifact, pg_sha = pg_artifacts["linux-x86_64"]
+target_platform = "linux-x86_64"
+artifact, pg_sha = pg_artifacts[target_platform]
 pg_urls = tuple(f"{base}/{artifact}/{pg_version}/{artifact}-{pg_version}.jar" for base in maven_bases)
 jar_bytes = fetch_verified(
     pg_urls, pg_sha, open_url=lambda req, timeout: urllib.request.urlopen(req, timeout=timeout),
@@ -221,7 +222,7 @@ with zipfile.ZipFile(io.BytesIO(jar_bytes)) as jar:
 with tarfile.open(fileobj=io.BytesIO(txz_bytes), mode="r:xz") as tar:
     tar.extractall(pg_dir, filter="data")
 
-vec_url, vec_sha = pgvector_artifacts["linux-x86_64"]
+vec_url, vec_sha = pgvector_artifacts[target_platform]
 deb_bytes = fetch_verified(
     (vec_url,), vec_sha, open_url=lambda req, timeout: urllib.request.urlopen(req, timeout=timeout),
     sleep=time.sleep, report_failure=print,
@@ -271,6 +272,10 @@ for binary in (pg_dir / "bin/initdb", pg_dir / "bin/postgres", pg_dir / "bin/pg_
     if "not found" in out:
         raise RuntimeError(f"missing shared library for {binary}:\n{out}")
 
+(pg_dir.parent.parent / RUNTIME_PINS_FILENAME).write_text(
+    runtime_pin_manifest(target_platform, pg_version, pg_sha, pgvector_version, vec_sha),
+    encoding="ascii",
+)
 pathlib.Path("/tmp/runtime_binaries.py").unlink()
 pathlib.Path("/tmp/artifact_fetch.py").unlink()
 print(f"vendored Postgres {pg_version} + pgvector {pgvector_version} verified at {pg_dir}")
