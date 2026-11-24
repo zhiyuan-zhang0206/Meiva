@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+EXEC_FAILURE_EVENTS = [
+    "exec_failed",
+    "exec_timeout",
+    "exec_cancelled",
+    "exec_node_timeout",
+]
+
 # A payload attribute is text in the `attributes` JSONB; only text that is a number is summed.
 NUMBER_PATTERN = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
 

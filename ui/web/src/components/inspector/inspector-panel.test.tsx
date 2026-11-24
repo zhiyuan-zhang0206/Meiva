@@ -154,13 +154,14 @@ describe("InspectorPanel", () => {
 
     const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
-    expect(within(activitySection!).getByText("TPS")).toBeTruthy();
-    expect(within(activitySection!).getByText("42.5")).toBeTruthy();
+    for (const gone of ["TPS", "LLM output", "Code execution"]) {
+      expect(within(activitySection!).queryByText(gone)).toBeNull();
+    }
     expect(screen.queryByText("Active rate")).toBeNull();
     expect(screen.queryByText("50%")).toBeNull();
     expect(screen.queryByText("LLM stage")).toBeNull();
-    expect(screen.getByText("20m")).toBeTruthy();
-    expect(screen.getByText("8m")).toBeTruthy();
+    expect(screen.queryByText("20m")).toBeNull();
+    expect(screen.queryByText("8m")).toBeNull();
     expect(screen.queryByText("Idle")).toBeNull();
 
     expect(screen.getByText("Liveness")).toBeTruthy();
@@ -209,7 +210,7 @@ describe("InspectorPanel", () => {
     const activity = screen.getByLabelText("Activity loading");
     expect(activity.getAttribute("aria-busy")).toBe("true");
     expect(screen.queryByText("Activity")).toBeNull();
-    for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution"]) {
+    for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit"]) {
       expect(within(activity).queryByText(label)).toBeNull();
     }
     expect(activity.querySelectorAll(".animate-spin")).toHaveLength(0);

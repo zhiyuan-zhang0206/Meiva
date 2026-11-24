@@ -10,10 +10,8 @@ import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
-  fixture,
   getAgent,
   getAgentInspectLive,
-  getAgentInspectStatistics,
   getAgentRoster,
   liveFixture,
   QueryClientProvider,
@@ -40,22 +38,6 @@ describe("InspectorPanel liveness identity rows", () => {
     const livenessSection = screen.getByText("Liveness").closest("section");
     expect(await within(livenessSection!).findByText("Codex")).toBeTruthy();
     expect(within(livenessSection!).getByText("Claude Opus 4.8")).toBeTruthy();
-  });
-
-  it("hides TPS, LM Output, and Code Execution in Activity for external harnesses", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "codex" }));
-    getAgentInspectLive.mockResolvedValue(liveFixture());
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    await screen.findByText("Codex");
-    const activitySection = screen.getByText("Activity").closest("section");
-    expect(within(activitySection!).getByText("Cost (API)")).toBeTruthy();
-    expect(within(activitySection!).getByText("LLM calls")).toBeTruthy();
-    expect(within(activitySection!).queryByText("Idle")).toBeNull();
-    expect(within(activitySection!).queryByText("TPS")).toBeNull();
-    expect(within(activitySection!).queryByText("LLM output")).toBeNull();
-    expect(within(activitySection!).queryByText("Code execution")).toBeNull();
   });
 
   it("falls back to an em dash when the roster has not loaded", async () => {

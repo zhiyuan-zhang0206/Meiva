@@ -49,78 +49,6 @@ class AgentCost(BaseModel):
     cache_hit_pct: float | None = Field(ge=0, le=100)
 
 
-class AgentStats(BaseModel):
-    """Observed turn + exec counters within the selected window.
-
-    `turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns
-    excluded); duration fields are null when no duration evidence survives.
-    The metadata declares retained historical histogram precision.
-    `exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome
-    (exec_failed / exec_timeout / exec_cancelled)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    turn_total: NonNegativeInt
-    turn_ok: NonNegativeInt
-    turn_p50_seconds: float | None = Field(ge=0)
-    turn_p90_seconds: float | None = Field(ge=0)
-    turn_min_seconds: float | None = Field(ge=0)
-    turn_max_seconds: float | None = Field(ge=0)
-    exec_ok: NonNegativeInt
-    exec_failed: NonNegativeInt
-
-
-class AgentTps(BaseModel):
-    """Token-per-second metrics for one agent — two views of throughput.
-
-    `lm_stage_tps` = output tokens / cumulative LLM-call wall-clock,
-    isolating just the model's generation speed excluding execute_code and framework
-    overhead. Denominator is the sum of all `turn_end.duration_seconds` over the window.
-
-    `agent_lifecycle_tps` = output tokens / agent's cumulative alive
-    wall-clock, covering the full agent runtime including non-LLM time.
-    Denominator is the agent's total time in non-terminated status (sum of each
-    spawn/resurrect → terminate interval, excluding gaps spent terminated)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    lm_stage_tps: float | None = Field(ge=0)
-    agent_lifecycle_tps: float | None = Field(ge=0)
-
-
-class AgentActivity(BaseModel):
-    """Active-rate: the share of an agent's alive wall-clock it spent actively
-    working versus idle-waiting for its next input. The complement
-    (`1 - active_rate`) is how much of its life the agent sat blocked on a
-    human/peer message — the metric's reason for being: surface how much an
-    agent is gated on people. A project-lead agent that decides/approves every
-    minute reads near 100%; one woken once a week reads near 0%; a worker that
-    runs flat-out then terminates reads ~100%.
-
-    `active_seconds` = Σ `duration_seconds` of every non-`claim` graph
-    `node_exit` in the window — llm generation + execute_code + before/after
-    hooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of
-    every `turn_end` event within the window — the model's generation wall-clock
-    (reasoning + output). `exec_seconds` = Σ `duration_seconds` of every
-    `node_exit` for the `exec` node — the code execution wall-clock. The `claim`
-    node is excluded because its wall-clock IS the idle-wait (it parks the agent
-    in the inbound wait between turns), so it falls into the blocked remainder.
-    `alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate
-    intervals, open tail to now), clipped to the same window — the same lifecycle
-    basis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped
-    at 1.0 (a node that began before the window's leading edge counts in full, so
-    raw active can momentarily exceed windowed alive); 0.0 when alive is 0. All
-    fields follow the request's `?hours=` window."""
-
-    model_config = ConfigDict(frozen=True)
-
-    active_seconds: float = Field(ge=0)
-    alive_seconds: float = Field(ge=0)
-    active_rate: float = Field(ge=0, le=1)
-    llm_seconds: float | None = Field(ge=0)
-    exec_seconds: float = Field(ge=0)
-
-
 class HeartbeatLastPause(BaseModel):
     """The agent's most recent heartbeat pause — when it last opted out of idle
     check-ins and the length it asked for. Sourced from the newest
@@ -191,58 +119,11 @@ class AgentInspectLive(BaseModel):
     heartbeat: HeartbeatInfo
 
 
-class MetricEvidence(BaseModel):
-    """Availability of observed data, never a claim that every event was collected.
-
-    A successful source scan cannot prove that an upstream producer lost nothing.
-    Missing historical data and missing exact duration observations remain explicit.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    availability: Literal["observed", "partial", "unavailable"]
-    sources: list[str]
-    retained_unapplied_sources: list[str] = Field(default_factory=list)
-    reason: (
-        Literal[
-            "historical_coverage_unknown",
-            "missing_turn_durations",
-            "archive_precision_unattributed",
-        ]
-        | None
-    ) = None
-    duration_precision: Literal["exact", "one_second_buckets", "mixed"] | None = None
-
-
-class InspectMetricsMetadata(BaseModel):
-    """One pinned query window and the evidence behind each statistics family.
-
-    ``last_observed_at`` is the newest persisted observation, not a completeness
-    watermark. ``sampled_at`` identifies the DB read, including when cached.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    collection: Literal["observed"] = "observed"
-    window_start: datetime | None
-    window_end: datetime
-    sampled_at: datetime
-    collection_started_at: datetime
-    last_observed_at: datetime | None
-    cost: MetricEvidence
-    turns: MetricEvidence
-    activity: MetricEvidence
-    lifecycle: MetricEvidence
-
-
 class AgentInspectStatistics(BaseModel):
-    """Window-dependent statistics, with no current control-plane state.
+    """Window-dependent usage of one agent, read from the usage ledger.
 
-    ``window_hours`` identifies the requested view;
-    ``applied_window_hours`` echoes the served hour window without a Loki
-    retention clamp. Metadata distinguishes observed, partial, and unavailable
-    source coverage. Unknown sections are null, never invented zero totals.
-    Current state belongs exclusively to ``AgentInspectLive``.
+    ``window_hours`` identifies the requested view; ``applied_window_hours`` echoes the served
+    hour window. Current state belongs exclusively to ``AgentInspectLive``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -250,11 +131,7 @@ class AgentInspectStatistics(BaseModel):
     agent_id: int
     window_hours: StatsWindowHours | None = None
     applied_window_hours: int | None = None
-    cost: AgentCost | None
-    stats: AgentStats | None
-    tps: AgentTps | None
-    activity: AgentActivity | None
-    metadata: InspectMetricsMetadata
+    cost: AgentCost
 
 
 class NeighborRow(BaseModel):

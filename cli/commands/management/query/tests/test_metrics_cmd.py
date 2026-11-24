@@ -22,17 +22,12 @@ def _agent(agent_id: int, *, cost: float, label: str | None = None) -> dict[str,
     return {
         "agent_id": agent_id,
         "label": label,
-        "events": 120,
         "cost_usd": cost,
         "llm_calls": 40,
         "tokens_in": 1000,
         "tokens_out": 200,
         "tokens_cached": 500,
         "cache_hit_pct": 50.0,
-        "turn_ok": 9,
-        "turn_total": 10,
-        "exec_ok": 30,
-        "exec_failed": 2,
     }
 
 
@@ -40,11 +35,8 @@ def _report(agents: list[dict[str, JsonValue]]) -> dict[str, object]:
     return {
         "meta": {
             "window_days": 1,
-            "agent_filter": None,
             "generated_at": "2026-11-12T01:00:00+00:00",
-            "total_events": 500,
             "distinct_agents": len(agents),
-            "since_compact": False,
         },
         "agents": agents,
     }
@@ -65,9 +57,7 @@ def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
     }
     body = _report([_agent(7, cost=4.706, label="ops") | ledger_totals, _agent(8, cost=0.5)])
     with serving({AGENTS: Reply(body=body)}) as gateway:
-        code = cmd_metrics_agents(
-            access_to(gateway.url), days=None, since_compact=False, as_json=False
-        )
+        code = cmd_metrics_agents(access_to(gateway.url), days=None, as_json=False)
     assert code == 0
     assert [r.target for r in gateway.requests] == ["/api/metrics/agents"]
     out = capsys.readouterr().out.splitlines()
@@ -81,10 +71,6 @@ def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
         "tokens_in",
         "tokens_out",
         "cache%",
-        "turns",
-        "exec_ok",
-        "exec_failed",
-        "events",
         "label",
     ]
     assert out[1].split() == [
@@ -97,37 +83,28 @@ def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
         "1000",
         "200",
         "50.0",
-        "9/10",
-        "30",
-        "2",
-        "120",
         "ops",
     ]
     assert out[2].split()[0:2] == ["8", "0.50"]
-    assert out[3] == "(2 agents, 500 events, last 1 day(s))"
+    assert out[3] == "(2 agents, last 1 day(s))"
 
 
-def test_metrics_agents_forwards_days_and_since_compact() -> None:
+def test_metrics_agents_forwards_days() -> None:
     with serving({AGENTS: Reply(body=_report([]))}) as gateway:
-        cmd_metrics_agents(access_to(gateway.url), days=7, since_compact=True, as_json=False)
-    assert _query(gateway.requests[0].target) == {"days": ["7"], "since_compact": ["true"]}
+        cmd_metrics_agents(access_to(gateway.url), days=7, as_json=False)
+    assert _query(gateway.requests[0].target) == {"days": ["7"]}
 
 
 def test_metrics_agents_says_when_nothing_ran(capsys: pytest.CaptureFixture[str]) -> None:
     with serving({AGENTS: Reply(body=_report([]))}) as gateway:
-        assert (
-            cmd_metrics_agents(
-                access_to(gateway.url), days=None, since_compact=False, as_json=False
-            )
-            == 0
-        )
+        assert cmd_metrics_agents(access_to(gateway.url), days=None, as_json=False) == 0
     assert capsys.readouterr().out == "(no agent activity in the last 1 day(s))\n"
 
 
 def test_metrics_agents_json_is_the_response_unchanged(capsys: pytest.CaptureFixture[str]) -> None:
     body = _report([_agent(7, cost=1.0)])
     with serving({AGENTS: Reply(body=body)}) as gateway:
-        cmd_metrics_agents(access_to(gateway.url), days=None, since_compact=False, as_json=True)
+        cmd_metrics_agents(access_to(gateway.url), days=None, as_json=True)
     assert json.loads(capsys.readouterr().out) == body
 
 
@@ -138,10 +115,7 @@ def test_a_refused_window_prints_the_gateways_reason_and_exits_1(
         status=422, body={"detail": [{"msg": "Input should be less than or equal to 30"}]}
     )
     with serving({AGENTS: refusal}) as gateway:
-        assert (
-            cmd_metrics_agents(access_to(gateway.url), days=99, since_compact=False, as_json=False)
-            == 1
-        )
+        assert cmd_metrics_agents(access_to(gateway.url), days=99, as_json=False) == 1
     assert capsys.readouterr().err.startswith("gateway 422: ")
 
 

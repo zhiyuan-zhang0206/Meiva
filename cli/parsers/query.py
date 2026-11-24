@@ -138,7 +138,6 @@ def add_events_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 @dataclass(frozen=True)
 class _MetricsAgentsOptions:
     days: int | None
-    since_compact: bool
     json: bool
 
 
@@ -170,7 +169,6 @@ def _h_metrics_agents(args: argparse.Namespace) -> int:
     return cmd_metrics_agents(
         gateway_access_from_boot(runtime_of(args).config),
         days=opts.days,
-        since_compact=opts.since_compact,
         as_json=opts.json,
     )
 
@@ -224,19 +222,14 @@ def _h_stats(args: argparse.Namespace) -> int:
 
 def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # meiva:note
-    # `meiva metrics agents` reads the per-agent cost, token and turn breakdown;
+    # `meiva metrics agents` reads the per-agent cost and token breakdown;
     # `meiva metrics backfill-unpriced` inspects or applies idempotent historical NULL-cost backfill.
-    metrics_p = sub.add_parser("metrics", help="per-agent cost, token and turn breakdown")
+    metrics_p = sub.add_parser("metrics", help="per-agent cost and token breakdown")
     metrics_sub = metrics_p.add_subparsers(dest="metrics_cmd", required=True)
     agents_p = metrics_sub.add_parser(
         "agents", help="one row per agent over the last N days, the costliest first"
     )
     agents_p.add_argument("--days", type=int, help="window in days, 1..30; default: the gateway's")
-    agents_p.add_argument(
-        "--since-compact",
-        action="store_true",
-        help="count each agent's events from its latest compaction on",
-    )
     agents_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
     agents_p.set_defaults(func=_h_metrics_agents)
 

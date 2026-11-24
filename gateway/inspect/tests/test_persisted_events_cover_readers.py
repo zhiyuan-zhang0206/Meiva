@@ -78,10 +78,10 @@ def _self_evolution_names() -> set[str]:
 
 
 def _parameter_lists() -> dict[str, set[str]]:
-    from base.telemetry.metrics import aggregate_sql
+    from base.telemetry.metrics import event_sql
 
     return {
-        "aggregate_sql.EXEC_FAILURE_EVENTS": set(aggregate_sql.EXEC_FAILURE_EVENTS),
+        "event_sql.EXEC_FAILURE_EVENTS": set(event_sql.EXEC_FAILURE_EVENTS),
         "meiva-self-evolution record.py": _self_evolution_names(),
     }
 
@@ -148,6 +148,7 @@ _PERSIST_WITHOUT_READER_DEBT: dict[str, dict[str, str]] = {
             "delivery_stalled",
             "event_log_drop",
             "gateway_latency",
+            "halt",
             "llm_provider_error",
             "llm_turn_aborted",
             "passive_recall",

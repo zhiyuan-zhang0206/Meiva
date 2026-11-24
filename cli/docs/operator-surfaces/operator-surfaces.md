@@ -55,9 +55,9 @@ instead of SQL or hand-built HTTP calls.
   the matching events counted per value of one dimension, largest group first
   (`GET /api/events/counts`; the counting runs in SQL under the events statement timeout, and a
   window with more than 1000 distinct values is refused).
-- `meiva metrics agents [--days N] [--since-compact] [--json]`: one row per agent over the last
-  N days (cost, calls, tokens, cache hit, turn and exec outcomes), costliest first
-  (`GET /api/metrics/agents`; the aggregation runs in the gateway's SQL).
+- `meiva metrics agents [--days N] [--json]`: one row per agent over the last
+  N days (cost, calls, tokens, cache hit), costliest first
+  (`GET /api/metrics/agents`; the aggregation runs in the gateway's SQL over the usage ledger).
 - `meiva stats [--hours 0|1|6|24|72|168|720] [--json]`: the fleet's tokens, cost (API and
   subscription), warning and error totals over a window, then the plugin status cards such as
   provider balances (`GET /api/stats/dashboard`; `0` is the last five minutes).

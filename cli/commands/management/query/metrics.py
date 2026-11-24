@@ -2,7 +2,7 @@
 # `meiva metrics agents` and `meiva stats` — the fleet's cost, token and alert figures read
 # through `GET /api/metrics/agents` and `GET /api/stats/dashboard`.
 #
-# Thin clients: the gateway aggregates in SQL (per-agent cost and turn outcomes over the last N
+# Thin clients: the gateway aggregates in SQL (per-agent cost and tokens over the last N
 # days; fleet totals, alert counts and the plugin status cards over a stats window), and these
 # verbs print what it returns. A window omitted here is the gateway's configured default.
 
@@ -19,7 +19,6 @@ from cli.boundary.gateway_read import fetch, print_json, render_table
 class _AgentMetrics(BaseModel):
     agent_id: int
     label: str | None
-    events: int
     cost_usd: float
     cost_usd_api: float | None = None
     cost_usd_subscription: float = 0
@@ -29,15 +28,10 @@ class _AgentMetrics(BaseModel):
     tokens_in: int
     tokens_out: int
     cache_hit_pct: float | None
-    turn_ok: int
-    turn_total: int
-    exec_ok: int
-    exec_failed: int
 
 
 class _MetricsMeta(BaseModel):
     window_days: int
-    total_events: int
     distinct_agents: int
 
 
@@ -48,14 +42,8 @@ class _AgentMetricsReport(BaseModel):
 
 # meiva:note
 # Print one row per agent for the window, the costliest first (the gateway's order).
-def cmd_metrics_agents(
-    access: GatewayAccess, *, days: int | None, since_compact: bool, as_json: bool
-) -> int:
-    resp = fetch(
-        access,
-        "/api/metrics/agents",
-        {"days": days, "since_compact": True if since_compact else None},
-    )
+def cmd_metrics_agents(access: GatewayAccess, *, days: int | None, as_json: bool) -> int:
+    resp = fetch(access, "/api/metrics/agents", {"days": days})
     if resp is None:
         return 1
     if as_json:
@@ -77,10 +65,6 @@ def cmd_metrics_agents(
                 "tokens_in",
                 "tokens_out",
                 "cache%",
-                "turns",
-                "exec_ok",
-                "exec_failed",
-                "events",
                 "label",
             ),
             [
@@ -94,20 +78,13 @@ def cmd_metrics_agents(
                     str(row.tokens_in),
                     str(row.tokens_out),
                     "" if row.cache_hit_pct is None else f"{row.cache_hit_pct:.1f}",
-                    f"{row.turn_ok}/{row.turn_total}",
-                    str(row.exec_ok),
-                    str(row.exec_failed),
-                    str(row.events),
                     row.label or "",
                 )
                 for row in report.agents
             ],
         )
     )
-    print(
-        f"({len(report.agents)} agents, {report.meta.total_events} events, "
-        f"last {report.meta.window_days} day(s))"
-    )
+    print(f"({len(report.agents)} agents, last {report.meta.window_days} day(s))")
     return 0
 
 

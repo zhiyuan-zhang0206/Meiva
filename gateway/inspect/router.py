@@ -33,6 +33,7 @@ from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
 from gateway.inspect._live import db_rows_blocking, project_heartbeat
 from gateway.inspect.schemas import (
+    AgentCost,
     AgentInspectLive,
     AgentInspectStatistics,
     HeartbeatLastPause,
@@ -149,7 +150,7 @@ async def _probe_agent_shells(
 # in-flight requests share a read; completed values are not kept behind a TTL.
 _INSPECT_RESPONSE_TIMEOUT_S = 15.0
 _InspectKey = tuple[int, int | None]
-InspectCache = InspectQueryCache[_InspectKey, _metrics.MetricsSnapshot]
+InspectCache = InspectQueryCache[_InspectKey, AgentCost]
 
 
 # meiva:note
@@ -172,12 +173,12 @@ async def _inspect_rows_cached_async(
     *,
     spawned_at: datetime,
     clock: Clock,
-) -> _metrics.MetricsSnapshot:
+) -> AgentCost:
     key = (agent_id, None if hours is None else int(hours))
     try:
         return await cache.get_or_load_async(
             key,
-            lambda: _metrics.inspect_snapshot(
+            lambda: _metrics.inspect_cost(
                 pool,
                 agent_id,
                 hours,
@@ -259,7 +260,7 @@ async def get_agent_inspect_statistics(
     applied_window_hours = None if hours is None else int(hours)
     try:
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
-        aggregates = await asyncio.wait_for(
+        cost = await asyncio.wait_for(
             _inspect_rows_cached_async(
                 state_as(request, InspectAppState).inspect_query_cache,
                 pool,
@@ -286,11 +287,7 @@ async def get_agent_inspect_statistics(
         agent_id=agent_id,
         window_hours=hours,
         applied_window_hours=applied_window_hours,
-        cost=aggregates.cost,
-        stats=aggregates.stats,
-        tps=aggregates.tps,
-        activity=aggregates.activity,
-        metadata=aggregates.metadata,
+        cost=cost,
     )
 
 
