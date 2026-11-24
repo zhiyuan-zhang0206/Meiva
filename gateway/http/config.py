@@ -204,6 +204,7 @@ class GatewayConfig:
     alerts: AlertSettings
     to_user: ToUserLimits
     grafana: GrafanaProxy
+    loki_url: str
     memory_pool: MemoryPoolPolicy
     memory_search: MemorySearchSettings
     heartbeat: HeartbeatTiming
@@ -228,7 +229,7 @@ class GatewayConfig:
     lifecycle_attempt_timeout_seconds: float = 5.0
     lifecycle_retries: int = 1
     # meiva:note
-    # A read of the unified or the per-agent event history past this many milliseconds is
+    # A read of the unified event history (Postgres or Loki) past this many milliseconds is
     # cancelled and answered as a retriable 503.
     events_read_timeout_ms: int = 10_000
     # meiva:note
@@ -358,6 +359,7 @@ def gateway_config_from_boot(
             host=gateway.grafana_host,
             port=gateway.grafana_port,
         ),
+        loki_url=view.observability.telemetry_loki_url,
         memory_pool=MemoryPoolPolicy(
             keep_local=view.general.memory_keep_local, track_branch=view.general.track_branch
         ),
@@ -451,6 +453,7 @@ def placeholder_config() -> GatewayConfig:
         alerts=_placeholders(AlertSettings),
         to_user=_placeholders(ToUserLimits),
         grafana=_placeholders(GrafanaProxy),
+        loki_url="",
         memory_pool=_placeholders(MemoryPoolPolicy),
         memory_search=_placeholders(MemorySearchSettings),
         heartbeat=_placeholders(HeartbeatTiming),

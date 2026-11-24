@@ -13,7 +13,6 @@ from schedules.plans.watch.main_red_issues import (
     IssueAction,
     OpenIssue,
     format_new_issue_notice,
-    liveness_issues_to_close,
     parse_created_issue_url,
     parse_open_issues,
     plan_open_issue,
@@ -148,8 +147,3 @@ class GithubIssueTracker:
             raise RuntimeError(
                 f"gh issue close #{issue_number} failed (rc={done.returncode}): {stderr}"
             )
-
-    def close_liveness_cards(self, reason: str = "watch reporting again: a round landed") -> None:
-        numbers = liveness_issues_to_close(self.list_open_issues())
-        for number in numbers:
-            self.close_card(number, reason)

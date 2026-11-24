@@ -41,8 +41,8 @@ def _page(
         "meta": {
             "total": total,
             "window_from": "2026-11-11T01:00:00+00:00",
-            "offset": 0,
             "has_more": has_more,
+            "next_to": "2026-11-11T01:59:59.999999+00:00" if has_more else None,
         },
         "items": items,
     }
@@ -92,7 +92,6 @@ def test_ls_forwards_every_filter_under_the_gateways_names() -> None:
         since="2026-11-12T00:00:00Z",  # time-bomb-ok: explicit request range under test
         until="2026-11-12T02:00:00Z",  # time-bomb-ok: explicit request range under test
         limit=5,
-        offset=10,
         with_total=True,
     )
     with serving({EVENTS: Reply(body=_page([]))}) as gateway:
@@ -108,7 +107,6 @@ def test_ls_forwards_every_filter_under_the_gateways_names() -> None:
         "from": ["2026-11-12T00:00:00Z"],
         "to": ["2026-11-12T02:00:00Z"],
         "limit": ["5"],
-        "offset": ["10"],
         "with_total": ["true"],
     }
 
@@ -139,7 +137,7 @@ def test_ls_shows_a_service_event_without_an_agent_and_cuts_long_attributes(
     assert row.endswith("...")
     assert len(row.split()[-1]) == 100
     assert out[-2] == "(1 of 40 events since 2026-11-11T01:00:00+00:00)"
-    assert out[-1] == "(more events: repeat with --offset 1)"
+    assert out[-1] == "(more events: repeat with --to 2026-11-11T01:59:59.999999+00:00)"
 
 
 def test_ls_json_prints_the_response_unchanged(capsys: pytest.CaptureFixture[str]) -> None:

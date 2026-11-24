@@ -10,10 +10,9 @@ from enum import StrEnum
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
-from schedules.plans.watch.main_red import STALE_WATCH_TITLE, Card
+from schedules.plans.watch.main_red import Card
 
 __all__ = [
-    "LIVENESS_FINGERPRINT",
     "MAIN_RED_LABEL",
     "MAIN_RED_LABEL_COLOR",
     "MAIN_RED_LABEL_DESCRIPTION",
@@ -22,7 +21,6 @@ __all__ = [
     "OpenIssue",
     "fingerprint_marker",
     "format_new_issue_notice",
-    "liveness_issues_to_close",
     "parse_created_issue_url",
     "parse_open_issues",
     "plan_open_issue",
@@ -31,7 +29,6 @@ __all__ = [
 MAIN_RED_LABEL = "main-red"
 MAIN_RED_LABEL_COLOR = "B60205"
 MAIN_RED_LABEL_DESCRIPTION = "Post-merge failure or watch alert tracked by main-red-watch"
-LIVENESS_FINGERPRINT = "main-red-watch/liveness"
 
 _MAX_ISSUE_TITLE_CHARS = 256
 _ISSUE_URL_RE = re.compile(r"(https?://\S+/issues/(\d+))")
@@ -153,16 +150,6 @@ def plan_open_issue(card: Card, open_issues: Sequence[OpenIssue]) -> IssueOpenPl
         body=_issue_body(card),
         label=MAIN_RED_LABEL,
     )
-
-
-def liveness_issues_to_close(open_issues: Sequence[OpenIssue]) -> tuple[int, ...]:
-    marker = fingerprint_marker(LIVENESS_FINGERPRINT)
-    numbers = [
-        issue.number
-        for issue in sorted(open_issues, key=lambda item: item.number)
-        if marker in issue.body or issue.title.strip() == STALE_WATCH_TITLE
-    ]
-    return tuple(dict.fromkeys(numbers))
 
 
 def format_new_issue_notice(card: Card, *, number: int, url: str) -> str:

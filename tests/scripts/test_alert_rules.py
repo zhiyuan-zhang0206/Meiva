@@ -48,6 +48,7 @@ _EXPECTED_UIDS = {
     "meiva-ops-events-freshness",
     "meiva-ops-events-low-water",
     "meiva-ops-gateway-metrics-silent",
+    "meiva-ops-main-red-watch-silent",
     "meiva-ops-root-health-stale",
     "meiva-ops-checkpoint-blobs-freshness",
     "meiva-ops-checkpoint-blobs-growth",
@@ -240,6 +241,40 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     assert rule["execErrState"] == "OK"
 
 
+def _manifest_cron_interval_minutes(name: str) -> int:
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[2] / "schedules/manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    (entry,) = [item for item in manifest["builtin_schedules"] if item["name"] == name]
+    interval = re.fullmatch(r"\*/(\d+) \* \* \* \*", entry["cron_expr"])
+    assert interval, f"{name}: cadence {entry['cron_expr']!r} is not a plain every-N-minutes cron"
+    return int(interval.group(1))
+
+
+def test_main_red_watch_silence_rule_waits_for_two_missed_rounds() -> None:
+    rules = {r["uid"]: r for r in load_rules()}
+    rule = rules["meiva-ops-main-red-watch-silent"]
+    (expr,) = rule_query_exprs(rule, "prometheus")
+    assert rule_query_exprs(rule, "loki") == []
+    metric = "meiva_main_red_watch_round_rounds_total"
+    window = re.match(rf"absent_over_time\({metric}\[(\d+)h\]\) and on\(\) ", expr)
+    assert window, expr
+    assert int(window.group(1)) * 60 == 2 * _manifest_cron_interval_minutes("main-red-watch")
+    assert f"count(last_over_time({metric}[6d])) > 0" in expr, "a never-seen watch must not alert"
+    assert threshold_params(rule) == [[0]]
+    assert rule["for"] == "5m"
+    assert rule["noDataState"] == "OK"
+    assert rule["execErrState"] == "OK"
+    assert rule["labels"] == {
+        "severity": "error",
+        "ruleUID": "meiva-ops-main-red-watch-silent",
+        "metric": "main_red_watch_silence",
+        "team": "meiva-ops",
+    }
+
+
 def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-root-health-stale"]
@@ -381,6 +416,9 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
         "meiva_memory_search_stats_rows_ratio"
     }
     assert _rendered_names("gateway_latency", "count") == {"meiva_gateway_latency_count_total"}
+    assert _rendered_names("main_red_watch_round", "rounds") == {
+        "meiva_main_red_watch_round_rounds_total"
+    }
     assert _rendered_names("turn_end", "duration_seconds") == {
         "meiva_turn_end_duration_seconds_bucket",
         "meiva_turn_end_duration_seconds_count",

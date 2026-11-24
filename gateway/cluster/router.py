@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
@@ -24,6 +25,7 @@ from base.db.transaction import write_transaction
 from gateway.cluster.admin_events_plan import (
     AdminEventsError,
     AdminEventsFilters,
+    loki_filters,
     plan_admin_events,
 )
 from gateway.cluster.harness_probe import (
@@ -36,7 +38,7 @@ from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.roster import snapshots
 from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, MachineDeleteResponse
 from gateway.cluster.status import RosterEnv, gather_cluster_status, read_local_facts, roster_env
-from gateway.events import telemetry_rows
+from gateway.events import loki_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
 from gateway.http.config import (
     GatewayAppState,
@@ -46,6 +48,7 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
+from gateway.lgtm.backend_failure import raise_backend_unavailable
 from ops.cluster import operations as _ops
 from ops.cluster_status import ClusterStatus
 
@@ -190,7 +193,7 @@ async def get_cluster_roster(
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
-#   - Reading service logs: the unified event stream (`telemetry_events`)
+#   - Reading service logs: the unified event stream (Loki, seven days)
 #     holds every INFO+ line from gateway / scheduler / labeler / agent-host /
 #     watchdog / memory-indexer and the agent processes.
 #   - Cleaning up a stale machines row after a host is decommissioned or
@@ -210,8 +213,8 @@ def get_cluster_admin_events(
     grep: str | None = None,
     limit: int | None = None,
 ) -> AgentEventsResponse:
-    """Slice the unified event stream (category=telemetry/log, read from
-    `telemetry_events`) for ops debugging without SSH.
+    """Slice the unified event stream (category=telemetry/log, read from Loki's
+    seven days) for ops debugging without SSH.
 
     Filters compose (AND):
       - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).
@@ -220,8 +223,9 @@ def get_cluster_admin_events(
       - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute
         timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.
       - `event=spawn,terminate`: comma-separated event names.
-      - `grep=<substring>`: case-insensitive substring match on the event
-        name, source and payload (which includes the `msg` text).
+      - `grep=<substring>`: case-insensitive substring match on the event's
+        recorded line: its name, source and payload (which includes the `msg` text)
+        and the other fields of the record.
       - `limit`: max rows to return, capped at 1000 (protective constant).
         Omitted returns the configured default
         (``display.cluster_events_default_limit`` - 200 out of the box).
@@ -229,6 +233,7 @@ def get_cluster_admin_events(
     Returns newest-first; the client paginates by passing
     `since=<oldest_ts_seen>` on the next call.
     """
+    now = gateway_clock(request).now()
     try:
         query = plan_admin_events(
             AdminEventsFilters(
@@ -241,22 +246,21 @@ def get_cluster_admin_events(
                 limit=limit,
             ),
             default_limit=gateway_config(request).display.cluster_events_default_limit,
-            now=gateway_clock(request).now(),
+            now=now,
         )
     except AdminEventsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    with gateway_state(request).db_pool.connection() as conn:
-        rows, _ = telemetry_rows.query_events(
-            conn,
-            agent_id=query.agent_id,
-            service_only=query.service_only,
-            categories=list(query.categories),
-            event_names=None if query.event_names is None else list(query.event_names),
-            level_min=query.level_min,
-            grep=query.grep,
+    try:
+        rows, _ = loki_rows.query_events(
+            state_as(request, loki_rows.LokiAppState).loki_client,
+            loki_filters(query),
             from_=query.from_,
+            to=None,
+            now=now,
             limit=query.limit,
         )
+    except httpx.HTTPError as exc:
+        raise_backend_unavailable(exc)
     return AgentEventsResponse(
         items=[
             AgentEventRow.model_validate(

@@ -31,12 +31,17 @@ every finished scan sends one, whatever its exit code.
 ## Weekly trigger
 
 The main check fires Tuesday 00:00 cluster time and acts only when the past
-week's agent-event volume reaches `MIN_WEEKLY_EVENTS`. A busy main trigger
+week's audit-event volume reaches `MIN_WEEKLY_EVENTS`. A busy main trigger
 (volume at or above `HIGH_WEEKLY_EVENTS`) also enables a Friday 00:00 follow-up,
 whose own bar is half that high threshold measured from the main trigger rather
 than from the whole week.
 
-The count comes from the live `/api/events` stream with `with_total=1`: the
+The count comes from the audit record, `/api/events?category=audit` with `with_total=1`. It is
+the permanent record of what agents did, in one store; the telemetry and log stream is Loki's
+seven days, which is the week this reads, and mostly background state samples. When the count
+moved from the whole stream to audit alone (2026-11-24: about 77,000 audit events and 286,000
+telemetry events in a week, against the 30,000 and 200,000 bars), `HIGH_WEEKLY_EVENTS` went from
+200,000 to 60,000 so that the follow-up still arms at the volume that armed it before. The
 2026-08-18 contract change made `meta.total` opt-in, and without the flag the
 gateway returns no total — which crashed the trigger on `int(None)`, while a
 silent 0 would have skipped the week's deep run.

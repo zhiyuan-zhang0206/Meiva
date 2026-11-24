@@ -158,7 +158,7 @@ _EVENTS_RETRY_POLICY = Policy(
 )
 
 
-# ─────── Loki-backed event fetches (paged via the gateway /api/events) ───────
+# ─────── event fetches (one page per slice via the gateway /api/events) ───────
 
 
 def _events_page(
@@ -169,7 +169,7 @@ def _events_page(
     *,
     sleep: Callable[[float], None] = retry_sleep,
 ) -> tuple[list[Mapping[str, object]], Mapping[str, object]]:
-    """One /api/events page (offset always 0). Returns (items, meta).
+    """One /api/events page. Returns (items, meta).
 
     Runs on `_EVENTS_RETRY_POLICY`: a transient failure (502/503/504 or a
     transport error) is retried inside the wait budget; a spent budget

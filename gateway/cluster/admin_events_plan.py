@@ -12,11 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from gateway.events.loki_query import LokiFilters
+
 __all__ = [
     "EVENTS_MAX_LIMIT",
     "AdminEventsError",
     "AdminEventsFilters",
     "AdminEventsQuery",
+    "loki_filters",
     "plan_admin_events",
 ]
 
@@ -49,7 +52,7 @@ class AdminEventsFilters:
 
 
 # meiva:note
-# The exact `telemetry_rows.query_events` filters one admin events request runs.
+# The exact filters one admin events request reads Loki with.
 @dataclass(frozen=True)
 class AdminEventsQuery:
     agent_id: int | None
@@ -125,4 +128,15 @@ def plan_admin_events(
         # A lower bound is always in effect; the default is the last 24 hours.
         from_=_since(filters.since, now) if filters.since else now - _DEFAULT_WINDOW,
         limit=limit,
+    )
+
+
+def loki_filters(query: AdminEventsQuery) -> LokiFilters:
+    return LokiFilters(
+        agent_id=query.agent_id,
+        service_only=query.service_only,
+        event_names=query.event_names,
+        level_min=query.level_min,
+        grep=query.grep,
+        categories=query.categories,
     )

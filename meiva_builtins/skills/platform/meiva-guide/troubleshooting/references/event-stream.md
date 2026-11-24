@@ -4,7 +4,7 @@ Loki holds the unified event river: every agent, every service, one stream
 family. This is where a run investigation starts, because it is the only
 surface that covers an unbounded agent life rather than one bounded trace.
 
-Reach it three ways: `meiva events` (Postgres subset, no LogQL), the gateway's Grafana
+Reach it three ways: `meiva events` (the same stream through the gateway, no LogQL), the gateway's Grafana
 datasource proxy with the `gq` helper in [SKILL.md](../SKILL.md#query-the-stack-from-any-machine)
 (any machine), or Grafana Explore.
 
@@ -71,20 +71,22 @@ needs its own stage: `| json model="attributes.model" | json cost_usd="attribute
 Lowercase the trace id before matching. Service-level (non-agent) rows have no `agent_id`
 label: select them by `machine` and `process`.
 
-The gateway reads Postgres for `GET /api/events` (what `meiva events ls` calls):
+The gateway answers `GET /api/events` (what `meiva events ls` calls) from Loki for the telemetry and
+log events and from Postgres for the audit events, merged newest first:
 
 ```
 GET /api/events?agent_id=3048&hours=6
 GET /api/events?trace_id=<hex>&from=<ISO-with-offset>
 ```
 
-Postgres keeps only the events a reader queries by name (`persist=True` in the registry) and
-every event at warning level or above; the rest of a trace's chain (`exec_envelope`,
-`hook_timing`, `node_exit`, info-level logs) is not there. The whole chain is in Loki within its
-7-day window (`| trace_id="<hex>"`) and in the per-machine JSONL event mirror.
+A trace's whole chain (`exec_envelope`, `hook_timing`, `node_exit`, info-level logs) is there
+within Loki's 7-day window; an older trace has only its audit events, and the per-machine JSONL
+event mirror covers what Loki missed.
 
 `from` must carry a timezone offset. Absent both `from` and `hours` the window is forced to the
-last 24h. `limit` caps at 1000; paging is `offset`, an exact count is opt-in via `with_total=1`.
+last 24h. `limit` caps at 1000; paging is by time: when `meta.has_more` is true, repeat the request
+with `to=meta.next_to` (`meiva events ls` prints it as `--to`). An exact count is opt-in via
+`with_total=1`.
 
 ## What went wrong — the recipes
 

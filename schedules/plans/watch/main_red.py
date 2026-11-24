@@ -34,7 +34,6 @@ __all__ = [
     "STATE_CONFIRMED",
     "STATE_INFRA",
     "STATE_SUSPECTED",
-    "WATCH_STALE_AFTER",
     "WEEKLY_STALE_AFTER",
     "Card",
     "Entry",
@@ -61,12 +60,6 @@ FAILURE_INFRA = "infra"
 # sighting -- the fingerprint keeps it to one card -- and its id names the steps a mapping would
 # have to cover, which is how the mapping stops rotting unnoticed.
 FAILURE_UNNAMED = "unnamed"
-
-# meiva:note
-# The watch's own heartbeat, in missed slots: a round lands every half hour, so one hour is two
-# missed slots. One missed slot is a slow round; two mean the watch stopped reporting.
-WATCH_STALE_AFTER = timedelta(hours=1)
-
 
 STATE_SUSPECTED = "suspected"
 STATE_CONFIRMED = "confirmed"
@@ -288,65 +281,18 @@ class Entry:
         return self.fingerprint.partition(_SEPARATOR)[0]
 
 
-# meiva:note
-# The one field of the liveness card that never changes: its body carries the age of the last round,
-# so a second `create` with today's body is a different call. Whoever closes the card finds it by
-# this title.
-STALE_WATCH_TITLE = "The main-red watch stopped reporting: no round heartbeat"
-
-
 @dataclass(frozen=True)
 class Card:
     fingerprint: str
     title: str
     body: str
     # meiva:note
-    # Which occurrence of what `fingerprint` names this card reports: the red run, the stale
-    # watch's last round, the missing slot. The fingerprint says what to watch and stays the same
+    # Which occurrence of what `fingerprint` names this card reports: the red run, the
+    # missing slot. The fingerprint says what to watch and stays the same
     # across occurrences, so it cannot be the create key on its own -- the second occurrence would
     # reuse the first card's key with different text, and the registry refuses that (2026-11-05/06,
     # 38 rounds). `episode` is the part that moves.
     episode: str
-
-    # meiva:note
-    # The card for a watch whose rounds stopped. It lives here, on the type it builds, rather than
-    # as another module-level decision: `main_red` sits at the module surface budget, and this
-    # question shares the card vocabulary with every other card the watch opens. A watch with no
-    # round on record returns nothing -- a schedule that never ran is the manager's business, and a
-    # fresh site would otherwise open a card the first time the check ran.
-    #
-    # `now` decides whether a card is due, never what it says: the age of the last round grows every
-    # round, and text that grows would make each round a different create under one key.
-    @classmethod
-    def for_stale_watch(
-        cls, last_round_at: datetime | None, now: datetime, *, stale_after: timedelta
-    ) -> Card | None:
-        if last_round_at is None:
-            return None
-        age = now - last_round_at
-        if age < stale_after:
-            return None
-        hours = stale_after.total_seconds() / 3600
-        return cls(
-            fingerprint="main-red-watch/liveness",
-            title=STALE_WATCH_TITLE,
-            body=(
-                f"The watch's last round was at {last_round_at.isoformat()} "
-                f"(threshold {hours:.0f}h).\n\n"
-                "This reports the watch, not `main`: while it is down, a red on `main` opens no "
-                "card.\n\n"
-                "Check, in this order:\n\n"
-                "1. `meiva schedules runs <id>` -- is the entry running, and did its last session "
-                "end `interrupted`?\n"
-                "2. `meiva schedules logs <id>` -- does a round print its `fingerprints=...` line, "
-                "or does it raise before printing?\n"
-                "3. `gh api repos/zhiyuan-zhang0206/Meiva/actions/workflows/release-gate.yml/runs` "
-                "-- if GitHub itself is down or the workflow was disabled, the watch has nothing "
-                "to read and says so in its own round.\n\n"
-                "Closes when a round lands again."
-            ),
-            episode=last_round_at.isoformat(),
-        )
 
 
 # meiva:note

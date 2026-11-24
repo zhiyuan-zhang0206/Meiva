@@ -18,7 +18,7 @@ def _at(seconds: float) -> datetime:
     return _START + timedelta(seconds=seconds)
 
 
-def test_page_params_are_offset_free_and_filter_by_agent_only_when_asked() -> None:
+def test_page_params_carry_no_paging_and_filter_by_agent_only_when_asked() -> None:
     plain = ew.page_params("telemetry", _at(0), _at(60), None)
     scoped = ew.page_params("audit", _at(0), _at(60), 42)
 
@@ -27,7 +27,6 @@ def test_page_params_are_offset_free_and_filter_by_agent_only_when_asked() -> No
         "from": "2026-08-13T00:00:00+00:00",
         "to": "2026-08-13T00:01:00+00:00",
         "limit": 1000,
-        "offset": 0,
     }
     assert scoped["agent_id"] == 42
     assert "agent_id" not in plain

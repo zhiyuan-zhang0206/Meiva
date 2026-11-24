@@ -209,7 +209,7 @@ def test_a_quiet_week_skips_and_does_not_arm_the_follow_up() -> None:
 
     assert decision == WeeklyDecision(
         (
-            f"[{_STAMP}] self-evolution check: 29999 events in past 7 days (min=30000, high=200000)",
+            f"[{_STAMP}] self-evolution check: 29999 events in past 7 days (min=30000, high=60000)",
             f"[{_STAMP}] self-evolution skipped: 29999 < 30000 minimum",
         ),
         None,
@@ -226,24 +226,24 @@ def test_an_ordinary_week_fires_without_arming_the_follow_up() -> None:
 
 
 def test_a_busy_week_fires_and_arms_the_follow_up() -> None:
-    decision = decide_main(200000, _NOW, _PROMPT)
+    decision = decide_main(60000, _NOW, _PROMPT)
 
     assert decision.prompt == _PROMPT
     assert decision.follow_up_next is True
-    assert decision.log_lines[1].endswith("mid-week follow-up enabled (200000 >= 200000)")
+    assert decision.log_lines[1].endswith("mid-week follow-up enabled (60000 >= 60000)")
 
 
 def test_the_follow_up_bar_is_half_the_high_threshold_and_disarms() -> None:
-    below = decide_follow_up(99999, _NOW, _PROMPT)
-    at = decide_follow_up(100000, _NOW, _PROMPT)
+    below = decide_follow_up(29999, _NOW, _PROMPT)
+    at = decide_follow_up(30000, _NOW, _PROMPT)
 
     assert below.prompt is None
     assert at.prompt == f"{_PROMPT} (mid-week follow-up)"
     assert not below.follow_up_next and not at.follow_up_next
-    assert "bar=100000" in at.log_lines[0]
+    assert "bar=30000" in at.log_lines[0]
 
 
-def test_events_are_counted_with_the_total_flag_and_the_bearer(tmp_path: Path) -> None:
+def test_audit_events_are_counted_with_the_total_flag_and_the_bearer(tmp_path: Path) -> None:
     since = _NOW - timedelta(days=7)
     with serve_json({"meta": {"total": 42}}) as served:
         total = count_events(EventsApi(served.url, "s3cret"), since, _NOW)
@@ -251,7 +251,7 @@ def test_events_are_counted_with_the_total_flag_and_the_bearer(tmp_path: Path) -
     assert total == 42
     [request] = served.requests
     assert request.path.startswith("/api/events?")
-    for part in ("with_total=1", "limit=1", "offset=0"):
+    for part in ("category=audit", "with_total=1", "limit=1"):
         assert part in request.path
     assert request.headers["authorization"] == "Bearer s3cret"
 
@@ -320,7 +320,7 @@ def test_a_busy_main_check_wakes_the_agent_and_arms_the_follow_up(
     sdk_environment: MeivaContext, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with (
-        serve_json({"meta": {"total": 250000}}) as events,
+        serve_json({"meta": {"total": 70000}}) as events,
         serve_gateway(_WEEKLY_AGENT) as gateway,
         gateway.client() as client,
         use_client(client),
@@ -333,7 +333,7 @@ def test_a_busy_main_check_wakes_the_agent_and_arms_the_follow_up(
     [wake] = _requests(gateway.requests, "/messages")
     assert wake.path == "/api/agents/90/messages"
     assert wake.body["content"] == _PROMPT
-    assert "mid-week follow-up enabled (250000 >= 200000)" in capsys.readouterr().out
+    assert "mid-week follow-up enabled (70000 >= 60000)" in capsys.readouterr().out
 
 
 def test_a_quiet_main_check_wakes_nobody(sdk_environment: MeivaContext) -> None:

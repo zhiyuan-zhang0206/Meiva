@@ -18,7 +18,7 @@ a text summary on stdout.
       "node_sequence": [ {step, node, span_id, start_offset_ms, duration_ms} ],
       "content": {pruned, messages: [...]} | null,
       "events": [EventRow...] | null,
-      "events_loki": [{ts, event_name, level, category, agent_id, attributes}...] | null
+      "events_total": int | null
     }
 
 `--with-content` / `--with-events` join gateway data by trace id:
@@ -26,11 +26,9 @@ a text summary on stdout.
 - content: `GET /api/agents/{agent}/traces/{trace_id}/messages` — the turn's
   complete message history from the checkpoint. `pruned: true` = checkpoint
   trimmed (expected for old turns). 404 = agent no longer exists.
-- events: `GET /api/events?trace_id=...` — the correlated events Postgres stores. The
-  `telemetry_events` table keeps only the events a reader queries (and anything at warning or
-  above), so this is a subset of the chain. `--with-events` also reads Loki for the same
-  trace id (`events_loki`), which holds every event of its 7-day window; a trace older than
-  that is complete only in the JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`).
+- events: `GET /api/events?trace_id=...` — the correlated events of the turn: every telemetry
+  and log event of the last seven days (the gateway reads them from Loki) and the audit events
+  (Postgres, permanent). A trace older than seven days has only its audit events.
 
 Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
 (`MEIVA_API_TOKEN`, set in every launched service and agent), else
@@ -227,44 +225,6 @@ def _fetch_events(gateway: str, trace_id: str, from_iso: str) -> dict:
     return _gateway_get(gateway, f"/api/events?{params}")
 
 
-def _fetch_loki_events(loki: str, trace_id: str, start_ns: int, end_ns: int) -> list[dict]:
-    """Every event of the trace that Loki still holds (7-day window), oldest first."""
-    import urllib.parse
-    import urllib.request
-
-    if not loki.startswith(("http://", "https://")):
-        raise ValueError(f"refusing non-http(s) Loki URL: {loki[:60]!r}")
-    params = urllib.parse.urlencode(
-        {
-            "query": f'{{service_name="unknown_service"}} | json | trace_id="{trace_id}"',
-            "start": str(start_ns),
-            "end": str(end_ns),
-            "limit": "5000",
-            "direction": "forward",
-        }
-    )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(f"{loki.rstrip('/')}/loki/api/v1/query_range?{params}", timeout=60) as resp:
-        streams = json.loads(resp.read().decode())["data"]["result"]
-    rows = []
-    for stream in streams:
-        for stamp, line in stream["values"]:
-            event = json.loads(line)
-            rows.append(
-                {
-                    "ts": event["ts"],
-                    "event_name": event["event_name"],
-                    "level": event["level"],
-                    "category": event["category"],
-                    "agent_id": event["agent_id"],
-                    "attributes": event["attributes"],
-                    "_ns": int(stamp),
-                }
-            )
-    rows.sort(key=lambda row: row.pop("_ns"))
-    return rows
-
-
 def _print_summary(out: dict) -> None:
     print(f"trace {out['trace_id']}  source={out['source']}")
     print(
@@ -290,9 +250,7 @@ def _print_summary(out: dict) -> None:
             f"messages={len(out['content']['messages'])}"
         )
     if out["events"] is not None:
-        print(f"events: {len(out['events'])} rows stored in Postgres (a subset of the chain)")
-    if out["events_loki"] is not None:
-        print(f"events_loki: {len(out['events_loki'])} rows (Loki, 7-day window)")
+        print(f"events: {len(out['events'])} of {out['events_total']} rows")
 
 
 def main() -> int:
@@ -313,11 +271,6 @@ def main() -> int:
         "--gateway",
         default=os.environ.get("MEIVA_GATEWAY_URL", "http://localhost:8000"),
         help="gateway base URL for content/events joins",
-    )
-    ap.add_argument(
-        "--loki-url",
-        default=os.environ.get("MEIVA_LOKI_URL", "http://127.0.0.1:3100"),
-        help="Loki base URL for the full-chain read of --with-events",
     )
     args = ap.parse_args()
 
@@ -354,7 +307,7 @@ def main() -> int:
         "node_sequence": _node_sequence(spans, start_ns),
         "content": None,
         "events": None,
-        "events_loki": None,
+        "events_total": None,
     }
 
     import urllib.error
@@ -389,15 +342,6 @@ def main() -> int:
             out["events_total"] = resp["meta"]["total"]
         except urllib.error.HTTPError as exc:
             print(f"--with-events failed: HTTP {exc.code}")
-        try:
-            out["events_loki"] = _fetch_loki_events(
-                args.loki_url,
-                out["trace_id"],
-                start_ns - 3_600_000_000_000,
-                min(end_ns + 3_600_000_000_000, int(datetime.now(UTC).timestamp() * 1e9)),
-            )
-        except (urllib.error.URLError, OSError) as exc:
-            print(f"--with-events: Loki unreachable ({exc}); events_loki left null")
 
     Path(args.out).write_text(json.dumps(out, indent=1), encoding="utf-8")
     _print_summary(out)

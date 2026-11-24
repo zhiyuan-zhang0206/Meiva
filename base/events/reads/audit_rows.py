@@ -3,7 +3,7 @@
 `category=audit` events are recorded in Postgres (docs/decisions/data/database/2026-10-02-audit-events-in-postgres.md);
 Loki holds only a projection that expires. Every reader that needs audit history reads here:
 `/api/events`, the run timeline, the fleet graph and the neighbors walk. Rows come back in the
-same dict shape `gateway.events.telemetry_rows.query_events` returns, so one merge serves both.
+same dict shape `gateway.events.loki_rows.query_events` returns, so one merge serves both.
 
 Row `id` is the event's stream id (the unsigned form of `audit_events.event_uid`), the same value
 the Loki row of that event carries. `line_sha256` is the digest of the recorded row, not of a

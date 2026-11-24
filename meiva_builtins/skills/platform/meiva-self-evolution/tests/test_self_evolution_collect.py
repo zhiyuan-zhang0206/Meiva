@@ -253,7 +253,7 @@ def _read(
 
 
 def test_fetch_slices_and_orders_oldest_first(collect_mod: Any) -> None:
-    # 2500 rows > single-page budget -> binary-search time; one offset=0 query per slice
+    # 2500 rows > single-page budget -> binary-search time; one query per slice
     rows = [world.event_row(i, world.ts_after(i * 2)) for i in range(2500)]
     with world.serve_events(rows) as server:
         out = _read(collect_mod, server)
@@ -261,10 +261,10 @@ def test_fetch_slices_and_orders_oldest_first(collect_mod: Any) -> None:
     assert len(out) == 2500
     tss = [str(r["ts"]) for r in out]
     assert tss == sorted(tss)
-    # No offset pagination: every request is offset=0 limit=1000 (Loki offset pagination times out / drops data)
+    # No paging: every request is one page of limit=1000
     assert server.requests
     for request in server.requests:
-        assert request.params["offset"] == "0"
+        assert "offset" not in request.params
         assert request.params["limit"] == "1000"
 
 
@@ -277,7 +277,7 @@ def test_fetch_bisects_oversized_slices_without_loss(collect_mod: Any) -> None:
     assert len(out) == 9000
     assert len({r["id"] for r in out}) == 9000
     for request in server.requests:
-        assert request.params["offset"] == "0"
+        assert "offset" not in request.params
         assert request.params["limit"] == "1000"
 
 

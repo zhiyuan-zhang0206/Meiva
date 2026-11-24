@@ -81,9 +81,9 @@ class EventsServer:
             key=lambda row: str(row["ts"]),
             reverse=True,
         )
-        limit, offset = int(params["limit"]), int(params["offset"])
-        page = matching[offset : offset + limit]
-        return {"items": page, "meta": {"has_more": offset + len(page) < len(matching)}}
+        limit = int(params["limit"])
+        page = matching[:limit]
+        return {"items": page, "meta": {"has_more": len(page) < len(matching)}}
 
 
 @contextmanager

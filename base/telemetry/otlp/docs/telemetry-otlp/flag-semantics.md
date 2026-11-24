@@ -1,6 +1,7 @@
 # OTLP flag semantics & endpoints
 
-No gateway reader consumes the Loki copy; every reader uses `telemetry_events`.
+The gateway reads the Loki copy (seven days) for `/api/events` and `/api/cluster/admin/events`; see
+`gateway/events/docs/event-reads.md`.
 
 **Flag semantics** — `MEIVA_TELEMETRY_OTLP_ENABLED` /
 `MEIVA_TELEMETRY_OTLP_ENDPOINT` (default `http://127.0.0.1:4318` — the standard

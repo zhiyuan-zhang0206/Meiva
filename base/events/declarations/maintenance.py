@@ -124,9 +124,12 @@ class AgentWatchRound(TypedDict):
 # opened, how many failures were classified as infrastructure, and how many post-merge workflows
 # were past their staleness threshold. The heartbeat is the point: a schedule that stops taking its
 # rounds looks exactly like a schedule with nothing to report, so a missing round has to be visible
-# as a missing event rather than as silence.
+# as a missing metric sample rather than as silence: `rounds` is always 1, the field
+# `METRIC_DISPOSITION` maps to the counter `meiva_main_red_watch_round_rounds_total`, and the Grafana
+# rule `meiva-ops-main-red-watch-silent` fires when that counter has no sample for an hour.
 # meiva:link base/events/docs/maintenance-payloads.md
 class TrunkRedWatchRound(TypedDict):
+    rounds: int
     fingerprints: int
     confirmed: int
     infra: int
@@ -216,7 +219,6 @@ EVENTS: dict[str, EventSpec] = {
         "one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules",
         payload=TrunkRedWatchRound,
         site="schedules/main-red-watch-schedule.py:watch_round (via emit_system_event)",
-        persist=True,
     ),
     "debt_sweep_daily": telemetry_event(
         "debt_sweep_daily",

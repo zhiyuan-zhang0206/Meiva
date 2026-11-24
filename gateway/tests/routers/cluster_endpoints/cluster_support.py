@@ -4,7 +4,6 @@ import asyncio
 import os
 import subprocess
 import threading
-import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,7 +11,6 @@ from pathlib import Path
 import psutil
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 
 from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -65,36 +63,6 @@ def roster_env(
         # case names, so no case depends on the machine running the suite.
         host=fake_host(commands=run_bounded, environ=dict(os.environ)),
     )
-
-
-# meiva:note
-# One `telemetry_events` row the admin events endpoint reads, committed.
-def seed_event(
-    conn: psycopg.Connection,
-    *,
-    event_name: str = "log",
-    level: str = "info",
-    agent_id: int | None = None,
-    msg: str = "hi",
-    seconds_ago: float = 60.0,
-    category: str = "telemetry",
-) -> None:
-    conn.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, "
-        "event_name, level, source, agent_id, attributes) "
-        "VALUES (%s, now() - make_interval(secs => %s), 'machine-1', 'c', 'gateway', %s, %s, %s, "
-        "'test', %s, %s)",
-        (
-            uuid.uuid4().int % (1 << 62),
-            seconds_ago,
-            category,
-            event_name,
-            level,
-            agent_id,
-            Jsonb({"msg": msg}),
-        ),
-    )
-    conn.commit()
 
 
 @pytest.fixture(autouse=True)

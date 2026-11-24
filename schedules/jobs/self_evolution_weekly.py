@@ -1,6 +1,10 @@
 # meiva:note
-# The weekly self-evolution trigger: count the agent events of the past week through the
+# The weekly self-evolution trigger: count the audit events of the past week through the
 # gateway's `/api/events` and wake the self-evolution agent when the volume clears its bar.
+#
+# The count is the audit record's (`category=audit`, permanent and one store), not the telemetry
+# and log stream: Loki keeps that for exactly the week this reads, and most of its lines are
+# background state samples, not agent activity.
 #
 # The count carries `with_total=1`: since the 2026-08-18 contract change `meta.total` is opt-in,
 # and without the flag the gateway returns no total, which crashed the trigger on `int(None)`
@@ -99,10 +103,10 @@ def count_events(api: EventsApi, since: datetime, until: datetime) -> int:
         raise RuntimeError("refusing to read events with no gateway credential")
     headers = {"Authorization": f"Bearer {api.token}"}
     params: dict[str, str | int] = {
+        "category": "audit",
         "from": since.isoformat(),
         "to": until.isoformat(),
         "limit": 1,
-        "offset": 0,
         "with_total": 1,
     }
     resp = httpx.get(f"{api.base_url}/api/events", params=params, headers=headers, timeout=120.0)

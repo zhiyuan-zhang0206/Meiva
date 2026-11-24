@@ -6,29 +6,23 @@ import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import pytest
 
-from base.db import Database
 from schedules.jobs.watch.main_red_issues import GithubIssueTracker
-from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import STATE_FILE, load_state, watch_once
 from schedules.plans.watch.main_red import (
     FAILURE_TEST,
-    STALE_WATCH_TITLE,
     Card,
     Failure,
     RunFacts,
 )
 from schedules.plans.watch.main_red_issues import (
-    LIVENESS_FINGERPRINT,
     MAIN_RED_LABEL,
     IssueAction,
     OpenIssue,
     fingerprint_marker,
     format_new_issue_notice,
-    liveness_issues_to_close,
     parse_created_issue_url,
     parse_open_issues,
     plan_open_issue,
@@ -158,16 +152,12 @@ def test_pure_plan_dedupes_by_marker_body_fingerprint_and_title() -> None:
     assert fingerprint_marker(card.fingerprint) in fresh.body
 
 
-def test_pure_parsers_and_liveness_selector() -> None:
+def test_pure_parsers() -> None:
     parsed = parse_open_issues(
         json.dumps(
             [
-                {"number": 20, "title": STALE_WATCH_TITLE, "body": ""},
-                {
-                    "number": 10,
-                    "title": "custom stale title",
-                    "body": fingerprint_marker(LIVENESS_FINGERPRINT),
-                },
+                {"number": 20, "title": "main-red: late", "body": ""},
+                {"number": 10, "title": "main-red: early", "body": "Fingerprint: `ci.yml::y`"},
                 {"number": 15, "title": "main-red: other", "body": "Fingerprint: `ci.yml::x`"},
                 {"number": "bad", "title": "skip", "body": ""},
             ]
@@ -176,7 +166,6 @@ def test_pure_parsers_and_liveness_selector() -> None:
     )
     assert [issue.number for issue in parsed] == [10, 15, 20]
     assert parsed[0].url == f"https://github.com/{_REPO}/issues/10"
-    assert liveness_issues_to_close(parsed) == (10, 20)
 
     with pytest.raises(TypeError):
         parse_open_issues("{}")
@@ -307,63 +296,6 @@ def test_watch_once_end_to_end_with_mocked_gh_opens_dedupes_and_closes_on_green(
     assert gh.issues[701]["state"] == "closed"
     assert gh.closed_comments == [(701, "red ended: resolved by a green run")]
     assert load_state(state_path).entries == {}
-
-
-def test_liveness_opens_dedupes_and_closes_github_issue() -> None:
-    gh = _FakeGh(next_number=801)
-    notices: list[str] = []
-    tracker = GithubIssueTracker(_REPO, run_process=gh, notify=notices.append)
-    last_round = datetime(2026, 11, 22, 9, 0, tzinfo=UTC)
-
-    class _FakeDb:
-        def __init__(self, ts: datetime) -> None:
-            self._ts = ts
-
-        def connect(self, *, autocommit: bool = False) -> _FakeDb:
-            assert autocommit
-            return self
-
-        def __enter__(self) -> _FakeDb:
-            return self
-
-        def __exit__(self, *_exc: object) -> bool:
-            return False
-
-        def cursor(self) -> _FakeDb:
-            return self
-
-        def execute(self, _sql: str, _params: object) -> None:
-            return None
-
-        def fetchone(self) -> tuple[datetime]:
-            return (self._ts,)
-
-    first = liveness_once(
-        last_round + timedelta(minutes=65),
-        database=cast("Database", _FakeDb(last_round)),
-        open_card=tracker.open_card,
-        close_card=tracker.close_liveness_cards,
-    )
-    second = liveness_once(
-        last_round + timedelta(minutes=95),
-        database=cast("Database", _FakeDb(last_round)),
-        open_card=tracker.open_card,
-        close_card=tracker.close_liveness_cards,
-    )
-    assert first == 801
-    assert second == 801
-    assert list(gh.issues) == [801]
-    assert len(notices) == 1
-
-    recovered = liveness_once(
-        last_round + timedelta(minutes=125),
-        database=cast("Database", _FakeDb(last_round + timedelta(minutes=120))),
-        open_card=tracker.open_card,
-        close_card=tracker.close_liveness_cards,
-    )
-    assert recovered is None
-    assert gh.issues[801]["state"] == "closed"
-    assert gh.closed_comments == [(801, "watch reporting again: a round landed")]
 
 
 def test_legacy_state_json_with_task_id_loads_safely_without_closing_wrong_issue(

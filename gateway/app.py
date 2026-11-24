@@ -72,9 +72,9 @@ from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
+from gateway.events import loki_rows, notification_outbox
 from gateway.events import merged as merged_stream_router
 from gateway.events import metrics as metrics_router
-from gateway.events import notification_outbox
 from gateway.events import router as events_router
 from gateway.events import system as system_router
 from gateway.extensions import inventory as inventory_router
@@ -161,6 +161,7 @@ class GatewayServerState(
     inspect_router.InspectAppState,
     frontend_telemetry_router.FrontendTelemetryAppState,
     grafana_router.GrafanaAppState,
+    loki_rows.LokiAppState,
     insights_router.InsightsAppState,
     memory_router.MemoryAppState,
     cluster_router.HarnessAppState,
@@ -325,6 +326,13 @@ async def lifespan(
             grafana_client = grafana_router.build_proxy_client()
             state.grafana_client = grafana_client
             releases.push_async_callback(grafana_client.aclose)
+
+            loki_client = loki_rows.build_client(
+                state.gateway_config.loki_url,
+                timeout_seconds=state.gateway_config.events_read_timeout_ms / 1000,
+            )
+            state.loki_client = loki_client
+            releases.callback(loki_client.close)
 
             try:
                 # meiva:note

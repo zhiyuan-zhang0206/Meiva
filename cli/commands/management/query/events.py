@@ -37,13 +37,12 @@ class EventsFilter:
     until: str | None = None
     hours: float | None = None
     limit: int | None = None
-    offset: int | None = None
     with_total: bool = False
 
 
 # meiva:note
 # The query parameters the gateway names for these filters. The window and the filters are the
-# same for the list and the counts; the page (`limit`, `offset`, `with_total`) is the list's.
+# same for the list and the counts; the page (`limit`, `with_total`) is the list's.
 def _filter_params(flt: EventsFilter) -> dict[str, str | int | float | bool | None]:
     return {
         "category": flt.category,
@@ -76,8 +75,8 @@ class _EventItem(BaseModel):
 class _EventsMeta(BaseModel):
     total: int | None
     window_from: datetime | None
-    offset: int
     has_more: bool
+    next_to: datetime | None
 
 
 class _EventsPage(BaseModel):
@@ -102,7 +101,6 @@ def cmd_events_ls(access: GatewayAccess, flt: EventsFilter, *, as_json: bool) ->
         "/api/events",
         {
             **_filter_params(flt),
-            "offset": flt.offset,
             "with_total": True if flt.with_total else None,
         },
     )
@@ -136,8 +134,8 @@ def cmd_events_ls(access: GatewayAccess, flt: EventsFilter, *, as_json: bool) ->
     )
     total = f" of {page.meta.total}" if page.meta.total is not None else ""
     print(f"({len(page.items)}{total} events since {since})")
-    if page.meta.has_more:
-        print(f"(more events: repeat with --offset {page.meta.offset + len(page.items)})")
+    if page.meta.has_more and page.meta.next_to is not None:
+        print(f"(more events: repeat with --to {page.meta.next_to.isoformat()})")
     return 0
 
 

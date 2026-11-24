@@ -11,8 +11,10 @@ from gateway.cluster.admin_events_plan import (
     AdminEventsError,
     AdminEventsFilters,
     AdminEventsQuery,
+    loki_filters,
     plan_admin_events,
 )
+from gateway.events.loki_query import LokiFilters
 
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 
@@ -109,3 +111,16 @@ def test_event_names_split_on_commas_and_drop_blanks() -> None:
 
 def test_grep_is_passed_through() -> None:
     assert _plan(grep="hello").grep == "hello"
+
+
+def test_the_query_is_read_from_loki_with_its_filters() -> None:
+    query = _plan(agent_id=3, level="warning", event="spawn, terminate", grep="boom")
+
+    assert loki_filters(query) == LokiFilters(
+        agent_id=3,
+        event_names=("spawn", "terminate"),
+        level_min="warning",
+        grep="boom",
+        categories=("telemetry", "log"),
+    )
+    assert loki_filters(_plan(service_only=True)).service_only is True

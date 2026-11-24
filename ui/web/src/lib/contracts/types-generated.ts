@@ -2731,8 +2731,8 @@ export interface components {
             window_from: string | null;
             window_to: string | null;
             limit: number;
-            offset: number;
             has_more: boolean;
+            next_to: string | null;
             generated_at: string;
         };
         EventsResponse: {
@@ -7318,7 +7318,6 @@ export interface operations {
                 to?: string | null;
                 hours?: number | null;
                 limit?: number | null;
-                offset?: number;
                 with_total?: boolean;
             };
             header?: never;
