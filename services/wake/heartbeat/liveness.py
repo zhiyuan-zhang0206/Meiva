@@ -37,6 +37,14 @@
 # excludes the pause latch), so it emits nothing: an expected absence is silent
 # at the source.
 #
+# A machine whose ops server answers while its agent host is dead (`host_online` is
+# False; None means the answer carried no verdict and is never a signal) is half-up:
+# the probe succeeded, so `machine_probe_failed` stays silent and `machine_probe` reads
+# online, yet no agent on it can run. Every such pass emits one `machine_agent_host_down`
+# event, with `machine_probe_failed`'s grading inputs. The target list already leaves out
+# announced stops (`stopped_at`), staging and paused machines, so a planned `meiva stop`
+# needs no extra suppression here; the Grafana rule owns the debounce.
+#
 # The probe path is injectable (`probe` argument) so tests can run the full
 # DB merge without dialing real ops servers.
 
@@ -198,7 +206,8 @@ async def _record_probe(
 ) -> None:
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success; a failed probe also
-    emits the `machine_probe_failed` signal."""
+    emits the `machine_probe_failed` signal, and a reached machine whose agent
+    host is down emits `machine_agent_host_down`."""
     with write_transaction(pool) as conn:
         row = query_one(
             conn,
@@ -228,6 +237,14 @@ async def _record_probe(
                 "consecutive_failures": consecutive_failures,
                 **_carried_load(pool, name),
             },
+        )
+    elif host_online is False:
+        telemetry.emit(
+            "telemetry",
+            "machine_agent_host_down",
+            level="warning",
+            source="system",
+            attributes={"machine": name, **_carried_load(pool, name)},
         )
 
 

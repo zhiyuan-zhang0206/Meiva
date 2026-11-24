@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 
 import psycopg
 import pytest
@@ -170,3 +171,104 @@ class TestMachineProbeFailedSignal:
                 "carries_service": True,
             }
         ]
+
+
+def _host_probe(host_online: bool | None) -> Callable[..., Awaitable[object]]:
+    async def probe(target_machine: str = "", **_kwargs: object) -> dict[str, object]:
+        return {
+            "machine_name": target_machine,
+            "serve_gateway": False,
+            "serve_agent_runner": True,
+            "paused": False,
+            "agent_host_online": host_online,
+        }
+
+    return probe
+
+
+class TestMachineAgentHostDownSignal:
+    async def _run(
+        self,
+        pool: ConnectionPool,
+        probe: Callable[..., Awaitable[object]],
+        *,
+        database_gate: ProcessDbGate,
+    ) -> None:
+        await run_liveness_pass(
+            Database.from_settings(gate=database_gate),
+            pool,
+            EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            probe=probe,
+            config=LivenessConfig(8.0),
+        )
+
+    @pytest.mark.usefixtures(pool.__name__)
+    def test_a_reachable_machine_with_a_dead_agent_host_emits_once_per_pass(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        emitted_events: EmittedEvents,
+        *,
+        database_gate: ProcessDbGate,
+    ) -> None:
+        register_machine(db_conn)
+
+        for _ in range(2):
+            asyncio.run(self._run(pool, _host_probe(False), database_gate=database_gate))
+        assert [
+            (event.category, event.event_name, event.level, event.attributes)
+            for event in emitted_events
+        ] == [
+            ("telemetry", "machine_agent_host_down", "warning", {"machine": MACHINE, **load})
+            for load in (_NO_LOAD, {"agent_count": 0, "carries_service": False})
+        ]
+        assert set(next(iter(emitted_events)).attributes) == set(
+            payload_keys("machine_agent_host_down")
+        )
+
+    @pytest.mark.usefixtures(pool.__name__)
+    @pytest.mark.parametrize("verdict", [True, None])
+    def test_a_running_or_unknown_agent_host_emits_nothing(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        emitted_events: EmittedEvents,
+        verdict: bool | None,
+        *,
+        database_gate: ProcessDbGate,
+    ) -> None:
+        register_machine(db_conn)
+
+        asyncio.run(self._run(pool, _host_probe(verdict), database_gate=database_gate))
+        assert len(emitted_events) == 0
+
+    @pytest.mark.usefixtures(pool.__name__)
+    def test_an_announced_stop_leaves_the_probe_targets_and_emits_nothing(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        emitted_events: EmittedEvents,
+        *,
+        database_gate: ProcessDbGate,
+    ) -> None:
+        register_machine(db_conn)
+        with db_conn.cursor() as cur:
+            cur.execute("UPDATE machines SET stopped_at = now() WHERE name = %s", (MACHINE,))
+        db_conn.commit()
+
+        asyncio.run(self._run(pool, _host_probe(False), database_gate=database_gate))
+        assert len(emitted_events) == 0
+
+    @pytest.mark.usefixtures(pool.__name__)
+    def test_an_unreachable_machine_emits_only_the_probe_failure(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        emitted_events: EmittedEvents,
+        *,
+        database_gate: ProcessDbGate,
+    ) -> None:
+        register_machine(db_conn)
+
+        asyncio.run(self._run(pool, FakeProbe({MACHINE: False}), database_gate=database_gate))
+        assert [event.event_name for event in emitted_events] == ["machine_probe_failed"]

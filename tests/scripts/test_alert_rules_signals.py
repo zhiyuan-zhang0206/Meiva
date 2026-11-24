@@ -45,6 +45,7 @@ SIGNALS: dict[str, Signal] = {
         "machine_probe_failed", "meiva-ops", "3m", "warning"
     ),
     "meiva-ops-machine-offline-error": Signal("machine_probe_failed", "meiva-ops", "10m", "error"),
+    "meiva-ops-agent-host-down": Signal("machine_agent_host_down", "meiva-ops", "3m", "error"),
     "meiva-ops-machine-stopped-too-long": Signal(
         "machine_stopped_too_long", "meiva-ops", "0m", "error"
     ),
@@ -151,6 +152,15 @@ def test_the_rule_only_groups_and_filters_by_fields_the_event_carries(uid: str) 
     grouped = re.findall(r"by \(([^)]*)\)", query)
     for label in (name.strip() for part in grouped for name in part.split(",")):
         assert label in _ENVELOPE or label.removeprefix("attributes_") in declared
+
+
+def test_the_agent_host_down_window_is_shorter_than_its_debounce() -> None:
+    rule = _rules()["meiva-ops-agent-host-down"][1]
+    (window,) = re.findall(r"\[(\d+)m\]", _query(rule))
+    (node,) = [d for d in rule["data"] if d["refId"] == "A"]
+    pending = int(rule["for"].removesuffix("m"))
+    assert int(window) < pending
+    assert node["relativeTimeRange"]["from"] == int(window) * 60
 
 
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:

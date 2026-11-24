@@ -22,6 +22,9 @@ Gateway's idle agent check scheduler — every `MEIVA_HEARTBEAT_INTERVAL_SECONDS
   `machine_probe_failed` event (machine + `consecutive_failures`) — the signal
   the Grafana "machine offline" rules grade (grace window, WARNING -> ERROR).
   A paused machine is not a target, so it emits nothing.
+  A machine that answers the probe while reporting its agent host as not running
+  (`agent_host_online` false; unknown is never a signal) emits one
+  `machine_agent_host_down` event per pass — the signal `meiva-ops-agent-host-down` grades.
   Edges entering or leaving `offline` publish the canonical `agent_updated`
   snapshot after commit, so the existing frontend fold updates immediately;
   `unknown → online` is not broadcast because both render online and a
