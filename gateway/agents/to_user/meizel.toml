@@ -1,6 +1,8 @@
 exports = ["document.py", "publications.py"]
 
 [uses]
+"document.py" = ["raw_receipt.py"]
+"raw_receipt.py" = []
 "tests" = ["document.py"]
 
 [purity]

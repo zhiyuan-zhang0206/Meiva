@@ -21,8 +21,12 @@ from base.agents.to_user import (
     WorkspaceDirListing,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
+    file_validators,
+    not_modified,
+    range_applies,
     read_document,
     read_failure,
+    validator_headers,
 )
 from base.config.domains.to_user import FileAccess
 from base.daemon.http_transport import RouteAnswer
@@ -635,9 +639,14 @@ def _json(payload: BaseModel) -> RouteAnswer:
 
 # meiva:note
 # The runner's answer to one forwarded workspace read, as the ops listener sends it, under the
-# reach the gateway sent; a refusal raises `WorkspaceFileError`. A `raw` read with a `byte_range`
-# answers that slice (`206`/`416` with its `Content-Range`) unless the range is one HTTP lets a
-# server ignore, which falls through to the whole file under the resource cap.
+# reach the gateway sent; a refusal raises `WorkspaceFileError`. A `raw` read carries the file's
+# validators (`ETag`, `Last-Modified`) and is evaluated against the browser's preconditions before
+# any byte is read: a matching `If-None-Match` answers `304` with no body, and a stale `If-Range`
+# drops the range so the whole current file answers. A `raw` read with a `byte_range` answers that
+# slice (`206`/`416` with its `Content-Range`) unless the range is one HTTP lets a server ignore,
+# which falls through to the whole file under the resource cap. The validators are taken from a
+# stat made before the read, so a file rewritten in between is tagged with the older version and
+# merely revalidates once more, never the reverse.
 def answer_workspace_file(
     request: WorkspaceFileRequest, *, home: Path, user_home: Path, limits: ToUserLimits
 ) -> RouteAnswer:
@@ -653,7 +662,14 @@ def answer_workspace_file(
         return _json(
             list_workspace_dir(reach, request.agent_id, request.path, custom_cwd=custom_cwd)
         )
-    if request.byte_range is not None:
+    stat = resolve_existing_workspace_file(
+        reach, request.agent_id, request.path, custom_cwd=custom_cwd
+    ).stat()
+    validators = file_validators(stat.st_size, stat.st_mtime_ns)
+    headers = validator_headers(validators)
+    if not_modified(validators, request.if_none_match):
+        return 304, b"", "application/octet-stream", headers
+    if request.byte_range is not None and range_applies(validators, request.if_range):
         answer = read_workspace_file_range(
             reach,
             request.agent_id,
@@ -667,7 +683,7 @@ def answer_workspace_file(
                 answer.status,
                 answer.content,
                 "application/octet-stream",
-                {"Content-Range": answer.content_range},
+                {**headers, "Content-Range": answer.content_range},
             )
     raw = read_workspace_file_raw(
         reach,
@@ -676,4 +692,4 @@ def answer_workspace_file(
         custom_cwd=custom_cwd,
         max_bytes=limits.resource_bytes,
     )
-    return 200, raw, "application/octet-stream"
+    return 200, raw, "application/octet-stream", headers

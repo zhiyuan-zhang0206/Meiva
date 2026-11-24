@@ -14,8 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ValidationError
 from starlette.background import BackgroundTask
+from starlette.datastructures import Headers
+from starlette.types import Receive, Scope, Send
 
 from base.agents.to_user import (
+    CACHE_CONTROL,
+    FileValidators,
     OngoingDocument,
     ToUserDocument,
     ToUserReadFailure,
@@ -23,6 +27,10 @@ from base.agents.to_user import (
     WorkspaceDirListing,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
+    file_validators,
+    not_modified,
+    range_applies,
+    validator_headers,
 )
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
@@ -30,6 +38,7 @@ from base.config.domains.to_user import FileAccess
 from base.db.rows import query_one
 from base.paths import workspace_path
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.agents.to_user.raw_receipt import RawReceipt
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
@@ -197,13 +206,21 @@ def response_policy(media_type: str) -> tuple[str, str]:
 
 # meiva:note
 # The media type a file name implies and the headers every served file carries: its disposition
-# and the passive CSP, never cached, never sniffed into another type.
-def passive_headers(name: str) -> tuple[str, dict[str, str]]:
+# and the passive CSP, never sniffed into another type. A file is cacheable exactly when it can be
+# revalidated: given its `validators` the response is `private, no-cache` with `ETag` and
+# `Last-Modified` (`base.agents.to_user.validators` owns the reasoning), and without them nothing
+# can check a cached copy, so it is `no-store`.
+def passive_headers(
+    name: str, validators: FileValidators | None = None
+) -> tuple[str, dict[str, str]]:
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     disposition, policy = response_policy(media_type)
+    cache = {"Cache-Control": "no-store"}
+    if validators is not None:
+        cache = {"Cache-Control": CACHE_CONTROL, **validator_headers(validators)}
     return media_type, {
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
-        "Cache-Control": "no-store",
+        **cache,
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": policy,
         "Referrer-Policy": "no-referrer",
@@ -470,8 +487,10 @@ async def _forward_workspace_json[Answer: BaseModel](
 # Open the owning runner's answer to a raw read without reading its body. `200`, `206` and `416`
 # are the file's answer and relay as they are; anything else becomes the gateway's refusal. A
 # whole file larger than `limit` is refused from its declared length before a byte is relayed.
-# A runner that predates `byte_range` or `file_access` refuses the field as `422`; the read is
-# then asked again as that runner knows it (whole file, workspace reach), so media keeps playing.
+# `304` is the runner's answer to a matching `If-None-Match` and relays the same way. A runner that
+# predates `byte_range`, `file_access` or the cache preconditions refuses the field as `422`; the
+# read is then asked again as that runner knows it (whole file, workspace reach, no preconditions),
+# so media keeps playing.
 async def open_workspace_file_raw(
     client: httpx.AsyncClient,
     url: str,
@@ -480,7 +499,14 @@ async def open_workspace_file_raw(
     *,
     limit: int,
 ) -> httpx.Response:
-    older = query.model_copy(update={"byte_range": None, "file_access": "workspaces"})
+    older = query.model_copy(
+        update={
+            "byte_range": None,
+            "file_access": "workspaces",
+            "if_none_match": None,
+            "if_range": None,
+        }
+    )
     try:
         return await _open_raw_once(client, url, query, headers, limit=limit)
     except HTTPException as refused:
@@ -501,7 +527,7 @@ async def _open_raw_once(
         client.build_request("POST", url, json=forwarded_body(query), headers=headers),
         stream=True,
     )
-    if upstream.status_code not in (200, 206, 416):
+    if upstream.status_code not in (200, 206, 304, 416):
         raw_err = await upstream.aread()
         await upstream.aclose()
         detail = raw_err.decode("utf-8", errors="replace").strip()
@@ -527,16 +553,31 @@ async def relay_body(upstream: httpx.Response, *, limit: int) -> AsyncIterator[b
         await upstream.aclose()
 
 
+def upstream_validators(upstream: httpx.Response) -> FileValidators | None:
+    etags = upstream.headers.get_list("etag")
+    modified = upstream.headers.get_list("last-modified")
+    return FileValidators(etags[0], modified[0]) if etags and modified else None
+
+
 # meiva:note
 # The forwarded raw read streams the runner's answer through instead of buffering it: the
-# browser's `Range` travels as `byte_range`, and the runner's `Content-Range` and length come
-# back with the file's own type and the passive headers.
+# browser's `Range`, `If-Range` and `If-None-Match` travel to the runner, which holds the file and
+# so decides them, and the runner's `Content-Range`, length and validators come back with the file's
+# own type and the passive headers. A `304` is relayed as a bodiless `304`.
 async def _stream_workspace_raw(
-    request: Request, target: _WorkspaceTarget, ops_url: str
+    request: Request, target: _WorkspaceTarget, ops_url: str, receipt: RawReceipt
 ) -> Response:
-    query = target.forwarded("raw").model_copy(update={"byte_range": request.headers.get("range")})
+    query = target.forwarded("raw").model_copy(
+        update={
+            "byte_range": request.headers.get("range"),
+            "if_none_match": request.headers.get("if-none-match"),
+            "if_range": request.headers.get("if-range"),
+        }
+    )
     limit = gateway_config(request).to_user.max_resource_bytes
     client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=3), trust_env=False)
+    receipt.remote = True
+    asked = receipt.now()
     try:
         upstream = await open_workspace_file_raw(
             client,
@@ -551,7 +592,12 @@ async def _stream_workspace_raw(
     except HTTPException:
         await client.aclose()
         raise
-    media_type, headers = passive_headers(target.name)
+    receipt.upstream_answered(asked)
+    media_type, headers = passive_headers(target.name, upstream_validators(upstream))
+    if upstream.status_code == 304:
+        await upstream.aclose()
+        await client.aclose()
+        return Response(status_code=304, headers=headers)
     headers["Accept-Ranges"] = "bytes"
     for name in ("content-length", "content-range"):
         if name in upstream.headers:
@@ -563,6 +609,12 @@ async def _stream_workspace_raw(
         media_type=media_type,
         background=BackgroundTask(client.aclose),
     )
+
+
+class _WholeFileResponse(FileResponse):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        kept = [pair for pair in Headers(scope=scope).raw if pair[0] != b"range"]
+        await super().__call__({**scope, "headers": kept}, receive, send)
 
 
 @router.get("/api/agents/{agent_id}/files/content", response_model=WorkspaceFileResponse)
@@ -595,9 +647,20 @@ async def get_workspace_file_raw(
         str, Query(description="Workspace or cwd relative path, absolute path, or file:// URL")
     ],
 ) -> Response:
-    target = await _workspace_target(request, agent_id, path)
-    if target.ops_url is not None:
-        return await _stream_workspace_raw(request, target, target.ops_url)
+    receipt = RawReceipt.begin(request)
+    try:
+        target = await _workspace_target(request, agent_id, path)
+        if target.ops_url is not None:
+            return receipt.wrap(
+                await _stream_workspace_raw(request, target, target.ops_url, receipt)
+            )
+        return receipt.wrap(await _serve_raw_here(request, target))
+    except HTTPException as refused:
+        receipt.refused(refused.status_code)
+        raise
+
+
+async def _serve_raw_here(request: Request, target: _WorkspaceTarget) -> Response:
     file = await _read_locally(
         resolve_existing_workspace_file,
         _reach_here(request, target),
@@ -605,8 +668,17 @@ async def get_workspace_file_raw(
         target.path,
         custom_cwd=target.custom_cwd,
     )
-    media_type, headers = passive_headers(file.name)
-    return FileResponse(path=file, stat_result=file.stat(), media_type=media_type, headers=headers)
+    stat = await _read_locally(file.stat)
+    validators = file_validators(stat.st_size, stat.st_mtime_ns)
+    media_type, headers = passive_headers(file.name, validators)
+    if not_modified(validators, request.headers.get("if-none-match")):
+        return Response(status_code=304, headers=headers)
+    serve = (
+        FileResponse
+        if range_applies(validators, request.headers.get("if-range"))
+        else _WholeFileResponse
+    )
+    return serve(path=file, stat_result=stat, media_type=media_type, headers=headers)
 
 
 # meiva:note

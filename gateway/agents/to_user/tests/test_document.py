@@ -6,18 +6,22 @@ from fastapi import HTTPException
 
 from base.agents.to_user import (
     FileRoot,
+    FileValidators,
     ToUserReadRequest,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
+    file_validators,
 )
 from base.config import settings
 from gateway.agents.to_user.document import (
     fetch_resource,
     fetch_workspace_json,
     open_workspace_file_raw,
+    passive_headers,
     relay_body,
     resource_request,
     resource_response,
+    upstream_validators,
 )
 
 
@@ -266,3 +270,70 @@ async def test_a_runner_without_ranges_or_reach_still_serves_the_whole_file() ->
         {"agent_id", "path", "mode", "byte_range", "file_access"},
         {"agent_id", "path", "mode"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_runner_without_cache_preconditions_still_serves_the_whole_file() -> None:
+    sent: list[set[str]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        fields = WorkspaceFileRequest.model_validate_json(request.content).model_fields_set
+        sent.append(fields)
+        if fields & {"if_none_match", "if_range"}:
+            return httpx.Response(422, text="Invalid workspace file request")
+        return httpx.Response(200, content=b"whole")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        upstream = await open_workspace_file_raw(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(
+                agent_id=1, path="clip.mp4", mode="raw", if_none_match='"a"', if_range='"a"'
+            ),
+            {},
+            limit=settings.to_user.max_resource_bytes,
+        )
+        assert (upstream.status_code, await upstream.aread()) == (200, b"whole")
+    assert sent == [
+        {"agent_id", "path", "mode", "if_none_match", "if_range"},
+        {"agent_id", "path", "mode"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_runners_not_modified_answer_is_relayed_as_it_is() -> None:
+    def serve(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(304, headers={"etag": '"a"'})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        upstream = await open_workspace_file_raw(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(agent_id=1, path="clip.mp4", mode="raw", if_none_match='"a"'),
+            {},
+            limit=1,
+        )
+    assert upstream.status_code == 304
+
+
+def test_a_file_is_cacheable_only_with_validators() -> None:
+    validators = file_validators(10, 1_732_494_000_123_456_789)
+    _, cached = passive_headers("voice.mp3", validators)
+    assert cached["Cache-Control"] == "private, no-cache"
+    assert (cached["ETag"], cached["Last-Modified"]) == (
+        validators.etag,
+        validators.last_modified,
+    )
+    _, bare = passive_headers("voice.mp3")
+    assert bare["Cache-Control"] == "no-store"
+    assert "ETag" not in bare and "Last-Modified" not in bare
+
+
+def test_a_runner_that_sent_no_validators_gets_none_invented() -> None:
+    assert upstream_validators(httpx.Response(200)) is None
+    assert upstream_validators(httpx.Response(200, headers={"etag": '"a"'})) is None
+    assert upstream_validators(
+        httpx.Response(
+            200, headers={"etag": '"a"', "last-modified": "Mon, 25 Nov 2024 00:20:00 GMT"}
+        )
+    ) == FileValidators('"a"', "Mon, 25 Nov 2024 00:20:00 GMT")
