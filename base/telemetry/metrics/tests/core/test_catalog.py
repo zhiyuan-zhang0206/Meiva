@@ -67,14 +67,12 @@ def test_validate_core_metric_validates_sql_like_plugins() -> None:
 
 def test_validate_core_metric_agent_placeholder_rule() -> None:
     # The template era is over (task #180 PR C): {{agent_id}} in a SQL query
-    # is rejected outright — the per-agent inspector idiom lives in the LogQL
-    # dialect (rendered per agent), not in SQL templates.
+    # is rejected outright.
     with pytest.raises(InvalidMetricQuery, match="template placeholders"):
         catalog.validate_core_metric(
             _spec(
                 name="core_agent",
                 query="SELECT count(*) FROM agents_meta WHERE {{agent_id}}",
-                output=["inspector"],
             )
         )
 
@@ -174,24 +172,20 @@ def test_logql_rejects_an_untemplated_cross_category_filter() -> None:
         )
 
 
-def test_render_logql_quotes_and_agent_placeholder() -> None:
+def test_render_logql_quotes_literals() -> None:
     """LogQL rendering: double-quoted literals (SQL single quotes would be a
-    parse error), {category_re} unquoted inside a regex, {{agent_id}} as a
-    label filter."""
+    parse error), {category_re} unquoted inside a regex."""
     spec = _logql_spec(
         name="core_loki_render",
         query=(
             'sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
-            'category=~"{category_re}|log" | '
-            "{{agent_id}} [$__interval]))"
+            'category=~"{category_re}|log" [$__interval]))'
         ),
-        output=["inspector"],
     )
     catalog.validate_core_metric(spec)
-    rendered = render_query(spec, agent_id=42)
+    rendered = render_query(spec)
     assert 'category=~"telemetry|log"' in rendered
     assert 'event_name="llm_usage"' in rendered
-    assert 'agent_id="42"' in rendered
     assert "{event_name}" not in rendered
     # event_name is a promoted stream label (2026-08-23 cutover): the matcher
     # renders into the selector, before the | json stage

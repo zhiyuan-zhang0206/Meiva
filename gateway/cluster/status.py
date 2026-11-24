@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
@@ -50,7 +50,6 @@ from base.packages.plugins.loading.ui_declarations import (
 from base.packages.plugins.surface import stats
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
-from gateway.cluster.monitor.diagnostics import diagnostic_totals, read_diagnostic_classes
 from gateway.cluster.roster import roster_probe, roster_rows
 from gateway.cluster.roster.liveness_snapshot import Snapshot
 from gateway.cluster.roster.roster_plan import (
@@ -141,9 +140,7 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
         "- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n"
         "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog "
         "heartbeats) — single source of truth shared with `/api/alerts`\n"
-        "- `tokens` / cost slices: the window's `llm_usage` rows in `telemetry_events`\n"
-        "- `diagnostics`: the window's structured error/anomaly classes in `telemetry_events`, "
-        "automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`"
+        "- `tokens` / cost slices: the window's usage-ledger rows"
     ),
 )
 def get_stats_dashboard(
@@ -174,7 +171,6 @@ def get_stats_dashboard(
             gateway_state(request).gateway_config,
             gateway_clock(request),
             cluster=gateway_cluster(request),
-            current_sha=gateway_state(request).process_image.sha,
             catalog=catalog_for_observation(request_catalog(request)),
             declared_cards=declared_cards,
         )
@@ -219,7 +215,6 @@ def _compute_stats_dashboard(
     clock: Clock,
     *,
     cluster: str,
-    current_sha: str | None,
     catalog: ModelCatalog | None,
     declared_cards: frozenset[tuple[str, str]],
 ) -> StatsDashboard:
@@ -231,14 +226,6 @@ def _compute_stats_dashboard(
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
         live_alerts = unresolved_alert_counts(conn)
-        diagnostics = read_diagnostic_classes(
-            conn,
-            cluster=cluster,
-            start=window_start,
-            end=now,
-            current_sha=current_sha,
-            quiet_window=timedelta(seconds=config.diagnostic_quiet_seconds),
-        )
         live_count = count_one(
             conn, "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'"
         )
@@ -273,7 +260,6 @@ def _compute_stats_dashboard(
             error=live_alerts.error,
             warning=live_alerts.warning,
         ),
-        diagnostics=diagnostic_totals(diagnostics, deployed_sha=current_sha),
         plugin_stats=_plugin_stat_rows(pool, declared_cards),
         as_of=clock.now(),
     )

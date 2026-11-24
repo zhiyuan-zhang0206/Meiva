@@ -13,9 +13,6 @@ import type {
   CompactAgentResponse,
   ConfigView,
   ConfigWriteResult,
-  DiagnosticClassRow,
-  DiagnosticSample,
-  DiagnosticsResponse,
   GuideDraftResponse,
   ClusterPluginsView,
   ClusterPluginSaved,
@@ -59,7 +56,7 @@ import type {
 } from "../../contracts/types";
 import { toUserPath } from "./routes/agent-routes";
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
-import { alertsPath, diagnosticSamplesPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
+import { alertsPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./plans";
 import { confirmDraftReceipt } from "./plans";
@@ -150,26 +147,6 @@ export function createControlApi(http: Http) {
         signal,
         "stats dashboard",
       );
-    },
-
-    getDiagnostics: (hours: number, signal?: AbortSignal): Promise<DiagnosticsResponse> => {
-      return jsonWithTimeout<DiagnosticsResponse>(
-        `/api/stats/diagnostics?hours=${hours}`,
-        {},
-        STATS_REQUEST_TIMEOUT_MS,
-        signal,
-        "diagnostics",
-      );
-    },
-
-    getDiagnosticSamples: (
-      cls: Pick<DiagnosticClassRow, "level" | "event_name" | "source" | "process">,
-      hours: number,
-      signal?: AbortSignal,
-    ): Promise<DiagnosticSample[]> => {
-      return f(diagnosticSamplesPath(cls, hours), { signal })
-        .then(ok<{ samples: DiagnosticSample[] }>)
-        .then((body) => body.samples);
     },
 
     getAlerts: (params: {

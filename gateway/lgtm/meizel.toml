@@ -1,9 +1,4 @@
-exports = ["backend_failure.py", "telemetry_staleness.py"]
-
-[uses]
-"telemetry_staleness.py" = ["staleness_plan.py"]
-"tests" = ["staleness_plan.py", "telemetry_staleness.py"]
+exports = ["backend_failure.py"]
 
 [purity]
 "__init__.py" = "strict"
-"staleness_plan.py" = "strict"

@@ -1,6 +1,6 @@
 # Agent Inspect Router
 
-`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` + `/inspect/metrics` — per-agent LLM cost/token/TPS + neighbor graph.
+`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` — per-agent LLM cost/token/TPS + neighbor graph.
 
 The live inspector's heartbeat block — the four display states (a pause, a queued wake,
 a projected check-in, nothing) and the daemon predicate each one mirrors — has its own
@@ -43,12 +43,3 @@ without retries, replacement snapshots, or cancellation of unrelated service wor
 Shell deadlines in `/inspect/live` and the shell monitor come only from
 `agent_shell_ttls`. Row-less page and schedule sessions render no shell TTL;
 their lifecycle is managed separately. Launch time never synthesizes a deadline.
-
-## Plugin metric surface (`/inspect/metrics`, W13b)
-
-Builds the metric registry in process — ENABLED shipped plugins' `metrics.py` declarations
-(`contribute()`, admitted into a data registry) + core definitions — renders `output`-inspector templates per agent, re-validates
-the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_events` (`gateway/inspect/_event_metrics.py`) and SQL read-only over Postgres —
-see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
-Which plugins are enabled is read once per request (`_plugin_faces.enabled_plugin_names`, from the machine's plugin config) and
-handed to the loader as a set of names; the loader and the per-agent execution (`metrics_for_agent(pool, agent_id, registry=..., clock=...)`) take values.

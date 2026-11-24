@@ -158,15 +158,6 @@ describe("useStatsDashboard shared polling", () => {
       anthropic_cost_usd: 0,
       google_cost_usd: 0,
       alerts: { unresolved: 0, critical: 0, error: 0, warning: 0 },
-      diagnostics: {
-        active_classes: 0,
-        archived_classes: 0,
-        active_events: 0,
-        archived_events: 0,
-        errors: 0,
-        warnings: 0,
-        deployed_sha: null,
-      },
       plugin_stats: [],
     });
     const queryClient = new QueryClient({
@@ -250,15 +241,6 @@ describe("useStatsDashboard shared polling", () => {
       anthropic_cost_usd: 0,
       google_cost_usd: 0,
       alerts: { unresolved: 0, critical: 0, error: 0, warning: 0 },
-      diagnostics: {
-        active_classes: 0,
-        archived_classes: 0,
-        active_events: 0,
-        archived_events: 0,
-        errors: 0,
-        warnings: 0,
-        deployed_sha: null,
-      },
       plugin_stats: [],
     });
     await tick(240_000);

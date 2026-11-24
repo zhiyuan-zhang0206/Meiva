@@ -50,9 +50,7 @@ class FleetGraphEdge(BaseModel):
 class FleetGraphResponse(BaseModel):
     """GET /api/fleet/graph response.
 
-    `telemetry_stale` says the heartbeat guard was old or missing while this
-    otherwise complete graph was read. `snapshot_at` records when the graph
-    snapshot was produced; a response served from the short poll cache keeps
+    `snapshot_at` records when the graph snapshot was produced; a response served from the short poll cache keeps
     that timestamp so clients can show its age.
     """
 
@@ -60,5 +58,4 @@ class FleetGraphResponse(BaseModel):
 
     nodes: list[FleetGraphNode]
     edges: list[FleetGraphEdge]
-    telemetry_stale: bool = False
     snapshot_at: datetime | None = None

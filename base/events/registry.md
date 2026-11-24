@@ -312,8 +312,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
 | `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |
 | `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events | ✓ |
-| `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | events | — |
-| `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events | — |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events | — |
 | `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | events | — |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |

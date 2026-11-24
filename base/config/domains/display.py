@@ -234,8 +234,8 @@ class DisplaySettings(EnvSettings):
         default=100,
         alias="MEIVA_EVENTS_DEFAULT_LIMIT",
         description=(
-            "Default page (events) of the agent event-history reads — GET "
-            "/api/agents/{id}/events and GET /api/events — when the caller passes no "
+            "Default page (events) of the event-history read — GET "
+            "/api/events — when the caller passes no "
             "limit. 100 rows covers a debugging glance over the recent activity without "
             "having the gateway parse a long Loki slice; callers that need more pass an "
             "explicit limit (1..1000)."
@@ -321,8 +321,8 @@ class DisplaySettings(EnvSettings):
         default=1,
         alias="MEIVA_METRICS_DEFAULT_WINDOW_DAYS",
         description=(
-            "Default window (days) of GET /api/metrics and /api/metrics/agents when "
-            "the caller passes none. 1 day is the settings tab's default read; the "
+            "Default window (days) of GET /api/metrics/agents when "
+            "the caller passes none. 1 day is the `meiva metrics agents` default read; the "
             "30-day cap stays a protective constant (it bounds the Loki scan)."
         ),
         json_schema_extra={

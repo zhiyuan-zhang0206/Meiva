@@ -29,7 +29,7 @@ __all__ = [
 
 Category = Literal["audit", "telemetry", "log"]
 PanelType = Literal["timeseries", "stat", "barchart", "table", "logs"]
-OutputSurface = Literal["grafana", "inspector"]
+OutputSurface = Literal["grafana"]
 TimeBasis = Literal["per_minute", "window"]
 
 TIME_BASIS_LABEL: dict[TimeBasis, str] = {"per_minute": "per minute", "window": "window"}
@@ -143,10 +143,8 @@ class MetricSpec(BaseModel):
 
     @model_validator(mode="after")
     def _grafana_log_limit_valid(self) -> MetricSpec:
-        if self.grafana_max_lines is not None and (
-            self.query_type != "logql" or self.output != ["grafana"]
-        ):
-            raise ValueError("grafana_max_lines needs Grafana-only LogQL output")
+        if self.grafana_max_lines is not None and self.query_type != "logql":
+            raise ValueError("grafana_max_lines needs LogQL output")
         return self
 
     @model_validator(mode="after")
@@ -169,14 +167,6 @@ class MetricSpec(BaseModel):
             raise ValueError("time_basis='per_minute' needs a logql or promql query")
         for part in parts:
             bucket_minutes(part)
-        return self
-
-    @model_validator(mode="after")
-    def _promql_is_grafana_only(self) -> MetricSpec:
-        """PromQL core tiles have no gateway inspector execution path yet."""
-
-        if self.query_type == "promql" and self.output != ["grafana"]:
-            raise ValueError("query_type='promql' is currently supported only for grafana output")
         return self
 
 

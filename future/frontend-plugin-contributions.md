@@ -196,12 +196,11 @@ value is validated as a CSS color literal.
 
 ### Already automatic — completed by this design, not new machinery
 
-- **Metrics**: `base/telemetry/metrics/plugin_metrics.py` already defines the two-tier
-  core/plugin metric architecture with an `inspector` output surface reserved
-  for per-agent panels under `/api/agents/{id}/inspect/metrics`
-  (`get_agent_plugin_metrics` exists). Finishing that reserved surface is part
-  of this design's scope: a plugin metric declared for `inspector` renders as
-  an inspect panel with zero UI declaration.
+- **Metrics**: `base/telemetry/metrics/plugin_metrics.py` defines the two-tier
+  core/plugin metric architecture; a plugin metric renders on the Grafana
+  dashboard with zero UI declaration. The per-agent `inspector` output surface
+  (`/api/agents/{id}/inspect/metrics`) was removed together with the
+  `telemetry_events` readers, so inspect panels do not come from metrics.
 - **Config**: plugin config schemas are Pydantic models in
   `base/packages/plugins/config_registration.py`; the settings area auto-renders them as
   forms. A plugin gets a settings page by having config at all.
@@ -356,8 +355,7 @@ composer/plugin extension point.
   board, a balance panel, a widget), and a plugin whose page must be dynamic is
   the trigger to design that field.
 - **U4 — agent-inspect sections**: generic markdown/kv/table renderers over
-  proxied `source` endpoints + the `page` variant; plus finishing the reserved
-  `inspector` surface of `base/telemetry/metrics/plugin_metrics.py`.
+  proxied `source` endpoints + the `page` variant.
 
 - **U5 — bless the API**: serve `openapi.json` from the gateway + the
   `docs/conventions/` contract page with the stability statement (Lane 1).

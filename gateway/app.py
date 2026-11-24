@@ -66,8 +66,6 @@ from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
 from gateway.cluster.harness_probe import HarnessProbeCache, ensure_machine_harnesses
-from gateway.cluster.monitor import diagnostics as diagnostics_router
-from gateway.cluster.monitor import ops_monitor as ops_monitor_router
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.server import main as _run_gateway
@@ -115,7 +113,6 @@ from gateway.http.model_catalog import (
 )
 from gateway.http.process import GatewayProcess
 from gateway.inspect import router as inspect_router
-from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.routers import (
     commands as commands_router,
@@ -162,7 +159,6 @@ _log = logging.getLogger(__name__)
 class GatewayServerState(
     CatalogAppState,
     inspect_router.InspectAppState,
-    fleet_graph_router.FleetGraphAppState,
     frontend_telemetry_router.FrontendTelemetryAppState,
     grafana_router.GrafanaAppState,
     insights_router.InsightsAppState,
@@ -206,7 +202,6 @@ def _build_request_resources(
     config = process.config
     machine_token_acceptance: AcceptanceCache = {}
     state.machine_token_acceptance = machine_token_acceptance
-    state.telemetry_staleness = TelemetryStaleness()
     state.status_cache = StatusCache()
     state.shell_backend = get_shell_backend(home=process.home)
     state.harness_cache = HarnessProbeCache()
@@ -567,10 +562,8 @@ def create_app(
         events_router.router,
         merged_stream_router.router,
         insights_router.router,
-        ops_monitor_router.router,
         alerts_router.router,
         status_router.router,
-        diagnostics_router.router,
         memory_router.router,
         fleet_graph_router.router,
         frontend_telemetry_router.router,

@@ -15,14 +15,11 @@ from typing import TypedDict
 from base.events.contract import EVENTS, EventTier
 
 __all__ = [
-    "AgentEventsQuery",
-    "AgentEventsRequest",
     "EventsFilters",
     "EventsPlan",
     "EventsRequest",
     "InvalidEventsQueryError",
     "page_depth",
-    "plan_agent_events",
     "plan_events",
 ]
 
@@ -232,51 +229,3 @@ def page_depth(plan: EventsPlan) -> tuple[int, int]:
     if plan.use_audit and plan.use_telemetry:
         return plan.limit + plan.offset, 0
     return plan.limit, plan.offset
-
-
-# meiva:note
-# The query parameters of one `GET /api/agents/{id}/events` request.
-@dataclass(frozen=True)
-class AgentEventsRequest:
-    agent_id: int
-    event: str | None
-    level: str | None
-    from_: datetime | None
-    to: datetime | None
-    limit: int | None
-    offset: int
-
-
-# meiva:note
-# The telemetry read behind `GET /api/agents/{id}/events`.
-@dataclass(frozen=True)
-class AgentEventsQuery:
-    agent_id: int
-    categories: list[str]
-    event_names: list[str] | None
-    level: str | None
-    from_: datetime
-    to: datetime | None
-    limit: int
-    offset: int
-
-
-# meiva:note
-# One agent's history: telemetry and log rows only (audit rows never leak into the feed).
-#
-# `level` is an exact match, not a minimum. An absent `from` defaults to the last 24 hours.
-def plan_agent_events(
-    request: AgentEventsRequest, *, now: datetime, default_limit: int
-) -> AgentEventsQuery:
-    return AgentEventsQuery(
-        agent_id=request.agent_id,
-        categories=["telemetry", "log"],
-        event_names=[request.event] if request.event is not None else None,
-        level=request.level,
-        from_=request.from_
-        if request.from_ is not None
-        else now - timedelta(hours=_DEFAULT_WINDOW_HOURS),
-        to=request.to,
-        limit=request.limit if request.limit is not None else default_limit,
-        offset=request.offset,
-    )

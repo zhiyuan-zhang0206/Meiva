@@ -28,7 +28,6 @@ function wrap(ui: ReactElement, { agents = [] }: { agents?: AgentRow[] } = {}) {
   transport.getFleetGraph.mockResolvedValue({
     nodes: [],
     edges: [],
-    telemetry_stale: false,
     snapshot_at: null,
   });
   return renderWithProviders(ui, {

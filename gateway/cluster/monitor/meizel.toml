@@ -1,5 +1,1 @@
-exports = ["diagnostics.py", "ops_monitor.py", "ops_series.py", "stats_events.py"]
-
-[uses]
-"diagnostics.py" = ["stats_events.py"]
-"ops_monitor.py" = ["ops_series.py", "stats_events.py"]
+exports = ["stats_events.py"]

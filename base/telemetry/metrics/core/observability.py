@@ -77,31 +77,6 @@ def core_metrics() -> list[MetricSpec]:
 
     specs.append(
         MetricSpec(
-            name="meiva_obs_agent_llm_cost_usd",
-            title="Agent LLM cost (USD)",
-            description=(
-                "Inspector-only (W13b): the same cost read as llm_cost_usd, "
-                "filtered per agent — the {{agent_id}} placeholder is rendered by "
-                'the gateway as agent_id="<n>".'
-            ),
-            event_name="llm_usage",
-            category="telemetry",
-            unit="currencyUSD",
-            panel="timeseries",
-            query_type="logql",
-            query=(
-                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-                f"category={{category}} | "
-                f"{{{{agent_id}}}} | "
-                f"unwrap {_LLM_ATTR['cost_usd']} [$__interval]))"
-            ),
-            target_names=["cost usd"],
-            output=["inspector"],
-        )
-    )
-
-    specs.append(
-        MetricSpec(
             name="meiva_obs_llm_error_rate",
             title="LLM errors",
             time_basis="per_minute",
@@ -124,7 +99,7 @@ def core_metrics() -> list[MetricSpec]:
                 event_count("category={category}", "5m", matchers='event_name="llm_turn_aborted"'),
             ],
             target_names=["provider_error", "turn_aborted"],
-            output=["grafana", "inspector"],
+            output=["grafana"],
             panel_id=22,
             section="LLM",
             order=6,
@@ -151,7 +126,7 @@ def core_metrics() -> list[MetricSpec]:
                 f" / {event_count('category={category}', '5m', matchers='event_name={event_name}')}"
             ),
             target_names=["ok_pct"],
-            output=["grafana", "inspector"],
+            output=["grafana"],
             panel_id=23,
             section="core",
             order=19,
@@ -608,30 +583,6 @@ def core_metrics() -> list[MetricSpec]:
             thresholds=[ThresholdStep(color="orange", value=1)],
             width=6,
             output=["grafana"],
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="meiva_obs_agent_delivery_stalled_count",
-            title="Agent delivery backlog",
-            description=(
-                "Inspector-only (W13b): same as delivery_stalled_count, filtered "
-                "per agent — {{agent_id}} is rendered by the gateway as "
-                'agent_id="<n>", showing one agent\'s backlog level.'
-            ),
-            event_name="delivery_stalled",
-            category="telemetry",
-            unit="short",
-            panel="timeseries",
-            query_type="logql",
-            query=event_count(
-                "category={category} | {{agent_id}}",
-                "$__interval",
-                matchers="event_name={event_name}",
-            ),
-            target_names=["stalled"],
-            output=["inspector"],
         )
     )
 

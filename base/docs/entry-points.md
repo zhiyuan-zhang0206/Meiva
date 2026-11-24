@@ -7,7 +7,7 @@
 - `base/lm/pricing/__init__.py:tally_tokens` / `cost_usd` — token usage and three-tier cost calculation
 - `base/api_contracts/agent_contract.py:AgentStatus` — agent lifecycle status enum (RUNNING / IDLING / TERMINATED)
 - `base/agents/messages/kwargs.py:read_meiva_kwargs` — typed reading entry point for message `additional_kwargs`
-- `base/telemetry/metrics/aggregate.py:build_report_from_aggregate` — assemble metrics report
+- `base/telemetry/metrics/aggregate.py:fetch_agent_rollups` — per-agent headline counters behind `/api/metrics/agents`
 - `base/host/env/bootstrap.py` — system boot entry point
 
 

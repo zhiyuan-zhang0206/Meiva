@@ -1,11 +1,7 @@
-"""Agent events endpoints — /api/agents/{id}/events*.
+"""Agent live-event endpoint — `GET /api/agents/{id}/events/stream`.
 
-Two faces of the same observability stream:
-- `GET …/events/stream`: the live SSE tail (subscribe to Redis `meiva:events`,
-  filter by `agent_id`) — only carries events from the moment you subscribe.
-- `GET …/events`: the historical REST query over `telemetry_events` in
-  Postgres (the durable record of the agent's telemetry and log events) —
-  the past, for ops / SDK / eval consumers.
+The live SSE tail: subscribe to Redis `meiva:events`, filter by `agent_id`. It only
+carries events from the moment you subscribe; history lives in Loki.
 
 Split out of the agents CRUD router (CRUD + lifecycle then; lifecycle later
 moved to `gateway/agents/lifecycle.py`) so each router stays a
@@ -15,20 +11,13 @@ inspector panel).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated
-
-import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.events import telemetry_rows
-from gateway.events.events_plan import AgentEventsRequest, plan_agent_events
-from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_state
+from gateway.http.config import gateway_config, gateway_state
 
 router = APIRouter()
 
@@ -43,9 +32,8 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
 
     Client `EventSource` receives `data: {json}\\n\\n` frames, one JSON
     `events.Event` per frame. code_delta chunks pass through immediately,
-    native streaming. This is the live tail; `GET /api/agents/{id}/events`
-    (no `/stream`) is the historical REST query over the persisted unified
-    event stream (`telemetry_events`).
+    native streaming. This is the live tail only; there is no historical
+    REST query per agent (`GET /api/events?agent_id=` is the history surface).
 
     Does **not** check agent_exists as a precondition: subscribing to a
     non-existent agent is allowed, you just receive no messages. Otherwise
@@ -70,91 +58,3 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.get("/api/agents/{agent_id}/events", dependencies=[Depends(deny_isolated_result_read)])
-def get_agent_events(
-    agent_id: int,
-    request: Request,
-    from_: Annotated[datetime | None, Query(alias="from")] = None,
-    to: Annotated[datetime | None, Query()] = None,
-    event: Annotated[str | None, Query()] = None,
-    level: Annotated[str | None, Query()] = None,
-    # `limit`'s range and `offset`'s ceiling stay protective constants (import-
-    # time Query bounds; task #3696 exception inventory); the default *window*
-    # is display.events_default_limit.
-    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
-    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
-) -> list[AgentEventRow]:
-    """Historical slice of this agent's `events` rows — the REST
-    counterpart to the live `…/events/stream` SSE tail (which only carries
-    events from the moment you subscribe). Backs ops / SDK / eval consumers
-    that need to query the past.
-
-    Filters compose (AND):
-      - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
-        (`ts >= from AND ts <= to`); `from` omitted defaults to the last
-        24h (same lower-bound contract as /api/events). Bad timestamps 422
-        (FastAPI datetime parse).
-      - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /
-        `exec` / `exec_failed`.
-      - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any
-        case accepted; the stored/returned values are LOWERCASE). This is an *exact* match,
-        unlike `/api/cluster/admin/events` where `level`
-        is a minimum threshold — a per-agent history query reads more
-        predictably as "give me exactly this level".
-
-    Returns newest-first (`ts DESC`; `id` is a stable surrogate derived
-    from the log line, so `limit`/`offset` paging stays deterministic).
-    `limit` returns the configured default window (``display.events_default_limit``
-    — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
-    pages further back and is capped at 10,000.
-
-    No agent-existence precondition (same as `…/activity` and `…/pending`):
-    an unknown agent or an empty window just returns `[]`.
-    """
-    query = plan_agent_events(
-        AgentEventsRequest(
-            agent_id=agent_id,
-            event=event,
-            level=level,
-            from_=from_,
-            to=to,
-            limit=limit,
-            offset=offset,
-        ),
-        now=gateway_clock(request).now(),
-        default_limit=gateway_config(request).display.events_default_limit,
-    )
-    config: GatewayConfig = gateway_state(request).gateway_config
-    try:
-        with gateway_state(request).db_pool.connection() as conn:
-            conn.execute(
-                "SELECT set_config('statement_timeout', %s, true)",
-                (str(config.events_read_timeout_ms),),
-            )
-            rows, _ = telemetry_rows.query_events(
-                conn,
-                agent_id=query.agent_id,
-                categories=query.categories,
-                event_names=query.event_names,
-                level=query.level,
-                from_=query.from_,
-                to=query.to,
-                limit=query.limit,
-                offset=query.offset,
-            )
-    except psycopg.errors.QueryCanceled as exc:
-        raise HTTPException(status_code=503, detail="events read timed out") from exc
-    return [
-        AgentEventRow(
-            id=row["id"],
-            line_sha256=row["line_sha256"],
-            ts=row["ts"],
-            agent_id=row["agent_id"],
-            level=row["level"],
-            event=row["event_name"],
-            payload=row["attributes"],
-        )
-        for row in rows
-    ]

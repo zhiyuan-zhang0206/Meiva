@@ -28,18 +28,16 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.inspect import _metrics, _plugin_metrics, neighbors
+from gateway.inspect import _metrics, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
 from gateway.inspect._live import db_rows_blocking, project_heartbeat
-from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 from gateway.inspect.schemas import (
     AgentInspectLive,
     AgentInspectStatistics,
     HeartbeatLastPause,
     NeighborRow,
     NeighborsResponse,
-    PluginMetricResult,
 )
 from gateway.schemas.stats import StatsWindowHours
 from ops.cluster import rpc as cluster_rpc
@@ -397,41 +395,3 @@ def get_agent_neighbors(
         for agent, depth_found, score in ancestors_ranked
     ]
     return NeighborsResponse(neighbors=neighbors_rows, ancestors=ancestors_rows)
-
-
-@router.get("/api/agents/{agent_id}/inspect/metrics")
-async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[PluginMetricResult]:
-    """The agent's plugin metrics for the inspector panel — the W13b inspector
-    surface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).
-
-    Builds the metric registry in process (task #180 PR D — shipped
-    plugin `metrics.py` modules + core definitions), keeps the metrics whose
-    `output` includes "inspector", renders each template for this agent
-    ({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,
-    substitutes the Grafana time macros with a fixed recent window (24h in 1h
-    buckets), and executes each query on the cluster's Postgres — LogQL
-    templates evaluated over `telemetry_events` / `audit_events`, SQL read-only.
-
-    Response: one `PluginMetricResult` per registered inspector metric, in
-    registration order. `timeseries` / `barchart` metrics carry `series`
-    (bucket ts + value, chronological); `stat` metrics carry `value`. A
-    metric whose query fails at runtime carries `error` (the others still
-    render); registry-level problems are HTTP errors instead — a template
-    failing the safety re-validation -> 500 with the reason, {{agent_id}}
-    template without an agent id -> 400 (unreachable here — the id is a path
-    param). 404 when the agent does not exist. The frontend panel polls this
-    every 5s like the parent /inspect. Implementation in
-    ``gateway/inspect/_plugin_metrics.py``.
-    """
-    registry = await asyncio.to_thread(
-        _plugin_metrics.load_plugin_metrics,
-        SHIPPED_PLUGINS_DIR,
-        enabled_plugin_names(home=gateway_state(request).gateway_process.home),
-    )
-    return await asyncio.to_thread(
-        _plugin_metrics.metrics_for_agent,
-        gateway_state(request).db_pool,
-        agent_id,
-        registry=registry,
-        clock=gateway_clock(request),
-    )

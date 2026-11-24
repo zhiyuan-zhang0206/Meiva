@@ -1861,7 +1861,7 @@
     "/api/agents/{agent_id}/events/stream": {
       "get": {
         "summary": "Get Events Stream",
-        "description": "SSE endpoint — subscribe to Redis `meiva:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail; `GET /api/agents/{id}/events`\n(no `/stream`) is the historical REST query over the persisted unified\nevent stream (`telemetry_events`).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
+        "description": "SSE endpoint — subscribe to Redis `meiva:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail only; there is no historical\nREST query per agent (`GET /api/events?agent_id=` is the history surface).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
         "operationId": "get_events_stream_api_agents__agent_id__events_stream_get",
         "parameters": [
           {
@@ -1880,146 +1880,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/events": {
-      "get": {
-        "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
-        "operationId": "get_agent_events_api_agents__agent_id__events_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "To"
-            }
-          },
-          {
-            "name": "event",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Event"
-            }
-          },
-          {
-            "name": "level",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Level"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 1000,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 10000,
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AgentEventRow"
-                  },
-                  "title": "Response Get Agent Events Api Agents  Agent Id  Events Get"
-                }
               }
             }
           },
@@ -2234,50 +2094,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NeighborsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/inspect/metrics": {
-      "get": {
-        "summary": "Get Agent Plugin Metrics",
-        "description": "The agent's plugin metrics for the inspector panel — the W13b inspector\nsurface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).\n\nBuilds the metric registry in process (task #180 PR D — shipped\nplugin `metrics.py` modules + core definitions), keeps the metrics whose\n`output` includes \"inspector\", renders each template for this agent\n({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,\nsubstitutes the Grafana time macros with a fixed recent window (24h in 1h\nbuckets), and executes each query on the cluster's Postgres — LogQL\ntemplates evaluated over `telemetry_events` / `audit_events`, SQL read-only.\n\nResponse: one `PluginMetricResult` per registered inspector metric, in\nregistration order. `timeseries` / `barchart` metrics carry `series`\n(bucket ts + value, chronological); `stat` metrics carry `value`. A\nmetric whose query fails at runtime carries `error` (the others still\nrender); registry-level problems are HTTP errors instead — a template\nfailing the safety re-validation -> 500 with the reason, {{agent_id}}\ntemplate without an agent id -> 400 (unreachable here — the id is a path\nparam). 404 when the agent does not exist. The frontend panel polls this\nevery 5s like the parent /inspect. Implementation in\n``gateway/inspect/_plugin_metrics.py``.",
-        "operationId": "get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PluginMetricResult"
-                  },
-                  "title": "Response Get Agent Plugin Metrics Api Agents  Agent Id  Inspect Metrics Get"
                 }
               }
             }
@@ -5833,85 +5649,10 @@
         }
       }
     },
-    "/api/metrics": {
-      "get": {
-        "summary": "Get Metrics",
-        "description": "Aggregate report over the last `days` of events (all agents, or a\nsingle one via `agent`). Omitted `days` returns the configured default\n(``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap\nstays a protective constant (it bounds the scan).\n`since_compact=true` additionally narrows each agent's events to those at\nor after its latest compact halt (echoed in `meta.since_compact`).\n`meta.total_events` counts every telemetry/log event in the window —\nincluding service-level rows (agent_id NULL) from every process, a scope\nwidened by the W9 events-table switch (it was agent-kernel lines only\nbefore); audit events are excluded.",
-        "operationId": "get_metrics_api_metrics_get",
-        "parameters": [
-          {
-            "name": "days",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 30,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Days"
-            }
-          },
-          {
-            "name": "agent",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Agent"
-            }
-          },
-          {
-            "name": "since_compact",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Since Compact"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MetricsReport"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/metrics/agents": {
       "get": {
         "summary": "Get Metrics Agents",
-        "description": "Per-agent breakdown of the last `days` of events — one\nheadline-counter row per agent (cost / tokens / cache hit / turn + exec\noutcomes), sorted by cost descending. `since_compact=true` narrows each\nagent's events to those at or after its latest compact halt. Service-level\nevents (no agent_id) count toward `meta.total_events` but produce no row —\nand the count covers every telemetry/log event in the window (all\nprocesses), the W9-widened scope documented on `get_metrics`.",
+        "description": "Per-agent breakdown of the last `days` of events — one\nheadline-counter row per agent (cost / tokens / cache hit / turn + exec\noutcomes), sorted by cost descending. `since_compact=true` narrows each\nagent's events to those at or after its latest compact halt. Service-level\nevents (no agent_id) count toward `meta.total_events` but produce no row —\nand the count covers every telemetry/log event in the window (all\nprocesses).",
         "operationId": "get_metrics_agents_api_metrics_agents_get",
         "parameters": [
           {
@@ -6912,53 +6653,6 @@
         }
       }
     },
-    "/api/ops/monitor": {
-      "get": {
-        "summary": "Get Ops Monitor",
-        "description": "Time-bucketed ops series over `window` (default 24h). Bucket width is\nderived from the window (1h→60s, 6h→300s, 24h→1800s, 7d→3600s); every\nbucket in the window is present (zero-filled when empty), aligned to\n`meta.bucket_starts`.",
-        "operationId": "get_ops_monitor_api_ops_monitor_get",
-        "parameters": [
-          {
-            "name": "window",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "1h",
-                "6h",
-                "24h",
-                "7d"
-              ],
-              "type": "string",
-              "default": "24h",
-              "title": "Window"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsMonitorReport"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/alerts": {
       "post": {
         "summary": "Ingest Alerts",
@@ -7133,7 +6827,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog heartbeats) — single source of truth shared with `/api/alerts`\n- `tokens` / cost slices: the window's `llm_usage` rows in `telemetry_events`\n- `diagnostics`: the window's structured error/anomaly classes in `telemetry_events`, automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`",
+        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog heartbeats) — single source of truth shared with `/api/alerts`\n- `tokens` / cost slices: the window's usage-ledger rows",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -7182,143 +6876,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SystemStatus"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/stats/diagnostics": {
-      "get": {
-        "summary": "Get Diagnostics",
-        "description": "The selected window's diagnostic error/anomaly classes, most frequent first.\n\nOnly active classes by default: a class is automatically archived when it has not\noccurred on the currently deployed commit SHA (`archived_by='deployed_sha'`) or when\n`GatewayConfig.diagnostic_quiet_seconds` passed with nothing recorded (`archived_by='quiet'`).\n`include_archived=true` lists archived classes too. Capped at `GatewayConfig.diagnostics_limit`.",
-        "operationId": "get_diagnostics_api_stats_diagnostics_get",
-        "parameters": [
-          {
-            "name": "hours",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/StatsWindowHours",
-              "default": 24
-            }
-          },
-          {
-            "name": "include_archived",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Include Archived"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiagnosticsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/stats/diagnostics/samples": {
-      "get": {
-        "summary": "Get Diagnostic Samples",
-        "description": "The newest `GatewayConfig.diagnostic_samples_limit` events of one diagnostic class in the window, with their message, deployed SHA and context.",
-        "operationId": "get_diagnostic_samples_api_stats_diagnostics_samples_get",
-        "parameters": [
-          {
-            "name": "level",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "enum": [
-                "warning",
-                "error",
-                "critical"
-              ],
-              "type": "string",
-              "title": "Level"
-            }
-          },
-          {
-            "name": "event_name",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 255,
-              "title": "Event Name"
-            }
-          },
-          {
-            "name": "source",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 255,
-              "title": "Source"
-            }
-          },
-          {
-            "name": "process",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 255,
-              "default": "",
-              "title": "Process"
-            }
-          },
-          {
-            "name": "hours",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/StatsWindowHours",
-              "default": 24
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiagnosticSamples"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -9232,7 +8789,7 @@
           "exec_failed"
         ],
         "title": "AgentMetricsItem",
-        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering. `exec_failed` is every exec outcome other than plain\n`exec` — same exec-ok/exec-failed split as the metrics report."
+        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering. `exec_failed` is every exec outcome other than plain\n`exec`."
       },
       "AgentMetricsReport": {
         "properties": {
@@ -9253,7 +8810,7 @@
           "agents"
         ],
         "title": "AgentMetricsReport",
-        "description": "GET /api/metrics/agents response — the per-agent breakdown behind the\nmetrics page's Agents panel, sorted by cost descending (ties by agent_id).\nSame window semantics as `/api/metrics`; `meta.since_compact` echoes the\noptional since-last-compact filter."
+        "description": "GET /api/metrics/agents response — the per-agent breakdown behind the\nmetrics page's Agents panel, sorted by cost descending (ties by agent_id).\n`meta.since_compact` echoes the optional since-last-compact filter."
       },
       "AgentObservation": {
         "properties": {
@@ -11568,241 +11125,6 @@
         ],
         "title": "DeliveryStatus"
       },
-      "DiagnosticClassRow": {
-        "properties": {
-          "level": {
-            "type": "string",
-            "enum": [
-              "warning",
-              "error",
-              "critical"
-            ],
-            "title": "Level"
-          },
-          "event_name": {
-            "type": "string",
-            "title": "Event Name"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "process": {
-            "type": "string",
-            "title": "Process"
-          },
-          "category": {
-            "type": "string",
-            "enum": [
-              "telemetry",
-              "log"
-            ],
-            "title": "Category"
-          },
-          "count": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Count"
-          },
-          "current_sha_count": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Current Sha Count"
-          },
-          "first_seen": {
-            "type": "string",
-            "format": "date-time",
-            "title": "First Seen"
-          },
-          "last_seen": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Last Seen"
-          },
-          "last_deployed_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Deployed Sha"
-          },
-          "regressed": {
-            "type": "boolean",
-            "title": "Regressed",
-            "default": false
-          },
-          "archived_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "deployed_sha",
-                  "quiet"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Archived By"
-          }
-        },
-        "type": "object",
-        "required": [
-          "level",
-          "event_name",
-          "source",
-          "process",
-          "category",
-          "count",
-          "current_sha_count",
-          "first_seen",
-          "last_seen"
-        ],
-        "title": "DiagnosticClassRow"
-      },
-      "DiagnosticSample": {
-        "properties": {
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
-          "machine": {
-            "type": "string",
-            "title": "Machine"
-          },
-          "trace_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trace Id"
-          },
-          "deployed_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployed Sha"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          },
-          "attributes": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Attributes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ts",
-          "agent_id",
-          "machine",
-          "trace_id",
-          "message",
-          "attributes"
-        ],
-        "title": "DiagnosticSample"
-      },
-      "DiagnosticSamples": {
-        "properties": {
-          "samples": {
-            "items": {
-              "$ref": "#/components/schemas/DiagnosticSample"
-            },
-            "type": "array",
-            "title": "Samples"
-          }
-        },
-        "type": "object",
-        "required": [
-          "samples"
-        ],
-        "title": "DiagnosticSamples"
-      },
-      "DiagnosticsResponse": {
-        "properties": {
-          "window_hours": {
-            "$ref": "#/components/schemas/StatsWindowHours"
-          },
-          "deployed_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployed Sha"
-          },
-          "classes": {
-            "items": {
-              "$ref": "#/components/schemas/DiagnosticClassRow"
-            },
-            "type": "array",
-            "title": "Classes"
-          },
-          "total_classes": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Classes"
-          },
-          "total_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Events"
-          },
-          "as_of": {
-            "type": "string",
-            "format": "date-time",
-            "title": "As Of"
-          }
-        },
-        "type": "object",
-        "required": [
-          "window_hours",
-          "deployed_sha",
-          "classes",
-          "total_classes",
-          "total_events",
-          "as_of"
-        ],
-        "title": "DiagnosticsResponse"
-      },
       "EventCountGroup": {
         "properties": {
           "key": {
@@ -12345,11 +11667,6 @@
             "type": "array",
             "title": "Edges"
           },
-          "telemetry_stale": {
-            "type": "boolean",
-            "title": "Telemetry Stale",
-            "default": false
-          },
           "snapshot_at": {
             "anyOf": [
               {
@@ -12369,7 +11686,7 @@
           "edges"
         ],
         "title": "FleetGraphResponse",
-        "description": "GET /api/fleet/graph response.\n\n`telemetry_stale` says the heartbeat guard was old or missing while this\notherwise complete graph was read. `snapshot_at` records when the graph\nsnapshot was produced; a response served from the short poll cache keeps\nthat timestamp so clients can show its age."
+        "description": "GET /api/fleet/graph response.\n\n`snapshot_at` records when the graph snapshot was produced; a response served from the short poll cache keeps\nthat timestamp so clients can show its age."
       },
       "GuideDraftRequest": {
         "properties": {
@@ -13371,193 +12688,6 @@
         "title": "LivenessState",
         "description": "Observed reachability, separate from agent lifecycle intent."
       },
-      "LlmBucket": {
-        "properties": {
-          "bucket": {
-            "type": "integer",
-            "title": "Bucket"
-          },
-          "calls": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Calls"
-          },
-          "latency_p50_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency P50 Ms"
-          },
-          "latency_p95_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency P95 Ms"
-          },
-          "latency_max_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency Max Ms"
-          },
-          "tokens_in": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Tokens In"
-          },
-          "tokens_out": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Tokens Out"
-          },
-          "tps": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tps"
-          },
-          "errors": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors"
-          }
-        },
-        "type": "object",
-        "required": [
-          "bucket",
-          "calls",
-          "latency_p50_ms",
-          "latency_p95_ms",
-          "latency_max_ms",
-          "tokens_in",
-          "tokens_out",
-          "tps",
-          "errors"
-        ],
-        "title": "LlmBucket",
-        "description": "One bucket's LLM call profile. Latency percentiles are over rows that\ncarry `latency_ms` (pre-instrumentation rows are NULL and ignored);\n`tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no\nlatency data). `errors` counts llm_provider_error and llm_turn_aborted events."
-      },
-      "LlmReport": {
-        "properties": {
-          "series": {
-            "items": {
-              "$ref": "#/components/schemas/LlmBucket"
-            },
-            "type": "array",
-            "title": "Series"
-          },
-          "totals": {
-            "$ref": "#/components/schemas/LlmTotals"
-          }
-        },
-        "type": "object",
-        "required": [
-          "series",
-          "totals"
-        ],
-        "title": "LlmReport"
-      },
-      "LlmTotals": {
-        "properties": {
-          "calls": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Calls"
-          },
-          "latency_p50_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency P50 Ms"
-          },
-          "latency_p95_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency P95 Ms"
-          },
-          "latency_max_ms": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Latency Max Ms"
-          },
-          "tokens_in": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Tokens In"
-          },
-          "tokens_out": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Tokens Out"
-          },
-          "tps": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tps"
-          },
-          "errors": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors"
-          }
-        },
-        "type": "object",
-        "required": [
-          "calls",
-          "latency_p50_ms",
-          "latency_p95_ms",
-          "latency_max_ms",
-          "tokens_in",
-          "tokens_out",
-          "tps",
-          "errors"
-        ],
-        "title": "LlmTotals",
-        "description": "Whole-window LLM profile — same fields as one LlmBucket, no bucket."
-      },
       "LoginRequest": {
         "properties": {
           "password": {
@@ -14199,42 +13329,11 @@
         "title": "MetricEvidence",
         "description": "Availability of observed data, never a claim that every event was collected.\n\nA successful source scan cannot prove that an upstream producer lost nothing.\nMissing historical data and missing exact duration observations remain explicit."
       },
-      "MetricPoint": {
-        "properties": {
-          "ts": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Ts"
-          },
-          "value": {
-            "type": "number",
-            "title": "Value"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ts",
-          "value"
-        ],
-        "title": "MetricPoint",
-        "description": "One sample of a plugin metric's inspector series — the bucket start\n(`ts`) and the aggregated `value` for that bucket. Series come back\nchronologically (the metric templates GROUP BY 1 ORDER BY 1); the frontend\ntakes the last point as the \"current\" value."
-      },
       "MetricsMeta": {
         "properties": {
           "window_days": {
             "type": "integer",
             "title": "Window Days"
-          },
-          "agent_filter": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Filter"
           },
           "generated_at": {
             "type": "string",
@@ -14259,31 +13358,12 @@
         "type": "object",
         "required": [
           "window_days",
-          "agent_filter",
           "generated_at",
           "total_events",
           "distinct_agents"
         ],
         "title": "MetricsMeta",
-        "description": "`/api/metrics` / `/api/metrics/agents` report header — window +\nprovenance. `since_compact` echoes the request's filter: True = each\nagent's events were narrowed to those at or after its latest compact\nhalt before aggregating."
-      },
-      "MetricsReport": {
-        "properties": {
-          "meta": {
-            "$ref": "#/components/schemas/MetricsMeta"
-          },
-          "metrics": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metrics"
-          }
-        },
-        "type": "object",
-        "required": [
-          "meta",
-          "metrics"
-        ],
-        "title": "MetricsReport"
+        "description": "`/api/metrics/agents` report header — window +\nprovenance. `since_compact` echoes the request's filter: True = each\nagent's events were narrowed to those at or after its latest compact\nhalt before aggregating."
       },
       "ModelInfo": {
         "properties": {
@@ -14817,64 +13897,6 @@
         ],
         "title": "OpenQuestion"
       },
-      "OpsMonitorMeta": {
-        "properties": {
-          "window": {
-            "type": "string",
-            "title": "Window"
-          },
-          "bucket_seconds": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Bucket Seconds"
-          },
-          "generated_at": {
-            "type": "string",
-            "title": "Generated At"
-          },
-          "bucket_starts": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Bucket Starts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "window",
-          "bucket_seconds",
-          "generated_at",
-          "bucket_starts"
-        ],
-        "title": "OpsMonitorMeta",
-        "description": "Window + provenance of one `/api/ops/monitor` response."
-      },
-      "OpsMonitorReport": {
-        "properties": {
-          "meta": {
-            "$ref": "#/components/schemas/OpsMonitorMeta"
-          },
-          "sse": {
-            "$ref": "#/components/schemas/SseReport"
-          },
-          "llm": {
-            "$ref": "#/components/schemas/LlmReport"
-          },
-          "restarts": {
-            "$ref": "#/components/schemas/RestartReport"
-          }
-        },
-        "type": "object",
-        "required": [
-          "meta",
-          "sse",
-          "llm",
-          "restarts"
-        ],
-        "title": "OpsMonitorReport",
-        "description": "GET /api/ops/monitor response — the whole panel in one round trip."
-      },
       "PackageDraftRequest": {
         "properties": {
           "kind": {
@@ -15072,81 +14094,6 @@
           "blocking"
         ],
         "title": "PermissionItemRow"
-      },
-      "PluginMetricResult": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          },
-          "plugin": {
-            "type": "string",
-            "title": "Plugin",
-            "default": ""
-          },
-          "unit": {
-            "type": "string",
-            "title": "Unit",
-            "default": "short"
-          },
-          "panel": {
-            "type": "string",
-            "enum": [
-              "timeseries",
-              "stat",
-              "barchart",
-              "table",
-              "logs"
-            ],
-            "title": "Panel"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "series": {
-            "items": {
-              "$ref": "#/components/schemas/MetricPoint"
-            },
-            "type": "array",
-            "title": "Series"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "title",
-          "panel"
-        ],
-        "title": "PluginMetricResult",
-        "description": "One plugin metric rendered for the inspector surface — an element of\nGET /api/agents/{id}/inspect/metrics.\n\nMirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):\n`panel` selects the payload — `timeseries` / `barchart` / `table` metrics\ncarry `series` (a bounded recent window, 24h in 1h buckets by default, so\nat most a couple of dozen points), `stat` metrics carry `value` (the\nsingle aggregate); a `logs` metric (a Grafana streaming surface) folds as\n`series` here. `error` is set (with `series`/`value` empty) when the metric's\nquery failed at execution time — the panel shows the rest of the metrics\nand surfaces the failure inline instead of 500ing the whole request;\nregistry-level problems (missing/malformed/tampered file, a template that\nfails the safety re-validation) are HTTP errors instead."
       },
       "PluginStat": {
         "properties": {
@@ -16100,54 +15047,6 @@
         "title": "RestartAgentResponse",
         "description": "POST /api/agents/{id}/restart response.\n\n`enqueued`: native restart is durable; the host completes claim and\n    checkpoint settlement before admitting the next incarnation.\n`already_terminated`: agent is dead; restart does not apply — use\n    resurrect."
       },
-      "RestartBucket": {
-        "properties": {
-          "bucket": {
-            "type": "integer",
-            "title": "Bucket"
-          },
-          "service_starts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Service Starts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "bucket",
-          "service_starts"
-        ],
-        "title": "RestartBucket",
-        "description": "One bucket's service start count (service_started)."
-      },
-      "RestartReport": {
-        "properties": {
-          "series": {
-            "items": {
-              "$ref": "#/components/schemas/RestartBucket"
-            },
-            "type": "array",
-            "title": "Series"
-          },
-          "services": {
-            "items": {
-              "$ref": "#/components/schemas/ServiceRestartRow"
-            },
-            "type": "array",
-            "title": "Services"
-          },
-          "totals": {
-            "$ref": "#/components/schemas/RestartTotals"
-          }
-        },
-        "type": "object",
-        "required": [
-          "series",
-          "services",
-          "totals"
-        ],
-        "title": "RestartReport"
-      },
       "RestartResult": {
         "type": "string",
         "enum": [
@@ -16155,20 +15054,6 @@
           "already_terminated"
         ],
         "title": "RestartResult"
-      },
-      "RestartTotals": {
-        "properties": {
-          "service_starts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Service Starts"
-          }
-        },
-        "type": "object",
-        "required": [
-          "service_starts"
-        ],
-        "title": "RestartTotals"
       },
       "ResurrectAgentRequest": {
         "properties": {
@@ -17989,38 +16874,6 @@
         "title": "ServiceItem",
         "description": "Online status of a single daemon."
       },
-      "ServiceRestartRow": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "starts": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Starts"
-          },
-          "last_start": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Start"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "starts",
-          "last_start"
-        ],
-        "title": "ServiceRestartRow",
-        "description": "One service's boot count within the window — `name` is the daemon\nidentity passed to `init_gateway_process` (gateway / agent-host / watchdog /\ndelivery_watchdog / labeler / memory_indexer / heartbeat / ...)."
-      },
       "ServicesStatus": {
         "properties": {
           "items": {
@@ -18612,84 +17465,6 @@
         "title": "SpawnedAgent",
         "description": "Creation receipt; execution_observed never asserts a completed turn.\n\nRunner RPCs carry only `id`. The gateway adds the optional observation\nfields after the launch request is accepted, preserving older ID consumers."
       },
-      "SseDropBucket": {
-        "properties": {
-          "bucket": {
-            "type": "integer",
-            "title": "Bucket"
-          },
-          "queue_full": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Queue Full"
-          },
-          "publish_error": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Publish Error"
-          },
-          "event_log_drop": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Event Log Drop"
-          }
-        },
-        "type": "object",
-        "required": [
-          "bucket",
-          "queue_full",
-          "publish_error",
-          "event_log_drop"
-        ],
-        "title": "SseDropBucket",
-        "description": "One bucket's SSE/event-log backlog footprint — dropped records by cause."
-      },
-      "SseReport": {
-        "properties": {
-          "series": {
-            "items": {
-              "$ref": "#/components/schemas/SseDropBucket"
-            },
-            "type": "array",
-            "title": "Series"
-          },
-          "totals": {
-            "$ref": "#/components/schemas/SseTotals"
-          }
-        },
-        "type": "object",
-        "required": [
-          "series",
-          "totals"
-        ],
-        "title": "SseReport"
-      },
-      "SseTotals": {
-        "properties": {
-          "queue_full": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Queue Full"
-          },
-          "publish_error": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Publish Error"
-          },
-          "event_log_drop": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Event Log Drop"
-          }
-        },
-        "type": "object",
-        "required": [
-          "queue_full",
-          "publish_error",
-          "event_log_drop"
-        ],
-        "title": "SseTotals"
-      },
       "StagedFile": {
         "properties": {
           "file_id": {
@@ -18870,9 +17645,6 @@
           "alerts": {
             "$ref": "#/components/schemas/StatsAlerts"
           },
-          "diagnostics": {
-            "$ref": "#/components/schemas/StatsDiagnostics"
-          },
           "plugin_stats": {
             "items": {
               "$ref": "#/components/schemas/PluginStat"
@@ -18901,64 +17673,10 @@
           "cost_usd",
           "subscription_cost_usd",
           "alerts",
-          "diagnostics",
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nPoint-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\nWindowed fields (`tokens`, cost slices, `diagnostics`) aggregate over `applied_window_hours`.\n\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), using the same single source of truth as `/api/alerts`.\n- `diagnostics`: Sentry-style error/anomaly classes from `telemetry_events`, automatically archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`."
-      },
-      "StatsDiagnostics": {
-        "properties": {
-          "active_classes": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Active Classes",
-            "default": 0
-          },
-          "archived_classes": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Archived Classes",
-            "default": 0
-          },
-          "active_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Active Events",
-            "default": 0
-          },
-          "archived_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Archived Events",
-            "default": 0
-          },
-          "errors": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors",
-            "default": 0
-          },
-          "warnings": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Warnings",
-            "default": 0
-          },
-          "deployed_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployed Sha"
-          }
-        },
-        "type": "object",
-        "title": "StatsDiagnostics"
+        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nPoint-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\nWindowed fields (`tokens`, cost slices) aggregate over `applied_window_hours`.\n\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), using the same single source of truth as `/api/alerts`."
       },
       "StatsTokens": {
         "properties": {

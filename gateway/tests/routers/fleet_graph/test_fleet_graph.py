@@ -24,12 +24,8 @@ from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
 from base.events.reads import audit_rows
-from gateway.tests.routers.fleet_graph.staleness_support import (
-    bus_with_sync_redis,
-)
-from gateway.tests.routers.fleet_graph.staleness_support import (
-    fleet_graph_client as gateway_test_client,
-)
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.fleet_graph.graph_support import bus_with_sync_redis
 from services.upkeep.events_maintenance import rollup
 
 

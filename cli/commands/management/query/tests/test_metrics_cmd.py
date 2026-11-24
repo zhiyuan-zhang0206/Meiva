@@ -157,15 +157,6 @@ def _dashboard(plugin_stats: list[dict[str, JsonValue]]) -> dict[str, object]:
         "anthropic_cost_usd": 4.25,
         "google_cost_usd": 1.15,
         "alerts": {"unresolved": 2, "critical": 1, "error": 1, "warning": 0},
-        "diagnostics": {
-            "active_classes": 2,
-            "archived_classes": 1,
-            "active_events": 4,
-            "archived_events": 10,
-            "errors": 1,
-            "warnings": 3,
-            "deployed_sha": "abc1234567890",
-        },
         "plugin_stats": plugin_stats,
         "as_of": "2026-11-12T01:00:00+00:00",
     }
@@ -188,18 +179,17 @@ def test_stats_prints_the_totals_and_the_plugin_cards(capsys: pytest.CaptureFixt
         assert cmd_stats(access_to(gateway.url), hours=None, as_json=False) == 0
     assert [r.target for r in gateway.requests] == ["/api/stats/dashboard"]
     out = capsys.readouterr().out.splitlines()
-    assert out[:8] == [
+    assert out[:7] == [
         "window:        last 24 hour(s)",
         "live agents:   12",
         "tokens:        in 1000, out 200, cache read 500, cache hit 50.0%",
         "cost (usd):    api 12.50 (openai unknown, anthropic 4.25, google 1.15), subscription (virtual) 3.00",
         "usage coverage: 3 calls without price, 2 incomplete reports",
         "alerts:        2 unresolved (1 critical, 1 error, 0 warning)",
-        "diagnostics:   2 active (4 events: 1 errors, 3 anomalies), 1 archived (sha abc1234)",
         "",
     ]
-    assert out[8].split() == ["plugin", "id", "status", "value", "updated", "detail"]
-    assert out[9].split() == [
+    assert out[7].split() == ["plugin", "id", "status", "value", "updated", "detail"]
+    assert out[8].split() == [
         "meiva_usage",
         "deepseek-balance",
         "ok",

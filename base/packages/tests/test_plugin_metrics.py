@@ -327,7 +327,7 @@ def test_per_minute_divides_each_part_by_its_own_bucket() -> None:
     first, second = render_targets(spec)
     assert first.endswith("[5m])) / 5")
     assert second.endswith("[30m])) / 30")
-    assert render_query(spec, agent_id=3).endswith("[5m])) / 5")
+    assert render_query(spec).endswith("[5m])) / 5")
 
 
 def test_window_suffixes_the_title_and_leaves_the_query_alone() -> None:

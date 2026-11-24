@@ -1,7 +1,7 @@
 exports = ["agent_events.py", "computer_traces.py", "merged.py", "metrics.py", "notification_outbox.py", "router.py", "schemas.py", "sse.py", "sse_frames.py", "system.py", "telemetry_rows.py"]
 
 [uses]
-"agent_events.py" = ["events_plan.py", "schemas.py", "sse.py", "sse_frames.py", "telemetry_rows.py"]
+"agent_events.py" = ["sse.py", "sse_frames.py"]
 "merged.py" = ["sse.py", "sse_frames.py"]
 "metrics.py" = ["schemas.py"]
 "router.py" = ["events_plan.py", "schemas.py", "telemetry_rows.py"]

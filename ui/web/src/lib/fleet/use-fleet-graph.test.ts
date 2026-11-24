@@ -45,7 +45,6 @@ const API_GRAPH: WireFleetGraph = {
       last_seen_at: "2026-06-17T00:00:00Z",
     },
   ],
-  telemetry_stale: false,
   snapshot_at: null,
 };
 
@@ -85,7 +84,6 @@ describe("useFleetGraph", () => {
     expect(result.current.graph).toEqual({
       nodes: [],
       edges: [],
-      telemetry_stale: false,
       snapshot_at: null,
     });
     expect(result.current.loading).toBe(true);
@@ -107,7 +105,6 @@ describe("useFleetGraph", () => {
         { from_agent: 1, to_agent: 2, event_type: "send_message", weight: 0.5, event_count: 3, last_seen_at: "2026-06-30T00:00:00Z" },
         { from_agent: 2, to_agent: 3, event_type: "resurrect", weight: 4, event_count: 2, last_seen_at: "2026-06-30T00:00:00Z" },
       ],
-      telemetry_stale: false,
     };
 
     answer = { kind: "json", body: raw };
@@ -128,7 +125,6 @@ describe("useFleetGraph", () => {
         { ...API_GRAPH.nodes[0], agent_id: 3, status: "terminated" },
       ],
       edges: [],
-      telemetry_stale: false,
     };
 
     answer = { kind: "json", body: raw };
@@ -152,7 +148,6 @@ describe("useFleetGraph", () => {
         },
       ],
       edges: [],
-      telemetry_stale: false,
       snapshot_at: null,
     };
 
@@ -175,7 +170,6 @@ describe("useFleetGraph", () => {
     expect(result.current.graph).toEqual({
       nodes: [],
       edges: [],
-      telemetry_stale: false,
       snapshot_at: null,
     });
   });

@@ -639,22 +639,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_agent_events_api_agents__agent_id__events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/computer/traces": {
         parameters: {
             query?: never;
@@ -711,22 +695,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_agent_neighbors_api_agents__agent_id__neighbors_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/inspect/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1727,22 +1695,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_metrics_api_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/metrics/agents": {
         parameters: {
             query?: never;
@@ -1887,22 +1839,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/ops/monitor": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_ops_monitor_api_ops_monitor_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/alerts": {
         parameters: {
             query?: never;
@@ -1975,38 +1911,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_system_status_api_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/stats/diagnostics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_diagnostics_api_stats_diagnostics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/stats/diagnostics/samples": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_diagnostic_samples_api_stats_diagnostics_samples_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2832,42 +2736,6 @@ export interface components {
             attempts: number;
             next_attempt_at: string | null;
         };
-        DiagnosticClassRow: {
-            level: "warning" | "error" | "critical";
-            event_name: string;
-            source: string;
-            process: string;
-            category: "telemetry" | "log";
-            count: number;
-            current_sha_count: number;
-            first_seen: string;
-            last_seen: string;
-            last_deployed_sha?: string | null;
-            regressed: boolean;
-            archived_by?: ("deployed_sha" | "quiet") | null;
-        };
-        DiagnosticSample: {
-            ts: string;
-            agent_id: number | null;
-            machine: string;
-            trace_id: string | null;
-            deployed_sha?: string | null;
-            message: string | null;
-            attributes: {
-                [key: string]: unknown;
-            };
-        };
-        DiagnosticSamples: {
-            samples: components["schemas"]["DiagnosticSample"][];
-        };
-        DiagnosticsResponse: {
-            window_hours: components["schemas"]["StatsWindowHours"];
-            deployed_sha: string | null;
-            classes: components["schemas"]["DiagnosticClassRow"][];
-            total_classes: number;
-            total_events: number;
-            as_of: string;
-        };
         EventCountGroup: {
             key: string | null;
             count: number;
@@ -2954,7 +2822,6 @@ export interface components {
         FleetGraphResponse: {
             nodes: components["schemas"]["FleetGraphNode"][];
             edges: components["schemas"]["FleetGraphEdge"][];
-            telemetry_stale: boolean;
             snapshot_at?: string | null;
         };
         GuideDraftRequest: {
@@ -3128,31 +2995,6 @@ export interface components {
             text: string | null;
         };
         LivenessState: "online" | "offline" | "unknown";
-        LlmBucket: {
-            bucket: number;
-            calls: number;
-            latency_p50_ms: number | null;
-            latency_p95_ms: number | null;
-            latency_max_ms: number | null;
-            tokens_in: number;
-            tokens_out: number;
-            tps: number | null;
-            errors: number;
-        };
-        LlmReport: {
-            series: components["schemas"]["LlmBucket"][];
-            totals: components["schemas"]["LlmTotals"];
-        };
-        LlmTotals: {
-            calls: number;
-            latency_p50_ms: number | null;
-            latency_p95_ms: number | null;
-            latency_max_ms: number | null;
-            tokens_in: number;
-            tokens_out: number;
-            tps: number | null;
-            errors: number;
-        };
         LoginRequest: {
             password: string;
             username?: string | null;
@@ -3249,23 +3091,12 @@ export interface components {
             reason?: ("historical_coverage_unknown" | "missing_turn_durations" | "archive_precision_unattributed") | null;
             duration_precision?: ("exact" | "one_second_buckets" | "mixed") | null;
         };
-        MetricPoint: {
-            ts: string;
-            value: number;
-        };
         MetricsMeta: {
             window_days: number;
-            agent_filter: number | null;
             generated_at: string;
             total_events: number;
             distinct_agents: number;
             since_compact: boolean;
-        };
-        MetricsReport: {
-            meta: components["schemas"]["MetricsMeta"];
-            metrics: {
-                [key: string]: unknown;
-            };
         };
         ModelInfo: {
             provider: string;
@@ -3350,18 +3181,6 @@ export interface components {
             created_at: string;
             question: components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"];
         };
-        OpsMonitorMeta: {
-            window: string;
-            bucket_seconds: number;
-            generated_at: string;
-            bucket_starts: string[];
-        };
-        OpsMonitorReport: {
-            meta: components["schemas"]["OpsMonitorMeta"];
-            sse: components["schemas"]["SseReport"];
-            llm: components["schemas"]["LlmReport"];
-            restarts: components["schemas"]["RestartReport"];
-        };
         PackageDraftRequest: {
             kind: "skill" | "plugin" | "mcp";
             nl: string;
@@ -3393,17 +3212,6 @@ export interface components {
             required: boolean;
             blocking: boolean;
             detail: string;
-        };
-        PluginMetricResult: {
-            name: string;
-            title: string;
-            description: string;
-            plugin: string;
-            unit: string;
-            panel: "timeseries" | "stat" | "barchart" | "table" | "logs";
-            error?: string | null;
-            value?: number | null;
-            series?: components["schemas"]["MetricPoint"][];
         };
         PluginStat: {
             plugin: string;
@@ -3543,19 +3351,7 @@ export interface components {
         RestartAgentResponse: {
             status: components["schemas"]["RestartResult"];
         };
-        RestartBucket: {
-            bucket: number;
-            service_starts: number;
-        };
-        RestartReport: {
-            series: components["schemas"]["RestartBucket"][];
-            services: components["schemas"]["ServiceRestartRow"][];
-            totals: components["schemas"]["RestartTotals"];
-        };
         RestartResult: "enqueued" | "already_terminated";
-        RestartTotals: {
-            service_starts: number;
-        };
         ResurrectAgentRequest: {
             resurrected_by: string;
             prompt?: string | null;
@@ -3807,11 +3603,6 @@ export interface components {
             pid: number | null;
             detail: string | null;
         };
-        ServiceRestartRow: {
-            name: string;
-            starts: number;
-            last_start: string | null;
-        };
         ServicesStatus: {
             items: components["schemas"]["ServiceItem"][];
         };
@@ -3901,21 +3692,6 @@ export interface components {
             reason?: components["schemas"]["AvailabilityReason"] | null;
             observed_at?: string | null;
         };
-        SseDropBucket: {
-            bucket: number;
-            queue_full: number;
-            publish_error: number;
-            event_log_drop: number;
-        };
-        SseReport: {
-            series: components["schemas"]["SseDropBucket"][];
-            totals: components["schemas"]["SseTotals"];
-        };
-        SseTotals: {
-            queue_full: number;
-            publish_error: number;
-            event_log_drop: number;
-        };
         StagedFile: {
             file_id: string;
             name: string;
@@ -3946,18 +3722,8 @@ export interface components {
             anthropic_cost_usd?: number | null;
             google_cost_usd?: number | null;
             alerts: components["schemas"]["StatsAlerts"];
-            diagnostics: components["schemas"]["StatsDiagnostics"];
             plugin_stats: components["schemas"]["PluginStat"][];
             as_of?: string | null;
-        };
-        StatsDiagnostics: {
-            active_classes: number;
-            archived_classes: number;
-            active_events: number;
-            archived_events: number;
-            errors: number;
-            warnings: number;
-            deployed_sha?: string | null;
         };
         StatsTokens: {
             input: number;
@@ -5429,42 +5195,6 @@ export interface operations {
             };
         };
     };
-    get_agent_events_api_agents__agent_id__events_get: {
-        parameters: {
-            query?: {
-                from?: string | null;
-                to?: string | null;
-                event?: string | null;
-                level?: string | null;
-                limit?: number | null;
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentEventRow"][];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_computer_trace_api_computer_traces_get: {
         parameters: {
             query: {
@@ -5576,35 +5306,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NeighborsResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PluginMetricResult"][];
                 };
             };
             422: {
@@ -7670,37 +7371,6 @@ export interface operations {
             };
         };
     };
-    get_metrics_api_metrics_get: {
-        parameters: {
-            query?: {
-                days?: number | null;
-                agent?: number | null;
-                since_compact?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MetricsReport"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_metrics_agents_api_metrics_agents_get: {
         parameters: {
             query?: {
@@ -8005,35 +7675,6 @@ export interface operations {
             };
         };
     };
-    get_ops_monitor_api_ops_monitor_get: {
-        parameters: {
-            query?: {
-                window?: "1h" | "6h" | "24h" | "7d";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsMonitorReport"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_alerts_api_alerts_get: {
         parameters: {
             query?: {
@@ -8179,69 +7820,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatus"];
-                };
-            };
-        };
-    };
-    get_diagnostics_api_stats_diagnostics_get: {
-        parameters: {
-            query?: {
-                hours?: components["schemas"]["StatsWindowHours"];
-                include_archived?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiagnosticsResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_diagnostic_samples_api_stats_diagnostics_samples_get: {
-        parameters: {
-            query: {
-                level: "warning" | "error" | "critical";
-                event_name: string;
-                source: string;
-                process?: string;
-                hours?: components["schemas"]["StatsWindowHours"];
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiagnosticSamples"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

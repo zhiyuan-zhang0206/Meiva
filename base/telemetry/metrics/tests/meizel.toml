@@ -1,4 +1,4 @@
 exports = ["telemetry_stream.py"]
 
 [uses]
-"test_metrics_aggregate_equivalence.py" = ["telemetry_stream.py"]
+"test_agent_rollups.py" = ["telemetry_stream.py"]

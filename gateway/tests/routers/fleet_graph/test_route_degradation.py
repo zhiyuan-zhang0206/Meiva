@@ -12,15 +12,12 @@ from psycopg import errors as pg_errors
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
+from gateway.http.config import GatewayAppState
 from gateway.http.error_handlers import unhandled_exception_handler
 from gateway.http.middleware.error_envelope import request_trace_middleware
-from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet import fleet_graph as fg
 from gateway.tests.auth.gateway_config import gateway_config_of
-from gateway.tests.routers.fleet_graph.staleness_support import (
-    bus_with_sync_redis,
-    write_fresh_heartbeat,
-)
+from gateway.tests.routers.fleet_graph.graph_support import bus_with_sync_redis
 
 
 # meiva:note
@@ -42,16 +39,14 @@ def app(database: Database) -> Iterator[FastAPI]:
 
     redis.get.side_effect = get
     app = FastAPI()
-    app.state = fg.FleetGraphAppState()
+    app.state = GatewayAppState()
     app.include_router(fg.router)
     app.middleware("http")(request_trace_middleware(_rng()))
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.state.bus = bus_with_sync_redis(lambda: redis)
     app.state.gateway_config = gateway_config_of(snapshot_process_config())
     app.state.clock = system_clock()
-    app.state.telemetry_staleness = TelemetryStaleness(check_interval_s=0)
     with database.pool(max_size=2) as pool:
-        write_fresh_heartbeat(pool)
         app.state.db_pool = pool
         yield app
 

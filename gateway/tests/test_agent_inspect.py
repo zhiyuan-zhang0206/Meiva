@@ -7,7 +7,6 @@ import psycopg
 import pytest
 
 from base.config import settings
-from base.telemetry.metrics.core.catalog import collect_core_metrics
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsReply,
@@ -568,30 +567,6 @@ def test_inspect_last_pause_same_timestamp_uses_newest_id(db_conn: psycopg.Conne
     with gateway_test_client() as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.json()["heartbeat"]["last_pause"]["duration_s"] == 600
-
-
-# meiva:note
-# The plugin metrics surface on the real gateway app.
-
-
-def test_inspect_metrics_route_serves_the_enabled_registry(db_conn: psycopg.Connection) -> None:
-    aid = _insert_agent(db_conn)
-    db_conn.commit()
-    with gateway_test_client() as client:
-        response = client.get(f"/api/agents/{aid}/inspect/metrics")
-    assert response.status_code == 200, response.text
-    served = {metric["name"] for metric in response.json()}
-    core = {spec.name for spec in collect_core_metrics() if "inspector" in spec.output}
-    assert core
-    assert core <= served
-
-
-def test_inspect_metrics_route_answers_404_for_an_unknown_agent(
-    db_conn: psycopg.Connection,
-) -> None:
-    db_conn.commit()
-    with gateway_test_client() as client:
-        assert client.get("/api/agents/999999/inspect/metrics").status_code == 404
 
 
 def test_inspect_live_returns_owned_and_created_schedules_ordered_and_isolated(

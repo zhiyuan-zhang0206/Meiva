@@ -142,7 +142,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="composed switch refresh — timeline head window + token usage + pending in one read"
     ),
     ("GET", "/api/agents/{agent_id}/events/stream"): RouteContract(note="SSE live stream"),
-    ("GET", "/api/agents/{agent_id}/events"): RouteContract(),
     ("GET", "/api/computer/traces"): RouteContract(
         note="computer-use task replay (Phase 3, task #1101): one task's desktop trail"
     ),
@@ -180,7 +179,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/inspect/live"): RouteContract(
         note="uncached live skeleton — cheap window-independent inspector fields",
     ),
-    ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
     ("GET", "/api/plugins"): RouteContract(
         note="read cluster plugin choices and presentation metadata"
@@ -227,9 +225,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("POST", "/api/memory/refresh"): RouteContract(note="re-scan — repeats are harmless"),
     ("POST", "/api/memory/search"): RouteContract(note="pure read"),
-    ("GET", "/api/metrics"): RouteContract(),
     ("GET", "/api/metrics/agents"): RouteContract(),
-    ("GET", "/api/ops/monitor"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/reply-suggestion/feedback"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="explicit user feedback with an immutable receipt",
@@ -342,8 +338,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="deliver a framework system note as a system marker with caller-controlled resurrection",
     ),
     ("GET", "/api/stats/dashboard"): RouteContract(),
-    ("GET", "/api/stats/diagnostics"): RouteContract(),
-    ("GET", "/api/stats/diagnostics/samples"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),

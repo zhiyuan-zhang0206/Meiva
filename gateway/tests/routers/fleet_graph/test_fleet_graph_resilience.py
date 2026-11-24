@@ -4,12 +4,9 @@ import psycopg
 from psycopg import errors as pg_errors
 
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
-from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.schemas import FleetGraphNode, FleetGraphResponse
-from gateway.tests.routers.fleet_graph.staleness_support import (
-    bus_with_sync_redis,
-    fleet_graph_client,
-)
+from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.routers.fleet_graph.graph_support import bus_with_sync_redis
 
 
 class _FakeRedis:
@@ -54,40 +51,13 @@ def test_success_writes_only_the_short_poll_cache(db_conn: psycopg.Connection) -
 
     import gateway.routers.fleet.fleet_graph as fg
 
-    with fleet_graph_client() as client:
+    with gateway_test_client() as client:
         client.app.state.bus = bus_with_sync_redis(lambda: redis)
         resp = client.get("/api/fleet/graph")
 
     assert resp.status_code == 200
     key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
     assert [(write[0], write[2]) for write in redis.writes] == [(key, 60)]
-
-
-def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
-    db_conn: psycopg.Connection,
-) -> None:
-    """A heartbeat outage marks telemetry degradation without discarding the graph."""
-    _seed_agent(db_conn)
-    redis = _FakeRedis()
-
-    import gateway.routers.fleet.fleet_graph as fg
-
-    # The capture is bound inside the app's lifespan: the gateway binds its own pipeline on start.
-    with (
-        fleet_graph_client(heartbeat=False) as client,
-        capturing_events() as emitted_events,
-    ):
-        client.app.state.bus = bus_with_sync_redis(lambda: redis)
-        resp = client.get("/api/fleet/graph")
-        stale = emitted_events.attributes("telemetry_read_stale")
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["telemetry_stale"] is True
-    assert body["snapshot_at"] is not None
-    key = fg.cache_key(include_terminated=False, hours=None, decay_lambda=0.5)
-    assert {write[0] for write in redis.writes} == {key}
-    assert stale[0]["source"] == "postgres"
 
 
 def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
@@ -124,7 +94,7 @@ def test_pg_cancellation_is_a_500_and_ignores_leftover_last_good_entries(
         def close(self) -> None:
             pass
 
-    with fleet_graph_client(raise_server_exceptions=False) as client:
+    with gateway_test_client(raise_server_exceptions=False) as client:
         client.app.state.bus = bus_with_sync_redis(lambda: redis)
         client.app.state.db_pool = _CanceledPool()
         resp = client.get("/api/fleet/graph")
