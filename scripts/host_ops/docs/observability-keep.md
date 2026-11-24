@@ -24,6 +24,24 @@ native Tempo backend shipped), and it keeps traces, logs and metrics flowing thr
   restarts them and the new commit's configuration, rules, dashboards and binaries take effect.
 - `restart: no verdict ...` (exit 2): an unresolvable commit or a missing git; treat it as restart.
 
+## What the verdict does not cover
+
+- **OLD is the commit the stack was started on**, normally each host's current checkout. The helper
+  takes one OLD; when hosts run different commits, run it once per distinct commit and keep only
+  if every run says `keep`.
+- **`--keep-service` needs `--keep-extras`.** `--stop-extras` is refused at argument parsing
+  (`extras_keep_refusal`), before any host is touched.
+- **Keeping `otel-collector` keeps `meiva-root` on every host** (a root with a kept unit is not
+  stopped), so the window's kept-root generation check applies to all hosts: a NEW whose launch
+  manifest differs from the live root refuses before the stop. That refusal is safe, and the
+  helper's `keep` does not predict it.
+- **A runner that has no such unit ignores the name** (the five names are roster entries on every
+  host); only `otel-collector` exists on a runner.
+- **Dashboards also come from installed plugins** (database rows, not git paths), which the helper
+  cannot see.
+- **Listener and port code** (`base/cluster/listener_plan.py`, `port_preflight.py`) is a restart
+  reason although it names no backend: the units' bind addresses come from it.
+
 ## The path list is one-sided on purpose
 
 A wrong entry may cost a window a restart it could have skipped; it must never keep a stack the

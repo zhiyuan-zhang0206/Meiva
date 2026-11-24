@@ -66,7 +66,8 @@ def _frontend_prebuild(quoted_new: str) -> str:
         f"W={FRONTEND_STAGE}\n"
         'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; '
         'git -C "$S" worktree prune\n'
-        'if [ -d "$S/ui/web/node_modules" ] && command -v pnpm >/dev/null 2>&1 \\\n'
+        'if grep -qiE "^MEIVA_MACHINE_SERVE_GATEWAY=.?(1|true|yes|on)" "$H/.env" 2>/dev/null \\\n'
+        '  && [ -d "$S/ui/web/node_modules" ] && command -v pnpm >/dev/null 2>&1 \\\n'
         f'  && ! git -C "$S" diff --quiet HEAD {quoted_new} -- ui/web \\\n'
         f'  && git -C "$S" diff --quiet HEAD {quoted_new} -- {_PREBUILD_FIXED_PATHS} \\\n'
         f'  && git -C "$S" worktree add -q --detach "$W" {quoted_new}; then\n'
@@ -111,7 +112,7 @@ def prestage_command(new: str) -> str:
         'if [ -f "$tmp/base/host/env/harness/convergence.py" ]; then\n'
         '  py="$S/.venv/bin/python"\n'
         '  [ -x "$tmp/.venv/bin/python" ] && py="$tmp/.venv/bin/python"\n'
-        f'  PYTHONPATH="$tmp" MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$py" -c {shlex.quote(_PRESTAGE_HARNESS_SCRIPT)}\n'
+        f'  PYTHONPATH="$tmp" MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$py" -c {shlex.quote(_PRESTAGE_HARNESS_SCRIPT)} || exit 1\n'
         "fi\n"
         f"{_frontend_prebuild(quoted)}"
     )

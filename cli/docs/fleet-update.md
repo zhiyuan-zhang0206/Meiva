@@ -75,7 +75,7 @@ copies the serving `node_modules` (a real copy: Turbopack rejects a symlinked on
 The prebuild is a cache warm, never a gate: any failure prints `frontend prebuild failed` and the
 window carries on, and `ensure` rebuilds a missing or mismatching `.next` itself because the key
 names every build input (source digest, node version, baked values; it holds no path). A
-lockfile, workspace or patch change skips the prebuild: the start installs, then builds. The stage
+lockfile, workspace or patch change skips the prebuild: the start installs, then builds. A host whose `.env` does not say `MEIVA_MACHINE_SERVE_GATEWAY` true skips it before checking anything out. Adopting the staged build replaces the serving `.next`, so a recovery switch back to OLD rebuilds the frontend at that start (30-45 s) instead of reusing OLD's build. The stage
 (a worktree and a `node_modules` copy, about 1 GB) is left in place after the switch so the outage
 does not spend seconds deleting it; the next prestage removes it first. Verified on a real build:
 only `.next/required-server-files.{json,js}` embed the build directory, and `next start` does not

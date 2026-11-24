@@ -514,8 +514,13 @@ def _commit_ui_source(rig: _PrestageRig, *, deps: bool = False) -> str:
     return target
 
 
-def _prebuild_rig(tmp_path: Path, *, node_modules: bool = True) -> _PrestageRig:
+def _prebuild_rig(
+    tmp_path: Path, *, node_modules: bool = True, gateway: bool = True
+) -> _PrestageRig:
     rig = _build_prestage_rig(tmp_path)
+    (rig.home / ".env").write_text(
+        f"MEIVA_MACHINE_SERVE_GATEWAY={'true' if gateway else 'false'}\n", encoding="utf-8"
+    )
     if node_modules:
         (rig.repo / "ui" / "web" / "node_modules").mkdir()
     write_executable(rig.source_py, _PREBUILD_PYTHON.format(log=rig.log_file))
@@ -544,15 +549,20 @@ def test_prestage_prebuilds_the_frontend_when_only_ui_web_source_changed(tmp_pat
     assert not (rig.repo / "ui/web/.next").exists()
 
 
-@pytest.mark.parametrize("reason", ["ui_unchanged", "no_node_modules", "lockfile_changed"])
+@pytest.mark.parametrize(
+    "reason", ["ui_unchanged", "no_node_modules", "lockfile_changed", "not_a_gateway"]
+)
 def test_prestage_does_not_prebuild_when_the_staged_tree_could_not_be_the_serving_one(
     tmp_path: Path, reason: str
 ) -> None:
-    rig = _prebuild_rig(tmp_path, node_modules=reason != "no_node_modules")
+    rig = _prebuild_rig(
+        tmp_path, node_modules=reason != "no_node_modules", gateway=reason != "not_a_gateway"
+    )
     target = {
         "ui_unchanged": rig.pyproject_sha,
         "no_node_modules": _commit_ui_source(rig),
         "lockfile_changed": rig.pnpm_sha,
+        "not_a_gateway": _commit_ui_source(rig),
     }[reason]
     result = rig.run(target)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -620,3 +630,20 @@ def test_the_switch_ignores_a_stage_for_another_commit_or_without_a_finished_bui
 
     shutil.rmtree(rig.home / "frontend-prebuild")
     assert _adopt(rig, target).returncode == 0
+
+
+def test_a_failing_harness_convergence_still_fails_prestage_before_the_prebuild_tail(
+    tmp_path: Path,
+) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    write_executable(
+        rig.source_py,
+        _PREBUILD_PYTHON.format(log=rig.log_file).replace(
+            'case "$*" in *frontend_prebuild*) ;; *) exit 0 ;; esac',
+            'case "$*" in *frontend_prebuild*) ;; *) exit 1 ;; esac',
+        ),
+    )
+    result = rig.run(target)
+    assert result.returncode != 0
+    assert _prebuild_calls(rig) == []

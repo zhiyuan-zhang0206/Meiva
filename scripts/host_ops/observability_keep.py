@@ -24,6 +24,8 @@ RESTART_PREFIXES = (
     "base/host/env/dotenv_boot.py",
     "base/host/env/port_lease.py",
     "base/host/system/macos_firewall.py",
+    "base/cluster/listener_plan.py",
+    "base/cluster/port_preflight.py",
     "base/paths/",
     "base/native_process/",
     "base/packages/dashboard_supply.py",

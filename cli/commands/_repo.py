@@ -9,6 +9,7 @@ callers import those definitions directly.
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -171,7 +172,11 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
 
 def _remove_foreign_markers(node_modules: Path) -> None:
     for marker in _FOREIGN_NODE_MODULES_MARKERS:
-        (node_modules / marker).unlink(missing_ok=True)
+        path = node_modules / marker
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
 
 
 def _frontend_deps_stamp_hash(fe: Path) -> str:

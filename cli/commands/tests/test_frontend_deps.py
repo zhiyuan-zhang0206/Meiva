@@ -310,3 +310,19 @@ def test_skips_across_commits_and_source_edits_when_lock_and_workspace_unchanged
 
     fake_pnpm_install.ensure(repo)
     assert fake_pnpm_install.installs() == []
+
+
+def test_a_foreign_marker_that_is_a_directory_is_cleared_too(
+    tmp_path: Path, fake_pnpm_install: FakePnpm
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    modules = repo / "ui" / "web" / "node_modules"
+    fake_pnpm_install.ensure(repo)
+    (modules / ".package-lock.json").mkdir()
+    (modules / ".package-lock.json" / "inner").write_text("x")
+    fake_pnpm_install.forget()
+    fake_pnpm_install.ensure(repo)
+    assert not (modules / ".package-lock.json").exists()
+    fake_pnpm_install.forget()
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
