@@ -205,8 +205,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "llm_usage_ledger",
     "inbound_messages",
     "agents_meta",
-    "agent_model_tokens_total",
-    "agent_model_tokens_total_through",
     "agent_metric_file_cursors",
     "agents",
     "alert_notification_members",

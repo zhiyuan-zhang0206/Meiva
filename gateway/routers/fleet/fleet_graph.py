@@ -7,9 +7,8 @@
 # Data sources (task #1197 LGTM cutover):
 # - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
 # - Postgres: the usage ledger token sums — retained-window (7d) totals + selected-window
-#   scores — from `telemetry_events`, the day-grain ledger and the folded
-#   `agent_model_tokens_total` (`gateway/routers/fleet/fleet_tokens.py`), read in the same
-#   connection as the nodes.
+#   scores — from `llm_usage_ledger` (`gateway/routers/fleet/fleet_tokens.py`), read in the
+#   same connection as the nodes.
 # - Edge events (audit category, spawn/send_message/fork/resurrect): aggregated
 #   in Postgres from `audit_events`, the permanent audit record
 #   (base/events/reads/audit_rows.py), in the same phase as the nodes.

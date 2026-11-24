@@ -460,39 +460,6 @@ COMMENT ON COLUMN inbound_messages.content_hash IS
 COMMENT ON COLUMN inbound_messages.source_assertion_match IS
     'Whether an agent:N source assertion matches a verified agent_token:M credential; NULL when either side is unknown. Informational only.';
 
--- ─────────────── events Since-Birth rollup ───────────────
--- Day-grain rollups that preserve the `events` "since-birth" aggregates
--- across retention (events is partitioned by month and old partitions are
--- DROPped; these tables survive so the whole-life aggregates the readers need do
--- not vanish with the raw rows). The whole ~59-day history reduces to ~2900 rows,
--- so these are never themselves subject to retention. A gateway maintenance daemon
--- (services.upkeep.events_maintenance) upserts them daily; the upsert is a full-day
--- overwrite recompute keyed on the PK, so it is idempotent — a re-run never
--- double-counts. The read-time split is day-boundary (UTC midnight): the ledger
--- serves rolled days, while the newest retained day (which can be stale) and today
--- come from the retained Loki tail so late closed-day writes count exactly once.
---
--- agent_metrics_daily: per agent x UTC-day turn / exec counters plus the mergeable
--- turn-duration stats. turn_dur_sum feeds both the lifetime mean and lm_stage_tps.
--- turn_dur_hist is a mergeable integer-second histogram for p50 / p90; its bucket
--- precision never supplies the exact lifetime min / max values.
-CREATE TABLE agent_metrics_daily (
-    agent_id      BIGINT NOT NULL REFERENCES agents(id),
-    day           DATE   NOT NULL,
-    turn_total    BIGINT NOT NULL DEFAULT 0,
-    turn_ok       BIGINT NOT NULL DEFAULT 0,
-    turn_dur_sum  DOUBLE PRECISION NOT NULL DEFAULT 0,  -- Σ turn_end.duration_seconds → lm_stage_tps denominator + lifetime mean
-    turn_dur_min  DOUBLE PRECISION,
-    turn_dur_max  DOUBLE PRECISION,
-    turn_dur_hist JSONB NOT NULL DEFAULT '{}'::jsonb,  -- floor(duration_seconds) integer-second bucket → count
-    exec_ok       BIGINT NOT NULL DEFAULT 0,            -- event = 'exec'
-    exec_failed   BIGINT NOT NULL DEFAULT 0,            -- event LIKE 'exec\_%' OR LIKE 'exec(%'
-    PRIMARY KEY (agent_id, day)
-);
-
-COMMENT ON COLUMN agent_metrics_daily.turn_dur_hist IS
-    'Integer-second floor(duration_seconds) bucket-to-count map; mergeable across days and backfilled for archive-era ledger rows.';
-
 -- Compact observed measurements, never a complete billing ledger. The telemetry
 -- queue can shed records before any sink; freshness does not prove completeness.
 CREATE TABLE agent_metric_collection (
@@ -658,58 +625,6 @@ COMMENT ON COLUMN api_idempotency.request_hash IS
     'SHA-256 of the immutable ops kind/payload; NULL on legacy/HTTP records. Unknown identity fails closed on ops replay.';
 COMMENT ON COLUMN api_idempotency.op_status IS
     'Ops-channel outcome status (''completed''/''failed''); NULL for HTTP middleware rows. The HTTP channel stores its HTTP code in `status` instead.';
-
--- agent_model_tokens_daily: per agent x UTC-day x model token + cost ledger.
--- cost_usd is the SUM of the day's stored usage-time price snapshots (user
--- principle: cost is billed at the price in force at the call, never
--- re-priced against the current registry) — costed_calls counts rows that
--- carried a snapshot, unpriced_calls the rows without one (they contribute
--- 0 cost), and estimated_calls marks calls costed from an inferred model
--- instead of an event snapshot. model '' = an llm_usage row that carried no
--- model field. The per-agent daily token total = SUM over that day's model
--- rows (not re-stored in agent_metrics_daily). Whole days land here from the
--- events-maintenance rollup pass over telemetry_events; the cost read path is these rows + the
--- newest raw rows.
-CREATE TABLE agent_model_tokens_daily (
-    agent_id         BIGINT NOT NULL REFERENCES agents(id),
-    day              DATE   NOT NULL,
-    model            TEXT   NOT NULL,
-    llm_calls        BIGINT NOT NULL DEFAULT 0,
-    tokens_in        BIGINT NOT NULL DEFAULT 0,
-    tokens_out       BIGINT NOT NULL DEFAULT 0,
-    tokens_cached    BIGINT NOT NULL DEFAULT 0,
-    tokens_reasoning BIGINT NOT NULL DEFAULT 0,
-    cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
-    cost_usd_subscription DOUBLE PRECISION NOT NULL DEFAULT 0,
-    costed_calls     BIGINT NOT NULL DEFAULT 0,
-    unpriced_calls   BIGINT NOT NULL DEFAULT 0,
-    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0,
-    estimated_calls  BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, day, model)
-);
-
--- The whole-life sums per agent and model, folded from agent_model_tokens_daily once its days can
--- no longer change (migration 20261003T020000_agent-model-tokens-total). A reader of "all time"
--- adds this to the days after the fold and to the newest raw rows.
--- `agent_model_tokens_total_through` holds the single watermark: the last UTC day folded in.
-CREATE TABLE IF NOT EXISTS agent_model_tokens_total (
-    agent_id         BIGINT NOT NULL REFERENCES agents(id),
-    model            TEXT   NOT NULL,
-    llm_calls        BIGINT NOT NULL DEFAULT 0,
-    tokens_in        BIGINT NOT NULL DEFAULT 0,
-    tokens_out       BIGINT NOT NULL DEFAULT 0,
-    tokens_cached    BIGINT NOT NULL DEFAULT 0,
-    tokens_reasoning BIGINT NOT NULL DEFAULT 0,
-    cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
-    costed_calls     BIGINT NOT NULL DEFAULT 0,
-    unpriced_calls   BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, model)
-);
-
-CREATE TABLE IF NOT EXISTS agent_model_tokens_total_through (
-    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
-    day       DATE NOT NULL
-);
 
 -- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
 -- One row = one alert instance, in the Alertmanager standard webhook payload
