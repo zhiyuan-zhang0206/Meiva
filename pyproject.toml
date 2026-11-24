@@ -150,6 +150,7 @@ dev = [
     "pytest-split",
     "pytest-random-order>=1.2.0",  # opt-in only (--random-order): the nightly random-order run, .github/workflows/random-order.yml
     "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
+    "lxml>=6.0",  # the "lxml" tree builder that update_model_pricing.py asks BeautifulSoup for by name
     # The locality checker, pinned to a release of its own repository; its rule data (`meizel.toml`,
     # `meizel.policy.toml`, `meizel.timing_baseline.json`) stays here.
     "meizel @ git+https://github.com/zhiyuan-zhang0206/meizel@645438a7565bace670de9b1c51274602ed336979",

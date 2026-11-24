@@ -533,7 +533,6 @@ argv-wrappers = [
 pure-third-party = [
     "anthropic",
     "dotenv",
-    "feedparser",
     "langchain_anthropic",
     "langchain_core",
     "langchain_openai",
@@ -546,7 +545,6 @@ pure-third-party = [
     "pydantic",
     "pydantic_core",
     "pydantic_settings",
-    "trafilatura",
     "yaml",
 ]
 impure-calls = [
