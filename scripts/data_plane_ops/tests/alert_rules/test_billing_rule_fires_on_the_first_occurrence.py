@@ -193,7 +193,9 @@ def test_collector_cluster_filter_drops_are_visible_as_a_window_delta() -> None:
     rule = rules["meiva-ops-otelcol-cluster-allow-drops"]
     expr = rule_query_exprs(rule, "prometheus")[0]
     assert 'filter="filter/cluster_allow"' in expr
-    assert "otelcol_processor_filter_(logs|spans|datapoints)_filtered" in expr
+    for signal in ("logs", "spans", "datapoints"):
+        assert f"increase(otelcol_processor_filter_{signal}_filtered_total{{" in expr
+    assert "__name__" not in expr
     assert "increase(" in expr
     assert "[5m]" in expr
     assert threshold_params(rule) == [[0]]

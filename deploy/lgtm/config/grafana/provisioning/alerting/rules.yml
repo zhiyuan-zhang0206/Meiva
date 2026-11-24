@@ -1708,9 +1708,9 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine) (
-                  increase({machine!="", filter="filter/cluster_allow", __name__=~"otelcol_processor_filter_(logs|spans|datapoints)_filtered(_total)?"}[5m])
-                  or on (machine)
-                  label_join(increase({machine="", machine_name!="", filter="filter/cluster_allow", __name__=~"otelcol_processor_filter_(logs|spans|datapoints)_filtered(_total)?"}[5m]), "machine", "", "machine_name")
+                  label_replace(increase(otelcol_processor_filter_logs_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "logs", "", "")
+                  or label_replace(increase(otelcol_processor_filter_spans_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "spans", "", "")
+                  or label_replace(increase(otelcol_processor_filter_datapoints_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "datapoints", "", "")
                 )
               instant: true
               range: false

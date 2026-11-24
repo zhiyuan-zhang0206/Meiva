@@ -124,3 +124,64 @@ def test_metrics_and_trace_resources_carry_the_routing_identity(tmp_path: Path) 
 
     assert attributes["cluster"] == ".meiva"
     assert attributes["meiva.cluster"] == observability.cluster_identity(home)
+
+
+def test_an_unreadable_capability_degrades_to_no_routing_identity(tmp_path: Path) -> None:
+    from base.host.db_authority.unit import unit_capability_path
+
+    home = tmp_path / ".meiva"
+    capability = unit_capability_path(home.resolve())
+    capability.parent.mkdir(parents=True)
+    capability.write_text("not a capability")
+
+    assert observability.cluster_identity(home) is None
+    assert observability.cluster_identity_attributes(home) == {}
+
+
+def test_the_logs_provider_resource_carries_the_routing_identity(tmp_path: Path) -> None:
+    from base.host.db_authority.api import ensure_telemetry_token
+    from base.telemetry.otlp import telemetry_otlp_sdk
+
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    ensure_telemetry_token(home.resolve(), "fixture-token-a")
+    logs, metrics = telemetry_otlp_sdk.build_providers(
+        "http://127.0.0.1:9", mirror_dir=tmp_path, home=home, instance_id="i"
+    )
+    try:
+        assert logs.resource.attributes["meiva.cluster"] == observability.cluster_identity(home)
+        assert metrics._sdk_config.resource.attributes["meiva.cluster"] == (
+            observability.cluster_identity(home)
+        )
+    finally:
+        logs.shutdown()
+        metrics.shutdown()
+
+
+def test_the_process_tracer_resource_carries_the_routing_identity(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from base.host.db_authority.api import ensure_telemetry_token
+    from base.telemetry.tests.otlp.identity_inputs import machine_identity
+    from base.telemetry.tracing import build_process_tracer
+
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    ensure_telemetry_token(home.resolve(), "fixture-token-a")
+    settings = SimpleNamespace(
+        trace_enabled=True,
+        trace_strip_content=True,
+        telemetry_otlp_endpoint="http://127.0.0.1:9",
+    )
+
+    provider = build_process_tracer(
+        service="test",
+        machine=machine_identity(),
+        home=home,
+        settings=settings,
+        environ={"MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://127.0.0.1:9"},
+    )
+
+    assert provider is not None
+    assert provider.resource.attributes["meiva.cluster"] == observability.cluster_identity(home)
+    assert provider.resource.attributes["cluster"] == ".meiva"

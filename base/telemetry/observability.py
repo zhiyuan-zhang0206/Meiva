@@ -51,7 +51,11 @@ def cluster_identity(home: Path) -> str | None:
     from base import cluster
     from base.host.db_authority.unit import telemetry_bearer
 
-    token = telemetry_bearer(home)
+    try:
+        token = telemetry_bearer(home)
+    except Exception as exc:
+        _report_label_fallback("routing identity", exc)
+        return None
     return None if token is None else cluster.cluster_id(token)
 
 

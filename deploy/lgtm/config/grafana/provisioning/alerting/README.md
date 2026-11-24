@@ -232,7 +232,7 @@ monotonic counters:
 |-----|--------|-----------|-------|----------|
 | `meiva-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine+exporter+signal | 5m | error |
 | `meiva-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
-| `meiva-ops-otelcol-cluster-allow-drops` | records dropped by the collector's cluster filter | `increase(otelcol_processor_filter_*_filtered{filter="filter/cluster_allow"}[5m]) > 0` | 0m | error |
+| `meiva-ops-otelcol-cluster-allow-drops` | records dropped by the collector's cluster filter | `increase(otelcol_processor_filter_{logs,spans,datapoints}_filtered_total{filter="filter/cluster_allow"}[5m]) > 0` (one `increase` per signal: a single `__name__=~` selector collides on labelset) | 0m | error |
 | `meiva-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
 | `meiva-ops-otelcol-receiver-refused` | intake refusals | `increase(otelcol_receiver_refused_log_records_total[10m]) > 0` (the memory limiter refuses all three signals at once) | 10m | warning |
 
