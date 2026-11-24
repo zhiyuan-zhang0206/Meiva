@@ -192,8 +192,8 @@ def _write_last_error(db: Database, schedule_id: int, message: str | None) -> No
 # all `run_loop` and `run_weekly` have in common, which is exactly why the failure handling lives
 # here instead of in each of them: two copies of it would be two semantics to keep in step, and the
 # one that drifts is the one nobody is reading
-# (`jobs/watch/stall_watch.py` and `jobs/watch/qa_keepalive.py` still carry their own older
-# variant: they catch and print, with no backoff and no schedule-row write).
+# (`jobs/watch/qa_keepalive.py` still carries its own older variant: it catches and prints, with
+# no backoff and no schedule-row write).
 #
 # A round that raises keeps the state it was given, because the assignment never happened: a slot
 # that was never claimed is searched for again, and the next attempt is the same work. The failure

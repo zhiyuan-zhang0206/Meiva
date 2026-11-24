@@ -32,7 +32,7 @@ this phase).
 | Kind | Examples | Why untouched |
 |---|---|---|
 | Current writers and readers | `lifecycle-op.json`, `start-serving.json`, `bootstrap-snapshot.json`, `agent_host.pid`, `pty-sessions.json`, `*.sock`, `meiva-root/` | Live state, rewritten on every start |
-| Written outside this repository | `probe-metrics-pub-state.json`, `staging-probe-v0-state.json` (Monsora staging probes), `db-write-stall-watch.json` and `review100-keeper.json` (stored schedule scripts) | Their owner maintains them; a file this checkout cannot write is not evidence of a stale release |
+| Written outside this repository | `probe-metrics-pub-state.json`, `staging-probe-v0-state.json` (Monsora staging probes), `review100-keeper.json` (stored schedule scripts) | Their owner maintains them; a file this checkout cannot write is not evidence of a stale release |
 | Orphaned records, no writer and no gate | `vp-boundary-crossed`, `.gauge_state`, `patrol-state.json`, `update-baseline.json`, `network-notes-*.json` | Diagnostic records: harmless to a reader, and deleting another tool's history is not the start's business |
 
 A general "remove what no code writes" rule would take the third row with the first — the sweep

@@ -4941,7 +4941,7 @@ groups:
       # numbers: the collector parses PgBouncer's per-minute stats line into two gauges. The
       # judgement is unchanged: under 20 transactions/s while the average query takes over
       # 300 ms, three minutes running. Over 29 days (40,375 minutes) that judgement marked only
-      # the two real incidents and no quiet night (stall_rule.py). It is the root-cause signal
+      # the two real incidents and no quiet night. It is the root-cause signal
       # that an agent-host crash wave follows, which neither `db-pool-acquire-slow` nor
       # `pg-connection-saturation` catches (0 firings in 30 days). noData stays OK: a cluster
       # that turned PgBouncer off (MEIVA_PGBOUNCER_ENABLED=false) has no series.

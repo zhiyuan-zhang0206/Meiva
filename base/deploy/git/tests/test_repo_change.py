@@ -72,7 +72,7 @@ def test_a_test_under_a_doc_root_is_code(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "schedules/db-write-stall-watch-schedule.py",
+        "schedules/qa-keepalive-schedule.py",
         "schedules/jobs/catchup.py",
         "schedules/docs/entry-composition.md",
     ],

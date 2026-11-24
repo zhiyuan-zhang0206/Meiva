@@ -111,16 +111,6 @@
       "placement": "per_machine"
     },
     {
-      "name": "db-write-stall-watch",
-      "class": "operator",
-      "default_enabled": false,
-      "description": "Operator sentinel for a stalled database write path (#5310): reads pgBouncer's per-minute stats line from $MEIVA_HOME/pgbouncer/pgbouncer.log and wakes the cluster operator after three consecutive minutes under 20 xacts/s with an average query time above 300 ms. Thresholds come from 29 days of history (40,375 minutes), where the rule marked only the two real incidents; an agent-host crash wave is the consequence it precedes, not the signal.",
-      "script": "db-write-stall-watch-schedule.py",
-      "command": "python db-write-stall-watch-schedule.py",
-      "trigger_kind": "every",
-      "interval_seconds": 60
-    },
-    {
       "name": "sched-dry-import-weekly",
       "class": "operator",
       "default_enabled": false,
