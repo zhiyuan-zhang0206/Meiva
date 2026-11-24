@@ -13,6 +13,7 @@ import {
   type SimNode,
 } from "@/lib/fleet/use-force-layout";
 import { useSvgZoomPan } from "@/lib/fleet/use-svg-zoom-pan";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
@@ -377,9 +378,9 @@ export const ForceGraph = memo(function ForceGraph({
           }}
         >
           <div ref={hoverBridgeRef} data-testid="hover-card-bridge" aria-hidden className="absolute" />
-          <div key={hovered.id} ref={hoverScrollRef} data-hover-card-scroll className="overscroll-contain rounded-lg">
+          <ScrollArea key={hovered.id} viewportRef={hoverScrollRef} data-hover-card-scroll className="rounded-lg" viewportClassName="overscroll-contain">
             <div ref={hoverContentRef}>{hoveredCard}</div>
-          </div>
+          </ScrollArea>
         </div>
       ) : null}
 

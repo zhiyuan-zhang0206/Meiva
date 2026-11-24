@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
@@ -39,21 +40,19 @@ export function RunTimelineWorkspace({ main, side }: { main: ReactNode; side: Re
   });
 
   const sideRegion = (
-    <aside
-      data-testid="run-timeline-reader"
-      aria-label={t("detailRegion")}
-      className={cn("h-full overflow-y-auto px-4 py-3.5 [overflow-wrap:anywhere]", MIN_H_0)}
-    >
-      {side}
+    <aside aria-label={t("detailRegion")} className={cn("h-full", MIN_H_0)}>
+      <ScrollArea className="h-full" viewportTestId="run-timeline-reader">
+        <div className="px-4 py-3.5 [overflow-wrap:anywhere]">{side}</div>
+      </ScrollArea>
     </aside>
   );
 
   if (!clientReady || !isWide) {
     return (
-      <div className={cn("overflow-y-auto", FLEX_1, MIN_H_0)} data-testid="run-timeline-workspace">
+      <ScrollArea className={cn(FLEX_1, MIN_H_0)} viewportTestId="run-timeline-workspace">
         <div className={cn("space-y-5 p-4", MIN_W_0)}>{main}</div>
         <div className="border-t border-border bg-card">{sideRegion}</div>
-      </div>
+      </ScrollArea>
     );
   }
 
@@ -66,9 +65,9 @@ export function RunTimelineWorkspace({ main, side }: { main: ReactNode; side: Re
       data-testid="run-timeline-workspace"
     >
       <ResizablePanel id={PANEL_MAIN} minSize={MAIN_PANEL_MIN}>
-        <div data-testid="run-timeline-main" className={cn("h-full overflow-y-auto", MIN_W_0)}>
+        <ScrollArea className={cn("h-full", MIN_W_0)} viewportTestId="run-timeline-main">
           <div className="space-y-5 p-6">{main}</div>
-        </div>
+        </ScrollArea>
       </ResizablePanel>
       <ResizableHandle aria-label={t("resizeHandle")} />
       <ResizablePanel

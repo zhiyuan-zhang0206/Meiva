@@ -4,6 +4,7 @@ import { Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AgentRow } from "@/lib/contracts/types";
 import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -96,7 +97,8 @@ export function SearchOverlay({
             </button>
           )}
         </div>
-        <ul className="max-h-[min(45vh,calc(var(--visual-viewport-height,100dvh)-6rem))] overflow-y-auto py-1">
+        <ScrollArea viewportClassName="max-h-[min(45vh,calc(var(--visual-viewport-height,100dvh)-6rem))]">
+        <ul className="py-1">
           {results.length === 0 ? (
             <li className="px-3 py-2.5 text-xs text-muted-foreground">
               {t("noMatch", { query: searchQuery })}
@@ -123,6 +125,7 @@ export function SearchOverlay({
             ))
           )}
         </ul>
+        </ScrollArea>
       </div>
     </div>
   );

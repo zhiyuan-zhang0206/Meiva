@@ -4,6 +4,7 @@ import { Clock, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { assetUrl } from "@/lib/transport/api";
 import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import type { DeliveredUploadStatus, PendingInbound, Quote } from "@/lib/contracts/types";
@@ -80,7 +81,8 @@ export function PendingStrip({
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}
         </div>
-        <ul className="mt-0.5 max-h-36 overflow-y-auto space-y-1.5">
+        <ScrollArea className="mt-0.5" viewportClassName="max-h-36">
+        <ul className="space-y-1.5">
           {showDelivering ? (
             <PendingRow testId="pending-delivering-batch" quote={deliveringBatch.quote}>
               <span className="truncate">
@@ -151,6 +153,7 @@ export function PendingStrip({
             );
           })}
         </ul>
+        </ScrollArea>
       </div>
     </div>
   );

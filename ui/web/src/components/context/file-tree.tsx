@@ -5,10 +5,11 @@ import { ChevronRight, File, Folder } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { sameFile, useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
-import { BAR_DIVIDER_CLASS, FLEX, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -120,9 +121,11 @@ export function FileTree({ agentId, workspaceAgentId, onWorkspaceChange }: {
           className="w-16 bg-transparent font-mono text-foreground outline-none"
         />
       </form>
-      <div className={cn("overflow-y-auto py-1", MIN_H_0)}>
-        <TreeFolder key={workspaceAgentId} agentId={agentId} workspaceAgentId={workspaceAgentId} path={undefined} depth={0} />
-      </div>
+      <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
+        <div className="py-1">
+          <TreeFolder key={workspaceAgentId} agentId={agentId} workspaceAgentId={workspaceAgentId} path={undefined} depth={0} />
+        </div>
+      </ScrollArea>
     </nav>
   );
 }

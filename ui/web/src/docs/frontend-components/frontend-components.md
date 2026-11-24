@@ -35,6 +35,10 @@ and update-age tooltips remain.
 The three columns' title bars, bottom rules, and edge-pinned controls:
 [Home shell chrome](home-shell-chrome/home-shell-chrome.md).
 
+## Scrolling
+
+Every scrollable region renders through `components/ui/scroll-area.tsx` (`ScrollArea`): the native OS scrollbar is hidden and a thin overlay thumb fades in on hover or scroll and out after 800 ms, without taking layout width. No component writes `overflow-y-auto` / `overflow-auto` by hand; a capped list or popover sets `viewportClassName="max-h-..."` on the `ScrollArea` instead and the surrounding box clips (`OVERFLOW_HIDDEN`), so it hugs short content and scrolls past the cap. `viewportId` stamps an `id` on the real scroller (the Control and Insights pages' `useSettledAnchorScroll` and scroll-spy look it up), `viewportRef` and `viewportTestId` reach it too, and `showHorizontalScrollbar` adds a horizontal thumb for code or log boxes. Radix's content wrapper is forced to `display: block`, so children cannot size themselves with `h-full` against it: give a fixed-height child an explicit height, or stretch the wrapper from `viewportClassName` (`flex [&>div]:m-auto` centres the login card). Native `<textarea>` fields cannot sit inside a `ScrollArea`; `Textarea` carries `.meiva-thin-scrollbar` (`globals.css`), the same thin rail as Markdown code blocks.
+
 ## Code blocks
 
 `PythonCode`'s highlighter loading — the lazy import, its proactive warm-up

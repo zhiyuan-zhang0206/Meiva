@@ -15,6 +15,7 @@ import SkillsPage from "./skills/page";
 import { PluginNavList } from "@/components/plugins/plugin-nav";
 import { AppSettingsEntry, useAppBridge } from "@/components/app/app-settings";
 import { useBrowser } from "@/lib/browser/browser-provider";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { CONTROL_SCROLL_ID } from "./sections";
@@ -95,8 +96,9 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
         </Link>
       </header>
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-        <nav aria-label={t("navigation")} className="shrink-0 border-b border-border bg-muted/15 p-3 md:w-56 md:border-b-0 md:border-r md:overflow-y-auto">
-          <div className={cn(FLEX, "gap-1 overflow-x-auto md:block md:space-y-5")}>
+        <nav aria-label={t("navigation")} className="shrink-0 border-b border-border bg-muted/15 md:w-56 md:border-b-0 md:border-r">
+          <ScrollArea className="md:h-full">
+          <div className={cn(FLEX, "gap-1 overflow-x-auto p-3 md:block md:space-y-5")}>
             {(["guide", "preferences", "manage", "system"] as const).map((group) => (
               <div key={group} className={cn(FLEX, "gap-1 md:block md:space-y-1")}>
                 {group !== "guide" && <p className="hidden px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:block">{t(group)}</p>}
@@ -109,8 +111,9 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
               </div>
             ))}
           </div>
+          </ScrollArea>
         </nav>
-        <div id={CONTROL_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
+        <ScrollArea viewportId={CONTROL_SCROLL_ID} className={cn(FLEX_1, MIN_H_0, MIN_W_0)} viewportClassName="overflow-x-hidden">
           <div className={cn("mx-auto max-w-4xl px-5 py-8 md:px-10", MIN_W_0)}>
             <ControlSection key={active} id={active} label={label(active)} description={description}>
               {active === "config" && <div className="space-y-8"><Config mode="general" /><Display mode="general" /></div>}
@@ -146,7 +149,7 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
             )}
 
           </div>
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

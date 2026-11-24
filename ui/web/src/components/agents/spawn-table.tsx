@@ -11,11 +11,12 @@
 
 import { ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { ModelsResponse } from "@/lib/contracts/types";
 import { modelLabel as formatModelLabel, reasoningEffortLabel } from "@/lib/contracts/models";
 import { formatModelPrice } from "@/lib/format/format-price";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 import { FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import {
@@ -33,7 +34,27 @@ import {
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
 const COLUMNS = "grid grid-cols-[auto_auto_auto_auto] border-b border-border text-xs";
 const HEADER = "border-b border-r border-border px-2.5 py-1.5 font-medium text-muted-foreground";
-const COLUMN_LIST = "max-h-[300px] overflow-y-auto border-r border-border p-1.5";
+const COLUMN_LIST = "border-r border-border";
+const COLUMN_VIEWPORT = "max-h-[300px]";
+const LIST = "p-1.5";
+
+function ScrollList({
+  label,
+  className,
+  viewportClassName,
+  children,
+}: {
+  label: string;
+  className?: string;
+  viewportClassName: string;
+  children: ReactNode;
+}) {
+  return (
+    <ScrollArea className={className} viewportClassName={viewportClassName}>
+      <ul aria-label={label} className={LIST}>{children}</ul>
+    </ScrollArea>
+  );
+}
 const CELL = "flex w-full items-center gap-1 rounded-sm px-2 py-1 text-left";
 const SELECTED = "bg-foreground/10 font-medium text-foreground";
 const IDLE = "text-muted-foreground hover:bg-accent hover:text-foreground";
@@ -128,7 +149,7 @@ export function SpawnTable({
       <div className={HEADER}>{modelLabel}</div>
       <div className={cn(HEADER, "border-r-0")}>{effortLabel}</div>
 
-      <ul aria-label={t("machine")} className={COLUMN_LIST}>
+      <ScrollList label={t("machine")} className={COLUMN_LIST} viewportClassName={COLUMN_VIEWPORT}>
         {machines.map((row) => {
           const selected = row.name === machine;
           const blocked = row.reason !== undefined;
@@ -147,9 +168,9 @@ export function SpawnTable({
             </li>
           );
         })}
-      </ul>
+      </ScrollList>
 
-      <ul aria-label={t("harness")} className={COLUMN_LIST}>
+      <ScrollList label={t("harness")} className={COLUMN_LIST} viewportClassName={COLUMN_VIEWPORT}>
         {harnessRows.map((row) => {
           const selected = row.harness === harness;
           return (
@@ -166,9 +187,9 @@ export function SpawnTable({
             </li>
           );
         })}
-      </ul>
+      </ScrollList>
 
-      <ul aria-label={modelLabel} className={COLUMN_LIST}>
+      <ScrollList label={modelLabel} className={COLUMN_LIST} viewportClassName={COLUMN_VIEWPORT}>
         {modelIds.map((candidate) => {
           const selected = candidate === model;
           const price = models?.[candidate]?.pricing;
@@ -197,9 +218,9 @@ export function SpawnTable({
         {modelIds.length === 0 && !modelsPending && (
           <li className="px-2 py-1 text-muted-foreground">{t("modelsUnavailable")}</li>
         )}
-      </ul>
+      </ScrollList>
 
-      <ul aria-label={effortLabel} className={cn(COLUMN_LIST, "border-r-0")}>
+      <ScrollList label={effortLabel} viewportClassName={COLUMN_VIEWPORT}>
         {efforts.map((level) => {
           const selected = level === effort;
           return (
@@ -218,7 +239,7 @@ export function SpawnTable({
         {efforts.length === 0 && (
           <li className="px-2 py-1 text-muted-foreground">—</li>
         )}
-      </ul>
+      </ScrollList>
     </div>
   );
 }
@@ -236,7 +257,8 @@ export function SpawnTable({
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
 const STACK_SECTION = "border-b border-border";
 const STACK_CELL = "flex w-full min-h-11 items-center gap-2 px-3 py-2 text-left";
-const STACK_LIST = "max-h-[40vh] overflow-y-auto border-t border-border p-1.5";
+const STACK_LIST = "border-t border-border";
+const STACK_VIEWPORT = "max-h-[40vh]";
 const STACK_NOTE = "block truncate text-[11px] text-muted-foreground";
 
 type StackSectionKey = "machine" | "harness" | "model" | "effort";
@@ -359,7 +381,7 @@ export function SpawnStack({
         expanded={open === "machine"}
         onToggle={() => toggle("machine")}
       >
-        <ul aria-label={t("machine")} className={STACK_LIST}>
+        <ScrollList label={t("machine")} className={STACK_LIST} viewportClassName={STACK_VIEWPORT}>
           {machines.map((row) => {
             const selected = row.name === machine;
             return (
@@ -377,7 +399,7 @@ export function SpawnStack({
               </li>
             );
           })}
-        </ul>
+        </ScrollList>
       </StackSection>
 
       <StackSection
@@ -388,7 +410,7 @@ export function SpawnStack({
         expanded={open === "harness"}
         onToggle={() => toggle("harness")}
       >
-        <ul aria-label={t("harness")} className={STACK_LIST}>
+        <ScrollList label={t("harness")} className={STACK_LIST} viewportClassName={STACK_VIEWPORT}>
           {harnessRows.map((row) => {
             const selected = row.harness === harness;
             return (
@@ -408,7 +430,7 @@ export function SpawnStack({
               </li>
             );
           })}
-        </ul>
+        </ScrollList>
       </StackSection>
 
       <StackSection
@@ -418,7 +440,7 @@ export function SpawnStack({
         expanded={open === "model"}
         onToggle={() => toggle("model")}
       >
-        <ul aria-label={modelLabel} className={STACK_LIST}>
+        <ScrollList label={modelLabel} className={STACK_LIST} viewportClassName={STACK_VIEWPORT}>
           {modelIds.map((candidate) => {
             const selected = candidate === model;
             const price = models?.[candidate]?.pricing;
@@ -441,7 +463,7 @@ export function SpawnStack({
           {modelIds.length === 0 && !modelsPending && (
             <li className="px-3 py-2 text-muted-foreground">{t("modelsUnavailable")}</li>
           )}
-        </ul>
+        </ScrollList>
       </StackSection>
 
       <StackSection
@@ -451,7 +473,7 @@ export function SpawnStack({
         expanded={open === "effort"}
         onToggle={() => toggle("effort")}
       >
-        <ul aria-label={effortLabel} className={STACK_LIST}>
+        <ScrollList label={effortLabel} className={STACK_LIST} viewportClassName={STACK_VIEWPORT}>
           {efforts.map((level) => (
             <li key={level}>
               <StackRow selected={level === effort} onClick={() => pick("effort", () => onEffort(level))}>
@@ -462,7 +484,7 @@ export function SpawnStack({
           {efforts.length === 0 && (
             <li className="px-3 py-2 text-muted-foreground">—</li>
           )}
-        </ul>
+        </ScrollList>
       </StackSection>
     </div>
   );

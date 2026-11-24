@@ -310,6 +310,54 @@ describe("ScrollArea", () => {
     expect(viewport.getAttribute("data-slot")).toBe("scroll-area-viewport");
   });
 
+  it("stamps viewportId on the inner viewport so id lookups reach the real scroller", () => {
+    render(
+      <ScrollArea viewportId="page-scroll">
+        <div>content</div>
+      </ScrollArea>,
+    );
+    const viewport = document.getElementById("page-scroll");
+    expect(viewport?.getAttribute("data-slot")).toBe("scroll-area-viewport");
+  });
+
+  it("mounts a horizontal scrollbar only when showHorizontalScrollbar is set", () => {
+    const { unmount } = render(
+      <ScrollArea>
+        <div>content</div>
+      </ScrollArea>,
+    );
+    const orientations = () =>
+      Array.from(document.querySelectorAll('[data-slot="scroll-area-scrollbar"]')).map((bar) =>
+        bar.getAttribute("data-orientation"),
+      );
+    expect(orientations()).toEqual(["vertical"]);
+    unmount();
+
+    render(
+      <ScrollArea showHorizontalScrollbar>
+        <div>content</div>
+      </ScrollArea>,
+    );
+    expect(orientations().sort()).toEqual(["horizontal", "vertical"]);
+  });
+
+  it("observes the content wrapper so late-loading content repositions the thumb", () => {
+    const observed: Element[] = [];
+    class RecordingResizeObserver implements ResizeObserver {
+      disconnect = () => undefined;
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve = () => undefined;
+    }
+    globalThis.ResizeObserver = RecordingResizeObserver;
+    renderScrollArea();
+
+    const viewport = document.querySelector('[data-slot="scroll-area-viewport"]')!;
+    expect(observed).toContain(viewport);
+    expect(observed).toContain(viewport.firstElementChild);
+  });
+
   it("does not flash an outer scrollbar when a nested ScrollArea scrolls", () => {
     render(
       <ScrollArea data-testid="outer-area" viewportTestId="outer-vp">
