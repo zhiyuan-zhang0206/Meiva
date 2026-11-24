@@ -51,7 +51,9 @@ from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability.inputs import CollectorSettings, collector_settings_from_boot
 from cli.commands.observability.plans.authority import host_port
 from cli.commands.observability.plans.collector.data_plane import (
+    DataPlaneFragments,
     data_plane_fragments,
+    pgbouncer_blocks,
     plan_data_plane_receivers,
     postgres_receiver_block,
     receiver_endpoint,
@@ -118,14 +120,13 @@ def _postgres_block(meiva_home: Path, db_url: str) -> str:
 
 
 # meiva:note
-# The receiver blocks and the pipeline-list fragment for this unit's own data plane, or two empty
-# strings for a unit that scrapes none. The Redis receiver always authenticates with the admin
+# The config fragments for this unit's own data plane, or empty ones for a unit that scrapes none. The Redis receiver always authenticates with the admin
 # password, so the URL it was handed is rebuilt with it before the password is read back out.
 # The cluster modules are imported where they are used, for the same start-up reason as
 # `_postgres_block`.
-def _data_plane_receivers(
+def _data_plane_fragments(
     roles: MachineRoles | None, meiva_home: Path, settings: CollectorSettings
-) -> tuple[str, str]:
+) -> DataPlaneFragments:
     from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
     plane = settings.data_plane
@@ -136,8 +137,9 @@ def _data_plane_receivers(
         remote_plane=plane.is_remote,
     )
     if not (plan.postgres or plan.redis):
-        return "", ""
+        return DataPlaneFragments()
     from base.cluster import redis_admin_url
+    from base.cluster.dataplane.pooler import logfile_path
 
     admin = split_url(redis_admin_url(plane.redis_url, plane.redis_admin_password))
     return data_plane_fragments(
@@ -146,6 +148,9 @@ def _data_plane_receivers(
         redis_block=redis_receiver_block(
             endpoint=receiver_endpoint(split_url(plane.redis_url), "redis"),
             password=unquote(admin.password or ""),
+        ),
+        pgbouncer=(
+            pgbouncer_blocks(log_path=logfile_path(meiva_home)) if plan.pgbouncer else ("", "", "")
         ),
     )
 
@@ -270,7 +275,7 @@ def generate_config(
     bases = lgtm_fanout_bases(
         obs, remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
     )
-    receivers, pipeline = _data_plane_receivers(roles, meiva_home, settings)
+    data_plane = _data_plane_fragments(roles, meiva_home, settings)
     shape = exporter_shape(roles, observability_url_set=bool(obs.observability_url))
     values = CollectorValues(
         meiva_home=str(meiva_home),
@@ -282,8 +287,7 @@ def generate_config(
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port(LOCAL_INGRESS_HOST, obs.telemetry_otlp_port),
         harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
-        data_plane_receivers=receivers,
-        data_plane_pipeline=pipeline,
+        data_plane=data_plane,
         exporters=_exporters(
             shape, settings, bearer=bearer, bases=bases, database_factory=database_factory
         ),

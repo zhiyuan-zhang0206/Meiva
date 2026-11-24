@@ -13,6 +13,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
 from base.telemetry.otlp.collector_listeners import SELF_METRICS_HOST
+from cli.commands.observability.plans.collector.data_plane import DataPlaneFragments
 from cli.commands.observability.plans.collector.remote import RemoteFragments
 
 __all__ = ["CollectorValues", "render_collector_config", "without_harness_receiver"]
@@ -46,8 +47,8 @@ _HARNESS_PIPELINES = """    traces/harness:
 # meiva:note
 # Every value the collector template substitutes.
 #
-# `data_plane_receivers` and `data_plane_pipeline` are the fragments for this unit's own Postgres
-# and Redis, `exporters` is the role-specific fan-out block, and `tempo_endpoint`, `loki_base` and
+# `data_plane` holds the fragments for this unit's own Postgres, Redis and PgBouncer stats,
+# `exporters` is the role-specific fan-out block, and `tempo_endpoint`, `loki_base` and
 # `prom_base` stay as named generation inputs for small downstream or custom templates: the
 # shipped template consumes the `exporters` block.
 @dataclass(frozen=True)
@@ -60,11 +61,15 @@ class CollectorValues:
     prom_base: str
     self_metrics_port: int
     local_ingress_endpoint: str
-    data_plane_receivers: str
-    data_plane_pipeline: str
+    data_plane: DataPlaneFragments
     exporters: str
     remote: RemoteFragments
     harness_ingress_endpoint: str | None
+
+
+def _connectors(*, harness: bool, data_plane: DataPlaneFragments) -> str:
+    entries = ("  forward/harness: {}\n" if harness else "") + data_plane.connectors
+    return f"connectors:\n{entries}".rstrip("\n") if entries else ""
 
 
 # meiva:note
@@ -85,11 +90,12 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "HARNESS_OTLP_RECEIVER": (
             _HARNESS_RECEIVER.format(endpoint=harness_endpoint) if harness_endpoint else ""
         ),
-        "HARNESS_OTLP_CONNECTOR": "connectors:\n  forward/harness: {}" if harness_endpoint else "",
+        "CONNECTORS": _connectors(harness=bool(harness_endpoint), data_plane=values.data_plane),
         "HARNESS_OTLP_PIPELINES": _HARNESS_PIPELINES if harness_endpoint else "",
         "HARNESS_OTLP_FORWARD": ", forward/harness" if harness_endpoint else "",
-        "DATA_PLANE_RECEIVERS": values.data_plane_receivers,
-        "DATA_PLANE_PIPELINE_RECEIVERS": values.data_plane_pipeline,
+        "DATA_PLANE_RECEIVERS": values.data_plane.receivers,
+        "DATA_PLANE_PIPELINES": values.data_plane.pipelines,
+        "DATA_PLANE_PIPELINE_RECEIVERS": values.data_plane.infra_receivers,
         "OTLP_EXPORTERS": values.exporters,
         "REMOTE_OTLP_RECEIVER": values.remote.receiver,
         "CLUSTER_AUTH_EXTENSION": values.remote.auth_extension,

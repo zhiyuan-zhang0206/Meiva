@@ -14,4 +14,4 @@ exports = ["data_plane.py", "exporters.py", "install.py", "remote.py", "render.p
 "data_plane.py" = ["text.py"]
 "exporters.py" = ["exporter_blocks.py", "text.py"]
 "remote.py" = ["text.py"]
-"render.py" = ["remote.py"]
+"render.py" = ["data_plane.py", "remote.py"]

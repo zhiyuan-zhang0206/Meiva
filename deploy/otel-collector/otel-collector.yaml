@@ -155,7 +155,7 @@ $HARNESS_OTLP_RECEIVER
     polls_to_archive: 50
     max_concurrent_files: 200
 $DATA_PLANE_RECEIVERS
-$HARNESS_OTLP_CONNECTOR
+$CONNECTORS
 
 processors:
   # The native exporters do not gate every diagnostic field (e.g. raw API
@@ -360,6 +360,7 @@ service:
   extensions: [file_storage/logoffsets$CLUSTER_AUTH_SERVICE_EXTENSION]
   pipelines:
 $HARNESS_OTLP_PIPELINES
+$DATA_PLANE_PIPELINES
     traces:
       receivers: [otlp$HARNESS_OTLP_FORWARD]
       processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, batch]
