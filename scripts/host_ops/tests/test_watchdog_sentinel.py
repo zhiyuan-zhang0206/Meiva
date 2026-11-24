@@ -1,5 +1,6 @@
 # meiva:note
 # The retained observer submits through the existing agent queue and never mints a receipt on failure.
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -8,7 +9,14 @@ from threading import Event
 import pytest
 
 from cli.fleet_update import fleet_alert_silence
-from scripts.host_ops.watchdog_sentinel import WINDOW_MARKER, Endpoints, Sentinel, age_from_payload
+from scripts.host_ops.watchdog_sentinel import (
+    DEFAULT_QUERY,
+    DEFAULT_SILENCE_SECONDS,
+    WINDOW_MARKER,
+    Endpoints,
+    Sentinel,
+    age_from_payload,
+)
 
 
 class Recorder:
@@ -115,7 +123,7 @@ def test_missing_sample_after_first_sighting_uses_the_silence_escalation(tmp_pat
     assert sentinel.tick(now=2800) == 0
 
     [message] = recorder.sent
-    assert "heartbeat series disappeared" in message
+    assert "no heartbeat sample in the last hour" in message
     assert "SILENT" in sentinel.log_path.read_text()
     assert sentinel.read_state() == {"first_seen": 1000, "last_sent": 1900}
 
@@ -208,7 +216,7 @@ def test_a_planned_update_window_holds_every_judgement_until_it_ends(tmp_path: P
 
     assert sentinel.tick(now=2000) == 0
     [message] = recorder.sent
-    assert "heartbeat series disappeared" in message
+    assert "no heartbeat sample in the last hour" in message
 
 
 def test_a_window_holds_the_query_failure_leg_too(tmp_path: Path) -> None:
@@ -249,4 +257,25 @@ def test_no_or_unreadable_window_marker_holds_nothing(tmp_path: Path, content: s
     recorder.age = 900
     sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints(), silence_seconds=60)
     assert sentinel.tick(now=1000) == 0
+    assert len(recorder.sent) == 1
+
+
+def test_the_query_ages_the_newest_heartbeat_across_a_restart_and_outlasts_the_budget() -> None:
+    match = re.fullmatch(
+        r"time\(\) - max\(max_over_time\(meiva_alerts_last_ingest_timestamp_seconds\[(\d+)h\]\)\)",
+        DEFAULT_QUERY,
+    )
+    assert match is not None
+    assert int(match.group(1)) * 3600 > DEFAULT_SILENCE_SECONDS
+
+
+def test_an_age_across_a_restart_gap_within_the_budget_is_not_silent(tmp_path: Path) -> None:
+    recorder = Recorder()
+    recorder.age = 945
+    sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints())
+    sentinel.write_state({"first_seen": 1})
+    assert sentinel.tick(now=1000) == 0
+    assert recorder.sent == []
+    recorder.age = DEFAULT_SILENCE_SECONDS + 1
+    assert sentinel.tick(now=2000) == 0
     assert len(recorder.sent) == 1
