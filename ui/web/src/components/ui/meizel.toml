@@ -3,6 +3,7 @@ exports = ["auto-expand-textarea.tsx", "button.tsx", "context-menu.tsx", "dialog
 [uses]
 "auto-expand-textarea.test.tsx" = ["auto-expand-textarea.tsx"]
 "auto-expand-textarea.tsx" = ["textarea.tsx"]
+"dialog.tsx" = ["scroll-area.tsx"]
 "inline-error.test.tsx" = ["inline-error.tsx"]
 "resizable.test.tsx" = ["resizable.tsx"]
 "scroll-area.test.tsx" = ["scroll-area.tsx"]
