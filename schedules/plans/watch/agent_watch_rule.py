@@ -40,7 +40,7 @@ from collections.abc import Iterable, Mapping
 from itertools import pairwise
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, TypeGuard
 
 __all__ = [
     "ESCALATE_MINUTES",
@@ -440,22 +440,30 @@ class SeatReadings:
     registry_dir: str
 
 
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 # meiva:note
 # Everything beyond `version` and the seat names belongs to the other readers (script, cadence,
 # health rule), so it is ignored rather than validated here: a field this module does not read
 # cannot make a registry unreadable.
 def _parse_seat_registry(agent_id: int, payload: object) -> SeatRegistry:
-    if not isinstance(payload, Mapping):
+    if not _is_str_mapping(payload):
         raise SeatRegistryError("registry is not an object")
     version = payload.get("version")
     if version != SEAT_REGISTRY_VERSION:
         raise SeatRegistryError(f"registry version {version!r} is not {SEAT_REGISTRY_VERSION}")
     raw = payload.get("seats")
-    if not isinstance(raw, list):
+    if not _is_object_list(raw):
         raise SeatRegistryError("registry has no seats list")
     names: list[str] = []
     for entry in raw:
-        if not isinstance(entry, Mapping):
+        if not _is_str_mapping(entry):
             raise SeatRegistryError("seat entry is not an object")
         name = entry.get("name")
         if not isinstance(name, str) or not name.strip():
