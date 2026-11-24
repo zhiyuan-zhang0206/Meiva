@@ -5,13 +5,22 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, MutableMapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.derive import fe_build_env_vars
 from base.cluster.frontend_build import ensure_build
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.host.boundary.options import options
 from services.supervision.roster.composition import FrontendBuildInputs, frontend_build_inputs
+
+
+@dataclass(frozen=True)
+class _Options:
+    stage: str
+    serving: str
+
 
 _FRONTEND = Path("ui") / "web"
 
@@ -43,9 +52,9 @@ def prebuild(
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="services.supervision.roster.frontend_prebuild")
-    parser.add_argument("--stage", type=Path, required=True)
-    parser.add_argument("--serving", type=Path, required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--stage", required=True)
+    parser.add_argument("--serving", required=True)
+    chosen = options(parser.parse_args(argv), _Options)
     inputs = frontend_build_inputs()
     clone = ["-Rc"] if sys.platform == "darwin" else ["-a", "--reflink=auto"]
 
@@ -60,8 +69,8 @@ def main(argv: list[str]) -> int:
         )
 
     return prebuild(
-        stage=args.stage,
-        serving=args.serving,
+        stage=Path(chosen.stage),
+        serving=Path(chosen.serving),
         roles=ConfiguredMachineIdentity(ConfigBoot()).role(),
         inputs=inputs,
         copy_tree=copy_tree,

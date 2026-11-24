@@ -11,7 +11,6 @@ import os
 import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +63,20 @@ class Timers(Protocol):
     def monotonic(self) -> float: ...
 
     def sleep(self, seconds: float) -> None: ...
+
+
+class _Timed:
+    def __init__(self, session: Session, step: str) -> None:
+        self._session = session
+        self._step = step
+        self._started = 0.0
+
+    def __enter__(self) -> None:
+        self._started = self._session.timers.monotonic()
+
+    def __exit__(self, *exc: object) -> None:
+        elapsed = self._session.timers.monotonic() - self._started
+        self._session.say(f"timing: {self._step} {elapsed:.1f}s")
 
 
 class Session:
@@ -126,13 +139,8 @@ class Session:
             futures = [pool.submit(_call, item) for item in items]
             return [future.result() for future in futures]
 
-    @contextmanager
-    def timed(self, step: str) -> Iterator[None]:
-        started = self.timers.monotonic()
-        try:
-            yield
-        finally:
-            self.say(f"timing: {step} {self.timers.monotonic() - started:.1f}s")
+    def timed(self, step: str) -> _Timed:
+        return _Timed(self, step)
 
     def defer(self, failure: HostFailure) -> None:
         if failure.alias in self.deferred:
