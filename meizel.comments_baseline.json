@@ -2934,7 +2934,7 @@
   "ops/tests/test_shell_ops.py": 2,
   "ops/tests/test_spawn_request_harness.py": 1,
   "ops/tests/test_to_user.py": 6,
-  "ops/to_user.py": 18,
+  "ops/to_user.py": 17,
   "ops/upload_delivery/__init__.py": 4,
   "ops/upload_delivery/copy_plan.py": 7,
   "ops/upload_delivery/tests/object_server.py": 1,

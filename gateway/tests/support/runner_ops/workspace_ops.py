@@ -17,6 +17,7 @@ import psycopg
 
 from base.agents.to_user import WorkspaceFileRequest, to_user_limits
 from base.config import settings
+from base.daemon.http_transport import FileBody
 from ops.to_user import WorkspaceFileError, answer_workspace_file
 
 
@@ -49,14 +50,18 @@ def remote_workspace_ops_server(
                 self.end_headers()
                 _ = self.wfile.write(exc.detail.encode("utf-8"))
                 return
+            body = answer[1]
+            if isinstance(body, FileBody):
+                with body.handle:
+                    body = body.handle.read(body.length)
             self.send_response(answer[0])
             self.send_header("Content-Type", answer[2])
-            self.send_header("Content-Length", str(len(answer[1])))
+            self.send_header("Content-Length", str(len(body)))
             headers: Mapping[str, str] = answer[3] if len(answer) == 4 else {}
             for name, value in headers.items():
                 self.send_header(name, value)
             self.end_headers()
-            _ = self.wfile.write(answer[1])
+            _ = self.wfile.write(body)
 
         @override
         def log_message(self, format: str, *args: object) -> None:

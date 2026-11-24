@@ -46,6 +46,7 @@ from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import start_health_server, stop_health_server
+from base.daemon.http_transport import KeepAlive
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
@@ -554,6 +555,7 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
             home=home,
             host=bind_host,
             tracer=tracer,
+            keep_alive=KeepAlive(),
             body_limits=desktop.limits,
             body_slots=desktop.slots,
             extra_routes={

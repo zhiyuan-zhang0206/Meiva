@@ -9,12 +9,19 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.agents.to_user import DOCUMENT_FILENAME, to_user_limits
+from base.agents.to_user import (
+    DOCUMENT_FILENAME,
+    ToUserLimits,
+    WorkspaceFileRequest,
+    to_user_limits,
+)
 from base.config import settings
+from base.daemon.http_transport import FileBody
 from base.db import Database, create_agent
 from ops.to_user import (
     FileReach,
     WorkspaceFileError,
+    answer_workspace_file,
     owned_workspace,
     read_at_most,
     read_to_user,
@@ -158,3 +165,149 @@ def test_reads_stop_at_the_limit_whatever_the_reported_size(tmp_path: Path) -> N
         _ = read_at_most(stream, 16, "File exceeds the size limit")
     assert error.value.status_code == 413
     assert read_at_most(stream, 17, "File exceeds the size limit") == payload
+
+
+OPEN_RANGE_BYTES = 1000
+RANGE_RESOURCE_BYTES = 5000
+
+RANGE_LIMITS = ToUserLimits(
+    document_bytes=1024,
+    references=4,
+    chain_depth=2,
+    resource_bytes=RANGE_RESOURCE_BYTES,
+    open_range_bytes=OPEN_RANGE_BYTES,
+)
+CLIP = bytes(i % 251 for i in range(3000))
+
+
+@pytest.fixture
+def clip_file(tmp_path: Path) -> Path:
+    path = tmp_path / "clip.mp3"
+    path.write_bytes(CLIP)
+    return path
+
+
+def _range_answer(
+    path: Path, byte_range: str | None, tmp_path: Path
+) -> tuple[int, bytes, str, dict[str, str]]:
+    request = WorkspaceFileRequest(
+        agent_id=1, path=str(path), mode="raw", byte_range=byte_range, file_access="all"
+    )
+    answer = answer_workspace_file(
+        request, home=tmp_path / "home", user_home=tmp_path, limits=RANGE_LIMITS
+    )
+    status, body, content_type = answer[:3]
+    headers = dict(answer[3]) if len(answer) == 4 else {}
+    if isinstance(body, FileBody):
+        with body.handle:
+            body = body.handle.read(body.length)
+    return status, body, content_type, headers
+
+
+def test_an_open_ended_range_is_answered_in_slices_that_chain(
+    clip_file: Path, tmp_path: Path
+) -> None:
+    received = b""
+    offset = 0
+    ranges: list[str] = []
+    while offset < len(CLIP):
+        status, body, _, headers = _range_answer(clip_file, f"bytes={offset}-", tmp_path)
+        assert status == 206
+        assert len(body) == min(OPEN_RANGE_BYTES, len(CLIP) - offset)
+        ranges.append(headers["Content-Range"])
+        received += body
+        offset += len(body)
+    assert received == CLIP
+    assert ranges == [
+        "bytes 0-999/3000",
+        "bytes 1000-1999/3000",
+        "bytes 2000-2999/3000",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("header", "first", "last"),
+    [
+        ("bytes=0-1999", 0, 1999),
+        ("bytes=500-2500", 500, 2500),
+        ("bytes=2990-999999", 2990, 2999),
+        ("bytes=0-0", 0, 0),
+        ("bytes=-1500", 1500, 2999),
+        ("bytes=-999999", 0, 2999),
+    ],
+)
+def test_a_range_that_names_its_end_is_honored_in_full(
+    clip_file: Path, tmp_path: Path, header: str, first: int, last: int
+) -> None:
+    status, body, _, headers = _range_answer(clip_file, header, tmp_path)
+    assert status == 206
+    assert body == CLIP[first : last + 1]
+    assert headers["Content-Range"] == f"bytes {first}-{last}/3000"
+
+
+def test_the_tail_and_the_resource_limit_bound_a_slice(tmp_path: Path) -> None:
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"z" * (RANGE_RESOURCE_BYTES * 2))
+    _, tail, _, tail_headers = _range_answer(
+        big, f"bytes={RANGE_RESOURCE_BYTES * 2 - 10}-", tmp_path
+    )
+    assert (len(tail), tail_headers["Content-Range"]) == (
+        10,
+        f"bytes 9990-9999/{RANGE_RESOURCE_BYTES * 2}",
+    )
+    _, capped, _, headers = _range_answer(big, f"bytes=0-{RANGE_RESOURCE_BYTES * 2 - 1}", tmp_path)
+    assert len(capped) == RANGE_RESOURCE_BYTES
+    assert (
+        headers["Content-Range"] == f"bytes 0-{RANGE_RESOURCE_BYTES - 1}/{RANGE_RESOURCE_BYTES * 2}"
+    )
+
+
+@pytest.mark.parametrize("header", ["bytes=3000-", "bytes=9999-10000", "bytes=-0"])
+def test_a_range_that_starts_past_the_end_is_not_satisfiable(
+    clip_file: Path, tmp_path: Path, header: str
+) -> None:
+    status, body, _, headers = _range_answer(clip_file, header, tmp_path)
+    assert (status, body, headers["Content-Range"]) == (416, b"", "bytes */3000")
+
+
+@pytest.mark.parametrize(
+    "header", ["items=0-5", "bytes=0-5,10-20", "bytes=abc-", "bytes=9-3", "bytes=", "garbage"]
+)
+def test_a_range_the_server_may_ignore_answers_the_whole_file(
+    clip_file: Path, tmp_path: Path, header: str
+) -> None:
+    status, body, _, headers = _range_answer(clip_file, header, tmp_path)
+    assert (status, body, headers) == (200, CLIP, {})
+
+
+def test_a_read_without_a_range_streams_the_whole_file(clip_file: Path, tmp_path: Path) -> None:
+    request = WorkspaceFileRequest(agent_id=1, path=str(clip_file), mode="raw", file_access="all")
+    answer = answer_workspace_file(
+        request, home=tmp_path / "home", user_home=tmp_path, limits=RANGE_LIMITS
+    )
+    assert answer[0] == 200
+    assert isinstance(answer[1], FileBody)
+    assert answer[1].length == len(CLIP)
+    answer[1].handle.close()
+
+
+def test_a_file_over_the_resource_limit_is_refused_before_streaming(tmp_path: Path) -> None:
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"z" * (RANGE_RESOURCE_BYTES + 1))
+    with pytest.raises(WorkspaceFileError) as refused:
+        _ = _range_answer(big, None, tmp_path)
+    assert refused.value.status_code == 413
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs procfs")
+def test_a_file_that_reports_no_size_is_read_in_one_piece(tmp_path: Path) -> None:
+    status, body, _, _ = _range_answer(Path("/proc/self/stat"), None, tmp_path)
+    assert (status, len(body) > 0) == (200, True)
+
+
+def test_an_empty_file_answers_empty_and_no_range_of_it_is_satisfiable(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.bin"
+    empty.write_bytes(b"")
+    assert _range_answer(empty, None, tmp_path)[:2] == (200, b"")
+    status, _, _, headers = _range_answer(empty, "bytes=0-", tmp_path)
+    assert (status, headers["Content-Range"]) == (416, "bytes */0")

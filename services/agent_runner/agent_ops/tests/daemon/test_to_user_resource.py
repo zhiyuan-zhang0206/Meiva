@@ -12,7 +12,7 @@ import pytest
 
 from base.agents.to_user import read_document, to_user_limits
 from base.config import settings
-from base.daemon.http_transport import start_daemon_http
+from base.daemon.http_transport import KeepAlive, start_daemon_http
 from base.db import Database, create_agent
 from base.paths import workspace_path
 from ops.to_user import read_to_user
@@ -199,6 +199,7 @@ async def _workspace_file_client(
             health_response=lambda: (200, b"{}"),
             extra_routes={("POST", "/to-user/workspace-file"): handler},
             auth_digests=frozenset({hashlib.sha256(b"test-token").hexdigest()}),
+            keep_alive=KeepAlive(),
         )
         async with server:
             port = server.sockets[0].getsockname()[1]
@@ -272,3 +273,35 @@ async def test_workspace_file_route_ranges_and_listing(
             json=forwarded | {"mode": "list", "path": "~", "file_access": "all"},
         )
         assert home_resp.json()["root"]["kind"] == "home"
+
+
+@pytest.mark.asyncio
+async def test_open_ended_ranges_stream_in_slices_over_one_connection(
+    database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
+) -> None:
+    slice_bytes = LIMITS.open_range_bytes
+    media = bytes(i % 253 for i in range(slice_bytes * 2 + 12_345))
+    async with _workspace_file_client(database, unit_home, op_executor) as (client, agent_id):
+        (unit_home / "workspaces" / str(agent_id) / "clip.mp3").write_bytes(media)
+        received = b""
+        local_ports: set[int] = set()
+        while len(received) < len(media):
+            response = await client.post(
+                "/to-user/workspace-file",
+                json={
+                    "agent_id": agent_id,
+                    "path": "clip.mp3",
+                    "mode": "raw",
+                    "byte_range": f"bytes={len(received)}-",
+                },
+            )
+            assert response.status_code == 206
+            assert 0 < len(response.content) <= slice_bytes
+            assert response.headers["content-length"] == str(len(response.content))
+            first = len(received)
+            last = first + len(response.content) - 1
+            assert response.headers["content-range"] == f"bytes {first}-{last}/{len(media)}"
+            received += response.content
+            local_ports.add(response.extensions["network_stream"].get_extra_info("client_addr")[1])
+        assert received == media
+        assert len(local_ports) == 1

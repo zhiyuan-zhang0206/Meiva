@@ -1,5 +1,5 @@
 # meiva:note
-# The four read-side guards are `settings.to_user` fields, cluster-pinned and consumed by both the ops listener and the gateway. max_document_bytes (1 MiB) guards against reading the wrong file as a document, not against writing — the soft word limit shapes the panel. max_references (1024) caps the per-reference stat probes of a pathological document. max_chain_depth (16) stops runaway or circular reference chains. max_resource_bytes (64 MiB) bounds one served file and with it the gateway's per-request buffering. Every bound must be positive; the first-version values were 256 KiB / 256 / 8 / 20 MiB. file_access ("all") is how far the panel's file viewer reaches on the owning machine.
+# The read-side guards are `settings.to_user` fields, cluster-pinned and consumed by both the ops listener and the gateway. max_document_bytes (1 MiB) guards against reading the wrong file as a document, not against writing — the soft word limit shapes the panel. max_references (1024) caps the per-reference stat probes of a pathological document. max_chain_depth (16) stops runaway or circular reference chains. max_resource_bytes (64 MiB) bounds one served file and with it the gateway's per-request buffering. max_open_range_bytes (2 MiB) is the slice an open-ended `Range: bytes=N-` read is answered with, so a media element streams a file in pieces instead of one whole-file response. Every bound must be positive; the first-version values were 256 KiB / 256 / 8 / 20 MiB. file_access ("all") is how far the panel's file viewer reaches on the owning machine.
 # meiva:link base/config/docs/to-user-limits.md
 from __future__ import annotations
 
@@ -81,6 +81,28 @@ class ToUserSettings(EnvSettings):
             "in workspaces already reach 30-40 MiB — and since the gateway buffers "
             "the body in memory, this is also the per-request memory bound. The "
             "first-version bound was 20 MiB."
+        ),
+        json_schema_extra=_TO_USER_FIELD,
+    )
+
+    max_open_range_bytes: int = Field(
+        title="Open-ended Range slice size (bytes)",
+        default=2 * 1024 * 1024,
+        gt=0,
+        alias="MEIVA_TO_USER_MAX_OPEN_RANGE_BYTES",
+        description=(
+            "Longest slice one open-ended byte-range read (`Range: bytes=N-`, no end) "
+            "is answered with; the `206` carries a `Content-Range` that tells the client "
+            "where the slice ends and the client asks for the next one. A media element "
+            "opens every file with `bytes=0-` and abandons that request as soon as it "
+            "has the metadata or the user seeks, so the slice bounds what an abandoned "
+            "request wastes on the link (100 Mb/s between two machines is 12 MB/s: 2 MiB "
+            "is about 170 ms of wire time, where a 20 MB file would hold the link for "
+            "1.7 s). It is also what gives the file its pieces: 2 MiB is about 87 s of "
+            "192 kb/s audio or 0.8 s of 20 Mb/s video, enough that the next request "
+            "(one round trip, 15-80 ms measured between the machines) is issued well "
+            "before the buffer drains. A range that names its end is answered in full up "
+            "to `max_resource_bytes`; only the open end is shortened."
         ),
         json_schema_extra=_TO_USER_FIELD,
     )

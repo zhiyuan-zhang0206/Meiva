@@ -10,12 +10,19 @@ def test_limits_default_to_the_widened_bounds() -> None:
     assert config.max_references == 1024
     assert config.max_chain_depth == 16
     assert config.max_resource_bytes == 64 * 1024 * 1024
+    assert config.max_open_range_bytes == 2 * 1024 * 1024
     assert config.file_access == "all"
 
 
 @pytest.mark.parametrize(
     "field",
-    ["max_document_bytes", "max_references", "max_chain_depth", "max_resource_bytes"],
+    [
+        "max_document_bytes",
+        "max_references",
+        "max_chain_depth",
+        "max_resource_bytes",
+        "max_open_range_bytes",
+    ],
 )
 def test_every_limit_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError, match=field):

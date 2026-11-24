@@ -7,12 +7,17 @@ all three process profiles carry the domain. The defaults widen the
 first-version hardcoded bounds
 ([limits decision](../../../docs/decisions/frontend/documents/2026-10-17-to-user-panel-limits-configurable.md)).
 
-The reader takes the four caps as one frozen value
+`max_open_range_bytes` (default 2 MiB) is the slice an open-ended byte-range read
+(`Range: bytes=N-`, which every media element starts with) is answered with; the
+runner's `206` states where the slice ends and the client asks for the next one.
+A range that names its end is honored up to `max_resource_bytes`.
+
+The reader takes the caps as one frozen value
 (`base/agents/to_user/limits.py`), so neither the document reader nor the
 resource resolver reads the process settings. An agent's turn takes them from
 the slices it already resolved (`to_user_limits_from_agent`), the same source
 that answers `workspace_in_system_prompt` and the panel's word limit, so a
-per-agent pin applies if one exists; the ops listener takes the same four
+per-agent pin applies if one exists; the ops listener takes the same
 fields from its own read model. Either way a click on a linked file meets the
 bound the panel was rendered under.
 

@@ -233,6 +233,7 @@ class AgentSlices:
             "llm_retry_max_attempts",
             "max_chain_depth",
             "max_document_bytes",
+            "max_open_range_bytes",
             "max_references",
             "max_resource_bytes",
             "memory_inherit_max_block_chars",

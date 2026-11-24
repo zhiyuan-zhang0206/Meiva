@@ -78,9 +78,25 @@ otherwise.
 and Safari can play at all. On the gateway host `FileResponse` serves them; a
 forwarded read carries the browser's `Range` to the runner as `byte_range`, the
 runner answers that slice (`206`, or `416` past the end, with its
-`Content-Range`, at most 8 MiB per answer, which the media element follows with
-its next range) and the gateway streams the answer through instead of buffering
-it. A request without a range, or with one HTTP lets a server ignore (several
+`Content-Range`) and the gateway streams the answer through instead of buffering
+it. A range that names its end is answered in full, up to `max_resource_bytes`;
+an open-ended one (`bytes=N-`, which is how every media element starts) is
+answered with at most `max_open_range_bytes` (default 2 MiB), which the media
+element follows with its next range. The runner streams the slice from disk in
+64 KiB chunks under a `Content-Length` taken from the file it opened, so the
+first byte leaves after one chunk is read rather than after the slice is
+assembled, and the ops listener keeps the connection open between requests
+(HTTP/1.1 keep-alive) for a client that reuses it.
+
+The slice rules, in `ops/to_user.py`: a range is answered from the start it names;
+only an open end is the server's to place (RFC 9110 section 15.3.7 lets a `206`
+carry any part of the requested range that its `Content-Range` describes, so a
+client that follows the header asks for the next slice). A named end, including a
+suffix range (`bytes=-N`), is honored in full and clamped to the file, never to the
+slice, and no answer exceeds `max_resource_bytes`. A regular file is opened, sized
+with `fstat` on that same handle (so the `Content-Length` cannot disagree with the
+file it streams) and handed to the transport; a file that reports no size (procfs,
+sysfs) has no length to promise and is read once under the limit, as before. A request without a range, or with one HTTP lets a server ignore (several
 ranges, another unit), gets the whole file under `max_resource_bytes`; so does a
 raw read whose runner predates `byte_range` or `file_access` and refuses it (it is
 asked again as that runner knows it, within workspace reach).
