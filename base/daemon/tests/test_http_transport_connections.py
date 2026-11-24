@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import threading
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -45,7 +45,7 @@ _REUSE = KeepAlive()
 @asynccontextmanager
 async def _serving(
     routes: dict[tuple[str, str], object], *, keep_alive: KeepAlive | None = _REUSE
-) -> AsyncIterator[tuple[asyncio.Server, int]]:
+) -> AsyncGenerator[tuple[asyncio.Server, int]]:
     server = await start_daemon_http(
         host="127.0.0.1",
         port=0,
@@ -65,7 +65,7 @@ async def _echo(body: bytes) -> tuple[int, bytes, str]:
 async def test_a_file_body_streams_in_chunks_and_its_handle_is_closed(tmp_path: Path) -> None:
     payload = bytes(range(256)) * ((STREAM_CHUNK_BYTES * 5 + 123) // 256 + 1)
     source = tmp_path / "big.bin"
-    source.write_bytes(payload)
+    _ = source.write_bytes(payload)
     handles: list[io.BufferedReader] = []
 
     async def file_route(_body: bytes) -> tuple[int, FileBody, str, dict[str, str]]:
@@ -135,7 +135,7 @@ async def test_a_file_shorter_than_its_length_ends_the_connection() -> None:
 @pytest.mark.asyncio
 async def test_a_peer_that_disconnects_mid_stream_releases_the_file(tmp_path: Path) -> None:
     source = tmp_path / "big.bin"
-    source.write_bytes(b"y" * (16 * 1024 * 1024))
+    _ = source.write_bytes(b"y" * (16 * 1024 * 1024))
     opened: list[io.BufferedReader] = []
 
     async def route(_body: bytes) -> tuple[int, FileBody, str]:

@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -282,7 +283,7 @@ async def test_open_ended_ranges_stream_in_slices_over_one_connection(
     slice_bytes = LIMITS.open_range_bytes
     media = bytes(i % 253 for i in range(slice_bytes * 2 + 12_345))
     async with _workspace_file_client(database, unit_home, op_executor) as (client, agent_id):
-        (unit_home / "workspaces" / str(agent_id) / "clip.mp3").write_bytes(media)
+        _ = (unit_home / "workspaces" / str(agent_id) / "clip.mp3").write_bytes(media)
         received = b""
         local_ports: set[int] = set()
         while len(received) < len(media):
@@ -302,6 +303,7 @@ async def test_open_ended_ranges_stream_in_slices_over_one_connection(
             last = first + len(response.content) - 1
             assert response.headers["content-range"] == f"bytes {first}-{last}/{len(media)}"
             received += response.content
-            local_ports.add(response.extensions["network_stream"].get_extra_info("client_addr")[1])
+            stream = response.extensions["network_stream"]
+            local_ports.add(cast(tuple[str, int], stream.get_extra_info("client_addr"))[1])
         assert received == media
         assert len(local_ports) == 1

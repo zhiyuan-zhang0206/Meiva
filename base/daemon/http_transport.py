@@ -77,7 +77,7 @@ class _Response:
     status: int
     body: bytes | FileBody
     content_type: str
-    headers: Mapping[str, str] = field(default_factory=dict)
+    headers: Mapping[str, str] = field(default_factory=dict[str, str])
     drained: bool = False
 
     @property
@@ -246,7 +246,8 @@ async def _read_and_dispatch(
     if length > 0:
         body_bytes = await asyncio.wait_for(reader.readexactly(length), timeout=_BODY_TIMEOUT_S)
     try:
-        answer = _response(*await handler(body_bytes))
+        status, body, content_type, *headers = await handler(body_bytes)
+        answer = _response(status, body, content_type, headers[0] if headers else None)
     except Exception as exc:
         _log.exception("[http_transport] route %s %s handler raised", *route)
         answer = _json_response(500, {"error": type(exc).__name__})
