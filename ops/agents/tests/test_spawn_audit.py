@@ -70,7 +70,7 @@ def test_a_spawn_is_recorded_with_its_machine(
         machine=machine,
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     )
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "spawn")
@@ -93,7 +93,7 @@ def test_a_fork_is_recorded_against_its_source_agent(
         machine=machine_identity.name(),
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     )
     checkpoint = _first_checkpoint(db_conn, parent)
 
@@ -131,7 +131,7 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
         prompt_source="agent:4242",
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     )
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "send_message")
@@ -161,7 +161,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
             machine=machine_identity.name(),
             catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
-            config={"llm_model": "deepseek-flash"},
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         )
 
     after = db_conn.execute("SELECT count(*) FROM agents").fetchone()

@@ -208,6 +208,7 @@ def validate_model_config(
     config: dict[str, object] | None = None,
     catalog: ModelCatalog,
     harness: Harness = Harness.MEIVA,
+    require_effort: bool = False,
 ) -> str:
     # Resolve effective model: per-agent overlay wins over cluster default.
     effective_model: str | None = None
@@ -246,7 +247,7 @@ def validate_model_config(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
         )
 
-    _validate_model_effort(effective_model, config, catalog=catalog)
+    _validate_model_effort(effective_model, config, catalog=catalog, require=require_effort)
     return effective_model
 
 
@@ -266,9 +267,14 @@ def validate_model_launch(
     keys: ProviderKeys,
     llm_override: str,
     harness: Harness = Harness.MEIVA,
+    require_effort: bool = False,
 ) -> str:
     effective_model = validate_model_config(
-        model=model, config=config, catalog=catalog, harness=harness
+        model=model,
+        config=config,
+        catalog=catalog,
+        harness=harness,
+        require_effort=require_effort,
     )
     if harness is Harness.MEIVA and not llm_override:
         _ensure_provider_key(effective_model, catalog=catalog, keys=keys)
@@ -285,17 +291,26 @@ def _reject_decision_model(model: str, *, catalog: ModelCatalog) -> None:
 
 
 def _validate_model_effort(
-    model: str, config: dict[str, object] | None, *, catalog: ModelCatalog
+    model: str, config: dict[str, object] | None, *, catalog: ModelCatalog, require: bool = False
 ) -> None:
-    """Reject unsupported explicit effort before spawn or override dispatch."""
+    """Reject unsupported explicit effort before spawn or override dispatch.
+
+    `require` is the birth rule: a model with effort levels must be given one explicitly, and a
+    model without levels must not be (a stored legacy config reaches launch with `require` off).
+    """
     effort = config.get("reasoning_effort") if config is not None else None
-    if effort is None or effort == "":
-        return
-    if not isinstance(effort, str):
+    if not isinstance(effort, str) and effort is not None:
         # Spawn handlers translate ValueError into an HTTP 400 response.
-        raise ValueError("reasoning_effort must be a string")  # noqa: TRY004
-    spec = catalog.models[model]
-    validate_effort(effort, spec.effort_levels or (), target=model)
+        raise ValueError("reasoning_effort must be a string")
+    levels = catalog.models[model].effort_levels or ()
+    if effort is None or effort == "":
+        if require and levels:
+            raise ValueError(
+                f"reasoning_effort must be explicitly provided with llm_model {model!r} "
+                f"(supported: {', '.join(levels)})"
+            )
+        return
+    validate_effort(effort, levels, target=model)
 
 
 # meiva:note

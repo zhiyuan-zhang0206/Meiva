@@ -61,14 +61,22 @@ def _resolve_and_check_model(
 
 
 def _validate_model_effort_and_harness(
-    spec: object, model: str, harness: Harness, effort_str: str | None
+    spec: object, model: str, harness: Harness, effort_str: str | None, *, require_effort: bool
 ) -> None:
-    effort_levels = getattr(spec, "effort_levels", ()) or ()
-    if harness is Harness.MEIVA and effort_str is not None:
-        try:
-            validate_effort(effort_str, effort_levels, target=model)
-        except ValueError as exc:
-            raise InvalidModelConfig(str(exc)) from exc
+    effort_levels: tuple[str, ...] = getattr(spec, "effort_levels", ()) or ()
+    if harness is not Harness.MEIVA:
+        return
+    if effort_str is None:
+        if require_effort and effort_levels:
+            raise InvalidModelConfig(
+                f"reasoning_effort must be explicitly provided with llm_model {model!r} "
+                f"(supported: {', '.join(effort_levels)})"
+            )
+        return
+    try:
+        validate_effort(effort_str, effort_levels, target=model)
+    except ValueError as exc:
+        raise InvalidModelConfig(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,7 @@ def _validate_external_restart_pins(
     catalog: ModelCatalog,
     effort_str: str | None,
     target: RestartHarnessTarget,
+    require_effort: bool,
 ) -> tuple[str, str | None] | None:
     raw_model = pins.get("llm_model")
     if raw_model is not None and not isinstance(raw_model, str):
@@ -105,6 +114,7 @@ def _validate_external_restart_pins(
             target.probed_models,
             requested_model=candidate,
             requested_effort=effort_str,
+            require_effort=require_effort,
         )
         _reject_decision_model_id(resolved_model, catalog)
         return (resolved_model, resolved_effort)
@@ -117,6 +127,7 @@ def validate_restart_model_config_pins(
     catalog: ModelCatalog,
     default_model: str | None = None,
     target: RestartHarnessTarget | None = None,
+    require_effort: bool = False,
 ) -> tuple[str, str | None] | None:
     effort = pins.get("reasoning_effort")
     if effort is not None and effort != "" and not isinstance(effort, str):
@@ -129,21 +140,15 @@ def validate_restart_model_config_pins(
             catalog=catalog,
             effort_str=effort_str,
             target=target,
+            require_effort=require_effort,
         )
     effective_harness = Harness.MEIVA
 
     effective_model = _resolve_and_check_model(pins, catalog, default_model)
     spec = catalog.models[effective_model]
-    _validate_model_effort_and_harness(spec, effective_model, effective_harness, effort_str)
-    if effort_str is None:
-        from base.lm.registry import explain_setting
-
-        effort_str = (
-            explain_setting(
-                "reasoning_effort", model=effective_model, explicit=None, models=catalog.models
-            ).value
-            or None
-        )
+    _validate_model_effort_and_harness(
+        spec, effective_model, effective_harness, effort_str, require_effort=require_effort
+    )
     return (effective_model, effort_str)
 
 
@@ -185,14 +190,23 @@ def validate_restart_model_config(
         raise AgentNotFound(f"agent {agent_id} does not exist")
     current_harness = coerce_harness(row[2])
     effective_harness = _resolve_target_harness(target, overlay, row[2])
+    stored_pins = {**_as_mapping(row[1]), **_as_mapping(row[0])}
     if effective_harness != current_harness:
         if not overlay.get("llm_model"):
             raise InvalidModelConfig(
                 "llm_model must be explicitly provided in config_overlay when switching harnesses"
             )
         effective_pins: Mapping[str, object] = overlay
+        require_effort = True
+    elif "llm_model" in overlay and overlay["llm_model"] != stored_pins.get("llm_model"):
+        effective_pins = {
+            **{k: v for k, v in stored_pins.items() if k != "reasoning_effort"},
+            **overlay,
+        }
+        require_effort = True
     else:
-        effective_pins = {**_as_mapping(row[1]), **_as_mapping(row[0]), **overlay}
+        effective_pins = {**stored_pins, **overlay}
+        require_effort = False
     resolved_target = (
         target
         if target is not None and target.harness is effective_harness
@@ -203,4 +217,5 @@ def validate_restart_model_config(
         catalog=catalog,
         default_model=default_model,
         target=resolved_target,
+        require_effort=require_effort,
     )

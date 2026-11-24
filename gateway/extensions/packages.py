@@ -5,7 +5,11 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.agents.creation import (
+    DRAFT_AGENT_CONFIG,
+    create_and_launch_agent,
+    guarded_draft_key,
+)
 from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc, gateway_state
 from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
@@ -60,7 +64,7 @@ async def guarded_draft_package(
         prompt=prompt,
         prompt_source="user",
         label="meiva-package-installer",
-        config={"llm_model": "deepseek-flash"},
+        config=dict(DRAFT_AGENT_CONFIG),
     )
     spawned = await create_and_launch_agent(
         body_obj,

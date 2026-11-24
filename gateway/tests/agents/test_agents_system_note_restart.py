@@ -166,7 +166,7 @@ class TestRestart:
             ),
             (
                 {"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
-                {"llm_model": "deepseek-flash"},
+                {"llm_model": "deepseek-flash", "reasoning_effort": "low"},
             ),
         ],
     )
@@ -231,18 +231,23 @@ class TestRestart:
             db_conn.commit()
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"message": "restarting", "config_overlay": {"llm_model": "gpt-5.6-sol"}},
+                json={
+                    "message": "restarting",
+                    "config_overlay": {"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"},
+                },
             )
 
         assert resp.status_code == 200
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-            assert cur.fetchone() == ({"reasoning_effort": "low", "llm_model": "gpt-5.6-sol"},)
+            assert cur.fetchone() == ({"reasoning_effort": "medium", "llm_model": "gpt-5.6-sol"},)
             cur.execute(
                 "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
                 (agent_id,),
             )
-            assert cur.fetchone() == ({"config_overlay": {"llm_model": "gpt-5.6-sol"}},)
+            assert cur.fetchone() == (
+                {"config_overlay": {"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"}},
+            )
 
     def test_restart_settles_withdrawn_model_before_storing(
         self,
@@ -254,17 +259,22 @@ class TestRestart:
             agent_id = spawn_via_http(client, {}).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
-                json={"message": "restarting", "config_overlay": {"llm_model": model}},
+                json={
+                    "message": "restarting",
+                    "config_overlay": {"llm_model": model, "reasoning_effort": "max"},
+                },
             )
         assert resp.status_code == 200, resp.text
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash", "reasoning_effort": "max"},)
             cur.execute(
                 "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'restart'",
                 (agent_id,),
             )
-            assert cur.fetchone() == ({"config_overlay": {"llm_model": "deepseek-flash"}},)
+            assert cur.fetchone() == (
+                {"config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}},
+            )
 
     @pytest.mark.parametrize("config_overlay", [None, {}])
     def test_restart_empty_config_overlay_keeps_legacy_restart_shape(
@@ -336,7 +346,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switching to codex",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp.status_code == 200, resp.text
@@ -369,7 +383,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switching to codex",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp.status_code == 200
@@ -393,7 +411,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switching back to meiva",
-                    "config_overlay": {"harness": "meiva", "llm_model": "deepseek-flash"},
+                    "config_overlay": {
+                        "harness": "meiva",
+                        "llm_model": "deepseek-flash",
+                        "reasoning_effort": "max",
+                    },
                 },
             )
             assert resp2.status_code == 200, resp2.text
@@ -427,7 +449,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switch while terminated",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp.status_code == 200, resp.text
@@ -453,7 +479,11 @@ class TestRestart:
                     f"/api/agents/{agent_id}/restart",
                     json={
                         "message": "preparing the starting harness",
-                        "config_overlay": {"harness": old_harness, "llm_model": old_model},
+                        "config_overlay": {
+                            "harness": old_harness,
+                            "llm_model": old_model,
+                            "reasoning_effort": "medium",
+                        },
                     },
                 )
                 assert first.status_code == 200, first.text
@@ -462,7 +492,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "continue checking",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp.status_code == 200, resp.text
@@ -492,7 +526,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switch while running",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp.status_code == 409
@@ -506,7 +544,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "   ",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp_blank.status_code == 422
@@ -525,7 +567,11 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "bad model",
-                    "config_overlay": {"harness": "claude_code", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {
+                        "harness": "claude_code",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
             assert resp_bad_model.status_code == 400
@@ -535,9 +581,21 @@ class TestRestart:
         ("old_harness", "old_model", "restart_overlay"),
         [
             ("codex", "gpt-6.1-sol", None),
-            ("codex", "gpt-6.1-sol", {"harness": "codex", "llm_model": "gpt-6.1-sol"}),
-            ("meiva", None, {"harness": "codex", "llm_model": "gpt-6.1-sol"}),
-            ("codex", "gpt-6.1-sol", {"harness": "meiva", "llm_model": "deepseek-flash"}),
+            (
+                "codex",
+                "gpt-6.1-sol",
+                {"harness": "codex", "llm_model": "gpt-6.1-sol", "reasoning_effort": "medium"},
+            ),
+            (
+                "meiva",
+                None,
+                {"harness": "codex", "llm_model": "gpt-6.1-sol", "reasoning_effort": "medium"},
+            ),
+            (
+                "codex",
+                "gpt-6.1-sol",
+                {"harness": "meiva", "llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            ),
         ],
     )
     def test_external_harness_restart_preserves_shell_sessions(
@@ -555,7 +613,11 @@ class TestRestart:
                     f"/api/agents/{agent_id}/restart",
                     json={
                         "message": "prepare external harness",
-                        "config_overlay": {"harness": old_harness, "llm_model": old_model},
+                        "config_overlay": {
+                            "harness": old_harness,
+                            "llm_model": old_model,
+                            "reasoning_effort": "medium",
+                        },
                     },
                 )
                 assert switched.status_code == 200, switched.text

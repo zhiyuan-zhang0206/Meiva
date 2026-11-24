@@ -9,13 +9,19 @@ You pick a worker's model at spawn time:
 
 ```python
 
-meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id})
+meiva.agents.spawn(
+    prompt="...",
+    config_overlay={"llm_model": model_id, "reasoning_effort": effort},
+)
 ```
 
 `model_id` is an id read from the live roster (next section), never a name
-remembered from elsewhere. Omitting the overlay is a valid choice — the child
-inherits the cluster default, which is the operator's standing choice. An
-explicit overlay should mean a deliberate reason to differ from it.
+remembered from elsewhere; `effort` is one of that model's `reasoning_effort_options`
+from the same roster entry. A model and its effort are chosen together: there is no cluster
+default effort. Omitting the overlay is a valid choice for a spawn from an agent — the child
+inherits the parent's model and effort. Naming a different model means naming its effort too
+(a model with no effort options takes none). An explicit overlay should mean a deliberate
+reason to differ from the parent.
 
 This skill carries judgment that holds whichever models are registered: how to
 choose, and how to spend. It names no model as preferred, required or
@@ -61,7 +67,7 @@ unknown model; repair it by naming a current id from the roster.
 Which models the operator wants used, and which are stopped, is configuration,
 not skill text:
 
-- The **cluster default** (`llm_model`) is what an omitted overlay inherits.
+- The spawning agent's own model and effort are what an omitted overlay inherits.
 - A **per-agent config** (the spawn overlay, or `meiva.self.restart(config_overlay=...)`)
   pins one agent.
 - The registry's roster flags express availability: a model with

@@ -119,6 +119,49 @@ describe("ConfigPage render", () => {
     expect(screen.queryByTitle("MEIVA_GATEWAY_MAX_RETRIES")).toBeNull();
   });
 
+  it("the per-agent reasoning effort pin has no row in the panel, and General has no empty Models card", async () => {
+    const effort = {
+      name: "reasoning_effort",
+      label: "Reasoning effort",
+      field_type: "string",
+      current_value: null,
+      default_value: null,
+      description: "Per-agent reasoning effort pin.",
+      group: "LLM",
+      capability: "common",
+      scope: "agent",
+      restart_required: "agent",
+      writable: false,
+      sensitive: false,
+      env_var: "MEIVA_REASONING_EFFORT",
+      remote_writable: false,
+      per_agent: true,
+      can_enable: null,
+      reason: null,
+    } as const;
+    const style = {
+      ...effort,
+      name: "fast_acknowledgement",
+      label: "Fast acknowledgement",
+      env_var: "MEIVA_FAST_ACKNOWLEDGEMENT",
+      scope: "cluster-default",
+      writable: true,
+    } as const;
+    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [...VIEW.fields, effort, style] });
+
+    wrap(<ConfigEditor mode="general" />);
+    expect(await screen.findByText("Fast acknowledgement")).toBeTruthy();
+    expect(screen.getByText("Working together")).toBeTruthy();
+    expect(screen.queryByText("Models")).toBeNull();
+    expect(screen.queryByText("Reasoning effort")).toBeNull();
+
+    cleanup();
+    wrap(<ConfigEditor mode="advanced" />);
+    await screen.findByText("Log level");
+    expect(screen.queryByText("Reasoning effort")).toBeNull();
+    expect(screen.queryByTitle("MEIVA_REASONING_EFFORT")).toBeNull();
+  });
+
   it("field appears under its display-group header", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     await renderSettled();

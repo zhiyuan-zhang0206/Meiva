@@ -37,7 +37,7 @@ type PanelId = typeof PANELS[number]["id"];
 function panelFor(anchor: string): PanelId {
   const match = PANELS.find((panel) => panel.id === anchor);
   if (match) return match.id;
-  if (anchor === "config-default-model" || ["config-communication", "config-model-preferences", "display-composer", "display-theme"].includes(anchor)) return "config";
+  if (anchor === "config-default-model" || ["config-communication", "display-composer", "display-theme"].includes(anchor)) return "config";
   if (anchor.startsWith("config-")) return "advanced";
   if (anchor === "machines" || anchor === "display" || anchor.startsWith("display-") || anchor.startsWith("advanced-")) return "advanced";
   return "config";

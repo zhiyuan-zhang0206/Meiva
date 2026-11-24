@@ -232,7 +232,9 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value() -> 
 class TestSpawn:
     def test_spawn_minimal_no_prompt_no_spawner(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            resp = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}})
+            resp = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            )
         assert resp.status_code == 201
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
@@ -251,7 +253,7 @@ class TestSpawn:
                 {
                     "prompt": "\u67e5 X",
                     "prompt_source": "user",
-                    "config": {"llm_model": "deepseek-flash"},
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
                 },
             )
         new_id = resp.json()["id"]
@@ -265,7 +267,7 @@ class TestSpawn:
                 {
                     "prompt": prompt,
                     "prompt_source": "user",
-                    "config": {"llm_model": "deepseek-flash"},
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
                 },
             )
         assert resp.status_code == 201
@@ -276,7 +278,10 @@ class TestSpawn:
         with gateway_test_client() as client:
             resp = spawn_via_http(
                 client,
-                {"spawner": "claude-code", "config": {"llm_model": "deepseek-flash"}},
+                {
+                    "spawner": "claude-code",
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                },
             )
         new_id = resp.json()["id"]
         row = _agent_row(db_conn, new_id)
@@ -289,7 +294,9 @@ class TestSpawn:
     ) -> None:
         model, catalog = withdrawn_model
         with gateway_test_client(catalog=catalog) as client:
-            resp = spawn_via_http(client, {"config": {"llm_model": model}})
+            resp = spawn_via_http(
+                client, {"config": {"llm_model": model, "reasoning_effort": "max"}}
+            )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["config_normalized"] == {
@@ -298,25 +305,27 @@ class TestSpawn:
         }
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (body["id"],))
-            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash", "reasoning_effort": "max"},)
 
     def test_spawn_available_model_carries_no_receipt(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            resp = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}})
+            resp = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            )
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body.get("config_normalized") is None
         with db_conn.cursor() as cur:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (body["id"],))
-            assert cur.fetchone() == ({"llm_model": "deepseek-flash"},)
+            assert cur.fetchone() == ({"llm_model": "deepseek-flash", "reasoning_effort": "max"},)
 
     def test_spawn_fork_resolves_latest_and_copies_checkpoint(
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            source = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             with db_conn.cursor() as cur:
                 for ckpt, parent in [("cka", None), ("ckb", "cka"), ("ckc", "ckb")]:
                     cur.execute(
@@ -344,9 +353,9 @@ class TestSpawn:
         db_conn: psycopg.Connection,
     ) -> None:
         with gateway_test_client() as client:
-            source = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            source = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = spawn_via_http(client, {"fork_from": source})
         assert resp.status_code == 409
         body = resp.json()
@@ -385,7 +394,7 @@ def test_post_commit_malformed_launch_reply_carries_id_and_cors_headers(
         allowed_origin = client.app.state.gateway_config.allowed_origins[0]
         resp = spawn_via_http(
             client,
-            {"config": {"llm_model": "deepseek-flash"}},
+            {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}},
             headers={"Origin": allowed_origin},
         )
     assert resp.status_code == 502
@@ -401,9 +410,9 @@ class TestTerminate:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
         assert resp.json() == _ENQUEUED_AT_EXIT
@@ -411,9 +420,9 @@ class TestTerminate:
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,)
@@ -437,9 +446,9 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
         assert resp.json() == _ENQUEUED_WITH_DEFERRED_SHELL_CLEANUP
@@ -453,9 +462,9 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "agent:42"},
@@ -469,9 +478,9 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
@@ -510,9 +519,9 @@ class TestAutoResurrect:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             terminate_hosted(db_conn, agent_id)
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
@@ -525,9 +534,9 @@ class TestAutoResurrect:
 
     def test_chat_to_alive_agent_no_resurrect(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "hello", "source": "user"},
@@ -540,9 +549,9 @@ class TestAutoResurrect:
 
     def test_chat_illegal_source_rejected_422(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {"config": {"llm_model": "deepseek-flash"}}).json()[
-                "id"
-            ]
+            agent_id = spawn_via_http(
+                client, {"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}}
+            ).json()["id"]
             resp = client.post(
                 f"/api/agents/{agent_id}/messages",
                 json={"content": "hello", "source": "ui:web"},

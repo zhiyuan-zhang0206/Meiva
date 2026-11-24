@@ -35,7 +35,7 @@ from base.packages.plugins.extensions import PluginContributions
 from meiva_builtins.plugins.lm_anthropic.models import MODELS
 from meiva_builtins.plugins.lm_anthropic.prices import PRICES
 
-# Budget used when MEIVA_REASONING_EFFORT enables an extended-thinking-only Claude
+# Budget used when the agent's reasoning_effort enables an extended-thinking-only Claude
 # model to its "on" tier and no explicit MEIVA_CLAUDE_THINKING_BUDGET_TOKENS is
 # configured (0 = unset). Anthropic's minimum is 1024; this sits well under
 # haiku-4-5's 64K max_tokens cap with headroom left for the actual response.
@@ -124,7 +124,7 @@ def _effort(
             raise ValueError(f"{ctx.model} effort {level!r} is not one the Anthropic SDK sends")
         return _CLAUDE_EFFORTS[level]
     logger.warning(
-        f"{ctx.model} does not support reasoning effort; MEIVA_REASONING_EFFORT={effort!r} ignored"
+        f"{ctx.model} does not support reasoning effort; reasoning_effort={effort!r} ignored"
     )
     return None
 

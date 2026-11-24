@@ -94,7 +94,10 @@ def test_invalid_admission_has_no_birth(
     assert (
         client.post(
             PATH,
-            json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+            json={
+                "machine": "local-test",
+                "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            },
             headers=headers,
         ).status_code
         == 422
@@ -107,7 +110,10 @@ def test_creation_with_single_idempotency_key_succeeds(
 ) -> None:
     response = client.post(
         PATH,
-        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        json={
+            "machine": "local-test",
+            "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+        },
         headers={"Idempotency-Key": "single-key-test"},
     )
     assert response.status_code == 201
@@ -119,7 +125,7 @@ def test_fork_without_source_checkpoint_has_no_birth(
 ) -> None:
     parent = client.post(
         PATH,
-        json={"config": {"llm_model": "deepseek-flash"}},
+        json={"config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}},
         headers={**HEADERS, "Idempotency-Key": "parent"},
     )
     assert parent.status_code == 201, parent.text
@@ -138,7 +144,7 @@ def test_lost_response_and_concurrency_replay_one_birth(
         "machine": "local-test",
         "prompt": "one goal",
         "prompt_source": "user",
-        "config": {"llm_model": "deepseek-flash"},
+        "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     }
     accepted = client.post(PATH, json=body, headers=HEADERS)
     assert accepted.status_code == 201, accepted.text
@@ -162,7 +168,10 @@ def test_revoked_credential_cannot_replay_guarded_receipt(
     assert (
         client.post(
             PATH,
-            json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+            json={
+                "machine": "local-test",
+                "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            },
             headers=HEADERS,
         ).status_code
         == 201

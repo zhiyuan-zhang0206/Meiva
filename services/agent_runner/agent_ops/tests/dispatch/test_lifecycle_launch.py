@@ -33,7 +33,7 @@ def launch(
         database,
         event_bus,
         machine=machine_identity.name(),
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         prompt="one goal",
         prompt_source="user",
         catalog=build_model_catalog(home=meiva_home()),

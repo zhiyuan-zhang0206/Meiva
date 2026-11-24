@@ -275,8 +275,12 @@ def spawn(
     `label` names the new agent's role, which peers and the fleet view show; omit it to let the
     system name the agent. `machine` defaults to yours (for a fork of a "claude_code" or "codex" agent, to the source's machine, the only one it can be born on). `config_overlay` carries per-agent config
     fields; keys it does not name follow the shared default. Identity config you do not name
-    (model, reasoning effort, the inject/expand lists, prompt shaping) is frozen at spawn;
-    operational knobs follow the shared default. Its `harness` key selects the initial runtime
+    (the inject/expand lists, prompt shaping) is frozen at spawn; operational knobs follow the
+    shared default. A model and its reasoning effort are chosen together and neither has a
+    default: a spawn made outside an agent, onto a different harness than your own, or naming a
+    model other than yours must give `llm_model` and `reasoning_effort` (one of that model's
+    effort options; none for a model that has no effort levels), or it is refused. Naming
+    neither inherits your own model and effort. Its `harness` key selects the initial runtime
     loop, the way `restart` switches it later: "meiva" (the default), "claude_code", "codex" or
     "antigravity". An unknown name is refused. `harness_availability()` reports which ones this
     machine can run. A harness no launcher can start yet is refused with `HarnessNotLaunchable`

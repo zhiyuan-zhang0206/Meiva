@@ -39,7 +39,9 @@ def _state(conn: psycopg.Connection, sid: int) -> tuple[object, ...]:
     return row
 
 
-@pytest.mark.parametrize("overlay", [None, {"llm_model": "gpt-6.1-sol"}])
+@pytest.mark.parametrize(
+    "overlay", [None, {"llm_model": "gpt-6.1-sol", "reasoning_effort": "medium"}]
+)
 async def test_external_restart_preserves_schedules(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,

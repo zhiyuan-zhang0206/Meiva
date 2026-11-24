@@ -79,8 +79,10 @@ export function useAgentActions(
   const spawnMutation = useMutation({
     // machine provided → use cross-machine forward; omitted → empty body {},
     // the backend defaults to the gateway machine that received the request.
-    // model provided → include config.llm_model; omit config entirely when
-    // model is undefined (cluster default, no override needed).
+    // model provided → include config.llm_model and its reasoning_effort (the picker always
+    // sends the pair; the gateway refuses a model with effort levels that arrives without
+    // one). Config is omitted only when the picker has no model yet, which the gateway
+    // refuses for a spawn from outside an agent.
     mutationFn: ({
       machine,
       model,

@@ -40,14 +40,14 @@ class TestSelfRestart:
         self, db_conn: psycopg.Connection, gateway_client: httpx.Client
     ) -> None:
         aid = meiva.agents.spawn(
-            config_overlay={"llm_model": "deepseek-flash"},
+            config_overlay={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         )
         pin_agent(aid)
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
             meiva.self.restart("effort test", config_overlay={"reasoning_effort": "low"})
         assert db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id=%s", (aid,)
-        ).fetchone() == ({"llm_model": "deepseek-flash"},)
+        ).fetchone() == ({"llm_model": "deepseek-flash", "reasoning_effort": "max"},)
         assert not _inbound_rows(db_conn, aid)
 
     def test_model_and_effort_change_commit_with_the_restart(

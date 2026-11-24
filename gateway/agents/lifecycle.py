@@ -308,7 +308,9 @@ def _validate_restart_model_blocking(
         # Only the agent's own restart names the flag; every other body reaches the runner as it
         # always did, so a runner that predates the flag sees nothing new.
         del payload["at_turn_end"]
-    if resolved is not None and target_harness != current_harness:
+    if resolved is not None and (
+        target_harness != current_harness or "llm_model" in (body.config_overlay or {})
+    ):
         overlay_copy = dict(body.config_overlay or {})
         overlay_copy["llm_model"] = resolved[0]
         overlay_copy["reasoning_effort"] = resolved[1] or ""

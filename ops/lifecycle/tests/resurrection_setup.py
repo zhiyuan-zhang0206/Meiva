@@ -52,7 +52,7 @@ def spawn_agent(
         and not spawner.startswith("agent:")
         and (not config or "llm_model" not in config)
     ):
-        config = {**(config or {}), "llm_model": "deepseek-flash"}
+        config = {**(config or {}), "llm_model": "deepseek-flash", "reasoning_effort": "max"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),

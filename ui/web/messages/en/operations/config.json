@@ -69,6 +69,5 @@
   },
   "restartAfterSave": "To apply your saved changes, restart: {targets}.",
   "dismissReminder": "Dismiss restart reminder",
-  "workingTogether": "Working together",
-  "modelsHeading": "Models"
+  "workingTogether": "Working together"
 }

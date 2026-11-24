@@ -359,20 +359,24 @@ class TestSpawnConfig:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         agent_id = meiva.agents.spawn(
-            config_overlay={"llm_model": "claude-sonnet-5"},
+            config_overlay={"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
         )
 
         row = db_conn.execute(
             "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
         ).fetchone()
-        assert row == ({"llm_model": "claude-sonnet-5"},)
+        assert row == ({"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},)
 
     def test_spawn_rejects_preset_overlay_key(self, self_agent: int) -> None:
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         with gateway_wire() as requests, pytest.raises(InvalidConfigOverlay):
             meiva.agents.spawn(
-                config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
+                config_overlay={
+                    "preset": "coder",
+                    "llm_model": "claude-sonnet-5",
+                    "reasoning_effort": "high",
+                },
             )
         assert requests == []
 

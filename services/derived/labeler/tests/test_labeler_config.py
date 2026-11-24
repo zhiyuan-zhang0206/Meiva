@@ -33,10 +33,6 @@ def test_gateway_tuning_does_not_read_stripped_agent_fields() -> None:
 
     class _PoisonLm:
         @property
-        def reasoning_effort(self) -> str:
-            raise AssertionError("gateway must not read stripped reasoning effort")
-
-        @property
         def claude_thinking_budget_tokens(self) -> int:
             raise AssertionError("gateway must not read stripped thinking budget")
 
@@ -47,14 +43,14 @@ def test_gateway_tuning_does_not_read_stripped_agent_fields() -> None:
     assert actual == ModelOverrides.from_pins({})
 
 
-@pytest.mark.parametrize("effort,budget", [(None, None), ("high", 2048), ("", 0)])
-def test_full_tuning_keeps_explicit_values(effort: str | None, budget: int | None) -> None:
-    lm = LmSettings.model_validate(
-        {"reasoning_effort": effort, "claude_thinking_budget_tokens": budget}
-    )
+@pytest.mark.parametrize("budget", [None, 2048, 0])
+def test_full_tuning_keeps_the_explicit_thinking_budget_and_leaves_effort_to_the_model(
+    budget: int | None,
+) -> None:
+    lm = LmSettings.model_validate({"claude_thinking_budget_tokens": budget})
     runtime = Settings(profile=None, lm=lm)
     actual = daemon.labeler_model_overrides(profile=None, lm=runtime.lm)
-    assert actual.reasoning_effort == effort
+    assert actual.reasoning_effort is None
     assert actual.claude_thinking_budget_tokens == budget
 
 

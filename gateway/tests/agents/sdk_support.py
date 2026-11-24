@@ -40,7 +40,9 @@ def spawn_agent(
     from base.agents.birth.spawn import create_agent_row
 
     effective_config: dict[str, object] = (
-        dict(config) if config is not None else {"llm_model": "deepseek-flash"}
+        dict(config)
+        if config is not None
+        else {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
     )
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),

@@ -57,7 +57,7 @@ def test_external_spawn_validates_execution_selection_without_native_keys(
         assert (
             validate_spawn_model_config(
                 cur,
-                {"llm_model": "gpt-oss-120b"},
+                {"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"},
                 catalog=model_catalog,
                 keys=ProviderKeys({}),
                 llm_override="",
@@ -66,6 +66,33 @@ def test_external_spawn_validates_execution_selection_without_native_keys(
                 probed_models=agy_models,
             )
             == "gpt-oss-120b"
+        )
+        with pytest.raises(
+            InvalidModelConfig, match="reasoning_effort must be explicitly provided"
+        ):
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "gpt-oss-120b"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.ANTIGRAVITY,
+                probed_models=agy_models,
+            )
+        effortless = (ProbedHarnessModel(id="claude-haiku-4-5-20251001"),)
+        assert (
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "claude-haiku-4-5-20251001"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.CLAUDE_CODE,
+                probed_models=effortless,
+            )
+            == "claude-haiku-4-5-20251001"
         )
         with pytest.raises(InvalidModelConfig, match="no model configured"):
             validate_spawn_model_config(
@@ -132,10 +159,24 @@ def test_restart_switching_onto_external_harness_drops_prior_harness_pins(
                     probed_models=probed,
                 ),
             )
+        with pytest.raises(
+            InvalidModelConfig, match="reasoning_effort must be explicitly provided"
+        ):
+            validate_restart_model_config(
+                cur,
+                agent_id,
+                {"harness": "codex", "llm_model": "gpt-6.1-terra"},
+                catalog=model_catalog,
+                default_model=settings.lm.llm_model,
+                target=RestartHarnessTarget(
+                    harness=Harness.CODEX,
+                    probed_models=probed,
+                ),
+            )
         resolved = validate_restart_model_config(
             cur,
             agent_id,
-            {"harness": "codex", "llm_model": "gpt-6.1-terra"},
+            {"harness": "codex", "llm_model": "gpt-6.1-terra", "reasoning_effort": "low"},
             catalog=model_catalog,
             default_model=settings.lm.llm_model,
             target=RestartHarnessTarget(
@@ -173,7 +214,7 @@ def test_fork_preflight_keeps_its_birth_model_after_default_changes(
         )
 
 
-def test_restart_validates_birth_effort_when_only_the_model_changes(
+def test_restart_changing_the_model_names_its_own_effort_and_never_inherits_the_old_one(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     agent_id = create_agent(db_conn)
@@ -182,7 +223,9 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
         (agent_id, Jsonb({"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"})),
     )
     with db_conn.cursor() as cur:
-        with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
+        with pytest.raises(
+            InvalidModelConfig, match="reasoning_effort must be explicitly provided"
+        ):
             validate_restart_model_config(
                 cur,
                 agent_id,
@@ -190,10 +233,30 @@ def test_restart_validates_birth_effort_when_only_the_model_changes(
                 catalog=model_catalog,
                 default_model=settings.lm.llm_model,
             )
+        with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
+            validate_restart_model_config(
+                cur,
+                agent_id,
+                {"llm_model": "deepseek-flash", "reasoning_effort": "low"},
+                catalog=model_catalog,
+                default_model=settings.lm.llm_model,
+            )
         validate_restart_model_config(
             cur,
             agent_id,
             {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            catalog=model_catalog,
+            default_model=settings.lm.llm_model,
+        )
+
+        db_conn.execute(
+            "UPDATE agents_meta SET birth_config=%s WHERE id=%s",
+            (Jsonb({"llm_model": "deepseek-flash", "reasoning_effort": "max"}), agent_id),
+        )
+        validate_restart_model_config(
+            cur,
+            agent_id,
+            {"llm_model": "deepseek-flash"},
             catalog=model_catalog,
             default_model=settings.lm.llm_model,
         )
@@ -223,3 +286,36 @@ def test_legacy_restart_validates_effort_against_the_unpinned_model(
             catalog=model_catalog,
             default_model="mimo-v2.6-pro",
         )
+
+
+def test_native_root_spawn_names_the_effort_with_the_model_and_a_fork_inherits_it(
+    db_conn: psycopg.Connection, tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    authority = ConfigAuthority(settings, Settings(profile=None), tmp_path / ".env")
+
+    def validate(config: dict[str, object] | None, fork_from: int | None = None) -> str:
+        with db_conn.cursor() as cur:
+            return validate_spawn_model_config(
+                cur,
+                config,
+                fork_from,
+                catalog=model_catalog,
+                keys=inert_keys(model_catalog),
+                llm_override=settings.lm.llm_override,
+                authority=authority,
+            )
+
+    with pytest.raises(InvalidModelConfig, match="reasoning_effort must be explicitly provided"):
+        validate({"llm_model": "deepseek-flash"})
+    with pytest.raises(InvalidModelConfig, match="reasoning_effort must be explicitly provided"):
+        validate({"llm_model": "deepseek-flash", "reasoning_effort": ""})
+    with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
+        validate({"llm_model": "deepseek-flash", "reasoning_effort": "low"})
+    assert validate({"llm_model": "deepseek-flash", "reasoning_effort": "max"}) == "deepseek-flash"
+
+    legacy_source = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine,birth_config) VALUES(%s,'idling','model-config-test',%s)",
+        (legacy_source, Jsonb({"llm_model": "deepseek-flash"})),
+    )
+    assert validate(None, legacy_source) == "deepseek-flash"

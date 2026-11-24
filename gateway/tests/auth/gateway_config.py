@@ -297,6 +297,27 @@ def spawn_headers(key: str | None = None, extra: Mapping[str, str] | None = None
     }
 
 
+_DEFAULT_TEST_MODEL_CONFIG: Mapping[str, object] = {
+    "llm_model": "deepseek-flash",
+    "reasoning_effort": "max",
+}
+
+
+def _spawn_payload(body: Mapping[str, Any] | None, *, raw: bool) -> dict[str, Any]:
+    payload = dict(body or {})
+    if raw:
+        return payload
+    fork_from = payload.get("fork_from")
+    spawner = str(payload.get("spawner") or "")
+    if fork_from is None and not spawner.startswith("agent:"):
+        cfg = payload.get("config")
+        if cfg is None:
+            payload["config"] = dict(_DEFAULT_TEST_MODEL_CONFIG)
+        elif isinstance(cfg, dict) and "llm_model" not in cfg:
+            payload["config"] = {**_DEFAULT_TEST_MODEL_CONFIG, **cfg}
+    return payload
+
+
 def spawn_via_http(
     client: TestClient,
     body: Mapping[str, Any] | None = None,
@@ -305,16 +326,7 @@ def spawn_via_http(
     headers: Mapping[str, str] | None = None,
     raw: bool = False,
 ) -> httpx2.Response:
-    payload = dict(body or {})
-    if not raw:
-        fork_from = payload.get("fork_from")
-        spawner = str(payload.get("spawner") or "")
-        if fork_from is None and not spawner.startswith("agent:"):
-            cfg = payload.get("config")
-            if cfg is None:
-                payload["config"] = {"llm_model": "deepseek-flash"}
-            elif isinstance(cfg, dict) and "llm_model" not in cfg:
-                payload["config"] = {"llm_model": "deepseek-flash", **cfg}
+    payload = _spawn_payload(body, raw=raw)
     return client.post(SPAWN_PATH, json=payload, headers=spawn_headers(key, headers))
 
 
@@ -325,16 +337,7 @@ def post_spawn(
     timeout: float,
     raw: bool = False,
 ) -> httpx.Response:
-    payload = dict(body)
-    if not raw:
-        fork_from = payload.get("fork_from")
-        spawner = str(payload.get("spawner") or "")
-        if fork_from is None and not spawner.startswith("agent:"):
-            cfg = payload.get("config")
-            if cfg is None:
-                payload["config"] = {"llm_model": "deepseek-flash"}
-            elif isinstance(cfg, dict) and "llm_model" not in cfg:
-                payload["config"] = {"llm_model": "deepseek-flash", **cfg}
+    payload = _spawn_payload(body, raw=raw)
     return httpx.post(
         f"{gateway_url}{SPAWN_PATH}", json=payload, headers=spawn_headers(), timeout=timeout
     )

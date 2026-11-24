@@ -37,7 +37,7 @@ def lifecycle_agent_id(
         machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     )
     return agent_id
 

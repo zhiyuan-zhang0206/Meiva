@@ -619,7 +619,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--config",
         default=None,
         type=_validated_config_json,
-        help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol"})',
+        help='config overlay as JSON (e.g. {"llm_model":"gpt-5.6-sol","reasoning_effort":"high"})',
     )
     agents_restart_p.add_argument(
         "-m",

@@ -4,7 +4,11 @@
 configuration stamped on newly born agents. Neither Meiva nor external harnesses
 maintain a cluster fallback default model: root agents require an explicit model
 selection, while child agents inherit their parent agent's effective model and reasoning
-effort. A fork preserves its inherited birth stamp.
+effort. A fork preserves its inherited birth stamp. Reasoning effort has no cluster default
+either: every birth or model switch that names `llm_model` also names `reasoning_effort` (one of
+the model's levels, or none for a model that has no levels), so a child that picks a different
+model than its parent's never inherits the parent's effort. `reasoning_effort` remains a Settings
+field only as the per-agent pin (`scope="agent"`, not writable); stored configs are not re-judged.
 
 `model_config.py` validates the final agent configuration: spawn overlays over
 current birth defaults (or a fork's inherited stamp), and restart edits over

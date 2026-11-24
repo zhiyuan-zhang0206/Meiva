@@ -44,7 +44,7 @@ def sdk(**kwargs: Any) -> int:
         "fork_from": None,
         "prompt_source": "user",
         "machine": "local-test",
-        "config": {"llm_model": "deepseek-flash"},
+        "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         "idempotency_key": "sdk-intent",
     }
     return spawn(**(args | kwargs))

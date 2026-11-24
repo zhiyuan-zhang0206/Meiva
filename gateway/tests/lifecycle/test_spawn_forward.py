@@ -143,7 +143,10 @@ class TestRouting:
         # not the REST request (which has no machine / spawner on the wire op).
         (launch,) = runner.calls_of("spawn-launch")
         assert resp.json()["id"] == launch.payload["agent_id"] > 0
-        assert launch.payload["config"] == {"llm_model": "deepseek-flash"}
+        assert launch.payload["config"] == {
+            "llm_model": "deepseek-flash",
+            "reasoning_effort": "max",
+        }
         assert "prompt" not in launch.payload
         assert launch.payload["launch_attempt_id"]
         assert launch.idempotency_key is not None

@@ -30,7 +30,7 @@ def spawn_agent(
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
     )
     if config is None or "llm_model" not in config:
-        config = {**(config or {}), "llm_model": "deepseek-flash"}
+        config = {**(config or {}), "llm_model": "deepseek-flash", "reasoning_effort": "max"}
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         db,
         bus,
