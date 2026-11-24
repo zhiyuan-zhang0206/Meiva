@@ -4,3 +4,4 @@
 "test_converge_otel_collector.py" = ["collector_harness.py"]
 "test_otel_port_deviation.py" = ["collector_harness.py"]
 "test_session_filelog_receivers_are_disjoint_and_bound.py" = ["collector_harness.py"]
+"test_pgbouncer_stats_receiver.py" = ["collector_harness.py"]

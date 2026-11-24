@@ -1,5 +1,6 @@
 # meiva:note
-# The Postgres and Redis receivers a gateway's collector scrapes its own data plane with.
+# The Postgres, Redis and PgBouncer-stats receivers a gateway's collector scrapes its own data plane
+# with.
 #
 # The shell in `otel_collector.py` reads the registry record, the socket path and the database
 # URL; these functions decide which receivers exist and write their config blocks. A pure
@@ -9,14 +10,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from cli.commands.observability.plans.collector.text import yaml_quote
 from cli.commands.observability.plans.url_parts import UrlParts
 
 __all__ = [
     "PEER_PLACEHOLDER",
+    "DataPlaneFragments",
     "DataPlanePlan",
     "data_plane_fragments",
+    "pgbouncer_blocks",
     "plan_data_plane_receivers",
     "postgres_receiver_block",
     "receiver_endpoint",
@@ -64,13 +68,65 @@ _REDIS_RECEIVER_BLOCK = """
     collection_interval: 60s
 """
 
+_PGBOUNCER_RECEIVER_BLOCK = """
+  # PgBouncer's per-minute `LOG stats:` line becomes two gauges: transactions
+  # per second and the average query time in microseconds. The source is the
+  # pooler's own log, not its admin console: `SHOW STATS` needs the SCRAM admin
+  # password over TCP, while the log needs no credential and carries the numbers
+  # the retired `db-write-stall-watch` schedule read (the regex mirrors
+  # schedules/plans/watch/stall_rule.py). The stall rule itself (under 20
+  # transactions/s with an average query above 300 ms for 3 minutes) lives in
+  # Grafana; the collector only emits the signal. The lines go through their own
+  # pipeline into a connector, never the main logs pipeline, so they do not
+  # reach Loki; any other log line fails the regex and is dropped quietly.
+  filelog/pgbouncer:
+    include:
+      - {log_path}
+    start_at: end
+    storage: file_storage/logoffsets
+    poll_interval: 10s
+    operators:
+      - type: regex_parser
+        on_error: drop_quiet
+        regex: '^\\d{{4}}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d\\.\\d+ \\S+ \\[\\d+\\] LOG stats: (?P<xacts>\\d+) xacts/s, \\d+ queries/s,.*?, xact \\d+ us, query (?P<query_us>\\d+) us, wait \\d+ us'
+"""
+
+_PGBOUNCER_CONNECTOR_BLOCK = """  signal_to_metrics/pgbouncer:
+    logs:
+      - name: pgbouncer.transactions
+        description: Transactions per second in the latest PgBouncer stats line.
+        unit: "{transaction}/s"
+        gauge:
+          value: Double(log.attributes["xacts"])
+      - name: pgbouncer.query_time
+        description: Average query time in the latest PgBouncer stats line.
+        unit: us
+        gauge:
+          value: Double(log.attributes["query_us"])
+"""
+
+_PGBOUNCER_PIPELINE_BLOCK = """    logs/pgbouncer:
+      receivers: [filelog/pgbouncer]
+      processors: [memory_limiter]
+      exporters: [signal_to_metrics/pgbouncer]"""
+
 
 # meiva:note
-# Which data-plane receivers this unit's collector carries.
+# Which data-plane receivers this unit's collector carries. PgBouncer's log is read on exactly the
+# units that scrape their own Postgres: both exist only where this home owns the data plane.
 @dataclass(frozen=True)
 class DataPlanePlan:
     postgres: bool
     redis: bool
+    pgbouncer: bool = False
+
+
+@dataclass(frozen=True)
+class DataPlaneFragments:
+    receivers: str = ""
+    connectors: str = ""
+    pipelines: str = ""
+    infra_receivers: str = ""
 
 
 # meiva:note
@@ -90,7 +146,8 @@ def plan_data_plane_receivers(
 ) -> DataPlanePlan:
     if roles is None or "gateway" not in roles or placeholder_db_url:
         return DataPlanePlan(postgres=False, redis=False)
-    return DataPlanePlan(postgres=otlp_enabled and not remote_plane, redis=True)
+    owned = otlp_enabled and not remote_plane
+    return DataPlanePlan(postgres=owned, redis=True, pgbouncer=owned)
 
 
 # meiva:note
@@ -128,12 +185,23 @@ def redis_receiver_block(*, endpoint: str, password: str) -> str:
     )
 
 
+def pgbouncer_blocks(*, log_path: Path) -> tuple[str, str, str]:
+    return (
+        _PGBOUNCER_RECEIVER_BLOCK.format(log_path=yaml_quote(log_path.as_posix())),
+        _PGBOUNCER_CONNECTOR_BLOCK,
+        _PGBOUNCER_PIPELINE_BLOCK,
+    )
+
+
 # meiva:note
-# The receiver blocks and the pipeline-list fragment for a plan: the text rendered into
-# `$DATA_PLANE_RECEIVERS` and `$DATA_PLANE_PIPELINE_RECEIVERS`.
+# The config fragments for a plan, in the order the infra metrics pipeline lists its receivers.
 def data_plane_fragments(
-    plan: DataPlanePlan, *, postgres_block: str, redis_block: str
-) -> tuple[str, str]:
+    plan: DataPlanePlan,
+    *,
+    postgres_block: str,
+    redis_block: str,
+    pgbouncer: tuple[str, str, str],
+) -> DataPlaneFragments:
     blocks: list[str] = []
     receivers: list[str] = []
     if plan.postgres:
@@ -142,4 +210,16 @@ def data_plane_fragments(
     if plan.redis:
         blocks.append(redis_block)
         receivers.append("redis")
-    return "".join(blocks), "".join(f", {receiver}" for receiver in receivers)
+    if not plan.pgbouncer:
+        return DataPlaneFragments(
+            receivers="".join(blocks),
+            infra_receivers="".join(f", {receiver}" for receiver in receivers),
+        )
+    receiver_block, connector_block, pipeline_block = pgbouncer
+    receivers.append("signal_to_metrics/pgbouncer")
+    return DataPlaneFragments(
+        receivers="".join([*blocks, receiver_block]),
+        connectors=connector_block,
+        pipelines=pipeline_block,
+        infra_receivers="".join(f", {receiver}" for receiver in receivers),
+    )

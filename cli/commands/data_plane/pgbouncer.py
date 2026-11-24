@@ -145,10 +145,6 @@ def userlist_path(home: Path) -> Path:
     return pooler_files.pooler_dir(home) / "userlist.txt"
 
 
-def _logfile_path(home: Path) -> Path:
-    return pooler_files.pooler_dir(home) / "pgbouncer.log"
-
-
 # meiva:note
 # The pgbouncer.ini for this cluster's pooler: the shape's values plus the facts this host
 # gives (the declared reachable address adds one bind, the default `localhost` leaves loopback
@@ -166,7 +162,7 @@ def render_ini(shape: PoolerShape, *, home: Path) -> str:
             listen_addrs=tuple(port_preflight.bind_addrs(machine=shape.machine)),
             listen_port=shape.listen_port,
             userlist_path=str(userlist_path(home)),
-            logfile=str(_logfile_path(home)),
+            logfile=str(pooler_files.logfile_path(home)),
             pidfile=str(pooler_files.pidfile_path(home)),
             max_client_conn=shape.max_client_conn,
             admin_user=POOLER_ADMIN,
@@ -431,7 +427,7 @@ def ensure_pgbouncer(spec: PoolerSpec, *, host: Host, timers: Timers) -> int:
         host=shape.machine.host(),
         bind_wait_s=spec.bind_wait_s,
         listen_port=shape.listen_port,
-        logfile=str(_logfile_path(spec.home)),
+        logfile=str(pooler_files.logfile_path(spec.home)),
     )
     run = _Run(spec, text, custodian, host, timers)
     for step in plan_convergence(observation):

@@ -215,6 +215,12 @@ fixture="$(mktemp)"
 | `meiva-ops-host-disk-watermark` | filesystem utilization | max by machine+mountpoint > 0.90, excluding read-only/optical-image filesystems and /Volumes/*, /private/tmp/*, /private/var/folders/* (Prometheus) | 15m | warning |
 | `meiva-ops-host-disk-watermark-93` | filesystem utilization | same series > 0.93 — approaching the Loki WAL hard stop (Prometheus) | 15m | warning |
 | `meiva-ops-host-disk-watermark-95` | filesystem utilization | same series > 0.95 — at the Loki WAL hard stop (Prometheus) | 5m | critical |
+| `meiva-ops-host-disk-free-low` | data-volume free bytes | min by machine of `system_filesystem_usage_bytes{state="free"}` on `/` or `/System/Volumes/Data` < 20 GiB (Prometheus) | 5m | warning |
+| `meiva-ops-host-disk-free-critical` | data-volume free bytes | same series < 10 GiB (Prometheus) | 2m | critical |
+| `meiva-ops-host-disk-draining` | hours until the volume is empty | free bytes ÷ the last hour's loss, only while the loss exceeds 8 GiB, < 6 h (Prometheus) | 10m | warning |
+| `meiva-ops-host-swap-used-high` | swap in use | sum by machine of `system_paging_usage_bytes{state="used"}` > 8 GiB (Prometheus) | 10m | warning |
+| `meiva-ops-host-swap-used-critical` | swap in use | same series > 15 GiB (Prometheus) | 5m | critical |
+| `meiva-ops-pgbouncer-write-stall` | PgBouncer per-minute stats | `pgbouncer_query_time_microseconds` > 300000 while `pgbouncer_transactions_per_second` < 20 (Prometheus) | 3m | critical |
 | `meiva-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `meiva-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
 
@@ -228,6 +234,7 @@ monotonic counters:
 | `meiva-ops-otelcol-queue-pressure` | exporter queue size/capacity | current ratio > 0.80 per machine+exporter+signal | 5m | error |
 | `meiva-ops-otelcol-enqueue-failures` | new enqueue rejections | `increase(otelcol_exporter_enqueue_failed_*_total[5m]) > 0` | 0m | error |
 | `meiva-ops-otelcol-host-silent` | recently-seen collector absent | machine seen in 24h has no `otelcol_process_uptime_total` in 5m | 0m | error |
+| `meiva-ops-otelcol-receiver-refused` | intake refusals | `increase(otelcol_receiver_refused_log_records_total[10m]) > 0` (the memory limiter refuses all three signals at once) | 10m | warning |
 
 The queue rule uses current gauges so it resolves after recovery; the reject
 rule uses a bounded counter delta so one historical drop does not keep
@@ -479,3 +486,19 @@ These rules read LGTM.
 `tests/scripts/test_alert_rules.py` checks the PromQL references in both the
 rules and the Ops dashboard against the instrument names and kinds in the
 [explicit metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.md).
+
+### Platform watchers these rules replace (R9)
+
+Before this change the second alert plane ran its own platform checks outside Grafana:
+schedules and launchd jobs that sampled a machine over ssh or tailed a log, kept their own
+state file and cooldown, and sent a message straight into an agent's inbox. A check that
+belongs to the platform is a signal plus a rule here, routed by `severity` through
+Alertmanager. Replaced, with what is *not* covered:
+
+| Watcher group | Replaced by | Not covered |
+|---|---|---|
+| macmini / company-mini free-space and rapid-drop watchers (`mm-descend-watch`, `disk-rapid-watch`, `disk-monitor`, `cm-watch`, `cm-avail-watch2`, `tier1-trigger`, the launchd disk samplers' alert half) | `host-disk-free-low`, `host-disk-free-critical`, `host-disk-draining` | per-process write attribution and the `disk17` emergency reclaim (an action, not an alert; it keeps its own trigger) |
+| swap watchers (`swap-guard-v15`, `cm-pool-watch`, `cm-mem-watch`) | `host-swap-used-high` / `-critical` (need the `paging` scraper) | kernel vm-pressure level and jetsam kills (not host_metrics signals); pageout rate has no rule yet, only the counter `system_paging_operations_total` |
+| `db-write-stall-watch` (#39) | `pgbouncer-write-stall` | none: same 3-minute judgement over the same stats line |
+| `cm-4318-probe` (#149) | `otelcol-receiver-refused`, `otelcol-host-silent` | the :4318 empty-POST reachability probe |
+| host-liveness watchers (`company-air-probe`, `mba-probe`, `monsora-sre-host-liveness-crosscheck` and its watchdogs) | `machine-offline-*`, `machine-stopped-too-long`, `health-probe-*` | an agent host that is dead while its machine's ops endpoint still answers (the heartbeat records `agent_host_online`; no rule reads it) |

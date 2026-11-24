@@ -513,7 +513,13 @@ def test_a_gateway_scrapes_its_own_data_plane_without_the_write_generations_logi
     }
     assert value_at(receivers, "redis", "endpoint") == "127.0.0.1:6380"
     assert value_at(receivers, "redis", "password") == data_plane().redis_admin_password
-    assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol", "postgresql", "redis"]
+    assert _infra_receivers(config) == [
+        "host_metrics",
+        "prometheus/otelcol",
+        "postgresql",
+        "redis",
+        "signal_to_metrics/pgbouncer",
+    ]
 
 
 def test_disabling_otlp_export_keeps_the_redis_receiver_but_drops_the_postgres_one(
@@ -577,7 +583,15 @@ def test_a_unit_that_does_not_own_the_data_plane_scrapes_only_its_host(
 
     assert "postgresql" not in mapping_at(config, "receivers")
     assert "redis" not in mapping_at(config, "receivers")
+    assert "filelog/pgbouncer" not in mapping_at(config, "receivers")
+    assert "logs/pgbouncer" not in mapping_at(config, "service", "pipelines")
+    assert "signal_to_metrics/pgbouncer" not in mapping_at(config, "connectors")
     assert "host_metrics" in mapping_at(config, "receivers")
+    assert mapping_at(config, "receivers", "host_metrics", "scrapers", "paging", "metrics") == {
+        "system.paging.usage": {"enabled": True},
+        "system.paging.operations": {"enabled": True},
+        "system.paging.faults": {"enabled": False},
+    }
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol"]
 
 

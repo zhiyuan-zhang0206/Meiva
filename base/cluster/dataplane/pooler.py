@@ -49,6 +49,10 @@ def pidfile_path(home: Path) -> Path:
     return pooler_dir(home) / "pgbouncer.pid"
 
 
+def logfile_path(home: Path) -> Path:
+    return pooler_dir(home) / "pgbouncer.log"
+
+
 def admin_reachable(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> bool:
     """Authenticate to the pooler's admin console without opening a backend.
 

@@ -5,13 +5,18 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 import yaml
 
 from cli.commands.observability.plans.collector.data_plane import (
     PEER_PLACEHOLDER,
+    DataPlaneFragments,
     DataPlanePlan,
     data_plane_fragments,
+    pgbouncer_blocks,
     plan_data_plane_receivers,
     postgres_receiver_block,
     receiver_endpoint,
@@ -66,8 +71,8 @@ def plan(
     )
 
 
-def test_a_gateway_unit_scrapes_its_own_postgres_and_redis() -> None:
-    assert plan(GATEWAY | RUNNER) == DataPlanePlan(postgres=True, redis=True)
+def test_a_gateway_unit_scrapes_its_own_postgres_redis_and_pgbouncer_stats() -> None:
+    assert plan(GATEWAY | RUNNER) == DataPlanePlan(postgres=True, redis=True, pgbouncer=True)
 
 
 @pytest.mark.parametrize(
@@ -83,7 +88,7 @@ def test_a_never_dialed_placeholder_database_url_means_no_plane_exists_yet() -> 
     assert plan(GATEWAY, placeholder=True) == DataPlanePlan(postgres=False, redis=False)
 
 
-def test_disabling_otlp_export_keeps_redis_but_not_the_postgres_receiver() -> None:
+def test_disabling_otlp_export_keeps_redis_but_not_the_home_owned_receivers() -> None:
     assert plan(GATEWAY, otlp=False) == DataPlanePlan(postgres=False, redis=True)
 
 
@@ -117,20 +122,68 @@ def test_the_redis_block_quotes_its_endpoint_and_password() -> None:
     assert block["password"] == "it's: a secret"  # noqa: S105
 
 
+def test_the_pgbouncer_blocks_read_the_stats_log_into_two_gauges() -> None:
+    receiver, connector, pipeline = pgbouncer_blocks(log_path=Path("/h/.meiva/pgbouncer/x.log"))
+    parsed = yaml.safe_load("receivers:" + receiver)["receivers"]["filelog/pgbouncer"]
+
+    assert parsed["include"] == ["/h/.meiva/pgbouncer/x.log"]
+    assert parsed["start_at"] == "end"
+    [parser] = parsed["operators"]
+    assert parser["on_error"] == "drop_quiet"
+    stats = (
+        "2026-11-24 21:51:53.269 CST [3005836] LOG stats: 77 xacts/s, 217 queries/s, 0 client "
+        "parses/s, 0 server parses/s, 0 binds/s, 1 client logins/s, in 34137 B/s, out 226849 "
+        "B/s, xact 5521 us, query 482 us, wait 0 us"
+    )
+    match = re.match(parser["regex"], stats)
+    assert match is not None
+    assert match.groupdict() == {"xacts": "77", "query_us": "482"}
+    assert (
+        re.match(parser["regex"], "2026-11-24 21:55:33.894 CST [1] LOG C-0x5: no such user") is None
+    )
+    gauges = yaml.safe_load("connectors:\n" + connector)["connectors"][
+        "signal_to_metrics/pgbouncer"
+    ]
+    assert [(entry["name"], entry["unit"]) for entry in gauges["logs"]] == [
+        ("pgbouncer.transactions", "{transaction}/s"),
+        ("pgbouncer.query_time", "us"),
+    ]
+    assert yaml.safe_load("pipelines:\n" + pipeline)["pipelines"]["logs/pgbouncer"] == {
+        "receivers": ["filelog/pgbouncer"],
+        "processors": ["memory_limiter"],
+        "exporters": ["signal_to_metrics/pgbouncer"],
+    }
+
+
 def test_the_fragments_list_blocks_and_pipeline_receivers_in_order() -> None:
+    blocks = ("[PGB]", "[CONN]", "[PIPE]")
     both = data_plane_fragments(
-        DataPlanePlan(postgres=True, redis=True), postgres_block="[PG]", redis_block="[REDIS]"
+        DataPlanePlan(postgres=True, redis=True, pgbouncer=True),
+        postgres_block="[PG]",
+        redis_block="[REDIS]",
+        pgbouncer=blocks,
     )
     redis_only = data_plane_fragments(
-        DataPlanePlan(postgres=False, redis=True), postgres_block="[PG]", redis_block="[REDIS]"
+        DataPlanePlan(postgres=False, redis=True),
+        postgres_block="[PG]",
+        redis_block="[REDIS]",
+        pgbouncer=blocks,
     )
     nothing = data_plane_fragments(
-        DataPlanePlan(postgres=False, redis=False), postgres_block="[PG]", redis_block="[REDIS]"
+        DataPlanePlan(postgres=False, redis=False),
+        postgres_block="[PG]",
+        redis_block="[REDIS]",
+        pgbouncer=blocks,
     )
 
-    assert both == ("[PG][REDIS]", ", postgresql, redis")
-    assert redis_only == ("[REDIS]", ", redis")
-    assert nothing == ("", "")
+    assert both == DataPlaneFragments(
+        receivers="[PG][REDIS][PGB]",
+        connectors="[CONN]",
+        pipelines="[PIPE]",
+        infra_receivers=", postgresql, redis, signal_to_metrics/pgbouncer",
+    )
+    assert redis_only == DataPlaneFragments(receivers="[REDIS]", infra_receivers=", redis")
+    assert nothing == DataPlaneFragments()
 
 
 def test_a_receiver_endpoint_is_the_urls_host_and_port() -> None:
@@ -350,8 +403,12 @@ def values() -> CollectorValues:
         self_metrics_port=8888,
         harness_ingress_endpoint="127.0.0.1:20702",
         local_ingress_endpoint="127.0.0.1:4318",
-        data_plane_receivers="[DP]",
-        data_plane_pipeline=", redis",
+        data_plane=DataPlaneFragments(
+            receivers="[DP]",
+            connectors="  c/x: {}\n",
+            pipelines="    logs/x: {}",
+            infra_receivers=", redis",
+        ),
         exporters="[EXPORTERS]",
         remote=NO_REMOTE_INGRESS,
     )
@@ -362,12 +419,14 @@ def test_the_template_is_filled_from_the_named_values() -> None:
         "home=$MEIVA_HOME label=$CLUSTER_LABEL machine=$MACHINE_NAME tempo=$TEMPO_ENDPOINT "
         "loki=$LOKI_BASE prom=$PROM_BASE self=$SELF_METRICS_PORT "
         "otlp=$OTLP_RECEIVER_ENDPOINT dp=$DATA_PLANE_RECEIVERS|$DATA_PLANE_PIPELINE_RECEIVERS "
+        "pipes=$DATA_PLANE_PIPELINES conn=$CONNECTORS "
         "x=$OTLP_EXPORTERS r=[$REMOTE_OTLP_RECEIVER$CLUSTER_AUTH_EXTENSION]"
     )
 
     assert render_collector_config(template, values()) == (
         'home=/h label=.meiva machine="box" tempo=http://t loki=http://l prom=http://p '
-        "self=8888 otlp=127.0.0.1:4318 dp=[DP]|, redis x=[EXPORTERS] r=[]"
+        "self=8888 otlp=127.0.0.1:4318 dp=[DP]|, redis pipes=    logs/x: {} "
+        "conn=connectors:\n  forward/harness: {}\n  c/x: {} x=[EXPORTERS] r=[]"
     )
 
 

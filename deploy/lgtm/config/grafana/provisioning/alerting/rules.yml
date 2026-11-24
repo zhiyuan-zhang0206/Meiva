@@ -4448,6 +4448,532 @@ groups:
                   query:
                     params: [C]
 
+      # ── Platform watchers → rules (R9 watch-plane migration) ──
+      # Free bytes on the volume that holds $MEIVA_HOME ("/" on Linux, "/System/Volumes/Data"
+      # on macOS, where "/" reports the same container and is folded in by `min by (machine)`).
+      # The utilization watermarks above judge a fraction; on a 228 GiB Mac 90% is 23 GiB left,
+      # on a 2 TB disk it is 200 GiB, so the fraction cannot say "the machine is about to run
+      # out". The macmini and company-mini ssh watchers (#112 #115 #116 #118 #119 #156 #159 and
+      # the launchd disk watchers) all reduced to this one number; 20 GiB is the highest line
+      # they carried (company-mini d20, macmini disk-rapid 20 GiB); the 8-day replay crosses it
+      # only on the real incidents (company-mini 11-18, min 11.6 GiB; macmini 11-20, min 16.7 GiB). On macOS the swap pool lives
+      # on this volume, so a growing pool already shows up here as lost free space.
+      - uid: meiva-ops-host-disk-free-low
+        title: "Data volume free space below 20 GiB"
+        condition: D
+        for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-host-disk-free-low
+          metric: host_disk_free
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} has {{ $values.C }} GiB free on its data volume (threshold 20)"
+          description: >-
+            The data volume on {{ $labels.machine }} has {{ $values.C }} GiB free for 5
+            minutes. Find the consumer first (Grafana /grafana/d/meiva-ops-main, "Host &
+            data plane"; on macOS also the swap pool: `sysctl vm.swapusage`), then prune
+            or move it. The critical tier fires below 10 GiB.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"}) / 2^30, 0.1)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [20]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # The brake line: macmini's disk17 guard braked at 10 GiB and reclaimed at 5 GiB, and
+      # below 10 GiB a build or a swap-pool growth step can finish the volume within minutes.
+      # The reclaim action itself stays with its owner; only the trigger moved here.
+      - uid: meiva-ops-host-disk-free-critical
+        title: "Data volume free space below 10 GiB"
+        condition: D
+        for: 2m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          ruleUID: meiva-ops-host-disk-free-critical
+          metric: host_disk_free
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} has {{ $values.C }} GiB free on its data volume (critical threshold 10)"
+          description: >-
+            The data volume on {{ $labels.machine }} is down to {{ $values.C }} GiB
+            free. Writes fail below zero, and on macOS a growing swap pool takes space
+            from the same volume. Free space now: stop the heaviest writer or remove
+            rebuildable caches.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"}) / 2^30, 0.1)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [10]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # One concept: hours until the volume is empty at the last hour's drain. It only exists
+      # while the volume lost more than 8 GiB in the last hour (company-mini's tier-1 trigger,
+      # #156), so a large idle disk and ordinary churn stay silent. Replayed on 8 days of
+      # Prometheus history (2026-11-17 to 11-24): it fires on the company-mini 15 GiB/h drop of
+      # 11-18 20:02 and on macbook-air's 17 GiB/h drop of 11-19 07:24, and on ubuntu's nightly
+      # ~03:20 dip while ubuntu had only ~50 GiB free (it has 160 GiB+ now, which keeps the
+      # projected time above 6 h).
+      - uid: meiva-ops-host-disk-draining
+        title: "Data volume will be full within 6 hours at the current drain"
+        condition: D
+        for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-host-disk-draining
+          metric: host_disk_draining
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} data volume is full in {{ $values.C }} h at the current drain"
+          description: >-
+            The data volume on {{ $labels.machine }} lost more than 8 GiB in the last
+            hour and, at that rate, is empty in {{ $values.C }} hours. Find what is
+            writing before the static free-space tiers (20 GiB, 10 GiB) fire.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(
+                  min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"})
+                  / (min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"} offset 1h) - min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"}))
+                  and on (machine) (min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"} offset 1h) - min by (machine) (system_filesystem_usage_bytes{machine!="", state="free", mountpoint=~"/|/System/Volumes/Data"})) > 8 * 2^30,
+                  0.1
+                )
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 3900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [6]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # Swap actually in use, from the host_metrics paging scraper. Two tiers on the absolute figure,
+      # because swap size, unlike a ratio, does not depend on the machine's RAM class: both
+      # 16 GiB Macs (macmini, company-mini) are visibly slow by 8 GiB in use (#6111), and 15 GiB
+      # is the critical line the macmini swap guard and the company-mini pool watcher carried
+      # (USED_LINE_MB = 15360). The scraper is new on every machine with this change: the rule
+      # has no history behind it, so the thresholds are the owners', not a recalibration.
+      # Kernel vm-pressure level and jetsam kills are not host_metrics signals and are not covered.
+      - uid: meiva-ops-host-swap-used-high
+        title: "Host swap in use above 8 GiB"
+        condition: D
+        for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-host-swap-used-high
+          metric: host_swap
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} is using {{ $values.C }} GiB of swap (threshold 8)"
+          description: >-
+            {{ $labels.machine }} has held {{ $values.C }} GiB of swap in use for 10
+            minutes. A memory-bound workload is paging; see which agent hosts or
+            harness CLIs hold the most resident memory and stop or restart the
+            heaviest. On macOS the swap pool also eats the data volume, so watch the
+            free-space rules too.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(sum by (machine) (system_paging_usage_bytes{machine!="", state="used"}) / 2^30, 0.1)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [8]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # The pool-size line: at 15 GiB in use the machine is thrashing, not just paging.
+      - uid: meiva-ops-host-swap-used-critical
+        title: "Host swap in use above 15 GiB (critical)"
+        condition: D
+        for: 5m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          ruleUID: meiva-ops-host-swap-used-critical
+          metric: host_swap
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} is using {{ $values.C }} GiB of swap (threshold 15)"
+          description: >-
+            {{ $labels.machine }} has had {{ $values.C }} GiB of swap in use for
+            5 minutes: on a 16 GiB Mac that is a thrashing machine, not a paging
+            one. Stop or restart the heaviest resident agent hosts or harness
+            CLIs now; on macOS the swap pool also eats the data volume.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                round(sum by (machine) (system_paging_usage_bytes{machine!="", state="used"}) / 2^30, 0.1)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [15]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # The database write-stall sentinel (#39, schedule db-write-stall-watch), moved from a
+      # per-minute schedule that tailed pgbouncer.log and paged agents to a rule over the same
+      # numbers: the collector parses PgBouncer's per-minute stats line into two gauges. The
+      # judgement is unchanged: under 20 transactions/s while the average query takes over
+      # 300 ms, three minutes running. Over 29 days (40,375 minutes) that judgement marked only
+      # the two real incidents and no quiet night (stall_rule.py). It is the root-cause signal
+      # that an agent-host crash wave follows, which neither `db-pool-acquire-slow` nor
+      # `pg-connection-saturation` catches (0 firings in 30 days). noData stays OK: a cluster
+      # that turned PgBouncer off (MEIVA_PGBOUNCER_ENABLED=false) has no series.
+      - uid: meiva-ops-pgbouncer-write-stall
+        title: "PgBouncer write path stalled"
+        condition: D
+        for: 3m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          ruleUID: meiva-ops-pgbouncer-write-stall
+          metric: pgbouncer_write_stall
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} PgBouncer stalled: under 20 xacts/s at {{ $values.C }} us average query"
+          description: >-
+            PgBouncer on {{ $labels.machine }} has completed fewer than 20
+            transactions per second at an average query time of {{ $values.C }}
+            microseconds (threshold 300000) for three minutes. This is the database
+            write path stalling; agent-host crashes follow it. Check host memory and
+            the largest cgroup units (~/.meiva/logs/host-memory.jsonl) and Postgres
+            itself.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                max by (machine) (
+                  (pgbouncer_query_time_microseconds{machine!=""} > 300000)
+                  and on (machine)
+                  (pgbouncer_transactions_per_second{machine!=""} < 20)
+                )
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # The collector's own receiver refused data: its memory_limiter returns retryable
+      # backpressure and each SDK drops what it cannot resend. The enqueue-failure rule above
+      # watches the exporter side; this is the intake side that the company-mini 4318 probe
+      # (#149) scraped by hand. Refused counters are monotonic: `increase` is load-bearing.
+      # The memory limiter refuses logs, metrics and traces at the same moment (one process
+      # memory reading), so the log counter stands for all three. One selector over the three
+      # names cannot work: `increase` drops __name__ and the OTLP receiver's series would
+      # then collide on (machine, receiver, transport).
+      - uid: meiva-ops-otelcol-receiver-refused
+        title: "OTel Collector receiver refusing telemetry"
+        condition: D
+        for: 10m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-otelcol-receiver-refused
+          metric: otelcol_receiver_refused
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} collector refused {{ $values.C }} log records in 10m"
+          description: >-
+            The OTel Collector on {{ $labels.machine }} refused {{ $values.C }} log
+            records in the last 10 minutes (its memory limiter refuses metrics
+            and traces at the same moment) and has refused data for 10 minutes
+            running, so agent processes on that machine are losing telemetry. The usual cause is its memory limiter (512 MiB): check
+            the collector's RSS and the exporter queues.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                sum by (machine) (increase(otelcol_receiver_refused_log_records_total{machine!=""}[10m]))
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
   - orgId: 1
     name: meiva-ops-slow
     folder: Meiva

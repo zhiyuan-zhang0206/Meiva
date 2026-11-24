@@ -9,7 +9,11 @@ Meiva code participates and a box with no agents running still reports.
 
 - `host_metrics`, on every **collector-bearing** machine, every 30 s — cpu (utilization ratio
   only; the per-core cumulative `system.cpu.time` is disabled), load, memory,
-  disk, filesystem, network.
+  paging, disk, filesystem, network. Paging exports `system_paging_usage_bytes`
+  (swap `state` used/free) and the cumulative `system_paging_operations_total`
+  (`direction` page_in/page_out, `type`); per-fault counters are disabled.
+  macOS swap is a self-growing pool of files on the data volume, so the Grafana
+  host rules read swap used and the page-out rate from these.
 - `prometheus/otelcol`, on every **collector-bearing** machine, every 30 s from the collector's
   loopback self-metrics endpoint — exporter queue size/capacity, enqueue
   failure counters and process uptime. Its port is per-unit configurable via
@@ -28,10 +32,18 @@ Meiva code participates and a box with no agents running still reports.
   receiver. Redis authenticates with the gateway-local Redis-admin password,
   which is also its `requirepass`. A pure agent-runner's URLs point at the
   GATEWAY's data plane, so rendering those receivers there would only duplicate
-  the gateway's series — `_data_plane_receivers` in
+  the gateway's series — `_data_plane_fragments` in
   `cli/commands/observability/otel_collector.py` omits them, and the rendered config is 0600
   because it carries the Redis admin password (and, on split units, the
   telemetry token).
+
+- `filelog/pgbouncer` → `signal_to_metrics/pgbouncer`, on the same gateway-capable,
+  home-owned-plane units as the Postgres receiver: the pooler's per-minute
+  `LOG stats:` line becomes the gauges `pgbouncer_transactions_per_second` and
+  `pgbouncer_query_time_microseconds` (latest line wins). It reads the log, not
+  the admin console, so no credential is involved; the lines go through their own
+  logs pipeline and never reach Loki. The write-stall rule on these gauges lives in
+  Grafana (it replaced the `db-write-stall-watch` schedule).
 
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised
