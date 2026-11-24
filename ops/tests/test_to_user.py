@@ -277,7 +277,8 @@ def test_a_range_the_server_may_ignore_answers_the_whole_file(
     clip_file: Path, tmp_path: Path, header: str
 ) -> None:
     status, body, _, headers = _range_answer(clip_file, header, tmp_path)
-    assert (status, body, headers) == (200, CLIP, {})
+    assert (status, body) == (200, CLIP)
+    assert "Content-Range" not in headers
 
 
 def test_a_read_without_a_range_streams_the_whole_file(clip_file: Path, tmp_path: Path) -> None:

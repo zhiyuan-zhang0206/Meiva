@@ -170,9 +170,9 @@ async def test_one_connection_serves_many_requests_including_a_pipelined_pair() 
         assert (await _read_reply(reader))[2] == b"echo:a"
         assert (await _read_reply(reader))[2] == b"echo:b"
         writer.write(_request("/boom"))
-        assert (await _read_reply(reader))[0] == 500
-        writer.write(_request("/echo", body=b"after"))
-        assert (await _read_reply(reader))[2] == b"echo:after"
+        status, headers, _ = await _read_reply(reader)
+        assert (status, headers["connection"]) == (500, "close")
+        assert await _at_eof(reader)
         writer.close()
 
 
@@ -264,12 +264,13 @@ async def test_closing_the_server_ends_idle_connections_promptly() -> None:
 async def test_a_response_that_left_a_request_body_unread_closes_the_connection() -> None:
     async with _serving({("POST", "/echo"): _echo}) as (_, port):
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        writer.write(_request("/nowhere"))
+        writer.write(_request("/healthz", method="GET"))
         status, headers, _ = await _read_reply(reader)
-        assert (status, headers["connection"]) == (404, "keep-alive")
-        writer.write(_request("/nowhere", body=b"GET /healthz HTTP/1.1\r\n\r\n"))
+        assert (status, headers["connection"]) == (200, "keep-alive")
+        smuggled = b"GET /healthz HTTP/1.1\r\n\r\n"
+        writer.write(_request("/healthz", method="GET", body=smuggled))
         status, headers, _ = await _read_reply(reader)
-        assert (status, headers["connection"]) == (404, "close")
+        assert (status, headers["connection"]) == (200, "close")
         assert await _at_eof(reader)
         writer.close()
 
@@ -281,6 +282,12 @@ async def test_a_response_that_left_a_request_body_unread_closes_the_connection(
         "Transfer-Encoding: chunked\r\n",
         "Content-Length: 5\r\n",
         "X-Fold: a\nb: c\r\n",
+        "Content-Length : 5\r\n",
+        "Transfer-Encoding : chunked\r\n",
+        "X-Folded: a\r\n Content-Length: 5\r\n",
+        "X-Folded: a\r\n\tTransfer-Encoding: chunked\r\n",
+        "no-colon-here\r\n",
+        "Bad Name: x\r\n",
     ],
 )
 async def test_ambiguous_framing_is_refused_and_nothing_after_it_is_executed(
@@ -304,7 +311,7 @@ async def test_ambiguous_framing_is_refused_and_nothing_after_it_is_executed(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("declared", ["abc", "-5", "1_0", " ", "1.5"])
+@pytest.mark.parametrize("declared", ["abc", "-5", "1_0", " ", "1.5", "9" * 5000])
 async def test_a_malformed_content_length_is_refused(declared: str) -> None:
     async with _serving({("POST", "/echo"): _echo}) as (_, port):
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
@@ -333,5 +340,43 @@ async def test_a_truncated_request_body_ends_the_connection() -> None:
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.write(b"POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\nshort")
         writer.write_eof()
+        assert await _at_eof(reader)
+        writer.close()
+
+
+@pytest.mark.asyncio
+async def test_a_not_modified_answer_names_its_status_and_keeps_the_connection() -> None:
+    async def route(_body: bytes) -> tuple[int, bytes, str, dict[str, str]]:
+        return 304, b"", "application/octet-stream", {"ETag": '"v1"'}
+
+    async with _serving({("POST", "/cached"): route, ("POST", "/echo"): _echo}) as (_, port):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(_request("/cached"))
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5)
+        assert head.startswith(b"HTTP/1.1 304 Not Modified\r\n")
+        assert b'ETag: "v1"' in head
+        writer.write(_request("/echo", body=b"after"))
+        assert (await _read_reply(reader))[2] == b"echo:after"
+        writer.close()
+
+
+@pytest.mark.asyncio
+async def test_any_connection_header_naming_close_ends_the_connection() -> None:
+    async with _serving({("POST", "/echo"): _echo}) as (_, port):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(_request("/echo", extra="Connection: keep-alive\r\nConnection: close\r\n"))
+        status, headers, _ = await _read_reply(reader)
+        assert (status, headers["connection"]) == (200, "close")
+        assert await _at_eof(reader)
+        writer.close()
+
+
+@pytest.mark.asyncio
+async def test_an_error_answer_never_keeps_the_connection() -> None:
+    async with _serving({("POST", "/echo"): _echo}, keep_alive=KeepAlive()) as (_, port):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(_request("/nowhere"))
+        status, headers, _ = await _read_reply(reader)
+        assert (status, headers["connection"]) == (404, "close")
         assert await _at_eof(reader)
         writer.close()

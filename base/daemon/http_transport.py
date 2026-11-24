@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import math
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import BinaryIO
@@ -39,6 +40,8 @@ RouteAnswer = (
 )
 ServedRoute = Callable[[bytes], Awaitable[RouteAnswer]]
 _MAX_BODY_BYTES = 64 * 1024
+_FIELD_NAME = re.compile(rb"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_MAX_LENGTH_DIGITS = 18
 _log = logging.getLogger("base.daemon.http_transport")
 
 # meiva:link base/daemon/docs/http-transport.md
@@ -50,6 +53,7 @@ _POLL_S = 1.0
 _REASONS = {
     200: "OK",
     206: "Partial Content",
+    304: "Not Modified",
     400: "Bad Request",
     401: "Unauthorized",
     404: "Not Found",
@@ -113,8 +117,13 @@ class _Request:
     def wants_keep_alive(self) -> bool:
         if self.version != "HTTP/1.1":
             return False
-        tokens = (_header_value(self.header_lines, b"connection") or "").lower().split(",")
-        return "close" not in (token.strip() for token in tokens)
+        tokens = (
+            token.strip().lower()
+            for line in self.header_lines[1:]
+            if line.lower().startswith(b"connection:")
+            for token in line.split(b":", 1)[1].decode("latin-1").split(",")
+        )
+        return "close" not in tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +148,17 @@ def _header_value(header_lines: list[bytes], name: bytes) -> str | None:
     return None
 
 
+def _refuse_ambiguous_lines(header_lines: list[bytes]) -> None:
+    if any(b"\n" in line or b"\r" in line for line in header_lines):
+        raise _BadFramingError("a bare line feed or carriage return in the header")
+    for h in header_lines[1:]:
+        name, colon, _ = h.partition(b":")
+        if h and not (colon and _FIELD_NAME.fullmatch(name)):
+            raise _BadFramingError("a header line without a token name before the colon")
+        if name.lower() == b"transfer-encoding":
+            raise _BadFramingError("Transfer-Encoding is not supported")
+
+
 def _content_length(header_lines: list[bytes]) -> int:
     """Declared body size: 0 when absent.
 
@@ -147,18 +167,17 @@ def _content_length(header_lines: list[bytes]) -> int:
     transport does not decode) raises `_BadFramingError`: guessing "no body" would leave the
     body's bytes in the stream to be read as the next request, which on a reused connection is
     request smuggling."""
-    if any(b"\n" in line or b"\r" in line for line in header_lines):
-        raise _BadFramingError("a bare line feed or carriage return in the header")
-    declared: list[bytes] = []
-    for h in header_lines[1:]:
-        lowered = h.lower()
-        if lowered.startswith(b"transfer-encoding:"):
-            raise _BadFramingError("Transfer-Encoding is not supported")
-        if lowered.startswith(b"content-length:"):
-            declared.append(h.split(b":", 1)[1].strip())
+    _refuse_ambiguous_lines(header_lines)
+    declared = [
+        h.split(b":", 1)[1].strip()
+        for h in header_lines[1:]
+        if h.lower().startswith(b"content-length:")
+    ]
     if not declared:
         return 0
-    if len(declared) > 1 or not (declared[0].isascii() and declared[0].isdigit()):
+    if len(declared) > 1 or len(declared[0]) > _MAX_LENGTH_DIGITS:
+        raise _BadFramingError("Content-Length must be one decimal number")
+    if not (declared[0].isascii() and declared[0].isdigit()):
         raise _BadFramingError("Content-Length must be one decimal number")
     return int(declared[0])
 
@@ -307,6 +326,7 @@ def _reusable(request: _Request, response: _Response, served: _Served, *, nth: i
     keep_alive = served.keep_alive
     return (
         keep_alive is not None
+        and response.status < 400
         and nth + 1 < keep_alive.max_requests
         and served.serving()
         and request.wants_keep_alive

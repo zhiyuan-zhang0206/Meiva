@@ -36,8 +36,11 @@ with a body), when the file body ended short, and when the server stops serving
 (`server.close()` ends idle connections within a second). Framing a second parser
 could read differently is refused with `400` and the connection closed, because on
 a reused connection the leftover bytes would be parsed as the next request: any
-`Transfer-Encoding`, a repeated or non-numeric `Content-Length`, and a line ending
-other than CRLF. `/healthz` probers and every other caller keep `Connection: close`.
+`Transfer-Encoding`, a repeated, non-numeric or over-long `Content-Length`, a line
+ending other than CRLF, and a header line whose name before the colon is not an RFC 9110
+token (a space before the colon, an obs-fold continuation line, no colon at all).
+Only a response below 400 keeps the connection, so an unauthenticated or failing client
+never holds an idle connection, and any `Connection` header naming `close` ends it. `/healthz` probers and every other caller keep `Connection: close`.
 The SIGTERM drain of agent-ops covers route execution, not the streaming of a body
 that follows it: a transfer still running at exit is cut and the client's
 `Content-Length` check reports it.
