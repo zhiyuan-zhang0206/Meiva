@@ -2513,6 +2513,84 @@ groups:
                   query:
                     params: [C]
 
+      # ── meiva-ops-agent-host-down: a machine whose ops server answers while its agent host is dead ──
+      # The liveness pass emits `machine_agent_host_down` every pass in which the status_probe
+      # succeeded but the machine reported its agent host as not running. The probe rules above
+      # cannot see it (the probe succeeded) and an announced stop is out of the target set, so
+      # a half-up machine, where no agent can run, was silent. The event repeats every pass;
+      # 3m is the debounce (a rollout restart of the host is shorter), and the same load grading
+      # as the offline rules leaves out a machine that carries nothing. It resolves when the
+      # host process is back and the stream goes idle.
+      - uid: meiva-ops-agent-host-down
+        title: "Agent host down on a reachable machine"
+        condition: D
+        for: 3m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: meiva-ops-agent-host-down
+          metric: agent_host_down
+          team: meiva-ops
+        annotations:
+          summary: "machine {{ $labels.attributes_machine }} answers but its agent host is not running"
+          description: >-
+            The ops server of {{ $labels.attributes_machine }} answers the liveness probe but reports
+            its agent host as not running (machine_agent_host_down events), so no agent on it can run
+            and `machine-offline` stays silent. Check the host's pidfile and `meiva cluster status`;
+            restart the unit with `meiva start` on that machine.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_machine) (count_over_time({service_name="unknown_service",
+                event_name="machine_agent_host_down"} | json | cluster=".meiva" | category="telemetry" |
+                (attributes_carries_service = "true" or attributes_agent_count > 0 or
+                attributes_agent_count = "") [5m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
       # ── meiva-ops-exec-child-boot-failed: replaces agent/graph/exec/_alerts.py maybe_alert_exec_boot_failure (POST /api/alerts, source agent-exec, per-agent 600s rate limit) ──
       - uid: meiva-ops-exec-child-boot-failed
         title: "Exec child boot failed"

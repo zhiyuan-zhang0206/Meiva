@@ -122,6 +122,12 @@ class MachineProbeFailed(TypedDict):
     carries_service: bool
 
 
+class MachineAgentHostDown(TypedDict):
+    machine: str
+    agent_count: int | None
+    carries_service: bool
+
+
 # meiva:note
 # `machine_stopped_too_long` payload — services/wake/heartbeat/liveness.py: one
 # event per liveness pass (~60s) for each host whose announced stop is older
@@ -266,6 +272,13 @@ EVENTS: dict[str, EventSpec] = {
         "machine_probe_failed",
         "agent-runner machine unreachable — one event per failed liveness probe",
         payload=MachineProbeFailed,
+        tier="anomaly",
+        site="services/wake/heartbeat/liveness.py:_record_probe (positional emit)",
+    ),
+    "machine_agent_host_down": telemetry_event(
+        "machine_agent_host_down",
+        "machine answers its status probe but its agent host is not running — one event per liveness pass",
+        payload=MachineAgentHostDown,
         tier="anomaly",
         site="services/wake/heartbeat/liveness.py:_record_probe (positional emit)",
     ),

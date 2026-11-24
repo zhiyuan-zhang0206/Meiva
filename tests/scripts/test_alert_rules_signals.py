@@ -45,6 +45,7 @@ SIGNALS: dict[str, Signal] = {
         "machine_probe_failed", "meiva-ops", "3m", "warning"
     ),
     "meiva-ops-machine-offline-error": Signal("machine_probe_failed", "meiva-ops", "10m", "error"),
+    "meiva-ops-agent-host-down": Signal("machine_agent_host_down", "meiva-ops", "3m", "error"),
     "meiva-ops-machine-stopped-too-long": Signal(
         "machine_stopped_too_long", "meiva-ops", "0m", "error"
     ),
