@@ -65,6 +65,8 @@ class WorkspaceFileRequest(BaseModel):
     mode: Literal["content", "raw", "list"]
     custom_cwd: str | None = None
     byte_range: str | None = Field(default=None, max_length=256)
+    if_none_match: str | None = Field(default=None, max_length=1024)
+    if_range: str | None = Field(default=None, max_length=256)
     # meiva:note
     # The values of `base.config.domains.to_user.FileAccess`, spelled out: the models stay importable
     # without the config layer (and `pydantic_settings`), which the exec child's lite boot must not load.

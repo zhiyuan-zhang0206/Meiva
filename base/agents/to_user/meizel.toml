@@ -1,13 +1,15 @@
 exports = ["delivery", "document.py", "errors.py", "limits.py", "models.py", "resources.py"]
 
 [uses]
-"__init__.py" = ["document.py", "errors.py", "limits.py", "models.py", "resources.py"]
+"__init__.py" = ["document.py", "errors.py", "limits.py", "models.py", "resources.py", "validators.py"]
 "document.py" = ["limits.py", "models.py", "resources.py"]
 "limits.py" = []
 "resources.py" = ["errors.py", "limits.py", "models.py"]
+"validators.py" = []
 
 [purity]
 "models.py" = "strict"
+"validators.py" = "strict"
 
 [debt.ambient-read]
 "resources.py#home pathlib.Path.expanduser" = { count = 1, owner = "#5816", until = "waits for the ops path to carry a user home: the agent rendering path resolves ~ against require_user_home() while ops/to_user.py has no user home in hand, so the expanduser() fallback stays for the one caller that cannot answer" }

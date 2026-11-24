@@ -18,11 +18,21 @@ from base.agents.to_user.models import (
     WorkspaceFileResponse,
 )
 from base.agents.to_user.resources import read_resource, resolve_file
+from base.agents.to_user.validators import (
+    CACHE_CONTROL,
+    FileValidators,
+    file_validators,
+    not_modified,
+    range_applies,
+    validator_headers,
+)
 
 __all__ = [
+    "CACHE_CONTROL",
     "DOCUMENT_FILENAME",
     "ONGOING_FILENAME",
     "FileRoot",
+    "FileValidators",
     "OngoingDocument",
     "ToUserDocument",
     "ToUserFileTooLarge",
@@ -34,6 +44,9 @@ __all__ = [
     "WorkspaceFileRequest",
     "WorkspaceFileResponse",
     "ensure_document",
+    "file_validators",
+    "not_modified",
+    "range_applies",
     "read_document",
     "read_failure",
     "read_ongoing",
@@ -41,4 +54,5 @@ __all__ = [
     "resolve_file",
     "to_user_limits",
     "to_user_limits_from_agent",
+    "validator_headers",
 ]

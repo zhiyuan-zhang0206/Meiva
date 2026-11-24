@@ -153,6 +153,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `alerts` | alert webhook heartbeat — epoch seconds of the last watchdog alert the webhook accepted | noise | last_ingest_timestamp_seconds | — | events | — |
 | `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events | ✓ |
 | `staged_upload_received` | one staged-upload request finished: body bytes, body receive time, entry path (Cloudflare colo or direct), status | noise | route, status, body_bytes, content_length, receive_ms, after_ms, total_ms, via_cloudflare, cf_colo, cf_connecting_ip, host | — | events | — |
+| `workspace_file_served` | one workspace file raw read finished: status, range, bytes, time to headers and to the last body byte, forwarded or local, entry path | noise | status, range, conditional, remote, body_bytes, content_length, completed, ttfb_ms, upstream_ms, body_ms, total_ms, via_cloudflare, cf_colo, host | — | events | — |
 | `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events | — |
 | `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events | — |
 | `gateway_event_loop` | gateway event-loop maximum callback lag and slow ticks (60s window) | noise | lag_ms, slow_ticks | — | events | — |

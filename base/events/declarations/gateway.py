@@ -86,6 +86,23 @@ class StagedUploadReceived(TypedDict):
     host: str | None
 
 
+class WorkspaceFileServed(TypedDict):
+    status: int
+    range: str | None
+    conditional: bool
+    remote: bool
+    body_bytes: int
+    content_length: int | None
+    completed: bool
+    ttfb_ms: float | None
+    upstream_ms: float | None
+    body_ms: float | None
+    total_ms: float
+    via_cloudflare: bool
+    cf_colo: str | None
+    host: str | None
+
+
 class SseLifecycle(TypedDict):
     """`sse` payload — one established or closed gateway stream."""
 
@@ -247,6 +264,14 @@ EVENTS: dict[str, EventSpec] = {
         payload=StagedUploadReceived,
         tier="noise",
         site="gateway/upload_delivery/receipt.py:_emit telemetry.emit(attributes=...)",
+    ),
+    "workspace_file_served": telemetry_event(
+        "workspace_file_served",
+        "one workspace file raw read finished: status, range, bytes, time to headers and to the "
+        "last body byte, forwarded or local, entry path",
+        payload=WorkspaceFileServed,
+        tier="noise",
+        site="gateway/agents/to_user/raw_receipt.py:RawReceipt.emit telemetry.emit(attributes=...)",
     ),
     "sse": telemetry_event(
         "sse",

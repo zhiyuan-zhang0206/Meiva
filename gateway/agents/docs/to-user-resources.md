@@ -85,6 +85,55 @@ ranges, another unit), gets the whole file under `max_resource_bytes`; so does a
 raw read whose runner predates `byte_range` or `file_access` and refuses it (it is
 asked again as that runner knows it, within workspace reach).
 
+### Caching a raw read
+
+A raw answer is cacheable exactly when it can be revalidated. The machine that
+holds the file stats it once and derives a strong `ETag`
+(`"<size hex>-<mtime_ns hex>"`; the content is never read to name it) and a
+`Last-Modified` from `(size, mtime_ns)` alone
+(`base/agents/to_user/validators.py`); a runner stamps them on its answer and the
+gateway relays them, so the same file has the same tag whichever way it is
+served. With validators the response is `Cache-Control: private, no-cache`:
+`private` keeps a shared proxy or CDN from storing workspace data, and `no-cache`
+lets the browser keep what it fetched and ask again before each reuse, so a
+replay, a seek or a return to the file costs one stat and a `304`, not a
+cross-machine transfer of the whole file. It is `no-cache`, not a `max-age`,
+because a file an agent rewrites, or a session that was revoked, must take effect
+on the next request. A runner that predates validators sends none, and the
+gateway then answers `no-store` rather than invent them.
+
+The validators are taken from one stat made before any byte is read, so a file
+rewritten between the stat and the read is tagged with its older version and
+merely revalidates once more, never the reverse (new bytes under an old tag are
+harmless; old bytes under a new tag would be cached as current). The gateway
+host and the runner apply the same rules (`not_modified`, `range_applies`); a
+`FileResponse` served locally is told to ignore its `Range` when `If-Range`
+names another version, because Starlette would also accept a date there.
+
+The browser's `If-None-Match` and `If-Range` travel to the machine that holds the
+file (`WorkspaceFileRequest.if_none_match` / `if_range`), which decides them
+before reading a byte:
+
+- A matching `If-None-Match` (weak comparison, a list, or `*`) is answered `304`
+  with the validators and no body, with or without a `Range`.
+- `If-Range` keeps a `Range` answer only on an exact match with the current
+  strong tag. A stale tag, a date or a weak tag drops the range and answers the
+  whole current file with `200`, so slices of two versions are never stitched
+  together.
+
+### Per-request receipt
+
+Each `files/raw` request leaves one `workspace_file_served` event
+(`gateway/agents/to_user/raw_receipt.py`; `gateway_latency` only times the
+response headers). It records `status`, a normalized `range` (`bytes=<n>-<n>` or
+`other`), `conditional`, `remote` (read forwarded to another machine),
+`body_bytes` and `content_length`, `completed` (the last chunk was accepted),
+`ttfb_ms`, `upstream_ms` (the owning runner's share of it), `body_ms`,
+`total_ms`, and the public path (`via_cloudflare`, `cf_colo`, the server-side
+`host`). Refused requests are included with their status. It never carries a
+path, file name, agent id, client address, token or cookie, and it is an event
+rather than a metric label so that nothing per-request becomes a series.
+
 ## Workspace browsing
 
 `GET /api/agents/{id}/files/list?path=<dir>` lists one directory for the panel's

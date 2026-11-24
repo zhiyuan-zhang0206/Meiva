@@ -3,7 +3,7 @@
 
 import pytest
 
-from gateway.upload_delivery.ingress import UploadIngress, classify_ingress
+from gateway.http.ingress import UploadIngress, classify_ingress
 
 
 def test_a_cloudflare_request_keeps_only_the_edge_code_and_presence_flags() -> None:

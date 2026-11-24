@@ -22,7 +22,7 @@ from starlette.types import Message, Receive
 
 from base import telemetry
 from gateway.http.config import gateway_clock
-from gateway.upload_delivery.ingress import classify_ingress
+from gateway.http.ingress import classify_ingress
 
 __all__ = ["StagedUploadRoute"]
 
