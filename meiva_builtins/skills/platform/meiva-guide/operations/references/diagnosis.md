@@ -4,6 +4,15 @@ Read this reference only for the task or mode selected by the skill entrypoint.
 Run command examples from the original skill directory unless they specify
 another working directory.
 
+## Observe first
+
+Before the per-symptom checks below, establish what the cluster recorded for the affected
+agent, machine or service in the window, from any machine and without ssh:
+`meiva events ls --machine <m> --agent <id> --hours 6`, then the Loki window and the trace
+for any `trace_id` it shows ([troubleshooting](../../troubleshooting/SKILL.md)). Only then read
+`netstat`/`lsof`, `ps` and log files on the host; a check that finds nothing in one store
+(events are Postgres only; Loki has no DEBUG) does not show the thing did not happen.
+
 ## Diagnosis playbooks
 
 Each playbook: symptoms → checks → likely causes → response. The cases are

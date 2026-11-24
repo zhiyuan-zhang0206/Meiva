@@ -863,15 +863,20 @@ there, not a special case in code.
 
 ## Logging / diagnostics
 
-Where to look when something went wrong on a host:
+Where to look when something went wrong, in this order (the
+[troubleshooting skill](../../meiva_builtins/skills/platform/meiva-guide/troubleshooting/SKILL.md)
+has the commands). Observability first: it covers every machine at once; local files only
+answer what it cannot.
 
 | Question | Surface |
 |---|---|
-| what did daemon X do | `$MEIVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
-| what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
+| what did the cluster do (an agent, a machine, an alert), without ssh | `meiva events ls --agent <id> --machine <m> --hours N` (the alert message carries this command; also `GET /api/cluster/admin/events` over the private network). Postgres: persisted events and warning-or-higher only |
+| the whole INFO stream of one agent or machine, any machine | Loki (84 hours, no DEBUG): `{agent_id=..}`, `{machine=..}`, then `\| trace_id=".."`; reachable from every machine through the gateway's Grafana datasource proxy |
+| what a traced stretch did, its timing and cross-service hops | Tempo, by `trace_id` or `span.meiva.agent_id`; Claude Code / Codex native spans carry `resource.meiva.agent_id` |
+| raw session stdout (gateway / shells / daemons / schedules) | Loki: shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
+| what did daemon X do, including DEBUG, or a daemon that died before it shipped | `$MEIVA_HOME/logs/<name>.log` on that machine (JSONL, rotated 100MB / 7 days; rotations are named by their start time, lines carry the machine's local time, events and Loki are UTC) |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | an agent's exec subprocesses | `$MEIVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
-| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
 ### Is this process supervised, and by which home?
 

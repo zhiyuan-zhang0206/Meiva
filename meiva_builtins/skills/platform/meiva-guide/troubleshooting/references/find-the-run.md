@@ -132,7 +132,7 @@ GET /api/agents/{agent_id}/messages
 Bearer `MEIVA_API_TOKEN` (or, on the gateway, `MEIVA_CLUSTER_SECRET`) when the
 cluster authenticates; gateway is on port 8000.
 `pruned: true` is the trimmed-checkpoint shape, not an error; 404 means the
-agent is gone. `scripts/read_trace.py --with-content` calls this for you.
+agent is gone. `read_trace.py --with-content` (inspect-a-trace scripts) calls this for you.
 
 ## The Postgres `events` archive is gone
 

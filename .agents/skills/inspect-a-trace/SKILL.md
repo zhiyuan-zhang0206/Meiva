@@ -1,125 +1,21 @@
 ---
 name: inspect-a-trace
-description: "Reconstructs an Meiva run from checkpoints and telemetry. Use when investigating agent behavior, execution failures, or correlated trace evidence."
+description: "Runs the trace fetch, read and render scripts from a Meiva source checkout. Use when troubleshooting has given a trace id and you want the whole trace as a span tree or an offline report."
 ---
 
-# Inspect a trace
+# Inspect a trace (scripts)
 
-A run is not a document. It is four live surfaces holding four different
-things, tied together by two ids. This skill is the correlation know-how: how
-to get from "agent 3048 behaved badly around 14:00" to that stretch of the
-conversation, its events, its span tree, and a link the user can open.
-
-Nothing trace-shaped is committed to the repo — there is no `traces/` doc axis
-(retired 2026-08-19, [why](../../../docs/decisions/engineering/design/simplification/2026-08-19-retire-the-traces-doc-axis.md)).
-The evidence is queried live, against the version that is actually running.
-
-## The four surfaces
-
-| Surface | Holds | Reach it with |
-|---|---|---|
-| **Postgres checkpoints** | the conversation itself — prompts, tool calls, results, system prompt | SQL + `base.agents.history.checkpoint` ([find-the-run](references/find-the-run.md)) |
-| **Loki** | the unified event river — every event, within its 84-hour window | LogQL ([event-stream](references/event-stream.md)); `GET /api/events` answers from Postgres, which stores only the events a reader queries and warning-or-higher ones |
-| **Tempo** | the span tree of one traced stretch — durations, langgraph node path, LLM call shape (7-day retention; telemetry, so a span the collector could not deliver is not recorded anywhere) | TraceQL + `fetch_trace.py` ([spans](references/spans.md)) |
-| **Grafana** | the human-browsable view of both | a constructed URL (below) |
-
-**Loki is the primary surface.** An agent is long-running and unbounded; its
-event river is the only place that shows the whole life of it. Tempo is
-drill-down for a *bounded* unit of work, and only once you already know which
-piece of work you care about. Start in the river, narrow to a trace, then open
-the spans.
-
-## The two correlation ids
-
-Everything hangs off these. Get one, and the rest follows.
-
-- **`agent_id`** — the agent. It is also the LangGraph `thread_id`, as a decimal
-  string (`checkpoints.thread_id = '3048'`), the Loki stream matcher
-  (`{service_name="unknown_service", agent_id="3048"}` — an index label
-  since the 2026-08-23 cutover), and the root span's `session.id`.
-- **`trace_id`** — the W3C trace identifier, lowercase 32-hex. It is the Loki line
-  field (`| trace_id="<hex>"`), the Tempo trace id, and — stamped per turn onto
-  the checkpoint the turn committed — `checkpoints.metadata->>'trace_id'`. The
-  reverse link is the root span's `meiva.checkpoint_id` attribute.
-
-Each agent graph invocation starts a fresh trace with a
-`meiva-agent-{agent_id}` root span. The trace can include SDK HTTP requests,
-gateway and agent-ops spans, and exec subprocess spans. A receiving turn links
-to the traces that supplied its input with span links. Follow those links to
-inspect the causal chain across agents. The root ends when the turn exits. If
-the host is killed before then, Tempo can show exported child spans while the
-root is missing.
-
-Root attributes include `meiva.agent_id`, `session.id`, and the `meiva.turn`
-counter local to a graph task. Order turns across tasks and restarts by
-timestamp or `meiva.checkpoint_id`.
-
-The checkpoint stamp is deliberately failure-tolerant
-(`agent/turn/trace_checkpoint.py`), so **not every checkpoint carries a
-`trace_id`**. A missing link is one lost correlation, not a broken system.
-
-Spans are **metadata-only** (trace v2): prompts and completions are stripped at
-record time (`base/telemetry/tracing.py`). Content comes back from the checkpoint, on
-demand, by trace id — never from Tempo.
-
-## The path
+The method for finding out what happened to an agent (events, Loki, Tempo, metrics, then local
+files) lives in the guide's
+[troubleshooting](../../../meiva_builtins/skills/platform/meiva-guide/troubleshooting/SKILL.md)
+skill, and works from any machine. This directory owns only the toolchain scripts that need a
+source checkout and its `.venv`:
 
 ```
-symptom ──▶ Loki: one agent's event river ──▶ a trace_id ──▶ Tempo spans (timing / node path)
-                                                └──────────▶ checkpoint messages (what was said)
+scripts/fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/
 ```
 
-1. **Find the run.** Narrow by agent and time window in Loki; or go through
-   Postgres when you want the *content* rather than the events, or need
-   history across compaction segments. → [references/find-the-run.md](references/find-the-run.md)
-2. **Read the event stream.** The `{service_name="unknown_service"} | json`
-   dialect, exec outcomes, `llm_usage`, halt reasons.
-   → [references/event-stream.md](references/event-stream.md)
-3. **Read the spans.** TraceQL to locate, Tempo's trace API to fetch whole, the
-   toolchain scripts to read and render. → [references/spans.md](references/spans.md)
-4. **Hand the user a link** (below).
-
-## Hand the user a link
-
-For anything a human should look at themselves, build the Grafana Explore URL
-rather than pasting a span dump. Grafana runs on the LGTM host at
-`http://localhost:3003` (anonymous viewer; `meiva observability status` to check it is up,
-`meiva observability on` to bring it up). Override with `MEIVA_GRAFANA_URL` when it is on
-another box.
-
-```python
-import json, os, urllib.parse
-
-grafana = os.environ.get("MEIVA_GRAFANA_URL", "http://localhost:3003")
-pane = {"explore": {"datasource": "tempo",
-                    "queries": [{"refId": "A", "queryType": "traceId", "query": trace_id}],
-                    "range": {"from": "now-1d", "to": "now"}}}
-url = f"{grafana}/explore?schemaVersion=1&panes={urllib.parse.quote(json.dumps(pane, separators=(',', ':')))}&orgId=1"
-```
-
-`scripts/render_trace.py` builds exactly this link into its report. Datasource
-uids are `tempo` / `loki` / `prometheus`; swap `datasource` and give a LogQL
-`expr` query to link the event stream instead.
-
-## The toolchain scripts
-
-`scripts/` holds three chained steps, each runnable standalone. `meiva.help(meiva.skills.inspect_a_trace)`
-shows this skill's path; in a repo
-worktree it is `.agents/skills/inspect-a-trace/scripts/`, abbreviated
-`<scripts>/` below.
-
-```
-fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/
-```
-
-They encode the conversions you would otherwise re-derive every time (base64 vs
-hex ids, OTLP envelopes, the 5 MB full-trace cap, gateway bearer auth). Details
-and the verified query set: [references/spans.md](references/spans.md).
-
-## Where this skill does not apply
-
-- Fleet-wide trends and dashboards — those are pre-shaped questions; use the
-  core-metrics dashboards (`base/telemetry/metrics/core/observability.py`) and the
-  alert rules, not run-level correlation.
-- Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `meiva observability`.
-- Computer-use traces (`/api/computer/traces`) — a different subsystem.
+They encode the conversions you would otherwise re-derive (base64 vs hex ids, OTLP envelopes,
+the 5 MB full-trace cap, gateway bearer auth). Usage, flags and Tempo pitfalls:
+[spans](../../../meiva_builtins/skills/platform/meiva-guide/troubleshooting/references/spans.md).
+Run them from the checkout root as `.venv/bin/python .agents/skills/inspect-a-trace/scripts/<script>`.
