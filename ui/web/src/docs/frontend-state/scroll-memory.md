@@ -15,7 +15,7 @@ visit's slot. The record carries a content key (agent / agent+session): a
 mismatch drops the position instead of restoring it onto other content.
 The home timeline keeps its own place record under the same entry key
 (`components/timeline/anchor/saved.ts`). A reader who left in history returns
-to their exact row, viewport offset and any header-toggle reserve they used.
+to their row and viewport offset, within the available scroll range.
 A reader who left at the tail keeps the latest human message or visible reply
 as a watermark. On return the timeline opens at the tail bounded by unread
 content, as described in [Timeline sticky scroll](../frontend-components/timeline-view/sticky-scroll.md).
@@ -25,7 +25,8 @@ When `feature.reloadReadingRestore` is enabled (default `true`), the home
 timeline also persists a bounded per-tab bookmark map in `Browser.session`
 (`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL)
 holding the same fields plus `scrollTop` and `savedAt`. Same-page switches prefer
-the in-memory place; a full page reload opens on the session bookmark. Following
+the in-memory place. A full page reload opens on the session bookmark. Older
+bookmarks with extra fields still restore their row and offset. Following
 the tail clears it, so a reload from the tail opens on the latest rows. Turning the feature off bypasses all `Browser.session` reads
 and writes. Terminal panes keep the shared `scroll-memory.ts` record, whose
 `followBottom` flag serves their tail following.

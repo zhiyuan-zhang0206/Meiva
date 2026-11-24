@@ -15,7 +15,7 @@ export interface RowRef {
 export type ViewAnchor =
   | { kind: "tail" }
   | { kind: "bounded-tail"; row: RowRef }
-  | { kind: "row"; row: RowRef; offset: number; clearTurnHeader?: true };
+  | { kind: "row"; row: RowRef; offset: number; clearTurnHeader?: true; clampToTail?: true };
 
 export const TAIL: ViewAnchor = { kind: "tail" };
 

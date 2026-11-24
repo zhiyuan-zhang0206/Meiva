@@ -146,11 +146,6 @@ export const TimelineView = memo(function TimelineView({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const overlaySlackRef = useRef<HTMLDivElement>(null);
-  // meiva:note
-  // Extra scroll space below the content: it lets a toggled header stay where it was clicked when the
-  // rows below are too short. Outside the content column, so it carries no row spacing.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-  const reserveRef = useRef<HTMLDivElement>(null);
 
   const { turnOverrides, toggleTurn, overrides, toggleExpanded } = useTimelineExpansion({ scrollMemoryKey, threadKey });
   const thresholds = useStickyThresholds();
@@ -173,7 +168,7 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => { pinnedHeadRef.current = pinnedHeadIds; });
   const pinnedHead = useCallback((id: string) => pinnedHeadRef.current.has(id), []);
   const { controls, atEnd } = useViewportAnchor({
-    wrapperRef, viewportRef, contentRef, overlaySlackRef, reserveRef, thresholds,
+    wrapperRef, viewportRef, contentRef, overlaySlackRef, thresholds,
     onChange: onAnchorChange, onUnresolved, pinnedHead, onFree, onRideEnd, viewportObserverFactory,
   });
 
@@ -353,16 +348,16 @@ export const TimelineView = memo(function TimelineView({
 
   // meiva:note
   // Manual expansion keeps the clicked header where it is and releases tail following, including
-  // for active work (user ruling 2026-11-17). Collapsing near the end may need reserve space to
-  // keep the header in place; the reader spends it by scrolling up past the natural end.
+  // for active work (user ruling 2026-11-17). Collapsing follows the tail if the shortened
+  // content ends before the clicked offset can be restored.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   const handleToggleTurn = useCallback(
     (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => {
       const viewport = controls.viewport();
       const header = viewport ? readTurnAnchor(viewport, button) : null;
       if (header) {
-        if (currentlyExpanded) placement.request(header, { hold: true });
-        else controls.place(header, { hold: true });
+        if (currentlyExpanded) placement.request({ ...header, clampToTail: true });
+        else controls.place(header);
       }
       toggleTurn(id, currentlyExpanded);
     },
@@ -370,19 +365,13 @@ export const TimelineView = memo(function TimelineView({
   );
 
   // meiva:note
-  // The arrow rides to the tail and follows it. Inside a toggle's reserve it uses the remaining range.
+  // The arrow rides to the tail and follows it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const handleScrollToBottom = useCallback(() => {
     const viewport = controls.viewport();
     if (!viewport) return;
     const end = viewport.scrollHeight - viewport.clientHeight;
     if (end - viewport.scrollTop <= 1) return;
-    const reserve = controls.reserveHeight();
-    const natural = end - reserve - controls.overlaySlackHeight();
-    if (reserve > 0 && viewport.scrollTop > natural + 0.5) {
-      controls.placeScrollTop(end);
-      return;
-    }
     controls.place(TAIL, { smooth: true });
   }, [controls]);
 
@@ -493,7 +482,6 @@ export const TimelineView = memo(function TimelineView({
             <div ref={endRef} />
           </div>
           <div ref={overlaySlackRef} data-timeline-overlay-slack aria-hidden="true" />
-          <div ref={reserveRef} data-timeline-reserve aria-hidden="true" />
         </div>
       </ScrollArea>
       {footer === undefined ? null : (

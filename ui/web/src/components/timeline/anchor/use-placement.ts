@@ -59,7 +59,7 @@ export interface Placement {
   pin: RowRef | null;
   // meiva:note
   // Place the reader at a row once it is mounted (quote, send, the arrow).
-  request: (anchor: ViewAnchor, options?: { hold?: boolean; smooth?: boolean }) => void;
+  request: (anchor: ViewAnchor, options?: { smooth?: boolean }) => void;
   onAnchorChange: (anchor: ViewAnchor, cause: AnchorChangeCause) => void;
   onUnresolved: (row: RowRef) => void;
   onFree: () => void;
@@ -88,7 +88,7 @@ export function usePlacement({
   const current = useCallback((): PlacementInputs => ({ ...live.current.inputs, now: Date.now() }), []);
 
   const effects = useMemo<PlacementEffects>(() => ({
-    place: (target, { hold, smooth }) => anchor.place(target, { hold, smooth }),
+    place: anchor.place,
     loadOlder: () => live.current.onLoadOlder?.("background"),
     cancelOlder: () => { live.current.onCancelBackgroundLoadOlder?.(); },
     dropSessionPlace: () => writeSessionPlace(threadKey, live.current.inputs.reloadRestore, null, 0),
@@ -134,7 +134,7 @@ export function usePlacement({
   const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => {
     const vp = row.clearTurnHeader ? anchor.viewport() : null;
     const hit = vp ? findRowNode(vp, row.row) : null;
-    return { identity, offset: hit && vp ? offsetOf(vp, hit.node) : row.offset, holdReserve: anchor.holdReserve() };
+    return { identity, offset: hit && vp ? offsetOf(vp, hit.node) : row.offset };
   }, [anchor]);
 
   const saveFrame = useRef(0);
@@ -165,7 +165,7 @@ export function usePlacement({
     const now = anchor.current();
     const identity = identityRef.current && sameRow(identityRef.current.row, row) ? identityRef.current : { row };
     const offset = now?.kind === "row" ? now.offset : READING_TOP_PX;
-    machine.lost({ identity, offset, holdReserve: anchor.holdReserve() }, current(), effects, now?.kind === "bounded-tail");
+    machine.lost({ identity, offset }, current(), effects, now?.kind === "bounded-tail");
   }, [anchor, current, effects, machine]);
 
   useLayoutEffect(() => () => {
@@ -191,7 +191,7 @@ export function usePlacement({
 
   const onFree = useCallback(() => machine.readerMoved(current(), null), [current, machine]);
 
-  const request = useCallback((target: ViewAnchor, options: { hold?: boolean; smooth?: boolean } = {}) => {
+  const request = useCallback((target: ViewAnchor, options: { smooth?: boolean } = {}) => {
     machine.request(target, current(), options);
   }, [current, machine]);
 

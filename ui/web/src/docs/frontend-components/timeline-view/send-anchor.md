@@ -43,19 +43,13 @@ viewport or pushing messages upward (user ruling 2026-11-22).
   `--timeline-footer-h` and stays hidden both at `naturalEnd` and inside the
   overlay slack.
 
-## The toggle reserve
+## Closing a work block near the bottom
 
-Opening or closing a work block by hand keeps its header where it is (user
-ruling 2026-11-17). When the rows below are too short to keep it there, the
-timeline adds reserve space below the conversation.
-
-- **Size.** The reserve is exactly the space the header needs, and the tail
-  never carries any.
-- **Release.** Once the reader actively scrolls upward to or past the natural
-  end, the reserve is removed in place. Movement inside the reserve keeps it, and
-  layout changes alone do not spend it.
-- **Saved places.** A saved place remembers whether it stood in the reserve, so
-  a return or reload recreates it.
+Closing a work block keeps the clicked header at its viewport offset when the
+shortened conversation still reaches that position. When the requested
+position reaches or exceeds the natural end, the reader settles at the
+natural end and resumes following new messages. The slack below that point
+belongs to the composer dock and pending strip.
 
 ## Relationship to Other Nodes
 

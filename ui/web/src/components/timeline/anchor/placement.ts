@@ -51,7 +51,7 @@ export interface PlacementInputs {
 }
 
 export interface PlacementEffects {
-  place: (anchor: ViewAnchor, options: { hold: boolean; smooth?: boolean }) => void;
+  place: (anchor: ViewAnchor, options?: { smooth?: boolean }) => void;
   loadOlder: () => void;
   cancelOlder: () => void;
   // meiva:note
@@ -101,7 +101,7 @@ export function initialGoal(memory: SavedPlace | TailDeparture | null, threadKey
 
 export class PlacementMachine {
   private goal: Goal;
-  private requested: { anchor: ViewAnchor; hold: boolean; smooth?: boolean } | null = null;
+  private requested: { anchor: ViewAnchor; smooth?: boolean } | null = null;
   private placedRow: RowRef | null = null;
   private snap: PlacementSnapshot;
   private readonly listeners = new Set<() => void>();
@@ -134,18 +134,18 @@ export class PlacementMachine {
   step(inputs: PlacementInputs, effects: PlacementEffects): void {
     for (let guard = 0; guard < 4 && this.advance(inputs, effects); guard++);
     if (this.goal.kind === "placed" && this.requested) {
-      const { anchor, hold, smooth } = this.requested;
+      const { anchor, smooth } = this.requested;
       this.requested = null;
       this.placedRow = anchor.kind === "tail" ? null : anchor.row;
-      effects.place(anchor, { hold, smooth });
+      effects.place(anchor, { smooth });
     }
     this.publish(inputs);
   }
 
   // meiva:note
   // A placement the reader asked for (quote, send, the arrow): lands once its row is mounted.
-  request(anchor: ViewAnchor, inputs: PlacementInputs, { hold = false, smooth = false }: { hold?: boolean; smooth?: boolean } = {}): void {
-    this.requested = { anchor, hold, smooth };
+  request(anchor: ViewAnchor, inputs: PlacementInputs, { smooth = false }: { smooth?: boolean } = {}): void {
+    this.requested = { anchor, smooth };
     this.publish(inputs);
   }
 
@@ -165,7 +165,7 @@ export class PlacementMachine {
     if (this.goal.kind !== "placed") return;
     const moved = locate(place.identity, inputs.items, inputs.compactBuffer);
     if (moved) {
-      if (!sameRow(moved, place.identity.row)) effects.place(bounded ? { kind: "bounded-tail", row: moved } : rowAnchor(place, moved), { hold: place.holdReserve });
+      if (!sameRow(moved, place.identity.row)) effects.place(bounded ? { kind: "bounded-tail", row: moved } : rowAnchor(place, moved));
       return;
     }
     this.goal = { kind: "row", place, fromSession: false, bounded };
@@ -176,10 +176,10 @@ export class PlacementMachine {
     return this.goal.kind === "placed";
   }
 
-  private settle(target: ViewAnchor, options: { hold: boolean }, effects: PlacementEffects): void {
+  private settle(target: ViewAnchor, effects: PlacementEffects): void {
     this.goal = { kind: "placed" };
     this.placedRow = target.kind === "tail" ? null : target.row;
-    effects.place(target, options);
+    effects.place(target);
   }
 
   // meiva:note
@@ -202,7 +202,7 @@ export class PlacementMachine {
           : null;
         const finish = () => {
           const row = boundary?.row;
-          this.settle(row ? { kind: "bounded-tail", row } : TAIL, { hold: false }, effects);
+          this.settle(row ? { kind: "bounded-tail", row } : TAIL, effects);
           return false;
         };
         if (boundary?.needsOlder && (inputs.hasMoreOlder || goal.search)) {
@@ -221,19 +221,19 @@ export class PlacementMachine {
       }
       case "tail": {
         if (loading && items.length === 0) return false;
-        this.settle(TAIL, { hold: false }, effects);
+        this.settle(TAIL, effects);
         return false;
       }
       case "row": {
         const row = this.goalRow(inputs);
         if (row) {
-          this.settle(goal.bounded ? { kind: "bounded-tail", row } : rowAnchor(goal.place, row), { hold: goal.place.holdReserve }, effects);
+          this.settle(goal.bounded ? { kind: "bounded-tail", row } : rowAnchor(goal.place, row), effects);
           return false;
         }
         if (loading) return false;
         return this.searchOlder(goal, inputs, effects, () => {
           if (goal.fromSession) effects.dropSessionPlace();
-          this.settle(TAIL, { hold: false }, effects);
+          this.settle(TAIL, effects);
           return false;
         });
       }

@@ -30,7 +30,6 @@ export interface SavedScroll {
   scrollTop: number;
   /** The visible timeline item and its position inside the viewport. */
   anchor?: { itemId: string; rank: number; viewportTop: number };
-  usedCollapseReserve?: true;
   // meiva:note
   // Whether an explicit bookmark requests bottom following. Terminal panes retain following; conversation switches always save the visible timeline item and offset with this flag false.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md

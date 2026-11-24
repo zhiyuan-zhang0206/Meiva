@@ -473,75 +473,100 @@ describe("TimelineView expanded work block height", () => {
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
   });
 
-  // meiva:note
-  // Collapsing keeps the clicked header where it was. Near the end the shortened content cannot
-  // reach that place, so reserve space below it holds the header there until the reader scrolls
-  // up to the natural end.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  it("keeps a collapsed tail header in place over reserve space the reader spends by scrolling up", () => {
-    const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "1.0" ? 1000 : 300 });
-    render(<TimelineView items={[
+  it("collapses a stuck tail header to the natural end and follows new messages until the reader scrolls up", () => {
+    const heights: Record<string, number> = { "1.0": 1000, "3.0": 300 };
+    const layout = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 300 });
+    const work = [
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "Reply" }),
       makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "2.1", kind: "agent_code", payload: "code" }),
-    ]} />);
+      makeItem({ item_id: "2.2", kind: "code_output", payload: "output" }),
+    ];
+    const view = render(<TimelineView items={work} />);
     layout.resize();
     const toggle = screen.getByTestId("turn-toggle");
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    layout.scrollTo(900);
-    const headerTop = layout.rowTop("2.0");
-    expect(headerTop).toBe(164);
-
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(layout.rowTop("2.0")).toBe(headerTop);
-    expect(layout.top()).toBe(900);
-    // meiva:note
-    // Without the reserve the browser would clamp at the shortened content's end.
-    expect(layout.naturalEnd()).toBe(540);
-    expect(layout.reserve()).toBe(360);
-    layout.resize();
-    expect(layout.rowTop("2.0")).toBe(headerTop);
-
-    layout.scrollTo(700);
-    expect(layout.top()).toBe(700);
-    expect(layout.reserve()).toBeGreaterThan(0);
-    layout.scrollTo(540);
-    expect(layout.top()).toBe(540);
-    expect(layout.reserve()).toBe(0);
-    layout.resize();
-    expect(layout.top()).toBe(540);
-    expect(layout.reserve()).toBe(0);
-  });
-
-  // meiva:note
-  // Suspected product bug: the toggle keeps the turn block's top edge, not the header the reader
-  // clicked. An expanded header is sticky, so a reader deep inside a long block clicks it at the
-  // bar (44px) while the block's top is far above the viewport; the collapsed header is then put
-  // back above the viewport and the reader is left looking at empty reserve space.
-  it("collapses a stuck header where the reader clicked it", () => {
-    const layout = timelineLayout({ rowHeight: 400 });
-    render(<TimelineView items={[
-      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
-      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
-      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
-    ]} />);
-    layout.resize();
-    const toggle = screen.getByTestId("turn-toggle");
-    fireEvent.click(toggle);
-    layout.scrollTo(450);
-    // meiva:note
-    // The block's top edge is 398px above the viewport; its sticky header shows under the bar (the
-    // layout model has no sticky positioning, so the stuck header's box is given directly).
-    expect(layout.rowTop("1.0")).toBeLessThan(0);
-    const top = layout.viewport().getBoundingClientRect().top + BAR_HEIGHT_PX;
-    const stuck = vi.spyOn(toggle, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ x: 0, y: top, width: 300, height: 40 }));
+    layout.scrollTo(1200);
+    expect(layout.rowTop("2.0")).toBeLessThan(0);
+    const stuck = vi.spyOn(toggle, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: BAR_HEIGHT_PX, height: 40 }));
     fireEvent.click(toggle);
     stuck.mockRestore();
     layout.resize();
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(layout.viewport().querySelector("[data-timeline-reserve]")).toBeNull();
+    expect(layout.naturalEnd()).toBe(540);
+    expect(layout.max()).toBe(layout.naturalEnd());
+    expect(layout.top()).toBe(layout.naturalEnd());
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+
+    const withReply = [...work, makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Done", partial: true })];
+    view.rerender(<TimelineView items={withReply} />);
+    expect(layout.top()).toBeGreaterThan(540);
+    expect(layout.top()).toBe(layout.naturalEnd());
+
+    const beforeStream = layout.top();
+    heights["3.0"] = 550;
+    layout.resize();
+    expect(layout.top()).toBe(beforeStream + 250);
+    expect(layout.top()).toBe(layout.naturalEnd());
+
+    const readingTop = layout.top() - 80;
+    layout.scrollTo(readingTop);
+    view.rerender(<TimelineView items={[...withReply, makeItem({ item_id: "4.0", kind: "agent_chat", payload: "Next reply" })]} />);
+    expect(layout.top()).toBe(readingTop);
+  });
+
+  it.each([false, true])("keeps manual expansion of a bottom work block at the clicked offset (active: %s)", (turnActive) => {
+    setUserSettings({ "display.expand_working_block": false });
+    const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "1.0" ? 1000 : 300 });
+    const work = [
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "Reply" }),
+      makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "2.1", kind: "agent_code", payload: "code" }),
+    ];
+    render(<TimelineView items={work} turnActive={turnActive} />);
+    layout.resize();
+    const toggle = screen.getByTestId("turn-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(layout.top()).toBe(layout.naturalEnd());
+    const offset = layout.rowTop("2.0");
+
+    fireEvent.click(toggle);
+    layout.resize();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(layout.rowTop("2.0")).toBe(offset);
+    expect(layout.top()).toBeLessThan(layout.naturalEnd());
+    expect(layout.max()).toBe(layout.naturalEnd());
+  });
+
+  it("collapses a stuck header in history at the clicked offset", () => {
+    const layout = timelineLayout({ rowHeight: 400 });
+    render(<TimelineView items={[
+      makeItem({ item_id: "0.0", kind: "agent_chat", payload: "Earlier reply" }),
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Later reply" }),
+      makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Latest reply" }),
+    ]} />);
+    layout.resize();
+    const toggle = screen.getByTestId("turn-toggle");
+    fireEvent.click(toggle);
+    layout.scrollTo(750);
+    // meiva:note
+    // The layout model has no sticky positioning, so the stuck header's box is given directly.
+    expect(layout.rowTop("1.0")).toBeLessThan(0);
+    const stuck = vi.spyOn(toggle, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: BAR_HEIGHT_PX, height: 40 }));
+    fireEvent.click(toggle);
+    stuck.mockRestore();
+    layout.resize();
+
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(layout.rowTop("1.0")).toBe(BAR_HEIGHT_PX);
+    expect(layout.viewport().querySelector("[data-timeline-reserve]")).toBeNull();
+    expect(layout.max()).toBe(layout.naturalEnd());
+    expect(layout.top()).toBeLessThan(layout.naturalEnd());
   });
 });
 
@@ -595,12 +620,8 @@ describe("TimelineView header scrolling scope", () => {
     expect(layout.rowTop("2.4")).toBe(132);
   });
 
-  // meiva:note
-  // Collapsing shortens the scroll range and the browser clamps scrollTop during layout. The writer does
-  // not count that clamp as reader drift, so the collapsed header stays where the reader clicked it.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   it("collapses an expanded work block at the current reading position", () => {
-    const layout = timelineLayout({ rowHeight: 300 });
+    const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "3.0" ? 800 : 300 });
     render(<TimelineView items={items} />);
     layout.resize();
     fireEvent.click(screen.getByTestId("turn-toggle"));

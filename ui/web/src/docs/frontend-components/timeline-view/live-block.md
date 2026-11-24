@@ -9,8 +9,10 @@ expanded block follows the reader's current scroll mode.
 
 This follows the user ruling of 2026-11-17, superseding the 2026-11-09 decision
 to jump to the bottom and follow when manually opening active work. Manual
-collapse preserves the header offset and temporarily adds scroll space if the
-shortened content cannot reach it.
+collapse preserves the header offset while the shortened timeline can reach
+it. At the natural end it resumes tail following. This decision applies once
+to the collapse placement, so a later resize of a historical row does not
+change the reader's scroll mode.
 
 ## Relationship to Other Nodes
 

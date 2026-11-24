@@ -78,10 +78,10 @@ bookmark and uses the normal opening rules.
 
 An expanded Work, Context or Details `TurnBlock` has an opaque header that
 sticks at the 44px lower edge of `HeaderBar` and releases at the end of the
-block. The toggle stays clickable there. Closing the block positions the
-collapsed header at the clicked height after the body is removed, using toggle
-reserve when needed. The header sits above ordinary rows and below the
-scrollbar and floating controls. Primary-message and nested card headers stay
+block. The toggle stays clickable there. Closing the block keeps the clicked
+offset if the shortened timeline can reach it. A collapse that reaches the
+natural end resumes tail following. The header sits above ordinary rows and
+below the scrollbar and floating controls. Primary-message and nested card headers stay
 in normal flow. A jump to a quote source inside the block adds the measured
 title height to the reading offset. Ordinary scroll reads a row only once
 some of it clears its expanded turn title.
@@ -98,4 +98,4 @@ Standing context notes omit timestamps according to their item metadata.
 
 - [Timeline View](timeline-view.md) — the renderer whose one scroll surface this node owns.
 - [Timeline deep collapse](deep-collapse.md) — the turns whose natural-height bodies the live-block rule keeps in place.
-- [Sending and the bottom edge](send-anchor.md) — what a send does (nothing), the down arrow, the pending strip over the bottom edge, and the toggle reserve.
+- [Sending and the bottom edge](send-anchor.md) — sends, the down arrow, and the slack for the composer dock and pending strip.

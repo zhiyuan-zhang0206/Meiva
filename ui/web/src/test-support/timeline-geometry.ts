@@ -1,9 +1,8 @@
 // meiva:note
 // A layout for the test DOM, which has none: inside a root carrying `root` (spread it on the element
 // wrapping a TimelineView), the viewport is 600px tall, row `n.r` occupies [(n-1)*300, n*300) of
-// the content, the content is `height()` px tall and the send reserve adds its style height below
-// it. The layout is answered by the element prototypes, so it holds from the first commit: the
-// timeline's own layout effects already read it, as they read a real browser's.
+// the content and the content is `height()` px tall. The element prototypes provide the layout
+// from the first commit: the timeline's own layout effects already read it, as they read a real browser's.
 interface Layout {
   top: () => number;
   setTop: (value: number) => void;
@@ -21,11 +20,6 @@ const ROW_PX = 300;
 function layoutOf(element: Element): Layout | undefined {
   const root = element.closest<HTMLElement>("[data-timeline-geometry]");
   return root ? layouts.get(root.dataset.timelineGeometry ?? "") : undefined;
-}
-
-function reserveOf(element: Element): number {
-  const reserve = element.querySelector<HTMLElement>("[data-timeline-reserve]");
-  return reserve ? Number.parseFloat(reserve.style.height) || 0 : 0;
 }
 
 function rect(top: number, height: number): DOMRect {
@@ -54,7 +48,7 @@ function install() {
     scrollHeight: { configurable: true, get(this: HTMLElement) {
       const layout = layoutOf(this);
       if (!layout) return scrollHeight.get(this);
-      if (this.matches(VIEWPORT)) return Math.max(VIEWPORT_PX, layout.height() + reserveOf(this));
+      if (this.matches(VIEWPORT)) return Math.max(VIEWPORT_PX, layout.height());
       return this.querySelector(".timeline-item") ? layout.height() : VIEWPORT_PX;
     } },
     offsetHeight: { configurable: true, get(this: HTMLElement) {

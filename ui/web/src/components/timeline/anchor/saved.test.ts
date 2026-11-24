@@ -8,7 +8,6 @@ import { hasSavedPlace, readMemoryPlace, readSessionPlace, rowAnchor, writeMemor
 const place = (extra: Partial<SavedPlace> = {}): SavedPlace => ({
   identity: { row: { itemId: "7.0", rank: 0 } },
   offset: -120,
-  holdReserve: false,
   ...extra,
 });
 
@@ -20,7 +19,7 @@ function enabled(now = 1000) {
 
 describe("memory place", () => {
   it("returns per entry and content", () => {
-    const saved = place({ holdReserve: true });
+    const saved = place();
     writeMemoryPlace("entry-a", "42", saved);
     expect(readMemoryPlace("entry-a", "42")).toBe(saved);
     expect(readMemoryPlace("entry-a", "43")).toBeNull();
@@ -43,12 +42,11 @@ describe("memory place", () => {
 });
 
 describe("session place", () => {
-  it("round-trips the row, its locator, the turn flag, the offset and the toggle reserve", () => {
+  it("round-trips the row, its locator, the turn flag and the offset", () => {
     const { config } = enabled();
     const saved = place({
       identity: { row: { itemId: "s1.cp.4.0", rank: 1, turn: true }, locator: "loc-4", coordinate: { rank: 1, msg: 4, block: 0 } },
       offset: 56,
-      holdReserve: true,
     });
     writeSessionPlace("42", config, saved, 1234);
     // meiva:note
@@ -56,8 +54,19 @@ describe("session place", () => {
     expect(readSessionPlace("42", config)).toEqual({
       identity: { row: { itemId: "s1.cp.4.0", rank: 1, turn: true }, locator: "loc-4" },
       offset: 56,
-      holdReserve: true,
     });
+  });
+
+  it("restores a legacy bookmark and omits its retired field when rewriting the cache", () => {
+    const { config, browser } = enabled();
+    const bookmark = { itemId: "7.0", rank: 0, viewportTop: -120, scrollTop: 900, savedAt: 1000 };
+    browser.session.write(RELOAD_BOOKMARKS_STORAGE_KEY, JSON.stringify({ "42": { ...bookmark, usedCollapseReserve: true } }));
+
+    expect(readSessionPlace("42", config)).toEqual(place());
+    writeSessionPlace("43", config, place(), 900);
+
+    const stored = browser.sessionValues.get(RELOAD_BOOKMARKS_STORAGE_KEY)!;
+    expect(JSON.parse(stored)).toEqual({ "42": bookmark, "43": bookmark });
   });
 
   it("round-trips a plain item row without optional fields", () => {
