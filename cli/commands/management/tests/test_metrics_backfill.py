@@ -7,16 +7,11 @@ from typing import Any
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 
 from base.db import Database
 from base.telemetry.delivery.mirror import event_id as mirror_event_id
 from base.telemetry.metrics import observed_metrics
-from cli.commands.management.metrics_backfill import (
-    cmd_backfill_usage_ledger,
-    cmd_metrics_backfill_unpriced,
-    cmd_reconcile_usage_ledger,
-)
+from cli.commands.management.metrics_backfill import cmd_metrics_backfill_unpriced
 from cli.database import operator_database_factory
 
 
@@ -77,47 +72,3 @@ def test_cmd_metrics_backfill_unpriced_dry_run_and_apply_json(
     rerun_payload: dict[str, Any] = json.loads(capsys.readouterr().out)
     assert rerun_payload["observations_scanned"] == 0
     assert rerun_payload["observations_priced"] == 0
-
-
-def test_reconcile_cli_exits_nonzero_for_a_record_only_difference(
-    db_conn: psycopg.Connection,
-    database: Database,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    ts = datetime(2026, 11, 21, tzinfo=UTC)
-    db_conn.execute(
-        """INSERT INTO telemetry_events
-           (event_uid, ts, machine, cluster, process, category, event_name, level, source, attributes)
-           VALUES (1, %s, 'test', 'test', 'gateway', 'telemetry', 'llm_usage', 'info', 'system', %s)""",
-        (
-            ts,
-            Jsonb(
-                {"call_id": "source-key", "model": "deepseek-flash", "in_total": 2, "out_total": 1}
-            ),
-        ),
-    )
-    db_conn.commit()
-    factory = operator_database_factory(
-        local_host=lambda: "127.0.0.1",
-        home=tmp_path,
-        open_database=lambda _cfg, _gate, _direct: database,
-    )
-    start, end = ts.date(), date(2026, 11, 22)
-    assert cmd_backfill_usage_ledger(factory, start=start, end=end, batch_size=1) == 0
-    capsys.readouterr()
-    assert cmd_reconcile_usage_ledger(factory, start=start, end=end, batch_size=1) == 0
-    assert json.loads(capsys.readouterr().out)["matches"] is True
-
-    db_conn.execute(
-        "UPDATE llm_usage_ledger SET call_id = 'ledger-key' WHERE call_id = 'source-key'"
-    )
-    db_conn.commit()
-    assert cmd_reconcile_usage_ledger(factory, start=start, end=end, batch_size=1) == 1
-    report = json.loads(capsys.readouterr().out)
-    assert report["mismatched_groups"] == 0
-    assert report["matches"] is False
-    assert report["record_differences"] == [
-        {"call_id": "ledger-key", "fields": [], "kind": "ledger_only"},
-        {"call_id": "source-key", "fields": [], "kind": "source_only"},
-    ]

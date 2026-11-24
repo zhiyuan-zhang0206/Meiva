@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -54,10 +55,25 @@ def seed_agent(conn: psycopg.Connection, parent: int | None = None, *, fork: boo
 def event(
     conn: psycopg.Connection, agent_id: int, ts: datetime, attributes: dict[str, Any]
 ) -> None:
+    cost = attributes.get("cost_usd")
     conn.execute(
-        "INSERT INTO telemetry_events (event_uid,ts,agent_id,machine,cluster,process,category,event_name,level,source,attributes) "
-        "VALUES (%s,%s,%s,'test','test','test','telemetry','llm_usage','info','test',%s)",
-        (agent_id * 1_000_000 + int(ts.timestamp()), ts, agent_id, Jsonb(attributes)),
+        "INSERT INTO llm_usage_ledger (call_id, occurred_at, agent_id, machine, cluster, billing, "
+        "usage_kind, model, calls, complete, tokens_in, tokens_out, tokens_reasoning, cache_read, "
+        "cost_usd, price_snapshot, price_source) VALUES (%s, %s, %s, 'test', 'test', 'api', 'turn', "
+        "%s, 1, true, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            f"test:{uuid.uuid4()}",
+            ts,
+            agent_id,
+            attributes.get("model", ""),
+            attributes.get("in_total"),
+            attributes.get("out_total"),
+            attributes.get("reasoning"),
+            attributes.get("cache_read"),
+            cost,
+            Jsonb({}),
+            None if cost is None else "live",
+        ),
     )
 
 
@@ -97,7 +113,7 @@ def test_window_prices_zero_usage_and_unpriced_events(db_conn: psycopg.Connectio
         db_conn,
         child,
         end - timedelta(seconds=1),
-        {"in_total": 30, "out_total": 5, "cache_read": 0, "unpriced": 1},
+        {"in_total": 30, "out_total": 5, "cache_read": 0},
     )
     event(db_conn, child, end + timedelta(seconds=1), priced)
     event(db_conn, other, end, priced)
@@ -185,7 +201,6 @@ def test_budget_reminds_named_peers_without_lifecycle_actions(wire: GatewayWire)
     "options",
     [
         ["--lineage", "unknown"],
-        ["--end", "2026-10-06T00:00:00+00:00"],
         ["--poll-seconds", "30"],
         ["--notify-agent", "2"],
         ["--poll-seconds", "nan", "--usd-limit", "1", "--notify-agent", "2"],
@@ -319,14 +334,16 @@ def test_the_process_database_is_named_after_the_captured_code_version(db_url: s
     assert row == (f"meiva:{process_name()}:v{version}",)
 
 
-def test_lifetime_report_combines_ledger_and_tail(db_conn: psycopg.Connection) -> None:
+def test_lifetime_report_reads_the_whole_ledger_and_an_end_bounds_it(
+    db_conn: psycopg.Connection,
+) -> None:
     root = seed_agent(db_conn)
     now = datetime.now(UTC)
-    yesterday = now.date() - timedelta(days=1)
-    db_conn.execute(
-        "INSERT INTO agent_model_tokens_daily (agent_id,day,model,llm_calls,costed_calls,unpriced_calls,tokens_in,tokens_out,cost_usd) "
-        "VALUES (%s,%s,'m',2,2,0,100,20,0.5)",
-        (root, yesterday),
+    event(
+        db_conn,
+        root,
+        now - timedelta(days=40),
+        {"model": "m", "in_total": 100, "out_total": 20, "cost_usd": 0.5},
     )
     event(
         db_conn,
@@ -335,10 +352,14 @@ def test_lifetime_report_combines_ledger_and_tail(db_conn: psycopg.Connection) -
         {"model": "m", "in_total": 10, "out_total": 2, "cost_usd": 0.1},
     )
     report = reader.usage_report(db_conn, roots=[root], lineage="self", start=None, end=now)
-    assert report["totals"]["calls"] == 3
+    assert report["totals"]["calls"] == 2
     assert report["totals"]["total_tokens"] == 132
     assert report["totals"]["recorded_cost_usd"] == 0.6
-    assert report["agents"][0]["by_model"]["m"]["llm_calls"] == 3
+    assert report["agents"][0]["by_model"]["m"]["llm_calls"] == 2
+    historical = reader.usage_report(
+        db_conn, roots=[root], lineage="self", start=None, end=now - timedelta(days=1)
+    )
+    assert historical["totals"]["calls"] == 1
     facts = usage.facts_of(report)
     assert facts.start is None
     reminder = budget.budget_message(facts, usd_limit=0.1)

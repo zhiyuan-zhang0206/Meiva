@@ -10,6 +10,8 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.api_contracts.agent_contract import SUBSCRIPTION_HARNESSES
+from base.events.contract import LLM_USAGE_KEYS
 from base.lm.pricing import (
     CacheTokens,
     ModelPrice,
@@ -23,11 +25,68 @@ from base.lm.pricing import (
 from base.telemetry.delivery.mirror import event_id as mirror_event_id
 from base.telemetry.event_store import event_uid
 from base.telemetry.metrics import observed_metrics
-from services.upkeep.events_maintenance import rollup, token_totals, unpriced_backfill
+from base.telemetry.metrics.event_sql import numeric as _num
+from services.upkeep.events_maintenance import token_totals, unpriced_backfill
 
 _OLD_DAY = date(2026, 11, 15)
 _RECENT_DAY = date(2026, 11, 21)
 _TODAY = date(2026, 11, 27)
+_COST = LLM_USAGE_KEYS["cost_usd"]
+
+_SEED_TOKENS_SQL = f"""
+    INSERT INTO agent_model_tokens_daily
+        (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
+         tokens_reasoning, cost_usd, cost_usd_subscription, costed_calls, unpriced_calls,
+         unpriced_calls_subscription)
+    SELECT t.agent_id, %(day)s, COALESCE({LLM_USAGE_KEYS["model"]}, ''), count(*),
+           COALESCE(sum({_num(LLM_USAGE_KEYS["in_total"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["out_total"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["cache_read"])}), 0)::bigint,
+           COALESCE(sum({_num(LLM_USAGE_KEYS["reasoning"])}), 0)::bigint,
+           COALESCE(sum({_num(_COST)}), 0)::float8,
+           COALESCE(sum({_num(_COST)}) FILTER (
+               WHERE {LLM_USAGE_KEYS["source"]} = ANY(%(subscription)s)
+           ), 0)::float8,
+           count(*) FILTER (WHERE COALESCE({_COST}, '') <> ''),
+           count(*) FILTER (WHERE COALESCE({_COST}, '') = ''),
+           count(*) FILTER (
+               WHERE COALESCE({_COST}, '') = ''
+                 AND {LLM_USAGE_KEYS["source"]} = ANY(%(subscription)s)
+           )
+    FROM telemetry_events t
+    JOIN agents a ON a.id = t.agent_id
+    WHERE t.ts >= %(start)s AND t.ts < %(end)s AND t.event_name = 'llm_usage'
+    GROUP BY t.agent_id, 3
+    ON CONFLICT (agent_id, day, model) DO UPDATE SET
+        llm_calls        = EXCLUDED.llm_calls,
+        tokens_in        = EXCLUDED.tokens_in,
+        tokens_out       = EXCLUDED.tokens_out,
+        tokens_cached    = EXCLUDED.tokens_cached,
+        tokens_reasoning = EXCLUDED.tokens_reasoning,
+        cost_usd         = EXCLUDED.cost_usd,
+        cost_usd_subscription = EXCLUDED.cost_usd_subscription,
+        costed_calls     = EXCLUDED.costed_calls,
+        unpriced_calls   = EXCLUDED.unpriced_calls,
+        unpriced_calls_subscription = EXCLUDED.unpriced_calls_subscription
+    WHERE EXCLUDED.llm_calls >= agent_model_tokens_daily.llm_calls
+"""  # noqa: S608 — keys come from the registered payload constants
+
+
+def _roll_day(conn: psycopg.Connection, day: date, *, prices: PriceBook | None = None) -> None:
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    if prices is not None and unpriced_backfill.day_has_unpriced_usage(conn, day):
+        unpriced_backfill.roll_tokens_day_with_backfill(conn, day, prices=prices, dry_run=False)
+        return
+    with conn.transaction():
+        conn.execute(
+            _SEED_TOKENS_SQL.encode(),
+            {
+                "day": day,
+                "start": start,
+                "end": start + timedelta(days=1),
+                "subscription": list(SUBSCRIPTION_HARNESSES),
+            },
+        )
 
 
 @pytest.fixture
@@ -200,8 +259,8 @@ def _seed_two_period_scenario(db: psycopg.Connection, agent: int) -> None:
         source=None,
         tag="recent-claude-api",
     )
-    rollup.roll_day(db, _OLD_DAY)
-    rollup.roll_day(db, _RECENT_DAY)
+    _roll_day(db, _OLD_DAY)
+    _roll_day(db, _RECENT_DAY)
     token_totals.fold_totals(db, today=_TODAY)
 
 
@@ -279,7 +338,7 @@ def test_backfill_prices_null_rows_at_occurred_at_preserves_existing_prices_and_
     ) == (2, 2, True)
     _assert_backfilled_tables(db, agent)
 
-    rollup.roll_day(db, _RECENT_DAY, prices=book)
+    _roll_day(db, _RECENT_DAY, prices=book)
     assert db.execute(
         "SELECT day, model, llm_calls, unpriced_calls, cost_usd "
         "FROM agent_model_tokens_daily WHERE agent_id = %s AND day = %s ORDER BY model",
@@ -529,7 +588,7 @@ def test_ledger_backfill_protects_estimated_rows_per_model_guard_and_sibling_age
     ).fetchall()
     assert mixed_rows == expected_mixed
 
-    rollup.roll_day(db, _OLD_DAY, prices=book)
+    _roll_day(db, _OLD_DAY, prices=book)
     after_rollup = db.execute(
         "SELECT model, llm_calls, cost_usd, costed_calls, unpriced_calls, estimated_calls "
         "FROM agent_model_tokens_daily WHERE agent_id = %s AND day = %s ORDER BY model",
@@ -580,7 +639,7 @@ def test_permanently_unpriced_ledger_day_skips_writes_and_reports_zero_updates(
         source="antigravity",
         tag="perm-unpriced",
     )
-    rollup.roll_day(db, _RECENT_DAY)
+    _roll_day(db, _RECENT_DAY)
 
     report = unpriced_backfill.run_unpriced_backfill(db, today=_TODAY, prices=book, dry_run=False)
     assert report.ledger_days_scanned == 1
@@ -617,7 +676,7 @@ def test_ledger_backfill_merges_priced_and_unpriced_calls_under_same_suffixed_mo
         source="antigravity",
         tag="suffix-unpriced",
     )
-    rollup.roll_day(db, _OLD_DAY)
+    _roll_day(db, _OLD_DAY)
 
     report = unpriced_backfill.run_unpriced_backfill(db, today=_TODAY, prices=book, dry_run=False)
     assert (report.ledger_days_updated, report.ledger_calls_priced) == (1, 1)

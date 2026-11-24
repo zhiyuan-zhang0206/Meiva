@@ -1,6 +1,6 @@
 # meiva:note
 # Gateway-owned events-maintenance daemon. Resident loops under one `TaskGroup`:
-# - Hourly dispatch (`telemetry_replay`, day-grain `rollup`, `blob_vacuum`, checkpoint size sample)
+# - Hourly dispatch (`telemetry_replay`, `blob_vacuum`, checkpoint size sample)
 # - 60s `registry_gauge` (`max(agents.id)` -> `agent_registry`)
 # - 5m Grafana `alert_reconciliation` (when credentialed)
 # Each loop tracks independent progress and hard deadlines for `/healthz`; exceeding a deadline
@@ -14,7 +14,7 @@ import signal
 import socket
 import sys
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
@@ -60,13 +60,7 @@ from services.upkeep.events_maintenance.blob_vacuum import (
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.health_components import LoopFacts
 from services.upkeep.events_maintenance.passes import events_maintenance_log
-from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
-from services.upkeep.events_maintenance.token_totals import fold_totals
-from services.upkeep.events_maintenance.unpriced_backfill import (
-    load_price_book,
-    run_unpriced_backfill,
-)
 
 
 # meiva:note
@@ -101,11 +95,9 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 
 # meiva:note
-# One hourly pass: the telemetry mirror replay, the cost-ledger rollup of the last closed days
-# (`telemetry_events` to `agent_model_tokens_daily` and `agent_metrics_daily`) and the fold of its
-# settled days into `agent_model_tokens_total`, the hourly checkpoint size/row-count telemetry
-# sample, and the blob VACUUM. One `now` drives the time-based steps. Logs what each step did; a
-# no-op pass logs nothing.
+# One hourly pass: the telemetry mirror replay, the unknown-writer audit, the hourly checkpoint
+# size/row-count telemetry sample, and the blob VACUUM. One `now` drives the time-based steps. Logs
+# what each step did; a no-op pass logs nothing.
 def run_maintenance(
     pool: ConnectionPool,
     progress: LoopProgress,
@@ -115,7 +107,7 @@ def run_maintenance(
     now: datetime,
     host: str,
 ) -> None:
-    # The telemetry_events record is independent of the rollup: its writer reports its own
+    # The telemetry_events record is independent of the other steps: its writer reports its own
     # failures and the mirror holds what it missed, so a failing replay must not prevent the
     # remaining maintenance work from making progress.
     try:
@@ -128,35 +120,6 @@ def run_maintenance(
     except Exception:
         events_maintenance_log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
-    prices = load_price_book()
-    today_utc = now.astimezone(UTC).date()
-    with pool.connection() as conn:
-        result = compute_rollup(conn, now_utc=now, prices=prices)
-        backfill = run_unpriced_backfill(conn, today=today_utc, prices=prices, dry_run=False)
-        folded = fold_totals(conn, today=today_utc)
-    progress.beat()
-    if backfill.observations_priced or backfill.ledger_calls_priced or backfill.totals_rebuilt:
-        events_maintenance_log.info(
-            "[events-maintenance] backfilled %d unpriced observations (%d metric days) and "
-            "%d ledger calls (%d ledger days, totals_rebuilt=%s)",
-            backfill.observations_priced,
-            backfill.metric_days_recomputed,
-            backfill.ledger_calls_priced,
-            backfill.ledger_days_updated,
-            backfill.totals_rebuilt,
-        )
-    if folded:
-        events_maintenance_log.info(
-            "[events-maintenance] folded settled ledger days into %d agent totals", folded
-        )
-    if result.start_day is not None:
-        events_maintenance_log.info(
-            "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
-            result.start_day,
-            result.end_day,
-            result.metrics_rows,
-            result.tokens_rows,
-        )
     # meiva:note
     # A row whose writer could not name its machine is the shape `#6089` made readable and nothing
     # read. The window spans one interval plus the pass deadline, so a slow pass cannot open a gap
@@ -267,8 +230,8 @@ def loop_components(
 
 
 # meiva:note
-# Main loop: roll immediately on start (fresh after a restart), then every
-# interval. The rollup DB work is synchronous psycopg run in a thread so it does
+# Main loop: run immediately on start (fresh after a restart), then every
+# interval. The maintenance DB work is synchronous psycopg run in a thread so it does
 # not block the healthz event loop.
 async def dispatch_loop(
     pool: ConnectionPool,
@@ -286,7 +249,7 @@ async def dispatch_loop(
     host = socket.gethostname()
     await passes.pass_loop(
         progress,
-        label="rollup",
+        label="maintenance",
         interval_s=interval,
         work=lambda: run_maintenance(
             pool,

@@ -24,9 +24,9 @@ when ancestry is broader than the work you mean to measure.
 
 `--start` and `--end` require timezone-aware timestamps. Windows are `[start,
 end)`; omitting `--end` uses the current time on every poll. `--lifetime` replaces
-`--start` and combines the folded lifetime ledger, later daily rows, and the
-current event tail; it cannot take a historical end. Arbitrary windows read
-retained events only and cannot recover precise times from folded history.
+`--start` and starts at the first report of the usage ledger. Every window, a
+historical one included, reads the same per-call ledger, which has no retention
+expiry, so a window is exact whatever its age.
 
 The JSON report contains roots, lineage, resolved IDs, window, per-agent and
 per-model usage, and totals. `total_tokens` is input + output: cached input and

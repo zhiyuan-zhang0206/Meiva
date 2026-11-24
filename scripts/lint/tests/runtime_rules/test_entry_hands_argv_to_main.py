@@ -105,7 +105,6 @@ _ENTRIES = [
         "services/supervision/meiva_root/__main__.py",
         "services/supervision/meiva_root/daemon.py",
     ),
-    ("services/upkeep/events_maintenance/rollup.py", None),
     ("ui/app/android/apply_overlay.py", None),
 ]
 

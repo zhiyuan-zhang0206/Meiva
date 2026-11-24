@@ -71,17 +71,10 @@ as virtual USD for subscription usage. Both are served every time — the consol
 half, because "no subscription call in this window" is an answer the reader asked for.
 Every read is scoped to the current home-derived cluster label (rows with no label included).
 
-`GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
-TPS and activity. It reads one repeatable-read Postgres snapshot over persisted
-observations, day summaries and disjoint historical ledger days. Exact percentile
-work scales with selected duration observations; additive work uses day summaries
-and at most two raw boundary days. Up to four in-flight leaders are admitted and
-identical callers share their read; completed results have no TTL. Each SQL query
-has a two-second statement limit and the HTTP wait has a 15-second limit. Collection
-is explicitly observed, never certified lossless. Missing historical sections and
-unknown compact boundaries are unavailable, with declared coverage/precision and
-observation timestamps. No runner probe, current-state projection, heartbeat query,
-or synchronous Loki scan occurs here.
+`GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, tokens, calls and cache hit.
+It reads `llm_usage_ledger` in one statement over `[start, end)` of `occurred_at`; the cumulative
+view starts at the agent's birth. Turn counts, exec outcomes, durations, TPS and activity time are
+not served. No runner probe, current-state projection, heartbeat query, or Loki scan occurs here.
 
 `GET /api/agents/{id}/inspect/live` exclusively owns the current projection,
 notice, runner shell probe, and indexed recent-pause lookup from the durable

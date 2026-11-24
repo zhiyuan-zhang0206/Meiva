@@ -16,11 +16,9 @@ already meters it as `sdk_call`.
 Framework hooks and sections record nothing — they have no plugin entry. Recording is a pure side channel: failures are
 swallowed and never perturb hook or wrap semantics.
 
-Two consumers read the stream. In the aggregate fetch path (`base/telemetry/metrics/aggregate.py` + `base/telemetry/metrics/aggregate_sql.py`), the
-`plugin_activation` section counts activations by contribution and by
-plugin × model — a contribution that registers but never fires is the removal
-evidence [`philosophy.md` §6](../../docs/conventions/philosophy.md) asks for. The
-weekly self-evolution collector puts the same counts on each run record as
+The weekly self-evolution collector reads the stream: counting activations by contribution shows
+a contribution that registers but never fires, the removal
+evidence [`philosophy.md` §6](../../docs/conventions/philosophy.md) asks for. It puts the counts on each run record as
 `plugins_activated`, so `mine.py` can cluster bad runs by the contribution that
 acted in them. A row missing part of the `(plugin, surface, identifier)` key
 is dropped rather than crashing the collect, but the drop is counted and

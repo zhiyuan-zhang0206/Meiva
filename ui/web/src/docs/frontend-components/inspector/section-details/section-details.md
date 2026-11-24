@@ -13,7 +13,7 @@ When visible, it wears the same row chrome as the Page section's rows — the ro
 hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and the hover highlight — so the panel's clickable rows and `Metric` cells read as one
 family. A cold failure gets the full error message (`InlineError`) in the body
 instead. Background refresh failures stay silent while cached snapshots are retained.
-**Activity** carries the cost, TPS and duration cells in its own node: [Activity section](../activity.md).
+**Activity** carries the cost, calls, tokens and cache-hit cells in its own node: [Activity section](../activity.md).
 
 **Context** is the selected agent's context-window occupancy: a wide gauge
 (`ContextMeter`, fixed at its comfortable `w-32` track width outside the

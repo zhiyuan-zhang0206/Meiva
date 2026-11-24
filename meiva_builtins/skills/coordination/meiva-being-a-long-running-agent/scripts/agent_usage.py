@@ -84,7 +84,7 @@ def parse_args(argv: Sequence[str]) -> UsageOptions:
     window = parser.add_mutually_exclusive_group(required=True)
     window.add_argument("--start", type=parse_time)
     window.add_argument(
-        "--lifetime", action="store_true", help="Folded lifetime ledger plus current event tail"
+        "--lifetime", action="store_true", help="Every ledger report up to --end (default: now)"
     )
     parser.add_argument("--end", type=parse_time, help="Default: current time on each poll")
     parser.add_argument("--usd-limit", type=float)
@@ -107,8 +107,6 @@ def validate_args(parsed: UsageOptions, parser: argparse.ArgumentParser) -> None
             parser.error("polling requires a moving end, a limit, and notification recipients")
     if parsed.notify_agent and parsed.usd_limit is None:
         parser.error("notification requires --usd-limit")
-    if parsed.lifetime and parsed.end:
-        parser.error("--lifetime cannot end at a historical timestamp")
     # Validate thresholds before database access, even on an empty report.
     check_usd_limit(parsed.usd_limit)
 

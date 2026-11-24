@@ -2,7 +2,7 @@
 # The resident loops of the events-maintenance service and how long each may go without completing
 # work before the health endpoint reads it as wedged.
 #
-# The rollup and resolution loops run blocking passes under the deadlines the cluster configures.
+# The dispatch and resolution loops run blocking passes under the deadlines the cluster configures.
 # The registry gauge is one single-row read per minute and the alert reconciliation is one Grafana
 # read (10 s timeout) and one bounded statement per five minutes, so both are wedged after three
 # missed intervals. The reconciliation exists only on a unit that holds the Grafana credential.

@@ -62,34 +62,17 @@ or a turn total. `complete` records whether the provider covered the usage.
 API and subscription reports carry different billing labels and use the same
 usage-time USD list prices. Subscription prices represent virtual spend.
 
-After deploying the writer to the gateway and every runner, run
-`meiva metrics backfill-usage-ledger --start YYYY-MM-DD --end YYYY-MM-DD` with
-an approved UTC interval that includes the old producers' final writes.
-Each batch commits independently. Re-running the same interval skips imported
-or dual-written IDs. Existing prices survive intact. Historical rows with no
-price can use the versioned archive at the stored time and carry
-`historical_catalog` as provenance. The batch size defaults to 1,000 reports
-to limit transaction duration.
-
-Before cutting readers over, run `meiva metrics usage-ledger-reconcile --start
-YYYY-MM-DD --end YYYY-MM-DD` for the same UTC interval. It compares retained
-telemetry and ledger totals by UTC day, reported model and billing in one
-read-only snapshot. Run large backfills one UTC day at a time. The JSON report
-lists source events, repeated IDs, totals from each side, and record differences
-by `call_id`. A record difference reports a missing side or lists the fields that
-differ. USD values in the totals are decimal strings. `historical_price_usd`
-identifies the part reconstructed from the catalog. `live_writers` counts priced
-live rows by the machine stored in the ledger. A process is reported only when
-matching telemetry from the same machine, cluster and usage timestamp identifies
-one process after the row was recorded. Otherwise the process is `null`. The
-command exits 1 for any record or group difference. A report persisted across UTC midnight or
-telemetry still in transit can produce a boundary difference. Compare adjacent
-days together when investigating it.
+The ledger started from the retained `llm_usage` telemetry: the one-time import
+of 2026-09-26 through 2026-11-24 (1,177,185 reports; `historical_catalog` marks
+the prices reconstructed from the versioned archive) was reconciled by UTC day,
+reported model and billing before the readers moved to the ledger, with no
+differences. Its commands are retired. Reports have no retention expiry; the
+Loki `llm_usage` stream is the operational copy and keeps seven days.
 
 ## Selecting usage scopes
 
 LLM usage is attributed to agents. The independent
 `meiva-being-a-long-running-agent` [usage script](../../../meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/references/usage.md)
 selects IDs, windows, and birth ancestry. `base/telemetry/metrics/usage.py` owns its
-read-only aggregation over retained events or lifetime ledger + tail. Threshold
+read-only aggregation over the ledger, for any window or from its first report. Threshold
 notifications leave convergence, preservation, and handoff to the agent.

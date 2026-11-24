@@ -21,7 +21,7 @@ to a read-only query only when none fits.
 | What an agent has been doing | `meiva agents timeline <agent_id> [--limit N] [--before ITEM_ID]` |
 | Audit, telemetry and log events: what happened, when, on which machine (debugging an agent or an alert: start at [troubleshooting](../troubleshooting/SKILL.md)) | `meiva events ls [--agent ID] [--name EVENT] [--category audit\|telemetry\|log] [--level L] [--machine M] [--hours H] [--limit N]` (newest first; default window: the last 24 hours; `--json` for scripts) |
 | How many events of each kind, machine, level or agent | `meiva events count --by event_name\|machine\|level\|agent_id\|category` with the same filters |
-| What each agent costs (calls, tokens, cost, turn outcomes) | `meiva metrics agents [--days N] [--json]` (costliest first) |
+| What each agent costs (calls, tokens, cost, cache hit) | `meiva metrics agents [--days N] [--json]` (costliest first) |
 | Fleet cost and tokens over a window, warning and error totals, balances and quotas that plugins report | `meiva stats [--hours 0\|1\|6\|24\|72\|168\|720] [--json]` (the plugin cards, such as provider balances, are listed under the totals) |
 | Schedules and their runs | `meiva schedules ls`, `meiva schedules get <name>`, `meiva schedules runs <name> [--limit N]`, `meiva schedules logs <name> [--lines N]` |
 | Open questions waiting for the user | `meiva questions list [--agent ID]` |
