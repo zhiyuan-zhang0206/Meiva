@@ -4,7 +4,6 @@ from typing import cast
 import pytest
 
 from agent.graph.prompt.conversation import (
-    delivery_style_prompt,
     harness_user_reply_section,
     user_reply_section,
 )
@@ -36,14 +35,8 @@ def _inputs(slices: AgentSlices, *, harness: Harness | None = None) -> SectionIn
 
 
 @pytest.mark.parametrize("fast_acknowledgement", [False, True])
-@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_initial_human_response_is_present_without_plugins(
-    style: str, fast_acknowledgement: bool
-) -> None:
-    slices = _slices(
-        agent__agent_communication_style=style,
-        agent__fast_acknowledgement=fast_acknowledgement,
-    )
+def test_initial_human_response_is_present_without_plugins(fast_acknowledgement: bool) -> None:
+    slices = _slices(agent__fast_acknowledgement=fast_acknowledgement)
 
     prompt = build_system_prompt(
         EMPTY,
@@ -60,21 +53,10 @@ def test_initial_human_response_is_present_without_plugins(
     assert "deliver the result in that conversation" in prompt
     assert "Peer messages, watcher events, scheduled wakes and system notes" in prompt
     assert "do not require courtesy replies" in prompt
-    if style == "silent":
-        expected = (
-            "Work without narrating after any opening confirmation"
-            if fast_acknowledgement
-            else "Work without narrating. While a task"
-        )
-        assert expected in prompt
-        assert "Silence here costs the user nothing" not in prompt
-    if style != "off":
-        assert "Ordinary information creates no question or notification" in prompt
 
 
-@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> None:
-    slices = _slices(agent__agent_communication_style=style)
+def test_reply_routing_and_handoff_policy_are_always_present() -> None:
+    slices = _slices()
     prompt = build_system_prompt(
         EMPTY,
         slices,
@@ -93,21 +75,11 @@ def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> Non
     assert "meiva.ui.notify" not in user_reply_section(_inputs(slices))
 
 
-@pytest.fixture(
-    params=[
-        (style, shape)
-        for style in ["off", "oriented", "concise", "silent"]
-        for shape in [False, True]
-    ]
-)
-def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
-    style, output_shape = cast(tuple[str, bool], request.param)
-    slices = _slices(
-        agent__agent_communication_style=style,
-        agent__prompt_output_conciseness_enabled=output_shape,
-    )
+@pytest.fixture(params=[False, True])
+def communication_prompt(request: pytest.FixtureRequest) -> str:
+    slices = _slices(agent__prompt_output_conciseness_enabled=cast(bool, request.param))
 
-    return style, build_system_prompt(
+    return build_system_prompt(
         EMPTY,
         slices,
         agent_id=1,
@@ -117,8 +89,8 @@ def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
     )
 
 
-def test_language_policy_survives_optional_guidance(communication_prompt: tuple[str, str]) -> None:
-    _, prompt = communication_prompt
+def test_language_policy_survives_optional_guidance(communication_prompt: str) -> None:
+    prompt = communication_prompt
 
     assert prompt.count("## Communication language") == 1
     assert "Follow the current request first, then standing user preferences" in prompt
@@ -127,26 +99,22 @@ def test_language_policy_survives_optional_guidance(communication_prompt: tuple[
     assert "Preserve code, identifiers, quotations and requested artifacts" in prompt
 
 
-def test_user_facing_text_policy_survives_every_style(
-    communication_prompt: tuple[str, str],
-) -> None:
-    style, prompt = communication_prompt
+def test_user_facing_text_policy_is_always_present(communication_prompt: str) -> None:
+    prompt = communication_prompt
 
     assert prompt.count("## Meaningful progress") == 1
     assert "Treat visible assistant text as substantive communication with the user" in prompt
     assert "Every message must be independently useful to the user" in prompt
     assert "without watching tool execution or reconstructing your internal steps" in prompt
     assert "Make it self-contained: state what changed, why it matters" in prompt
-    assert ("This agent is configured for live pairing" in prompt) == (style == "oriented")
+    assert "This agent is configured for live pairing" not in prompt
     assert "every message must remain self-contained and useful to the user" in prompt
     assert "Do not assume continuous attention to the session" in prompt
     assert "after an hour away" not in prompt
 
 
-def test_milestone_policy_preserves_results_and_questions(
-    communication_prompt: tuple[str, str],
-) -> None:
-    _, prompt = communication_prompt
+def test_milestone_policy_preserves_results_and_questions(communication_prompt: str) -> None:
+    prompt = communication_prompt
 
     assert "meaningful milestones for the user: a usable result" in prompt
     assert "Completing an internal step or ending a turn is not itself a milestone" in prompt
@@ -176,9 +144,8 @@ def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
         ) in section
 
 
-@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_sdk_prompt_has_one_delivery_protocol(style: str) -> None:
-    slices = _slices(agent__user_delivery_mode="sdk", agent__agent_communication_style=style)
+def test_sdk_prompt_has_one_delivery_protocol() -> None:
+    slices = _slices(agent__user_delivery_mode="sdk")
     prompt = build_system_prompt(
         EMPTY,
         slices,
@@ -225,15 +192,10 @@ def _rendered(mode: str, *, fast_acknowledgement: bool) -> dict[str, str]:
         agent__user_delivery_mode=mode, agent__fast_acknowledgement=fast_acknowledgement
     )
     inputs = _inputs(slices)
-    rendered = {
+    return {
         f"native/{mode}": user_reply_section(inputs),
         f"harness/{mode}": harness_user_reply_section(inputs),
     }
-    for style in ("oriented", "concise", "silent"):
-        rendered[f"style/{style}/{mode}"] = delivery_style_prompt(
-            mode, style, fast_acknowledgement=fast_acknowledgement
-        )
-    return rendered
 
 
 @pytest.mark.parametrize("fast_acknowledgement", [False, True])
@@ -267,8 +229,7 @@ def test_attention_policy_is_shared_across_delivery_modes_and_callers(
     sections = [
         text.split("## User attention\n\n", 1)[1].split("\n\n#", 1)[0]
         for mode in ("prefix", "sdk", "naive")
-        for key, text in _rendered(mode, fast_acknowledgement=fast_acknowledgement).items()
-        if key.startswith(("native/", "harness/"))
+        for text in _rendered(mode, fast_acknowledgement=fast_acknowledgement).values()
     ]
     assert len(sections) == 6
     assert all(section == sections[0] for section in sections)
@@ -403,9 +364,7 @@ def test_fast_acknowledgement_off_and_on_across_modes_and_callers(mode: str) -> 
 
 @pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
 def test_fast_acknowledgement_is_only_for_direct_human_requests(mode: str) -> None:
-    for key, text in _rendered(mode, fast_acknowledgement=True).items():
-        if key.startswith("style/"):
-            continue
+    for text in _rendered(mode, fast_acknowledgement=True).values():
         fast_ack = text.split("## Fast acknowledgement", 1)[1]
         assert (
             "Only a new request sent directly by the human in this conversation qualifies"

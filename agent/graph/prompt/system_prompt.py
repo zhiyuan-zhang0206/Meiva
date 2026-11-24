@@ -21,7 +21,6 @@ from ._base_prompt import (
 from ._codeact import codeact_section as codeact_section
 from .capabilities import capabilities_section, capability_index_is_empty
 from .conversation import (
-    delivery_style_prompt,
     harness_user_reply_section,
     user_reply_section,
 )
@@ -78,18 +77,6 @@ def keep_it_simple_section(inputs: SectionInputs) -> str:
         "tedious, mechanical thing — the shortcut that saves an hour now costs more "
         "later. Be relentless: favor the principle even when it is tedious. When other "
         "rules tension, this meta-principle decides."
-    )
-
-
-def communication_style_section(inputs: SectionInputs) -> str:
-
-    style = str(_resolved("agent_communication_style", inputs))
-    if style == "off":
-        return ""
-    return delivery_style_prompt(
-        inputs.slices.prompt.user_delivery_mode,
-        style,
-        fast_acknowledgement=bool(inputs.slices.prompt.fast_acknowledgement),
     )
 
 
@@ -427,7 +414,6 @@ FRAMEWORK_SECTIONS: tuple[Callable[[SectionInputs], str], ...] = (
     codeact_section,
     keep_it_simple_section,
     user_reply_section,
-    communication_style_section,
     user_tone_section,
     _output_conciseness_section,
     ui_delivery_section,
@@ -572,7 +558,6 @@ HARNESS_FRAMEWORK_SECTIONS: tuple[Callable[[SectionInputs], str], ...] = (
     harness_sdk_expand_section,
     keep_it_simple_section,
     harness_user_reply_section,
-    communication_style_section,
     user_tone_section,
     _output_conciseness_section,
     ui_delivery_section,

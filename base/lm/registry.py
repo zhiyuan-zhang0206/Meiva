@@ -23,7 +23,6 @@ class ModelTuning:
     llm_stream_ttft_timeout_seconds: float | None = None
     llm_stream_total_timeout_seconds: float | None = None
     llm_stream_inter_chunk_timeout_seconds: float | None = None
-    agent_communication_style: str | None = None
     prompt_user_tone_enabled: bool | None = None
     prompt_prefer_sdk_enabled: bool | None = None
     prompt_keep_it_simple_enabled: bool | None = None
@@ -54,7 +53,6 @@ DEFAULT_TUNING = ModelTuning(
     llm_stream_ttft_timeout_seconds=30.0,
     llm_stream_total_timeout_seconds=3600.0,
     llm_stream_inter_chunk_timeout_seconds=300.0,
-    agent_communication_style="off",
     prompt_user_tone_enabled=True,
     prompt_prefer_sdk_enabled=True,
     prompt_keep_it_simple_enabled=True,
@@ -346,10 +344,7 @@ IntSettingName = Literal[
     "claude_thinking_budget_tokens",
     "llm_retry_max_attempts",
 ]
-StrSettingName = Literal[
-    "reasoning_effort",
-    "agent_communication_style",
-]
+StrSettingName = Literal["reasoning_effort"]
 
 
 @dataclass(frozen=True)

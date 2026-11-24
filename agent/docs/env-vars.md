@@ -36,7 +36,6 @@ Cluster identity is **path-only** (`base/cluster/`, #629/#633): there is no `MEI
 | `MEIVA_LLM_OVERRIDE` | environment variable | Inject custom LLM factory (testing/multi-instance) |
 | `MEIVA_SYSTEM_PROMPT_*` | environment variable | Control toggles for system prompt sections. `MEIVA_SYSTEM_PROMPT_CONCISENESS` and `MEIVA_SYSTEM_PROMPT_UI_DELIVERY` default off (shared floor in `DEFAULT_TUNING`); an explicit value, per agent overlay or per-model tuning turns them on |
 | `MEIVA_FAST_ACKNOWLEDGEMENT` | cluster setting / per-agent overlay | Dual-layer switch (`False` default) controlling `## Fast acknowledgement`: off forbids low-information acks and stays silent until results/blockers; on sends one concise confirmation before calling tools on direct requests |
-| `MEIVA_AGENT_COMMUNICATION_STYLE` | environment variable | How verbose the agent is when working: `off` (default) / `oriented` / `concise` / `silent`; `off` omits the section entirely |
 
 ### DB
 | Variable | Set at | Purpose |

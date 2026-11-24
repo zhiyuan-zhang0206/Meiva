@@ -1,5 +1,5 @@
 # meiva:note
-# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Pre-tool acknowledgement vs strict silent execution is controlled solely by `## Fast acknowledgement` (`fast_acknowledgement`, cluster default `False`, per-agent `config_overlay` override). Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` are always active. Pre-tool acknowledgement vs strict silent execution is controlled solely by `## Fast acknowledgement` (`fast_acknowledgement`, cluster default `False`, per-agent `config_overlay` override). Intermediate turns call `execute_code` with no assistant text unless a milestone is reached.
 from base.agents.messages.reply_intent import (
     DISPLAY_TO_USER,
     HIDE_FROM_USER,
@@ -267,44 +267,6 @@ def user_reply_section(_inputs: SectionInputs) -> str:
     )
 
 
-_NOTIFICATION_GUIDANCE = (
-    "Apply the core user-attention test before these style preferences. "
-    "Deliver results through the configured user delivery protocol. Use meiva.ui.ask "
-    "for persistent questions. Ordinary information creates no question or notification."
-)
-
-_ORIENTED_BODY = (
-    "This agent is configured for live pairing. Offer more frequent substantive "
-    "updates on meaningful findings and checkpoints, with a brief explanation "
-    "of what you learned, why it matters and what remains unresolved. Each "
-    "message must remain self-contained and useful to the user. Surface "
-    "material direction changes and actionable blockers when they arise. "
-    "When a task is quick and self-explanatory, a single reply is enough."
-)
-
-_CONCISE_BODY = (
-    "Speak at milestones in one or two sentences, focusing on the result or "
-    "decision the user needs. Between those, work without commenting. "
-    "This size limit applies to progress updates, not requested explanations "
-    "or complete final deliverables."
-)
-
-_SILENT_BODY = (
-    "Work without narrating after the required initial reply to a human request. "
-    "While a task is in flight, emit no running "
-    "commentary — no announcing the next step, no reporting what a command "
-    "returned, no thinking out loud.\n\n"
-    "When human-requested work is finished, give one complete report: what you did, what "
-    "you found, what you changed, and anything you could not do. It has to "
-    "stand alone — the user did not watch you get there, so do not lean on "
-    "context they never saw. Deliver it through the configured user delivery protocol.\n\n"
-    "During work, surface important changes that pass the user-attention test, "
-    "including changed promises, adverse outcomes, corrections and blockers "
-    "requiring the user's action. Ask questions only the user can answer when "
-    "needed rather than silently waiting until the end."
-)
-
-
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
     visibility_why = _CLAUDE_CODE_VISIBILITY_WHY if _inputs.harness is Harness.CLAUDE_CODE else ""
     fast_acknowledgement = _fast_acknowledgement_enabled(_inputs)
@@ -321,13 +283,6 @@ def harness_user_reply_section(_inputs: SectionInputs) -> str:
         ),
         fast_acknowledgement=fast_acknowledgement,
     )
-
-
-COMMUNICATION_STYLE_SECTIONS = {
-    "oriented": f"# Keeping the user oriented\n\n{_NOTIFICATION_GUIDANCE}\n\n{_ORIENTED_BODY}",
-    "concise": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_CONCISE_BODY}",
-    "silent": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_SILENT_BODY}",
-}
 
 
 def delivery_prompt(
@@ -374,26 +329,3 @@ def delivery_prompt(
         "",
     )
     return f"{naive}\n\n{fast_ack}"
-
-
-def delivery_style_prompt(mode: str, style: str, *, fast_acknowledgement: bool = False) -> str:
-    section = COMMUNICATION_STYLE_SECTIONS[style]
-    replacement = (
-        "Work without narrating after any opening confirmation."
-        if fast_acknowledgement
-        else "Work without narrating."
-    )
-    section = section.replace(
-        "Work without narrating after the required initial reply to a human request.",
-        replacement,
-    )
-    if UserDeliveryMode(mode) is UserDeliveryMode.SDK:
-        section = section.replace(
-            _NOTIFICATION_GUIDANCE,
-            "Published messages automatically carry unread state. Publish each update once; "
-            "the user can read it later and respond from the same message.",
-        ).replace(
-            "Deliver it through the configured user delivery protocol.",
-            "Deliver the report through `meiva.ui.publish`.",
-        )
-    return section
