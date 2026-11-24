@@ -36,9 +36,9 @@ Rules the whole tree obeys:
 - **Wrap every count in `sum(...)`.** An unaggregated `count_over_time` over many streams hits
   Loki's per-query series cap.
 
-Retention is 84h and Loki never holds DEBUG. Older than that, the JSONL event mirror
-(`$MEIVA_HOME/logs/events-*.jsonl`, 7 days, per machine) still holds every event; DEBUG is only in
-the machine's local files.
+Retention is 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and Loki never holds DEBUG. The
+per-machine JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`, also 7 days) holds every event
+Loki missed; DEBUG is only in the machine's local files.
 
 ## The line shape
 
@@ -81,7 +81,7 @@ GET /api/events?trace_id=<hex>&from=<ISO-with-offset>
 Postgres keeps only the events a reader queries by name (`persist=True` in the registry) and
 every event at warning level or above; the rest of a trace's chain (`exec_envelope`,
 `hook_timing`, `node_exit`, info-level logs) is not there. The whole chain is in Loki within its
-84-hour window (`| trace_id="<hex>"`) and in the JSONL event mirror beyond it.
+7-day window (`| trace_id="<hex>"`) and in the per-machine JSONL event mirror.
 
 `from` must carry a timezone offset. Absent both `from` and `hours` the window is forced to the
 last 24h. `limit` caps at 1000; paging is `offset`, an exact count is opt-in via `with_total=1`.

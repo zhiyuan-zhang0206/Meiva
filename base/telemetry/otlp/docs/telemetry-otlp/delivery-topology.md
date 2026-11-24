@@ -31,8 +31,8 @@ promise for traces, logs or metrics; what must not be lost (audit, usage and cos
 is business data written to the database, not telemetry.
 
 Spans are metadata-only: LLM content is stripped at the source, and the
-conversation itself lives in the checkpoints (see the
-`inspect-a-trace` skill). The pre-compact conversation dump
+conversation itself lives in the checkpoints (see the Meiva Guide's
+`troubleshooting` skill, `references/find-the-run.md`). The pre-compact conversation dump
 (`agent/hooks/history_dump.py`, `MEIVA_COMPACT_HISTORY_DUMP`) is unrelated to
 traces.
 

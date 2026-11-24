@@ -26,7 +26,7 @@ Take the steps in order and stop when you have the cause.
    `--level warning`, `--name`, `--from/--to` with an offset; `meiva events count --by event_name`
    lists what occurred). Runs on every machine, no ssh. Stored in Postgres: only events
    declared `persist` and everything at warning or above.
-3. **Loki window query**, for everything else (the whole INFO stream, 84 hours). See
+3. **Loki window query**, for everything else (the whole INFO stream, 7 days). See
    [Query the stack from any machine](#query-the-stack-from-any-machine).
 4. **A `trace_id` opens the whole causal chain.** `meiva events ls --trace <id>` and
    `{machine="<m>"} | trace_id="<id>"` in Loki give the events; Tempo gives the span tree
@@ -44,10 +44,10 @@ Zero rows from one store does not mean the thing did not happen. Before concludi
 
 - `meiva events` is Postgres only. Non-persisted events (`node_exit`, `exec_envelope`,
   `health_probe_ran`, plain INFO logs) are 0 there and present in Loki. Lifecycle
-  request/result events are written to Postgres by the CLI and are not in Loki. Check the
+  request/result events are written to Postgres by the CLI and are almost absent from Loki. Check the
   declaration in `base/events/declarations/` to know which store has it, or ask both.
-- Loki keeps 84 hours and never DEBUG. Older: Postgres events, then the per-machine
-  `$MEIVA_HOME/logs/events-*.jsonl` (7 days).
+- Loki keeps 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and never DEBUG. Older, or a line Loki
+  lacks: Postgres events, then the per-machine `$MEIVA_HOME/logs/events-*.jsonl` (also 7 days).
 - Always narrow by `machine`: one agent id's query without it can read as another host.
 - Tempo spans carry no content; messages come from the checkpoint ([find-the-run](references/find-the-run.md)).
 - `harness_exit_code` is not a failure signal (antigravity logs 1 on a normal terminate).
@@ -100,7 +100,7 @@ LogQL dialect, recipes (exec outcomes, spend, halts) and raw shell/service logs 
 with `"$MEIVA_PYTHON"` there.
 
 If `gq` returns 404, the gateway's Grafana proxy is off (`MEIVA_GRAFANA_PROXY_ENABLED=false`);
-401 means the process holds no machine token (run it through `$MEIVA_PYTHON` as above).
+a plain `curl` without a token gets 401 (use `gq`, which runs through `$MEIVA_PYTHON`); inside `gq`, 401 means the token is invalid or expired and a `KeyError` on `MEIVA_API_TOKEN` means the process holds none.
 
 ## Traces
 

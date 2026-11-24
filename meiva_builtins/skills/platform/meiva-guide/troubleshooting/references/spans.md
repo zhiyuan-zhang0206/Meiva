@@ -39,7 +39,7 @@ URL on the station. The scripts inherit `MEIVA_TELEMETRY_TEMPO_QUERY_URL`
 
 ## Find: TraceQL
 
-All verified against Tempo 3.0.2.
+Verified against Tempo 3.0.2; the deployed version is 3.1.1 (`deploy/lgtm/native/versions.yml`).
 
 | Want | Query |
 |---|---|
@@ -108,8 +108,8 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
   `GET /api/events?trace_id=<hex>&from=<ISO>` (`events`) and the same trace id from Loki
   (`events_loki`, `--loki-url`, default `http://127.0.0.1:3100`). Postgres keeps only the
   events a reader queries by name and everything at warning or above, so `events` is a
-  subset; Loki holds the whole chain within its 84-hour window, and the JSONL event mirror
-  (`$MEIVA_HOME/logs/events-*.jsonl`, 7 days, per machine) holds it beyond that.
+  subset; Loki holds the whole chain within its 7-day window, and the per-machine JSONL event
+  mirror (`$MEIVA_HOME/logs/events-*.jsonl`, also 7 days) covers what Loki missed.
 - Gateway auth: bearer `MEIVA_API_TOKEN` (a launched process's machine token),
   else `MEIVA_CLUSTER_SECRET` from the environment or the gateway's
   `$MEIVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).
@@ -129,7 +129,7 @@ The report and Grafana are complements: Grafana is the interactive browser, the
 report is the sharable annotated artifact. Prefer just handing over the Grafana
 link unless the annotation is the point.
 
-## Pitfalls (all observed, Tempo 3.0.2)
+## Pitfalls (observed on Tempo 3.0.2; not re-checked on 3.1.1)
 
 - **5 MB full-trace cap** — `/api/traces/{id}` refuses larger traces outright.
 - **`spss` caps at 100, and time-window paging is unreliable** — a window can

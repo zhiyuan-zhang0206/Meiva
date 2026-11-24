@@ -11,8 +11,8 @@ Start with [meiva-self-development](meiva-self-development/SKILL.md) and
 [Serious Research](meiva-serious-research/SKILL.md).
 [Review Contribution](review-contribution/SKILL.md) checks this repository's
 rules; [Measure Complexity](measure-complexity/SKILL.md) runs the repository's
-radon tooling; [Inspect a Trace](inspect-a-trace/SKILL.md) explains runtime
-evidence and diagnostics. These independent tools keep their existing owners.
+radon tooling; [Inspect a Trace](inspect-a-trace/SKILL.md) holds the trace fetch/read/render
+scripts (the method is the Meiva Guide's `troubleshooting` skill). These independent tools keep their existing owners.
 
 The three shared packages are symlinks to their canonical sources under
 `meiva_builtins/skills/`. This is a development selection, not a mirror of the
