@@ -17,7 +17,10 @@ from base.lm.reasoning import to_canonical_reasoning
 
 
 def has_invalid_reply_visibility(message: AIMessage) -> bool:
-    if not read_meiva_kwargs(message).get("meiva_explicit_visibility"):
+    kwargs = read_meiva_kwargs(message)
+    if not kwargs.get("meiva_explicit_visibility") or kwargs.get("meiva_non_human_wake"):
+        return False
+    if message.tool_calls:
         return False
     content = to_canonical_reasoning(message_content(message))
     if isinstance(content, str):

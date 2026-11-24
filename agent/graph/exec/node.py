@@ -68,7 +68,6 @@ from agent.graph.exec._notes import merge_exec_notes
 from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
-from agent.hooks.reply_visibility import deliver_reply_visibility_correction
 from agent.messages import exec_output_message
 from agent.nodes import CLAIM, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
@@ -598,30 +597,6 @@ def _remaining_exec_calls(
     raise ValueError("exec_node: no preceding AIMessage")
 
 
-def _extract_messages(raw: object) -> list[BaseMessage]:
-    return [m for m in raw if isinstance(m, BaseMessage)] if is_object_list(raw) else []
-
-
-async def _apply_after_exec_hooks(
-    state: _state.AgentState,
-    runtime: Runtime[MeivaContext],
-    config: RunnableConfig,
-    update: dict[str, object],
-) -> None:
-    new_msgs = _extract_messages(update.get("messages"))
-    post_state = state.model_copy(update={"messages": [*state.messages, *new_msgs]})
-    vis_update = (
-        await deliver_reply_visibility_correction(post_state, runtime, config)
-        if runtime.context.clock_factory is not None
-        else None
-    )
-    extra_msgs: list[BaseMessage] = []
-    if vis_update is not None:
-        extra_msgs.extend(_extract_messages(vis_update.get("messages")))
-    if extra_msgs:
-        update["messages"] = [*new_msgs, *extra_msgs]
-
-
 def _skipped_call_results(
     calls: Sequence[ToolCall], ctx: MeivaContext, agent_id: int, start_index: int
 ) -> list[ToolMessage]:
@@ -660,12 +635,10 @@ async def exec_node_impl(
 ) -> Command[ExecGoto]:
     message, replacements, calls, _completed = _remaining_exec_calls(state.messages)
     if not calls:
-        empty_update: dict[str, object] = {
-            "messages": state.pending_exec_notes,
-            "pending_exec_notes": [],
-        }
-        await _apply_after_exec_hooks(state, runtime, config, empty_update)
-        return Command[ExecGoto](update=empty_update, goto=CLAIM)
+        return Command[ExecGoto](
+            update={"messages": state.pending_exec_notes, "pending_exec_notes": []},
+            goto=CLAIM,
+        )
     agent_id = agent_id_from_config(config)
     call = calls[0]
     issued_at = read_meiva_kwargs(message).get("meiva_created_at")
@@ -702,7 +675,6 @@ async def exec_node_impl(
 
     update["messages"] = replacements + results + notes
     update["pending_exec_notes"] = []
-    await _apply_after_exec_hooks(state, runtime, config, update)
     return Command[ExecGoto](update=update, goto=CLAIM)
 
 

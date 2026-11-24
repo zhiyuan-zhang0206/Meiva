@@ -161,7 +161,7 @@ class ReadTimelineSink:
         self._active = False
         self._delivered_output = False
         self._closed_turns = 0
-        self._invalid = False
+        self._unmarked_tail = False
         self._history_end = self._start_offset()
         self._seen_stat: tuple[int, ...] | None = (
             None if self._file is None else self._file.watch_signature()
@@ -196,8 +196,8 @@ class ReadTimelineSink:
         self._delivered_output = False
 
     def take_invalid_reply(self) -> bool:
-        invalid, self._invalid = self._invalid, False
-        return invalid
+        unmarked, self._unmarked_tail = self._unmarked_tail, False
+        return unmarked and not self._non_human_wake
 
     def mark_human(self) -> None:
         self._non_human_wake = False
@@ -211,18 +211,16 @@ class ReadTimelineSink:
             self._delivered_output = True
         if isinstance(event, AssistantText):
             self._check_reply(event.text)
+        elif isinstance(event, ToolUse) and event.parent_tool_use_id is None:
+            self._unmarked_tail = False
         if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
             await self._read_logged(anchor=event)
         self._dirty.set()
 
     def _check_reply(self, text: str) -> None:
         self._replied = True
-        if (
-            self._policy.explicit_visibility
-            and text.strip()
-            and parse_reply_visibility(text) is None
-        ):
-            self._invalid = True
+        if self._policy.explicit_visibility and text.strip():
+            self._unmarked_tail = parse_reply_visibility(text) is None
 
     async def record_control(self, text: str, *, error: bool = False) -> None:
         logger.warning(

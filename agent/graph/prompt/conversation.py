@@ -1,6 +1,11 @@
 # meiva:note
 # Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Pre-tool acknowledgement vs strict silent execution is controlled solely by `## Fast acknowledgement` (`fast_acknowledgement`, cluster default `False`, per-agent `config_overlay` override). Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
-from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE, SDK_DELIVERY_RULE
+from base.agents.messages.reply_intent import (
+    DISPLAY_TO_USER,
+    HIDE_FROM_USER,
+    REPLY_VISIBILITY_RULE,
+    SDK_DELIVERY_RULE,
+)
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.user_delivery import UserDeliveryMode
 
@@ -75,7 +80,10 @@ def _build_user_reply_section(
         "for unread reminders. The prefix alone neither guarantees a new reminder "
         "for every block nor clears an earlier unread marker. "
         "Text without a valid prefix is folded into Details. A system note may ask you "
-        "to correct it. Tool calls, tool results and reasoning do not need a prefix. "
+        "to correct it. A tool call with no accompanying text, tool results and reasoning "
+        "need no prefix; but any text you write, even one short remark right before a tool "
+        f"call, must start with {HIDE_FROM_USER} (or {DISPLAY_TO_USER} for a user-facing "
+        "message). "
         "Use the hide prefix for required process narration that does not pass the "
         "user-attention test; only the display prefix delivers it to the user. "
         "Keep delegated summaries under MEIVA_HIDE_FROM_USER: delivery to the delegator "
@@ -198,8 +206,9 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
             "immediately, make a quick sanity check and — before calling any tool — immediately "
             "emit one brief `MEIVA_DISPLAY_TO_USER` acknowledgement (one concise sentence in the "
             "user's language confirming you are starting). Immediately after that opening "
-            "acknowledgement, use `MEIVA_HIDE_FROM_USER` for all tool calls and intermediate "
-            "work. When finished, if the instruction was a pure action/execution request that "
+            "acknowledgement, start every text block you write, including a one-line remark "
+            "before a tool call, with `MEIVA_HIDE_FROM_USER`; a tool call with no accompanying "
+            "text needs no prefix. When finished, if the instruction was a pure action/execution request that "
             "needs no post-execution report, stay silent (`MEIVA_HIDE_FROM_USER`) instead of "
             "interrupting the user a second time; if it asked for findings, an answer, or a "
             "deliverable, send the final result once with `MEIVA_DISPLAY_TO_USER`."

@@ -194,7 +194,6 @@
   "agent/hooks/dump_name.py": 2,
   "agent/hooks/history_dump.py": 6,
   "agent/hooks/repair.py": 8,
-  "agent/hooks/reply_visibility.py": 1,
   "agent/hooks/snapshot_wait.py": 4,
   "agent/hooks/tests/hook_typing_contract.py": 6,
   "agent/hooks/tests/test_chunk_threshold.py": 6,
