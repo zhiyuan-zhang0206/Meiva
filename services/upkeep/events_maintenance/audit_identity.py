@@ -67,7 +67,7 @@ class _UnknownRows:
 
 
 # meiva:note
-# The reading itself, blocking: the caller runs it in the pass's worker thread, beside the rollup it
+# The reading itself, blocking: the caller runs it in the pass's worker thread, beside the other steps it
 # shares a connection pool with. `window_seconds` is the caller's, because only the daemon knows how
 # often it sweeps and how long one pass may run.
 def read_unknown_writers(

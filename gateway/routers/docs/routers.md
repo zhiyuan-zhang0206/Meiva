@@ -24,7 +24,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **agent_events** (`/api/agents/{id}/events/stream`) — real-time SSE tail (filtered by agent_id); history is `/api/events?agent_id=`
 - **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface: audit rows from Postgres `audit_events`, telemetry/log from Postgres `telemetry_events`, merged newest-first; filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope; `/api/events/counts` counts the same filtered stream per value of one dimension (`by` = event_name / machine / level / agent_id / category) in SQL, largest group first, under the same statement timeout
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — see [the understanding tree and message units over a window](../../../services/derived/insights/run_timeline/docs/run_timeline.md) (its `/messages` range read included).
-- **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces — [Agent Inspect Router](../../inspect/docs/inspect.md)
+- **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token usage + neighbor graph; plugin metric and inspector-widget surfaces — [Agent Inspect Router](../../inspect/docs/inspect.md)
 - **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [SSE (Server-Sent Events)](../../events/docs/sse/sse.md))
 - **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
 - **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read [Alerts Router](../../alerts/docs/alerts.md)
@@ -46,7 +46,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 
 ### Ops & system
 - **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard totals; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([dashboard contract](../../cluster/docs/ops-surfaces.md))
-- **metrics** (`/api/metrics/agents`) — the per-agent headline counters behind `meiva metrics agents`
+- **metrics** (`/api/metrics/agents`) — the per-agent usage totals (calls, tokens, cost, cache hit) behind `meiva metrics agents`, read from the usage ledger
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — shell session monitor (session backend proxy)
 - **memory** (`/api/memory/search`, `/refresh`, `/graph`) — [shared checkout ownership and bounded search](memory.md); a search stops when its client disconnects

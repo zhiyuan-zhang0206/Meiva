@@ -7,8 +7,7 @@ exports = ["aggregate.py", "core", "event_sql.py", "grafana_dashboard.py", "logq
 "logql.py" = ["plugin_metrics_sql.py"]
 "observed_metrics.py" = ["event_sql.py"]
 "plugin_metrics.py" = ["logql.py", "plugin_metrics_sql.py"]
-"tests" = ["grafana_dashboard.py", "aggregate.py", "core", "observed_metrics.py", "plugin_metrics.py"]
-"usage.py" = ["event_sql.py"]
+"tests" = ["aggregate.py", "core", "grafana_dashboard.py", "observed_metrics.py", "plugin_metrics.py", "usage.py"]
 
 [purity]
 "event_sql.py" = "strict"

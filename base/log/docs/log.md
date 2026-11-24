@@ -61,9 +61,8 @@ events-maintenance daemon kept the current and next month ahead of the write
 frontier so nothing stranded in the DEFAULT catch-all. Retention DROP was
 never enabled: the archive cleanup dropped the table whole (task
 #1281/#1823). Live retention is the JSONL mirror tiers (7d full / 90d
-rollup-source) plus Loki's own. The day-grain rollups
-(`agent_metrics_daily` / `agent_model_tokens_daily`) keep since-birth
-aggregates alive across the retirement.
+rollup-source) plus Loki's own. The usage ledger
+(`llm_usage_ledger`) keeps since-birth usage independent of that retention.
 
 ## Notes
 

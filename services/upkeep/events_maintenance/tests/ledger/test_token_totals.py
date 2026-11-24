@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
-import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 import psycopg
 import pytest
 
-from services.upkeep.events_maintenance import rollup, token_totals
+from services.upkeep.events_maintenance import token_totals
 
 _TODAY = date(2026, 6, 30)
 
@@ -112,39 +110,3 @@ def test_every_ledger_column_is_folded_per_model(db: psycopg.Connection) -> None
         (agent,),
     ).fetchall()
     assert rows == [("a", 4, 20, 10, 6, 2, 0.75, 2, 2), ("b", 2, 10, 5, 3, 1, 2.0, 1, 1)]
-
-
-def _raw_usage(db: psycopg.Connection, agent: int, day: date, tokens_in: int) -> None:
-    db.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-        "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'm', 'c', 'p', "
-        "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
-        (
-            uuid.uuid4().int % (1 << 62),
-            datetime(day.year, day.month, day.day, 10, tzinfo=UTC),
-            agent,
-            json.dumps({"in_total": tokens_in, "out_total": 1, "model": "m"}),
-        ),
-    )
-
-
-def test_a_range_rebuilds_the_totals_only_when_it_reaches_the_watermark(
-    db: psycopg.Connection,
-) -> None:
-    agent = _agent(db)
-    today = datetime.now(UTC).date()
-    old = today - timedelta(days=40)
-    _ledger(db, agent, old, 100, 10)
-    token_totals.fold_totals(db, today=today)
-    assert _total(db, agent) == (100, 10)
-    _raw_usage(db, agent, old, 150)
-
-    recent = today - timedelta(days=1)
-    untouched = rollup.roll_range(db, recent, recent, today=today)
-    assert not untouched.rebuilt
-    assert _total(db, agent) == (100, 10)
-
-    refolded = rollup.roll_range(db, old, old, today=today)
-    assert refolded.rebuilt
-    assert refolded.result.tokens_rows == 1
-    assert _total(db, agent) == (150, 1)

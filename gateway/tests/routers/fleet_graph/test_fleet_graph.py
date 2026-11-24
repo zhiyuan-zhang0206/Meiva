@@ -26,7 +26,6 @@ from psycopg import errors as pg_errors
 from base.events.reads import audit_rows
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.fleet_graph.graph_support import bus_with_sync_redis
-from services.upkeep.events_maintenance import rollup
 
 
 def _seed_agent(
@@ -83,13 +82,6 @@ def _usage(
             (str(uuid.uuid4()), age_hours, agent, in_total, out_total),
         )
     db_conn.commit()
-
-
-def _roll_ledger(db_conn: psycopg.Connection) -> None:
-    """Roll the closed days of the usage rows into the ledger, as the maintenance pass does;
-    usage older than the newest two days is read from there."""
-    yesterday = datetime.now(UTC).date() - timedelta(days=1)
-    rollup.roll_days(db_conn, yesterday - timedelta(days=10), yesterday)
 
 
 def _event(
@@ -172,8 +164,6 @@ def test_total_tokens_reads_the_retained_seven_day_window(db_conn: psycopg.Conne
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=100, out_total=10, age_hours=24 * 6)
     _usage(db_conn, a, in_total=1000, out_total=1000, age_hours=24 * 8)
-
-    _roll_ledger(db_conn)
 
     with gateway_test_client() as client:
         nodes = _nodes_by_id(client)
@@ -261,8 +251,6 @@ def test_node_score_windowed_excludes_old_events(db_conn: psycopg.Connection) ->
     # The retained 7d total carries the old + recent rows; the 24h score only the recent one.
     _usage(db_conn, a, in_total=100, out_total=100, age_hours=1)
     _usage(db_conn, a, in_total=999, out_total=999, age_hours=48)
-
-    _roll_ledger(db_conn)
 
     with gateway_test_client() as client:
         nodes = _nodes_by_id(client, "?hours=24")
@@ -610,8 +598,6 @@ def test_cache_key_separates_params(db_conn: psycopg.Connection) -> None:
     a = _seed_agent(db_conn)
     _usage(db_conn, a, in_total=100, out_total=50, age_hours=1)
     _usage(db_conn, a, in_total=100, out_total=100, age_hours=48)
-
-    _roll_ledger(db_conn)
 
     with gateway_test_client() as client:
         all_time = _nodes_by_id(client)

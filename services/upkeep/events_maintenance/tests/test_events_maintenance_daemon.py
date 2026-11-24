@@ -1,8 +1,8 @@
 # meiva:note
 # `services.upkeep.events_maintenance.daemon` against the throwaway Postgres.
 #
-# The hourly pass replays the JSONL mirror, rolls the closed days, folds the settled ones, samples the
-# checkpoint tables and vacuums inside the quiet window; the service runs it beside the resolution and
+# The hourly pass replays the JSONL mirror, audits unknown writers, samples the checkpoint tables
+# and vacuums inside the quiet window; the service runs it beside the resolution and
 # registry-gauge loops under one TaskGroup, so a loop that raises ends the process while a pass that
 # overruns its deadline only fails health. Each of those is observed here on real rows, a real health
 # endpoint and real database faults.
@@ -35,7 +35,6 @@ from base.db.tests.pool_probe import PoolProbe
 from base.db.tests.pool_probe import pool_probe as pool_probe
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.mirror import event_id
-from base.telemetry.metrics import observed_metrics
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.tests.db_faults import table_locked, table_missing
 from services.upkeep.events_maintenance.tests.service_probe import (
@@ -107,16 +106,7 @@ def _pass(
     )
 
 
-def _ledger(db: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:
-    db.commit()
-    return db.execute(
-        "SELECT day, model, llm_calls, tokens_in, tokens_out FROM agent_model_tokens_daily "
-        "WHERE agent_id = %s",
-        (agent_id,),
-    ).fetchall()
-
-
-def test_the_pass_replays_the_mirror_rolls_the_closed_days_and_marks_success(
+def test_the_pass_replays_the_mirror_and_marks_success(
     db_conn: psycopg.Connection,
     database: Database,
     pool: ConnectionPool,
@@ -133,33 +123,22 @@ def test_the_pass_replays_the_mirror_rolls_the_closed_days_and_marks_success(
         "SELECT event_name FROM telemetry_events WHERE machine = 'mirrored'"
     ).fetchall()
     assert stored == [("llm_usage",)]
-    assert _ledger(db_conn, agent) == [(_NOW.date().replace(day=2), "m", 1, 5, 2)]
     assert progress.snapshot()["last_success_at"] is not None
 
 
 def test_a_failing_replay_does_not_stop_the_rest_of_the_pass(
-    db_conn: psycopg.Connection,
     database: Database,
     pool: ConnectionPool,
     process_config: ConfigBoot,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent = _agent(db_conn)
     (tmp_path / "events-20261002.jsonl").write_bytes(b"this is not an event\n")
-    db_conn.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-        "category, event_name, level, source, attributes) VALUES (1, %s, %s, 'm', 'c', 'p', "
-        "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
-        (_MIRRORED_AT, agent, json.dumps({"in_total": 7, "out_total": 1, "model": "m"})),
-    )
-    db_conn.commit()
     progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
 
     _pass(pool, database, process_config, tmp_path, progress)
 
     assert "telemetry events replay incomplete" in caplog.text
-    assert _ledger(db_conn, agent) == [(_NOW.date().replace(day=2), "m", 1, 7, 1)]
     assert progress.snapshot()["last_success_at"] is not None
 
 
@@ -192,50 +171,6 @@ def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
         )
 
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
-
-
-def test_the_pass_auto_heals_unpriced_observations_using_archive_pricing(
-    db_conn: psycopg.Connection,
-    database: Database,
-    pool: ConnectionPool,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-) -> None:
-    agent = _agent(db_conn)
-    obs = observed_metrics.observe_row(
-        {
-            "id": event_id("daemon-unpriced-neon", int(1_790_000_001 * 1e9)),
-            "agent_id": agent,
-            "ts": _MIRRORED_AT,
-            "category": "telemetry",
-            "event_name": "llm_usage",
-            "attributes": {
-                "model": "gemini-4-neon-high",
-                "in_total": 100_000,
-                "out_total": 10_000,
-                "reasoning": 0,
-                "source": "antigravity",
-                "unpriced": 1,
-            },
-        }
-    )
-    assert obs is not None
-    assert observed_metrics.write_observations([obs], db=db_conn) == 1
-    db_conn.commit()
-
-    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
-    _pass(pool, database, process_config, tmp_path, progress)
-
-    db_conn.commit()
-    row = db_conn.execute(
-        "SELECT unpriced_calls, unpriced_calls_subscription, cost_usd_subscription "
-        "FROM agent_metric_days WHERE agent_id = %s",
-        (agent,),
-    ).fetchone()
-    assert row is not None
-    assert row[0] == 0
-    assert row[1] == 0
-    assert row[2] > 0
 
 
 def test_loop_components_report_fresh_loops_as_ok() -> None:
@@ -353,7 +288,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
 @pytest.mark.parametrize(
     ("crashing", "table"),
     [
-        ("dispatch", "agent_model_tokens_total_through"),
+        ("dispatch", "audit_events_canonical"),
     ],
 )
 async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
@@ -398,7 +333,7 @@ async def test_stopping_the_service_does_not_wait_for_a_pass_past_its_deadline(
     pidfile = tmp_path / "run" / "events_maintenance.pid"
     before = asyncio.all_tasks()
 
-    with table_locked(db_url, "telemetry_events"):
+    with table_locked(db_url, "audit_events"):
         service = _run(boot, database, tmp_path)
         try:
             await wait_serving(port, pidfile)

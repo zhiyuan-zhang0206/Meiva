@@ -45,7 +45,7 @@ async def test_consecutive_failed_passes_end_the_loop() -> None:
     with pytest.raises(ExceptionGroup) as raised:
         async with asyncio.TaskGroup() as tasks:
             await passes.pass_loop(
-                _progress(), label="rollup", interval_s=0.001, work=script, tasks=tasks
+                _progress(), label="maintenance", interval_s=0.001, work=script, tasks=tasks
             )
 
     assert raised.group_contains(RoundFailureLimitError)
@@ -65,7 +65,7 @@ async def test_a_completed_pass_and_a_db_outage_do_not_exhaust_the_budget() -> N
     async with asyncio.TaskGroup() as tasks:
         loop = tasks.create_task(
             passes.pass_loop(
-                _progress(), label="rollup", interval_s=0.001, work=script, tasks=tasks
+                _progress(), label="maintenance", interval_s=0.001, work=script, tasks=tasks
             )
         )
         deadline = time.monotonic() + 20.0
@@ -87,7 +87,9 @@ async def test_a_failed_pass_waits_a_full_interval_before_retrying() -> None:
 
     async with asyncio.TaskGroup() as tasks:
         loop = tasks.create_task(
-            passes.pass_loop(progress, label="rollup", interval_s=0.4, work=script, tasks=tasks)
+            passes.pass_loop(
+                progress, label="maintenance", interval_s=0.4, work=script, tasks=tasks
+            )
         )
         deadline = time.monotonic() + 20.0
         while len(calls) < 2 and time.monotonic() < deadline:
@@ -107,7 +109,9 @@ async def test_an_unreachable_database_is_recorded_and_retried_after_the_interva
 
     async with asyncio.TaskGroup() as tasks:
         loop = tasks.create_task(
-            passes.pass_loop(progress, label="rollup", interval_s=0.2, work=script, tasks=tasks)
+            passes.pass_loop(
+                progress, label="maintenance", interval_s=0.2, work=script, tasks=tasks
+            )
         )
         deadline = time.monotonic() + 20.0
         while len(calls) < 2 and time.monotonic() < deadline:
@@ -147,7 +151,7 @@ async def test_a_wedged_pass_parks_the_loop_without_waiting_out_the_interval() -
         async with asyncio.TaskGroup() as tasks:
             await asyncio.wait_for(
                 passes.pass_loop(
-                    progress, label="rollup", interval_s=60.0, work=overrun, tasks=tasks
+                    progress, label="maintenance", interval_s=60.0, work=overrun, tasks=tasks
                 ),
                 timeout=5.0,
             )
