@@ -46,12 +46,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/files/content"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/files/raw"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/files/list"): RouteContract(),
-    ("GET", "/api/alerts"): RouteContract(),
-    ("GET", "/api/alerts/stream"): RouteContract(
-        note="SSE tail — subscribing to an idle stream just waits; the UI's initial fetch covers the gap"
-    ),
+    ("GET", "/api/alerts/firing"): RouteContract(note="live read of Grafana's active alerts"),
     ("POST", "/api/alerts"): RouteContract(
-        note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at)",
+        note="Grafana Alertmanager webhook — a watchdog payload refreshes the heartbeat gauge; "
+        "nothing is stored",
     ),
     ("POST", ALERT_AGENT_WEBHOOK_PATH): RouteContract(
         Idempotency.NON_IDEMPOTENT,

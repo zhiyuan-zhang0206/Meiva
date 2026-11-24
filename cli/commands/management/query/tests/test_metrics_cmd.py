@@ -130,7 +130,7 @@ def _dashboard(plugin_stats: list[dict[str, JsonValue]]) -> dict[str, object]:
         "openai_cost_usd": None,
         "anthropic_cost_usd": 4.25,
         "google_cost_usd": 1.15,
-        "alerts": {"unresolved": 2, "critical": 1, "error": 1, "warning": 0},
+        "alerts": {"state": "ok", "firing": 2, "critical": 1, "error": 1, "warning": 0},
         "plugin_stats": plugin_stats,
         "as_of": "2026-11-12T01:00:00+00:00",
     }
@@ -159,7 +159,7 @@ def test_stats_prints_the_totals_and_the_plugin_cards(capsys: pytest.CaptureFixt
         "tokens:        in 1000, out 200, cache read 500, cache hit 50.0%",
         "cost (usd):    api 12.50 (openai unknown, anthropic 4.25, google 1.15), subscription (virtual) 3.00",
         "usage coverage: 3 calls without price, 2 incomplete reports",
-        "alerts:        2 unresolved (1 critical, 1 error, 0 warning)",
+        "alerts:        2 firing (1 critical, 1 error, 0 warning)",
         "",
     ]
     assert out[7].split() == ["plugin", "id", "status", "value", "updated", "detail"]
@@ -171,6 +171,40 @@ def test_stats_prints_the_totals_and_the_plugin_cards(capsys: pytest.CaptureFixt
         "42.10",
         "2026-11-12T00:55:00+00:00",
     ]
+
+
+@pytest.mark.parametrize(
+    ("alerts", "line"),
+    [
+        (
+            {
+                "state": "unavailable",
+                "firing": None,
+                "critical": None,
+                "error": None,
+                "warning": None,
+            },
+            "alerts:        unavailable (grafana unreachable)",
+        ),
+        (
+            {
+                "state": "not_configured",
+                "firing": None,
+                "critical": None,
+                "error": None,
+                "warning": None,
+            },
+            "alerts:        not configured (no grafana)",
+        ),
+    ],
+)
+def test_stats_never_prints_a_zero_for_alerts_it_could_not_count(
+    capsys: pytest.CaptureFixture[str], alerts: dict[str, JsonValue], line: str
+) -> None:
+    body = _dashboard([]) | {"alerts": alerts}
+    with serving({DASHBOARD: Reply(body=body)}) as gateway:
+        assert cmd_stats(access_to(gateway.url), hours=None, as_json=False) == 0
+    assert line in capsys.readouterr().out.splitlines()
 
 
 def test_stats_forwards_hours_and_names_the_five_minute_window(

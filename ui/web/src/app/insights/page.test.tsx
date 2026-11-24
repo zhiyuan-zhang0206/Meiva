@@ -30,14 +30,16 @@ function StatusBody() {
   );
 }
 function OpsBody() {
-  return <div id="ops-metrics">OPS_BODY</div>;
-}
-function AlertsBody() {
-  return <div id="alerts-section">ALERTS_BODY</div>;
+  return (
+    <div id="ops-metrics">
+      OPS_BODY
+      <div id="ops-alerts" />
+    </div>
+  );
 }
 
 function InsightsPage() {
-  return <InsightsShell Status={StatusBody} Ops={OpsBody} Alerts={AlertsBody} />;
+  return <InsightsShell Status={StatusBody} Ops={OpsBody} />;
 }
 
 afterEach(cleanup);
@@ -48,7 +50,7 @@ beforeEach(() => {
 });
 
 // meiva:note
-// The shell's alert section states ages on the page's clock, which the app root mounts.
+// The shell's sections state ages on the page's clock, which the app root mounts.
 function wrap(
   ui: React.ReactElement,
   qc = new QueryClient({
@@ -171,7 +173,7 @@ describe("InsightsPage shell", () => {
     const { browser } = wrap(<InsightsPage />);
     await waitFor(() => expect(document.getElementById("ops-metrics")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: /insights sections/i });
-    // Every sub-anchor (Status' blocks, Ops' Metrics/Alerts) appears in the nav.
+    // Every sub-anchor (Status' blocks, Ops' Metrics and Alerts) appears in the nav.
     for (const section of INSIGHTS_SECTIONS) {
       for (const sub of section.subs ?? []) {
         expect(within(nav).getByRole("button", { name: sub.label })).toBeTruthy();

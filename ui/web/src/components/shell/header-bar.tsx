@@ -9,7 +9,8 @@ import { Menu, PanelLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
-import { AlertsCountPill } from "@/components/notifications/alerts-badge";
+import { AlertsCountPill, useAlertsLabel } from "@/components/notifications/alerts-badge";
+import type { AlertsSignal } from "@/lib/notifications/use-firing-alerts";
 import { cn } from "@/lib/format/utils";
 import {
   BAR_DIVIDER_CLASS,
@@ -26,13 +27,13 @@ interface Props {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   // meiva:note
-  // The unresolved-alert count, so a closed sidebar keeps the one signal the expanded
+  // The firing-alert signal (a count, or "status unknown" while Grafana is unreachable), so a closed sidebar keeps the one signal the expanded
   // sidebar shows at the head of its icon row: with the rail collapsed on desktop, or the
   // drawer closed on a phone, the icon row is gone and an unreviewed P0 would be invisible
   // (user 2026-10-21). It rides the restore button on desktop and the menu button on a
   // phone, and each button's label names it, so the closed state stays quiet but not blind.
   // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
-  alertCount?: number;
+  alerts?: AlertsSignal;
   // meiva:note
   // Exact unread-agent + unanswered-question total, only shown on the phone.
   mobileAttentionCount?: number | null;
@@ -50,10 +51,10 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, alertCount = 0, mobileAttentionCount = 0, mobileAttentionState = "ready", pinnedRight, children, maxWidthCss }: Props) {
+export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, alerts = null, mobileAttentionCount = 0, mobileAttentionState = "ready", pinnedRight, children, maxWidthCss }: Props) {
   const t = useTranslations("nav");
   const sidebarT = useTranslations("sidebar");
-  const alertsT = useTranslations("alerts");
+  const alertsLabel = useAlertsLabel();
   const attentionCount = mobileAttentionCount ?? 0;
 
   // meiva:note
@@ -82,16 +83,16 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
           onClick={onToggleSidebar}
           className="hidden md:inline-flex absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-sidebar-accent shrink-0"
           aria-label={
-            alertCount > 0
-              ? `${sidebarT("showSidebar")}, ${alertsT("unresolvedAlerts", { count: alertCount })}`
+            alerts !== null
+              ? `${sidebarT("showSidebar")}, ${alertsLabel(alerts)}`
               : sidebarT("showSidebar")
           }
           aria-pressed={false}
           data-testid="sidebar-toggle"
         >
           <PanelLeft className={ICON_SIZE_CLASS} />
-          {alertCount > 0 ? (
-            <AlertsCountPill count={alertCount} testId="sidebar-toggle-alert-count" />
+          {alerts !== null ? (
+            <AlertsCountPill signal={alerts} testId="sidebar-toggle-alert-count" />
           ) : null}
         </button>
       ) : null}
@@ -115,8 +116,8 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
             onClick={onOpenSidebar}
             className="md:hidden relative p-1 -ml-1 rounded hover:bg-sidebar-accent shrink-0"
             aria-label={
-              alertCount > 0
-                ? `${t("openSidebar")}, ${alertsT("unresolvedAlerts", { count: alertCount })}`
+              alerts !== null
+                ? `${t("openSidebar")}, ${alertsLabel(alerts)}`
                 : mobileAttentionState !== "ready"
                   ? `${t("openSidebar")}, ${t(mobileAttentionState === "error" ? "attentionUnavailable" : "attentionLoading")}`
                 : attentionCount > 0
@@ -125,8 +126,8 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
             }
           >
             <Menu className={ICON_SIZE_CLASS} />
-            {alertCount > 0 ? (
-              <AlertsCountPill count={alertCount} testId="mobile-sidebar-alert-count" />
+            {alerts !== null ? (
+              <AlertsCountPill signal={alerts} testId="mobile-sidebar-alert-count" />
             ) : mobileAttentionState !== "ready" ? (
               <span data-testid="mobile-sidebar-attention-unknown" className="absolute -right-0.5 -top-0.5 rounded-full bg-muted px-1 text-[10px] font-semibold leading-4 text-muted-foreground">
                 {mobileAttentionState === "error" ? "?" : "…"}

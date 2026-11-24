@@ -1,4 +1,3 @@
-import type { AlertsWindow } from "../../../contracts/types";
 import { withQuery } from "./route-query";
 
 export function agentQuestionsPath(agentId: number): string {
@@ -14,18 +13,4 @@ export function fleetGraphPath(opts?: { hours?: number; decayLambda?: number }):
 
 export function memoryNotePath(path: string): string {
   return `/api/memory/note?${new URLSearchParams({ path }).toString()}`;
-}
-
-export function alertsPath(params: {
-  window?: AlertsWindow;
-  status?: string;
-  severity?: string;
-  limit?: number;
-}): string {
-  const q = new URLSearchParams();
-  if (params.window) q.set("window", params.window);
-  if (params.status) q.set("status", params.status);
-  if (params.severity) q.set("severity", params.severity);
-  if (params.limit) q.set("limit", String(params.limit));
-  return withQuery("/api/alerts", q);
 }

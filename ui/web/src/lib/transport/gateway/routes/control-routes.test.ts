@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./config-routes";
-import { alertsPath, fleetGraphPath, memoryNotePath, agentQuestionsPath } from "./control-routes";
+import { fleetGraphPath, memoryNotePath, agentQuestionsPath } from "./control-routes";
 
 describe("config routes", () => {
   it("getConfig appends ?machine= only when a machine is given", () => {
@@ -23,12 +23,6 @@ describe("config routes", () => {
 });
 
 describe("control routes", () => {
-  it("alerts list only the filters that are set", () => {
-    expect(alertsPath({})).toBe("/api/alerts");
-    expect(alertsPath({ window: "24h", status: "unresolved", severity: "error", limit: 200 }))
-      .toBe("/api/alerts?window=24h&status=unresolved&severity=error&limit=200");
-  });
-
   it("one agent's open questions are read by the agent id, with no limit", () => {
     expect(agentQuestionsPath(7)).toBe("/api/questions/open?agent_id=7");
   });

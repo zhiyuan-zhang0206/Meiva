@@ -1,7 +1,7 @@
 "use client";
 
 // /insights — the cluster's read-only observability surface: live Status and
-// the Grafana Ops dashboard link, split out of Control so the two usage
+// the Grafana Ops dashboard and alerts links, split out of Control so the two usage
 // sessions don't share a page. Insights is meant to sit open and poll Status
 // every 15s; its update check runs only on entry or explicit re-check. Control
 // is almost entirely static write/manage forms.
@@ -28,7 +28,6 @@ import {
 } from "@/app/control/sections";
 import { ControlSection } from "@/app/control/section";
 import OpsPage from "@/app/insights/ops/page";
-import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useBrowser } from "@/lib/browser/browser-provider";
@@ -37,25 +36,23 @@ import { cn } from "@/lib/format/utils";
 
 type StatusSlot = ComponentType<ComponentProps<typeof StatusPage>>;
 type OpsSlot = ComponentType<ComponentProps<typeof OpsPage>>;
-type AlertsSlot = ComponentType<ComponentProps<typeof AlertsSection>>;
 
 export interface InsightsShellProps {
   Status: StatusSlot;
   Ops: OpsSlot;
-  Alerts: AlertsSlot;
 }
 
 // meiva:note
-// This route is the Insights page's composition root: it names the three section bodies and hands
+// This route is the Insights page's composition root: it names the section bodies and hands
 // them to the shell. The shell owns the layout, the nav and the anchor scroll, and takes each body
 // as a required prop, so a test renders the shell with its own stand-ins instead of replacing the
 // section modules.
 // meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 export default function InsightsPage() {
-  return <InsightsShell Status={StatusPage} Ops={OpsPage} Alerts={AlertsSection} />;
+  return <InsightsShell Status={StatusPage} Ops={OpsPage} />;
 }
 
-export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
+export function InsightsShell({ Status, Ops }: InsightsShellProps) {
   const t = useTranslations("insights");
   const runTimelineT = useTranslations("runTimeline");
   // meiva:note
@@ -126,14 +123,6 @@ export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
               description={runTimelineT("insightsEntryDescription")}
             >
               <RunTimelineEntry />
-            </ControlSection>
-
-            <ControlSection
-              id="alerts"
-              label={t("alerts")}
-              description={t("alertsDescription")}
-            >
-              <Alerts />
             </ControlSection>
 
           </div>

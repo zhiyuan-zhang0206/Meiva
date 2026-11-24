@@ -11,7 +11,6 @@ from tests.e2e.fixture_environment import E2EEnv
 
 _CHANNEL_PATHS = {
     "/api/system": "system",
-    "/api/alerts/stream": "alerts",
     "/api/system/all": "systemAll",
 }
 

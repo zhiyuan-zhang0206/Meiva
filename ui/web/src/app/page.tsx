@@ -18,7 +18,7 @@ import { useContextPanelOpen } from "@/lib/context/context-panel-open";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { useTokenUsage } from "@/lib/inspector/use-token-usage";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
-import { useAlerts } from "@/lib/notifications/use-alerts";
+import { alertsSignal, useFiringAlerts } from "@/lib/notifications/use-firing-alerts";
 import { useStore } from "@/lib/state/store";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { useTimeline } from "@/lib/timeline/use-timeline";
@@ -60,7 +60,7 @@ function HomePageWiring() {
   const inspector = useInspectorOpen();
   const settings = useUserSettings();
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
-  const alerts = useAlerts();
+  const alerts = useFiringAlerts();
   const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
   // meiva:note
   // Populates `useTimelineStore` token-usage fields read by InspectorPanel's Context section.
@@ -90,7 +90,7 @@ function HomePageWiring() {
       timeline={timeline}
       timelineStore={timelineStore}
       bfcacheId={bfcacheId}
-      unresolvedAlerts={alerts.data?.meta.unresolved_count ?? 0}
+      alerts={alertsSignal(alerts.data)}
       contextPanel={contextPanel}
       AgentSidebar={AgentSidebar}
       ContextPanel={SharedContextPanel}

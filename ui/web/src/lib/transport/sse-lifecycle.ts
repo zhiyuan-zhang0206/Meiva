@@ -12,11 +12,11 @@ export interface SseStoreSlice {
 export interface SseRuntimeHooks {
   useAuthStatus: () => SseAuthStatus;
   useStore: <T>(selector: (state: SseStoreSlice) => T) => T;
-  useMergedChannels: () => readonly ("system" | "alerts" | "systemAll")[];
+  useMergedChannels: () => readonly ("system" | "systemAll")[];
   useDocumentVisible: () => boolean;
 }
 
-const DEFAULT_MERGED_CHANNELS: readonly ("system" | "alerts" | "systemAll")[] = [];
+const DEFAULT_MERGED_CHANNELS: readonly ("system" | "systemAll")[] = [];
 const DEFAULT_STORE_SLICE: SseStoreSlice = {
   reconnectNonce: 0,
   bumpReconnect: () => undefined,

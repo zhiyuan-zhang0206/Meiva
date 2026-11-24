@@ -234,7 +234,7 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
         <ToggleRow
           icon={Activity}
           label="Single realtime connection"
-          description="Carry the agent list, the open conversation and alerts over one stream instead of three. Off keeps one stream per channel, exactly as before; on frees connections for the page itself, which matters most on plain HTTP where a browser allows six per origin."
+          description="Carry the agent list and the open conversation over one stream instead of two. Off keeps one stream per channel, exactly as before; on frees connections for the page itself, which matters most on plain HTTP where a browser allows six per origin."
           value={settings["web.sseSingleStream"] === true}
           onChange={(v) => setSetting("web.sseSingleStream", v)}
         />

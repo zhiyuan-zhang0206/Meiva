@@ -1,4 +1,0 @@
-exports = ["alerts-section.tsx"]
-
-[uses]
-"alerts-section.test.tsx" = ["alerts-section.tsx"]

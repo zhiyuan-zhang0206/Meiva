@@ -145,7 +145,10 @@ gone and only index entries remained). Prometheus expires the oldest blocks
 when it reaches either seven days or the 8 GB disk cap. Tempo's
 `MEIVA_LGTM_TEMPO_RETENTION_HOURS` defaults to 168 hours. Loki, Prometheus,
 and Tempo use explicit Go memory limits, and Loki bounds query splitting,
-parallelism, and result-cache size.
+parallelism, and result-cache size. Grafana keeps its alert state history (the
+annotations behind the alerting history page) for seven days
+(`[unified_alerting.state_history.annotations] max_age` in `grafana.ini`); its cleanup
+job removes older rows in batches after the setting first takes effect.
 
 The collector stamps local logs (including filelog), metrics, and traces with
 the roster identity in the `meiva.machine` resource attribute. Relays preserve

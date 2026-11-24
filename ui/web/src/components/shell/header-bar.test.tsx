@@ -108,32 +108,45 @@ describe("HeaderBar", () => {
     expect(label.parentElement?.className).toContain("md:pl-8");
   });
 
-  it("collapsed sidebar toggle carries the unresolved-alert count and names it", () => {
+  it("collapsed sidebar toggle carries the firing-alert count and names it", () => {
     // meiva:note
     // User 2026-10-21: the icon row leaves with the rail, so the one standing signal
     // rides the restore button instead of disappearing with it.
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     render(
-      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alertCount={4} />,
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alerts={{ kind: "count", count: 4 }} />,
     );
     expect(screen.getByTestId("sidebar-toggle-alert-count").textContent).toBe("4");
-    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("4 unresolved alerts");
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("4 firing alerts");
   });
 
-  it("collapsed sidebar toggle stays quiet with no unresolved alerts", () => {
+  it("collapsed sidebar toggle stays quiet with no firing alerts", () => {
     render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} />);
     expect(screen.queryByTestId("sidebar-toggle-alert-count")).toBeNull();
-    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).not.toContain("unresolved");
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).not.toContain("alerts");
   });
 
-  it("mobile menu button carries the unresolved-alert count too", () => {
+  it("mobile menu button carries the firing-alert count too", () => {
     // meiva:note
     // The drawer is the phone's sidebar: closed, it hides the same icon row the
     // desktop rail hides, so the count rides the menu button that opens it.
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
-    render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alertCount={2} />);
+    render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alerts={{ kind: "count", count: 2 }} />);
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
-    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 firing alerts");
+  });
+
+  it("an unreachable Grafana shows a grey ? on the restore button and the menu button, never a count", () => {
+    const unknown = { kind: "unknown" } as const;
+    const { rerender } = render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alerts={unknown} />,
+    );
+    const pill = screen.getByTestId("sidebar-toggle-alert-count");
+    expect(pill.textContent).toBe("?");
+    expect(pill.className).toContain("bg-muted");
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("Grafana unreachable");
+    rerender(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alerts={unknown} />);
+    expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("?");
   });
 
   it("draws every bar glyph at the one shell icon size", () => {
@@ -149,7 +162,7 @@ describe("HeaderBar", () => {
     for (const icon of icons) expect(icon.getAttribute("class")).toContain(ICON_SIZE_CLASS);
   });
 
-  it("mobile menu button stays quiet with no unresolved alerts", () => {
+  it("mobile menu button stays quiet with no firing alerts", () => {
     render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} />);
     expect(screen.queryByTestId("mobile-sidebar-alert-count")).toBeNull();
   });
@@ -176,10 +189,10 @@ describe("mobile sidebar attention", () => {
     expect(screen.getByTestId("mobile-sidebar-attention-count").textContent).toBe("1");
     rerender(<HeaderBar {...props} mobileAttentionCount={0} />);
     expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
-    rerender(<HeaderBar {...props} mobileAttentionCount={3} alertCount={2} />);
+    rerender(<HeaderBar {...props} mobileAttentionCount={3} alerts={{ kind: "count", count: 2 }} />);
     expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
-    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 firing alerts");
   });
   it.each(["loading", "error"] as const)("names %s without pretending the total is zero", (state) => {
     render(<HeaderBar {...props} mobileAttentionCount={null} mobileAttentionState={state} />);

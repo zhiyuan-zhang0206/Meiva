@@ -18,7 +18,7 @@ validates the 202 receipt in `transport/gateway/upload-delivery.ts`, and polls
 
 **HTTPS shares SSE when Web Locks and BroadcastChannel are available.** Each
 visible, authenticated page requests the exclusive `meiva-ui-sse` Web Lock. The lock holder
-owns the real EventSources for `/api/system`, `/api/alerts/stream`, and the
+owns the real EventSources for `/api/system` and the
 selected-agent union `/api/system/all`; other pages own no gateway SSE sockets.
 The leader relays raw frames (including heartbeats) and open/reconnecting/closed
 state over `BroadcastChannel("meiva-ui-sse")`. Each browser page still reconciles its own Query cache.
@@ -61,8 +61,8 @@ a selected agent. Clearing the last selection closes it; union changes replace i
 No inactive or previously visited agent remains subscribed. Hidden pages do not replace SSE
 with polling. Reopening refreshes the selected timeline, token usage, and
 pending messages with one composed reconcile read (`/conversation-snapshot`,
-agent-reconcile.ts) and repairs the global read models. Alerts retain a
-separate domain stream.
+agent-reconcile.ts) and repairs the global read models. Alerts have no stream: the
+badge polls `/api/alerts/firing` every 30s.
 Multiple hooks share each page's subscription, and disposed connections discard late
 callbacks. `withCredentials` carries the session cookie through gateway auth.
 
@@ -80,9 +80,9 @@ requests through the gate.
 
 - **Half-dead watchdog**: 45s without any frame (even heartbeats) = socket stuck in OPEN (graceful restart / proxy hop) → the leader reopens it; a follower requests repair through the channel. Server sends a heartbeat frame roughly every 15s as liveness.
 - **CLOSED auto-reconnect**: unauthenticated streams never open; the leader probes `/api/auth/check` after a CLOSED stream — invalid session flips auth state and stays closed until login; valid session or failed probe → single-flight capped backoff reopen (1s doubled to 30s, reset on open). Followers only mirror connection state. The per-page fallback retains its existing retry timers and `retryNonce` levers. `onerror` dispatches CLOSED/CONNECTING/OPEN (unknown → throw); `ConnectionEvent` = open/reconnecting/closed/parse-failed.
-- `lib/sse-lifecycle.ts` owns the per-connection watchdog, retry timer, and legacy CLOSED auth probe for both system and alert providers. Each passes its own reconnect and notification callbacks; system emits connection events and uses the global reconnect nonce, while alerts invalidates its query caches on open and uses local reconnect state. Frame parsing and malformed-frame recovery remain provider-specific.
+- `lib/sse-lifecycle.ts` owns the per-connection watchdog, retry timer, and legacy CLOSED auth probe for the system provider, which passes its reconnect and notification callbacks, emits connection events and uses the global reconnect nonce. Frame parsing and malformed-frame recovery remain provider-specific.
 - **Cluster reconnect**: the authenticated `/api/cluster/status` poll reconnects SSE and refetches agents when a confirmed pause clears. Paused state alone never claims an interrupted updater or authorizes recovery.
-- The cluster reconnect uses the global store `reconnectNonce`; a shared follower relays a restart request to the leader. The per-page fallback retains separate system retry timers and AlertsProvider's independent watchdog and retry state.
+- The cluster reconnect uses the global store `reconnectNonce`; a shared follower relays a restart request to the leader. The per-page fallback retains separate system retry timers.
 
 ## Hook directory
 

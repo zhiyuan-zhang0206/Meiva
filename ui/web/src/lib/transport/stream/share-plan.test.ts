@@ -8,13 +8,13 @@ import {
   staleTabs,
 } from "./share-plan";
 
-const ALL = new Set(["system", "systemAll", "alerts"] as const);
+const ALL = new Set(["system", "systemAll"] as const);
 
 describe("merged stream url", () => {
   it("carries every merged channel on one source in wire order, with the idle agent filter", () => {
     const url = new URL(mergedStreamUrl("https://gw", ALL, ""));
     expect(url.origin + url.pathname).toBe("https://gw/api/stream");
-    expect(url.searchParams.get("channels")).toBe("global,all,alerts");
+    expect(url.searchParams.get("channels")).toBe("global,all");
     expect(url.searchParams.get("agents")).toBe("0");
   });
 
@@ -23,13 +23,13 @@ describe("merged stream url", () => {
   });
 
   it("omits the agent filter when the detail channel is not merged", () => {
-    const url = new URL(mergedStreamUrl("https://gw", new Set(["alerts", "system"] as const), "3"));
-    expect(url.searchParams.get("channels")).toBe("global,alerts");
+    const url = new URL(mergedStreamUrl("https://gw", new Set(["system"] as const), "3"));
+    expect(url.searchParams.get("channels")).toBe("global");
     expect(url.searchParams.has("agents")).toBe(false);
   });
 
-  it("orders merged channels system, systemAll, alerts regardless of insertion order", () => {
-    expect(mergedChannels(new Set(["alerts", "system"] as const))).toEqual(["system", "alerts"]);
+  it("orders merged channels system, systemAll regardless of insertion order", () => {
+    expect(mergedChannels(new Set(["systemAll", "system"] as const))).toEqual(["system", "systemAll"]);
   });
 });
 
@@ -68,7 +68,7 @@ describe("merged frame", () => {
       dropped: 0,
     });
     expect(parseMergedFrame('{"ch":"all","events":[]}')?.ch).toBe("systemAll");
-    expect(parseMergedFrame('{"ch":"alerts","events":[]}')?.ch).toBe("alerts");
+    expect(parseMergedFrame('{"ch":"alerts","events":[]}')).toBeNull();
   });
 
   it("reports the number of payloads the server shed", () => {

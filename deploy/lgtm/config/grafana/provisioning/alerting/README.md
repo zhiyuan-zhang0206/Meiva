@@ -113,9 +113,10 @@ that drifted from its recorded hash is restored from the checkout and reported a
 `converge_file_overwritten`, because the checkout owns this tree; the webhook URL
 is a Grafana-native `$__env{MEIVA_ALERTS_WEBHOOK_URL}` reference resolved from
 the process env).
-The contact point posts to the gateway's alert ingest endpoint — loopback
+The contact point posts to the gateway's alert webhook — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
-address when `MEIVA_OBSERVABILITY_URL` points at a remote station.
+address when `MEIVA_OBSERVABILITY_URL` points at a remote station. The gateway keeps no
+alert state: Grafana is the one truth, and the Web UI badge and `meiva stats` read it live.
 
 ## Rules
 
@@ -286,7 +287,7 @@ baseline ×2) rather than single long turns. The emitter's single
 route-classification source is `gateway/http/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
 fan-out to the user (alert-fatigue ruling 2026-08-22). The label is history: the
-IM channels retired on 2026-11-08 and the ingest no longer reads it.
+IM channels retired on 2026-11-08 and nothing reads it.
 
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — none of the three is gated. Thresholds are
@@ -402,7 +403,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-exec-node-timeout` | `exec_node_timeout` per agent (30m) | 0m | warning | nothing: the node timeout killed the call and no rule read the event (#6400) |
 | `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` per agent (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
 | `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period |
-| `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
+| `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04) |
 | `meiva-ops-grafana-rule-evaluation-failed` | At least one terminal Grafana rule evaluation failure in 5m, aggregated across rules | 0m | error | rule evaluation health in Grafana and its alerting logs |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
@@ -425,22 +426,22 @@ query Prometheus or when the watchdog heartbeat disappears.
 
 ## The alert pipeline's own dead-man pair
 
-Grafana delivers alerts to the gateway at `POST /api/alerts`. A webhook token
+Grafana delivers the watchdog to the gateway at `POST /api/alerts`. A webhook token
 rotation, stopped gateway, or wrong contact point can break that path for every
 rule. The watchdog sends a heartbeat to make failures visible on a quiet night.
 
 - `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
-  nothing about the system; its only job is to walk the whole path and refresh one row. Its route
+  nothing about the system; its only job is to walk the whole path and refresh one gauge. Its route
   repeats every 5 minutes and carries `continue: false`, so the heartbeat costs one POST per period
   and never reaches the catch-all.
-- `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
-  (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
-  accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
-  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path and judges the
+- `meiva-ops-alert-pipeline-silent` reads the gauge the gateway refreshes
+  (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:receive_alert_webhook`
+  for every accepted POST that carries a firing watchdog) and fires when it is older than 900 s — three
+  missed periods — for 5 minutes. The outside-Grafana sentinel uses the existing agent message path and judges the
   age of the newest heartbeat over the last hour (`max_over_time(...[1h])`), so a gateway restart that
   replaces the series is not silence; it fires when that age passes 1800 s.
 
-The judgment is on the *age of the last accepted ingest*, not on how many alerts fired: a quiet night
+The judgment is on the *age of the last accepted heartbeat*, not on how many alerts fired: a quiet night
 cannot trip it and a broken token cannot hide behind one. The period (5 m) and the threshold (3 × 5 m)
 are asserted together in `tests/scripts/test_alert_notification_policy.py`, so one cannot drift from the
 other.
@@ -453,22 +454,24 @@ sentinel checks for the loss of a previously observed series. The separate
 
 ## Notifications — the policy, the webhook, the window silence
 
-Rules evaluate in Grafana and POST firing/resolved webhooks to the gateway's `POST /api/alerts`
-(contact point and policy in `contact.yml`). The policy is the one place merging and repetition
+Rules evaluate in Grafana, and Grafana's embedded Alertmanager owns the alert state: what is
+firing, silenced or recovering. The policy (`contact.yml`) is the one place merging and repetition
 are decided: instances of one rule are one group (`group_by: [alertname]`, 30s wait, 5m
-interval, 4h repeat), critical skips the wait, and every other alert has an explicit route to the
-webhook. The direct Telegram contact point is retired; every rule uses the gateway webhook.
-The host sentinel retains a separate observation loop and agent-queue submission,
-but no external Bot API delivery path remains.
+interval, 4h repeat). The built-in policy has one receiver, the gateway's `POST /api/alerts`,
+which stores nothing — it only counts the watchdog heartbeat (its route repeats every 5m). The
+direct Telegram contact point is retired. The host sentinel retains a separate observation loop and
+agent-queue submission, but no external Bot API delivery path remains.
 
-The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
-webhook shape) — one alert instance = one row. It is the only writer of that table
-(`tests/scripts/test_alert_single_path.py`). The retired IM channel's `notify_im` labels are inert.
+The gateway keeps no copy of alert state. The Web UI's alert badge and `meiva stats` read Grafana's
+active alerts live (`GET /api/alerts/firing`; silenced and inhibited instances do not count, and a
+Grafana that cannot be reached shows as unavailable, never as zero). History is Grafana's: the
+alerting history page, `GET /api/annotations?type=alert` and `GET /api/v1/rules/history`.
+The retired IM channel's `notify_im` labels are inert.
 
 For an agent inbox destination, start with the [complete site policy example](../../contact.agent.example.yml).
 Copy it to `$MEIVA_HOME/lgtm/alerting/contact.yml`, replace the example agent ID, and converge the
-station, then reload Grafana alerting provisioning. Its error/critical route continues to the existing ingest rules. The built-in policy is
-ingest-only. [Receiver setup](../../../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)
+station, then reload Grafana alerting provisioning. Its error/critical route continues to the
+heartbeat route. The built-in policy notifies nobody. [Receiver setup](../../../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)
 
 A planned outage is a silence, not a gate in the services: `meiva update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,

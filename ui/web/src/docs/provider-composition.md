@@ -1,6 +1,6 @@
 # Provider composition
 
-`<html lang="en">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `EventStreamProvider` → [fold owner] → `AlertsProvider` → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
+`<html lang="en">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `EventStreamProvider` → [fold owner] → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
@@ -9,11 +9,12 @@
 - **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height`, publishes `--visual-viewport-height` and `--safe-area-bottom: 0px` on `<html>`, and resets root scroll to `(0, 0)` so fixed overlays, modals, and bottom bars stay inside the remaining area above an iOS/iPadOS `WKWebView` keyboard — the WebKit half of the contract whose Blink/Android half is `interactive-widget=resizes-content`. See [Mobile, tablet and coarse-pointer UX](mobile-and-tablet-ux.md).
 - **AppConnectionBanner** (#648): root-mounted and renders nothing; drives cluster health polling (`useClusterHealth`) and owns the store state consumed by `ConnectionNotice`; self-gated by `useAuth().status`. All Providers self-gate on auth state — no outer auth guard layer.
 
-Root composition tests keep authentication pending and assert that alert reads,
-SSE subscriptions and cluster polling stay blocked. Settings and theme readers
-still run against explicit pending API boundaries. They mount the real alert
-provider, observe the root query client and unmount before clearing its cache;
-this is initial composition evidence, not live stream acceptance.
+Root composition tests keep authentication pending and assert that SSE subscriptions
+and cluster polling stay blocked. Settings and theme readers still run against explicit
+pending API boundaries. They observe the root query client and unmount before clearing its
+cache; this is initial composition evidence, not live stream acceptance. The firing-alert
+badge polls from inside the authenticated tree (`AuthGuard` unmounts it on a 401), not from
+a root provider.
 
 The connection notice counts failures only while the stream's document is
 visible and focused. Hiding cancels its 15s escalation timer and clears a

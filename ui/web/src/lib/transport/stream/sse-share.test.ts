@@ -26,7 +26,7 @@ function tab(network: FakeNetwork, options: { merged?: SseChannel[]; solo?: bool
     },
     { base: "http://gateway.test", merged: new Set(options.merged ?? []), solo: options.solo ?? false },
   );
-  const listen = (ch: "system" | "alerts" | "systemAll", activeId: number | null = null) => {
+  const listen = (ch: "system" | "systemAll", activeId: number | null = null) => {
     const onFrame = vi.fn<(raw: string) => void>();
     const onState = vi.fn<(state: "open" | "reconnecting" | "closed") => void>();
     const onGap = vi.fn<(dropped: number) => void>();
@@ -61,9 +61,7 @@ describe("profile SSE transport", () => {
 
     expect(leader.transport.isLeader()).toBe(true);
     expect(follower.transport.isLeader()).toBe(false);
-    expect(leader.sources.map((source) => new URL(source.url).pathname)).toEqual([
-      "/api/system", "/api/alerts/stream",
-    ]);
+    expect(leader.sources.map((source) => new URL(source.url).pathname)).toEqual(["/api/system"]);
     expect(follower.sources).toHaveLength(0);
     leader.sources[0].open();
     leader.sources[0].frame('{"role":"heartbeat"}');
@@ -90,7 +88,7 @@ describe("profile SSE transport", () => {
     await settle();
     expect(leader.sources.every((source) => source.readyState === READY.CLOSED)).toBe(true);
     expect(follower.transport.isLeader()).toBe(true);
-    expect(follower.sources).toHaveLength(2);
+    expect(follower.sources).toHaveLength(1);
     expect(received.onState).toHaveBeenLastCalledWith("reconnecting");
     follower.sources[0].open();
     expect(received.onState).toHaveBeenLastCalledWith("open");
@@ -114,7 +112,7 @@ describe("profile SSE transport", () => {
     follower.document.show(true);
     await settle();
     expect(follower.transport.isLeader()).toBe(true);
-    expect(follower.sources).toHaveLength(2);
+    expect(follower.sources).toHaveLength(1);
     leader.transport.dispose();
     follower.transport.dispose();
     await settle();
@@ -155,18 +153,18 @@ describe("profile SSE transport", () => {
     const network = new FakeNetwork();
     const leader = tab(network);
     const follower = tab(network);
-    leader.listen("alerts");
-    const received = follower.listen("alerts");
+    leader.listen("system");
+    const received = follower.listen("system");
     await settle();
-    leader.sources[1].error(READY.CONNECTING);
+    leader.sources[0].error(READY.CONNECTING);
     expect(received.onState).toHaveBeenCalledWith("reconnecting");
-    leader.sources[1].error(READY.CLOSED);
+    leader.sources[0].error(READY.CLOSED);
     await settle();
     expect(received.onState).toHaveBeenCalledWith("closed");
     expect(leader.auth.probes).toBe(1);
     expect(follower.auth.probes).toBe(0);
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(leader.sources).toHaveLength(3);
+    expect(leader.sources).toHaveLength(2);
     expect(follower.sources).toHaveLength(0);
     leader.transport.dispose();
     follower.transport.dispose();
@@ -202,14 +200,13 @@ describe("profile SSE transport", () => {
     failed.transport.dispose();
   });
 
-  it("clears leadership and closes partial sources when the lock callback throws", async () => {
+  it("clears leadership when the lock callback throws", async () => {
     const failed = tab(new FakeNetwork());
-    failed.fake.failNextSourceOnPath("/api/alerts/stream");
+    failed.fake.failNextSourceOnPath("/api/system");
     failed.listen("system");
     await settle();
     expect(failed.transport.isLeader()).toBe(false);
-    expect(failed.sources).toHaveLength(1);
-    expect(failed.sources[0].readyState).toBe(READY.CLOSED);
+    expect(failed.sources).toHaveLength(0);
     expect(failed.fake.errors).toEqual([
       { message: "[sse-share] Web Lock failed", cause: expect.any(Error) as unknown },
     ]);
@@ -217,20 +214,20 @@ describe("profile SSE transport", () => {
   });
 
   it("carries every merged channel on one source, without the per-channel slots", async () => {
-    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll"] });
     leader.listen("system");
     await settle();
     expect(leader.sources).toHaveLength(1);
     const url = new URL(leader.sources[0].url);
     expect(url.pathname).toBe("/api/stream");
-    expect(url.searchParams.get("channels")).toBe("global,all,alerts");
+    expect(url.searchParams.get("channels")).toBe("global,all");
     expect(url.searchParams.get("agents")).toBe("0");
     leader.transport.dispose();
     await settle();
   });
 
   it("reopens the merged source with the union when the selection changes", async () => {
-    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll"] });
     leader.listen("system");
     leader.listen("systemAll", 7);
     await settle();
@@ -242,16 +239,14 @@ describe("profile SSE transport", () => {
   });
 
   it("hands each wire channel to its subscribers in the shape they already parse", async () => {
-    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll"] });
     const system = leader.listen("system");
     const detail = leader.listen("systemAll", 3);
-    const alerts = leader.listen("alerts");
     await settle();
     const source = leader.sources[0];
     source.open();
     source.frame('{"ch":"global","events":[{"role":"label_updated","agent_id":3}]}');
     source.frame('{"ch":"all","events":[{"role":"chat_delta"},{"role":"idle"}]}');
-    source.frame('{"ch":"alerts","events":[{"id":1,"status":"unresolved"}]}');
 
     expect(system.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
       '{"role":"label_updated","agent_id":3}',
@@ -259,15 +254,12 @@ describe("profile SSE transport", () => {
     expect(detail.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
       '[{"role":"chat_delta"},{"role":"idle"}]',
     ]);
-    expect(alerts.onFrame.mock.calls.map(([raw]) => raw)).toEqual([
-      '{"id":1,"status":"unresolved"}',
-    ]);
     leader.transport.dispose();
     await settle();
   });
 
   it("degrades only the channel an error frame names", async () => {
-    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll"] });
     const system = leader.listen("system");
     const detail = leader.listen("systemAll", 3);
     await settle();
@@ -285,7 +277,7 @@ describe("profile SSE transport", () => {
   });
 
   it("reports a shed count as a gap without inventing frames", async () => {
-    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"] });
+    const leader = tab(new FakeNetwork(), { merged: ["system", "systemAll"] });
     const detail = leader.listen("systemAll", 3);
     await settle();
     leader.sources[0].frame('{"ch":"all","events":[],"dropped":4}');
@@ -296,7 +288,7 @@ describe("profile SSE transport", () => {
   });
 
   it("owns the merged source alone when the page has no lock manager", async () => {
-    const solo = tab(new FakeNetwork(), { merged: ["system", "systemAll", "alerts"], solo: true });
+    const solo = tab(new FakeNetwork(), { merged: ["system", "systemAll"], solo: true });
     const received = solo.listen("system");
     await settle();
     expect(solo.transport.isLeader()).toBe(true);

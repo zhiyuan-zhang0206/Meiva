@@ -157,7 +157,7 @@ describe("useStatsDashboard shared polling", () => {
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
       google_cost_usd: 0,
-      alerts: { unresolved: 0, critical: 0, error: 0, warning: 0 },
+      alerts: { state: "ok" as const, firing: 0, critical: 0, error: 0, warning: 0 },
       plugin_stats: [],
     });
     const queryClient = new QueryClient({
@@ -240,7 +240,7 @@ describe("useStatsDashboard shared polling", () => {
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
       google_cost_usd: 0,
-      alerts: { unresolved: 0, critical: 0, error: 0, warning: 0 },
+      alerts: { state: "ok" as const, firing: 0, critical: 0, error: 0, warning: 0 },
       plugin_stats: [],
     });
     await tick(240_000);

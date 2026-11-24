@@ -4,6 +4,5 @@
     ".",
 ]
 "meiva.tests.fixtures.sdk" = [
-    "test_alert_reconciler.py",
     "test_registry_gauge.py"
 ]

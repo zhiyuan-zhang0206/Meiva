@@ -13,7 +13,6 @@ from psycopg_pool import ConnectionPool
 
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
-from base.telemetry.alerts import resolve_schedule_alerts
 from gateway.http.config import (
     gateway_clock,
     gateway_config,
@@ -134,10 +133,6 @@ def _apply_schedule_update(
         sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments)),
         (*changed.values(), schedule_id),
     )
-    effective_enabled = changed.get("enabled", previous.enabled)
-    effective_status = changed.get("status", previous.status)
-    if not effective_enabled or effective_status in ("stopped", "completed", "cancelled"):
-        resolve_schedule_alerts(cur.connection, schedule_id)
     if code_changed:
         cur.execute(
             "INSERT INTO schedule_versions (schedule_id, script, command, note) "
@@ -455,7 +450,6 @@ def delete_blocking(pool: ConnectionPool, schedule_id: int) -> DeletedRow:
         )
         if deleted is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        resolve_schedule_alerts(conn, schedule_id)
         return deleted
 
 
@@ -660,8 +654,6 @@ def _apply_declarative_control(
         "last_error = NULL, updated_at = %s WHERE id = %s",
         (enabled, status, next_launch, now, schedule_id),
     )
-    if not enabled:
-        resolve_schedule_alerts(conn, schedule_id)
 
 
 # meiva:link gateway/schedules/docs/router-contracts.md

@@ -455,7 +455,7 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_15m() -> None:
 # meiva:note
 # The dead-man pair is judged as a pair: the watchdog's period (5m, its route's
 # repeat_interval) is the N the silence rule multiplies by three, and the gauge it
-# reads is the one the gateway's ingest refreshes. Pinning only one half lets the
+# reads is the one the gateway's alert webhook refreshes. Pinning only one half lets the
 # other drift into a switch that never fires -- or fires on a quiet night. The silent
 # rule's no-data state stays OK because the gauge rides the gateway's own OTLP push: a
 # stopped gateway takes it along, so absence would report the gateway (the metrics-silent
@@ -479,7 +479,7 @@ def test_alert_pipeline_watchdog_and_silence_rule_agree_on_the_period() -> None:
 
 
 # meiva:note
-# The Alerts page shows the summary line, so a rule about one agent must name it there. These
+# Grafana's alert list and the agent notification show the summary line, so a rule about one agent must name it there. These
 # rules group by the envelope agent id. Grafana renders a label the series lacks as "[no value]",
 # so rules whose event family gained its agent id at the call site (older events carry none) guard
 # the label and render "unknown" instead.

@@ -49,7 +49,7 @@ describe("merged SSE channel selection", () => {
       wrapper: settingsWrapper({ [SSE_SINGLE_STREAM_SETTING]: true }),
     });
     expect(result.current).toBe(MERGED_SSE_CHANNELS);
-    expect([...MERGED_SSE_CHANNELS]).toEqual(["system", "systemAll", "alerts"]);
+    expect([...MERGED_SSE_CHANNELS]).toEqual(["system", "systemAll"]);
   });
 
   it("treats an empty channel set as no merge instead of a zero-channel stream", () => {

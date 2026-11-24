@@ -70,6 +70,16 @@ def test_grafana_provisions_bidirectional_trace_links(lgtm_unit: LgtmUnit) -> No
     assert to_trace["url"] == "$${__value.raw}"
 
 
+def test_grafana_keeps_alert_state_history_for_seven_days(lgtm_unit: LgtmUnit) -> None:
+    lgtm_unit.render()
+    grafana_ini = (lgtm_unit.native / "config/grafana.ini").read_text(encoding="utf-8")
+
+    assert "[unified_alerting.state_history.annotations]\n" in grafana_ini
+    assert (
+        "\nmax_age = 7d\n" in grafana_ini.split("[unified_alerting.state_history.annotations]")[1]
+    )
+
+
 def test_grafana_binds_the_configured_listen_host_and_port(lgtm_unit: LgtmUnit) -> None:
     lgtm_unit.render(settings=settings_with(lgtm_grafana_listen_host=WILDCARD))
     grafana_ini = (lgtm_unit.native / "config/grafana.ini").read_text(encoding="utf-8")

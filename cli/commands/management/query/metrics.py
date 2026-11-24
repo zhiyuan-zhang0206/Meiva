@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -105,10 +106,11 @@ class _PluginStat(BaseModel):
 
 
 class _StatsAlerts(BaseModel):
-    unresolved: int
-    critical: int
-    error: int
-    warning: int
+    state: Literal["ok", "unavailable", "not_configured"]
+    firing: int | None
+    critical: int | None
+    error: int | None
+    warning: int | None
 
 
 class _StatsDashboard(BaseModel):
@@ -124,6 +126,17 @@ class _StatsDashboard(BaseModel):
     google_cost_usd: float | None = None
     alerts: _StatsAlerts
     plugin_stats: list[_PluginStat]
+
+
+def _alerts_line(alerts: _StatsAlerts) -> str:
+    if alerts.state == "unavailable":
+        return "unavailable (grafana unreachable)"
+    if alerts.state == "not_configured":
+        return "not configured (no grafana)"
+    return (
+        f"{alerts.firing} firing "
+        f"({alerts.critical} critical, {alerts.error} error, {alerts.warning} warning)"
+    )
 
 
 # meiva:note
@@ -164,11 +177,7 @@ def cmd_stats(access: GatewayAccess, *, hours: int | None, as_json: bool) -> int
             f"usage coverage: {stats.usage_unpriced_calls} calls without price, "
             f"{stats.usage_incomplete_reports} incomplete reports"
         )
-    print(
-        f"alerts:        {stats.alerts.unresolved} unresolved "
-        f"({stats.alerts.critical} critical, {stats.alerts.error} error, "
-        f"{stats.alerts.warning} warning)"
-    )
+    print(f"alerts:        {_alerts_line(stats.alerts)}")
     if stats.plugin_stats:
         print()
         print(

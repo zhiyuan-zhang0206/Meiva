@@ -84,7 +84,7 @@ _API_STUBS: dict[str, object] = {
         "openai_cost_usd": 0,
         "anthropic_cost_usd": 0,
         "google_cost_usd": 0,
-        "alerts": {"unresolved": 0, "critical": 0, "error": 0, "warning": 0},
+        "alerts": {"state": "ok", "firing": 0, "critical": 0, "error": 0, "warning": 0},
         "diagnostics": {
             "active_classes": 0,
             "archived_classes": 0,

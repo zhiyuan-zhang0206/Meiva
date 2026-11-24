@@ -85,8 +85,9 @@ matching the rail behaviour they mirror.
 
 The collapsed rail's restore control and a collapsed right panel's reopen control are pinned to HeaderBar's own edges, never to the centred conversation column.
 
-The restore control carries the unresolved-alert count and names it in its label,
-so collapsing the desktop rail keeps alert visibility (user 2026-10-21). The
+The restore control carries the firing-alert count (or the grey "?" of an unreachable
+Grafana) and names it in its label, so collapsing the desktop rail keeps alert visibility
+(user 2026-10-21). The
 phone's menu button keeps the same alert-first behavior. With no alerts, the
 phone alone shows a sunset-orange attention count with white digits: unread
 agents, counted once each,

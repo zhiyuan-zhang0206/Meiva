@@ -27,7 +27,6 @@ import { EventStreamProvider } from "@/lib/transport/useEventStream";
 import { initTelemetry } from "@/lib/telemetry/telemetry";
 import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
 import { SETTINGS_QUERY_KEY, useUserSettings } from "@/lib/state/use-user-settings";
-import { AlertsProvider } from "@/lib/notifications/use-alerts";
 
 // meiva:note
 // The frontend's composition root wires the page into the two module-level
@@ -187,18 +186,16 @@ export function Providers({
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <EventStreamProvider>
-              <AlertsProvider>
-                <theme.Provider nonce={nonce}>
-                  <MessagesProvider>
-                    <ThemedSlots theme={theme} />
-                    <NavTimingReporter />
-                    <AppConnectionBanner />
-                    <AppUpdateBanner />
-                    {children}
-                    <ToastHost />
-                  </MessagesProvider>
-                </theme.Provider>
-              </AlertsProvider>
+              <theme.Provider nonce={nonce}>
+                <MessagesProvider>
+                  <ThemedSlots theme={theme} />
+                  <NavTimingReporter />
+                  <AppConnectionBanner />
+                  <AppUpdateBanner />
+                  {children}
+                  <ToastHost />
+                </MessagesProvider>
+              </theme.Provider>
             </EventStreamProvider>
           </AuthProvider>
         </QueryClientProvider>

@@ -1,6 +1,6 @@
 # Alert-pipeline host sentinel
 
-The sentinel queries Prometheus for the age of the newest accepted alert ingest:
+The sentinel queries Prometheus for the age of the newest accepted watchdog heartbeat (the gateway's alert webhook):
 `time() - max(max_over_time(meiva_alerts_last_ingest_timestamp_seconds[1h]))`. The
 range selector is what makes the age continuous across a gateway restart, which
 replaces the series and leaves the new process without a sample until the next

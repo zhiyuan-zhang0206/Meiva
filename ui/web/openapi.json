@@ -6615,127 +6615,21 @@
     },
     "/api/alerts": {
       "post": {
-        "summary": "Ingest Alerts",
-        "operationId": "ingest_alerts_api_alerts_post",
+        "summary": "Receive Alert Webhook",
+        "operationId": "receive_alert_webhook_api_alerts_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AlertWebhookPayload"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AlertIngestResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "List Alerts",
-        "description": "Unresolved-first alert history for the alert section.\n\nUnresolved instances float above resolved ones (2026-08-05 user ruling);\nwithin a status class, newest starts come first.\n``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is\nthe full match count.",
-        "operationId": "list_alerts_api_alerts_get",
-        "parameters": [
-          {
-            "name": "window",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^(1h|6h|24h|7d)$",
-              "default": "24h",
-              "title": "Window"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "unresolved",
-                    "resolved"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "name": "severity",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "critical",
-                    "warning",
-                    "error"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Severity"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 500,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AlertsListResponse"
-                }
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -6750,17 +6644,19 @@
         }
       }
     },
-    "/api/alerts/stream": {
+    "/api/alerts/firing": {
       "get": {
-        "summary": "Get Alerts Stream",
-        "description": "SSE endpoint — subscribe to the ``meiva:alerts`` Redis channel, forward.\n\n    Client ``EventSource`` receives ``data: {json}\n\n`` frames, one\n    ``AlertRow`` JSON per frame, on every ingest. Same machinery as the\n    agent-events stream (heartbeat frames, error frames, reconnection-safe);\n    this is the live tail — the initial fetch (GET /api/alerts) covers rows\n    ingested before the subscription opened.",
-        "operationId": "get_alerts_stream_api_alerts_stream_get",
+        "summary": "Get Firing Alerts",
+        "description": "Alerts Grafana reports firing right now — the top-bar badge.\n\n`state` says whether the counts can be trusted: a Grafana that does not answer is\n`unavailable` with no counts, never zero.",
+        "operationId": "get_firing_alerts_api_alerts_firing_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FiringAlerts"
+                }
               }
             }
           }
@@ -6787,7 +6683,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog heartbeats) — single source of truth shared with `/api/alerts`\n- `tokens` / cost slices: the window's usage-ledger rows",
+        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `alerts`: alerts Grafana reports firing now, read from Grafana (excluding the synthetic watchdog heartbeat and silenced or inhibited instances) — shared with `/api/alerts/firing`; `state` says whether the counts are known\n- `tokens` / cost slices: the window's usage-ledger rows",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -8990,142 +8886,6 @@
         ],
         "title": "AgentStatus"
       },
-      "AlertIngestResult": {
-        "properties": {
-          "processed": {
-            "type": "integer",
-            "title": "Processed"
-          },
-          "inserted": {
-            "type": "integer",
-            "title": "Inserted"
-          },
-          "updated": {
-            "type": "integer",
-            "title": "Updated"
-          }
-        },
-        "type": "object",
-        "required": [
-          "processed",
-          "inserted",
-          "updated"
-        ],
-        "title": "AlertIngestResult",
-        "description": "What one ingest POST did — counts the UI/ops can log."
-      },
-      "AlertRow": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unresolved",
-              "resolved"
-            ],
-            "title": "Status"
-          },
-          "severity": {
-            "type": "string",
-            "enum": [
-              "critical",
-              "warning",
-              "error"
-            ],
-            "title": "Severity"
-          },
-          "alertname": {
-            "type": "string",
-            "title": "Alertname"
-          },
-          "labels": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Labels"
-          },
-          "annotations": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Annotations"
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Starts At"
-          },
-          "ends_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ends At"
-          },
-          "fingerprint": {
-            "type": "string",
-            "title": "Fingerprint"
-          },
-          "generator_url": {
-            "type": "string",
-            "title": "Generator Url"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source"
-          },
-          "notified_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notified At"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "severity",
-          "alertname",
-          "labels",
-          "annotations",
-          "starts_at",
-          "ends_at",
-          "fingerprint",
-          "generator_url",
-          "source",
-          "notified_at",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "AlertRow"
-      },
       "AlertWebhookAlert": {
         "properties": {
           "status": {
@@ -9161,27 +8921,10 @@
             "title": "Endsat",
             "default": ""
           },
-          "fingerprint": {
-            "type": "string",
-            "title": "Fingerprint",
-            "default": ""
-          },
           "generatorURL": {
             "type": "string",
             "title": "Generatorurl",
             "default": ""
-          },
-          "values": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Values"
           }
         },
         "type": "object",
@@ -9190,11 +8933,6 @@
       },
       "AlertWebhookPayload": {
         "properties": {
-          "source": {
-            "type": "string",
-            "title": "Source",
-            "default": "grafana"
-          },
           "status": {
             "anyOf": [
               {
@@ -9220,52 +8958,7 @@
         },
         "type": "object",
         "title": "AlertWebhookPayload",
-        "description": "Top level of an Alertmanager webhook POST.\n\nTolerates both the full Alertmanager v4 envelope (version/groupKey/\nreceiver/commonLabels/… — ignored here) and the slimmer Grafana-managed\nwebhook shape; only ``status`` + ``alerts[]`` matter to the store.\n``source`` tags the row's provenance: the webhook omits it (default\n``grafana``)."
-      },
-      "AlertsListMeta": {
-        "properties": {
-          "window": {
-            "type": "string",
-            "title": "Window"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "unresolved_count": {
-            "type": "integer",
-            "title": "Unresolved Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "window",
-          "total",
-          "unresolved_count"
-        ],
-        "title": "AlertsListMeta",
-        "description": "Query provenance of one GET /api/alerts response."
-      },
-      "AlertsListResponse": {
-        "properties": {
-          "alerts": {
-            "items": {
-              "$ref": "#/components/schemas/AlertRow"
-            },
-            "type": "array",
-            "title": "Alerts"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/AlertsListMeta"
-          }
-        },
-        "type": "object",
-        "required": [
-          "alerts",
-          "meta"
-        ],
-        "title": "AlertsListResponse",
-        "description": "Unresolved-first alert history + the count the UI badge shows."
+        "description": "Top level of an Alertmanager webhook POST.\n\nTolerates both the full Alertmanager v4 envelope (version/groupKey/\nreceiver/commonLabels/… — ignored here) and the slimmer Grafana-managed\nwebhook shape; only ``status`` + ``alerts[]`` matter to the gateway."
       },
       "AnswerQuestions": {
         "properties": {
@@ -11277,6 +10970,72 @@
           "agent_id"
         ],
         "title": "FileRoot"
+      },
+      "FiringAlerts": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable",
+              "not_configured"
+            ],
+            "title": "State"
+          },
+          "firing": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firing"
+          },
+          "critical": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critical"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "FiringAlerts"
       },
       "FleetGraphEdge": {
         "properties": {
@@ -17056,36 +16815,6 @@
         ],
         "title": "StatReset"
       },
-      "StatsAlerts": {
-        "properties": {
-          "unresolved": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Unresolved",
-            "default": 0
-          },
-          "critical": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Critical",
-            "default": 0
-          },
-          "error": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Error",
-            "default": 0
-          },
-          "warning": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Warning",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "title": "StatsAlerts"
-      },
       "StatsDashboard": {
         "properties": {
           "live_count": {
@@ -17169,7 +16898,7 @@
             "title": "Google Cost Usd"
           },
           "alerts": {
-            "$ref": "#/components/schemas/StatsAlerts"
+            "$ref": "#/components/schemas/FiringAlerts"
           },
           "plugin_stats": {
             "items": {
@@ -17202,7 +16931,7 @@
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nPoint-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\nWindowed fields (`tokens`, cost slices) aggregate over `applied_window_hours`.\n\n- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), using the same single source of truth as `/api/alerts`."
+        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nPoint-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\nWindowed fields (`tokens`, cost slices) aggregate over `applied_window_hours`.\n\n- `alerts`: alerts Grafana reports firing now (excluding the synthetic watchdog heartbeat and silenced or inhibited instances), the same answer as `/api/alerts/firing`; `state` says whether the counts are known."
       },
       "StatsTokens": {
         "properties": {

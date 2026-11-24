@@ -14,7 +14,7 @@ import { vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import type {
   AgentLineage,
-  AlertsResponse,
+  FiringAlerts,
   AgentRow,
   ModelsResponse,
   StatsDashboard,
@@ -24,6 +24,7 @@ import type {
 import type { StatsWindowHours } from "@/lib/agents/sidebar";
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
 import { BREAKPOINT_LG_PX, BREAKPOINT_MD_PX, BREAKPOINT_WIDE_PX } from "@/lib/layout/breakpoint";
+import { FIRING_ALERTS_QUERY_KEY } from "@/lib/notifications/use-firing-alerts";
 import { useStore } from "@/lib/state/store";
 import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
 import { fakeBrowser } from "@/test-support/browser";
@@ -132,10 +133,7 @@ function statsAnswer(): () => Promise<StatsDashboard> {
 // component made (`push` or `replace`) and its target, not a spy wired into a module mock.
 export const navigation = fakeNavigation();
 
-const NO_ALERTS: AlertsResponse = {
-  alerts: [],
-  meta: { window: "24h", total: 0, unresolved_count: 0 },
-};
+const NO_ALERTS: FiringAlerts = { state: "ok", firing: 0, critical: 0, error: 0, warning: 0 };
 
 export function wrap(ui: ReactElement) {
   const settings = scenarioSettings();
@@ -173,7 +171,7 @@ export function wrap(ui: ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } },
   });
-  queryClient.setQueryData(["alerts"], NO_ALERTS);
+  queryClient.setQueryData(FIRING_ALERTS_QUERY_KEY, NO_ALERTS);
   return renderWithProviders(ui, {
     browser: fakeBrowser({ media: state.media }),
     settings,

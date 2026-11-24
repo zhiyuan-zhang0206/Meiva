@@ -3,9 +3,8 @@ import type { SseChannel } from "./sse-plan";
 const WIRE_CHANNEL: Record<SseChannel, string> = {
   system: "global",
   systemAll: "all",
-  alerts: "alerts",
 };
-const MERGED_ORDER: readonly SseChannel[] = ["system", "systemAll", "alerts"];
+const MERGED_ORDER: readonly SseChannel[] = ["system", "systemAll"];
 
 export function mergedChannels(merged: ReadonlySet<SseChannel>): readonly SseChannel[] {
   return MERGED_ORDER.filter((ch) => merged.has(ch));
@@ -36,7 +35,6 @@ export function staleTabs(
 const LOGICAL_CHANNEL: Record<string, SseChannel | undefined> = {
   global: "system",
   all: "systemAll",
-  alerts: "alerts",
 };
 
 export interface MergedFrame {

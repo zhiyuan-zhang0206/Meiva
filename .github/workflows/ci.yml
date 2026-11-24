@@ -2951,7 +2951,7 @@ jobs:
         id: pytest-env-guard
         run: >
           uv run pytest
-          tests/e2e/visual/test_alerts_no_horizontal_overflow.py::test_alerts_table_no_horizontal_scroll_desktop
+          tests/e2e/visual/test_accessibility.py::test_first_tab_focuses_skip_link_to_main_content
           tests/harness/test_env_guard_canary.py
           tests/harness/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1

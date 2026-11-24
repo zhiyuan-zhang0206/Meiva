@@ -150,7 +150,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `text` | LLM text output | noise | — | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value, geometry_incident, geometry_phase, geometry_reason, geometry_elapsed_ms, geometry_layout_height, geometry_visual_height, geometry_visual_scale, geometry_html_inline_height, geometry_html_height, geometry_body_height, geometry_shell_height, geometry_shell_bottom, geometry_composer_height, geometry_composer_bottom | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
-| `alerts` | alert webhook ingest heartbeat — epoch seconds of the last alert the ingest accepted | noise | last_ingest_timestamp_seconds | — | events | — |
+| `alerts` | alert webhook heartbeat — epoch seconds of the last watchdog alert the webhook accepted | noise | last_ingest_timestamp_seconds | — | events | — |
 | `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events | ✓ |
 | `staged_upload_received` | one staged-upload request finished: body bytes, body receive time, entry path (Cloudflare colo or direct), status | noise | route, status, body_bytes, content_length, receive_ms, after_ms, total_ms, via_cloudflare, cf_colo, cf_connecting_ip, host | — | events | — |
 | `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events | — |

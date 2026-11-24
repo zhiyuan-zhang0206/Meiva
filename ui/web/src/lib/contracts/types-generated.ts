@@ -1830,23 +1830,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_alerts_api_alerts_get"];
+        get?: never;
         put?: never;
-        post: operations["ingest_alerts_api_alerts_post"];
+        post: operations["receive_alert_webhook_api_alerts_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/alerts/stream": {
+    "/api/alerts/firing": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["get_alerts_stream_api_alerts_stream_get"];
+        get: operations["get_firing_alerts_api_alerts_firing_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2377,31 +2377,6 @@ export interface components {
             last_permanent_reject_reason?: string | null;
         };
         AgentStatus: "running" | "idling" | "terminated";
-        AlertIngestResult: {
-            processed: number;
-            inserted: number;
-            updated: number;
-        };
-        AlertRow: {
-            id: number;
-            status: "unresolved" | "resolved";
-            severity: "critical" | "warning" | "error";
-            alertname: string;
-            labels: {
-                [key: string]: string;
-            };
-            annotations: {
-                [key: string]: string;
-            };
-            starts_at: string;
-            ends_at: string | null;
-            fingerprint: string;
-            generator_url: string;
-            source: string;
-            notified_at: string | null;
-            created_at: string;
-            updated_at: string;
-        };
         AlertWebhookAlert: {
             status: "firing" | "resolved";
             labels?: {
@@ -2412,25 +2387,11 @@ export interface components {
             };
             startsAt: string;
             endsAt: string;
-            fingerprint: string;
             generatorURL: string;
-            values?: {
-                [key: string]: unknown;
-            } | null;
         };
         AlertWebhookPayload: {
-            source: string;
             status?: ("firing" | "resolved") | null;
             alerts?: components["schemas"]["AlertWebhookAlert"][];
-        };
-        AlertsListMeta: {
-            window: string;
-            total: number;
-            unresolved_count: number;
-        };
-        AlertsListResponse: {
-            alerts: components["schemas"]["AlertRow"][];
-            meta: components["schemas"]["AlertsListMeta"];
         };
         AnswerQuestions: {
             expected_ids: number[];
@@ -2754,6 +2715,13 @@ export interface components {
             kind: "workspace" | "home" | "machine";
             path: string;
             agent_id: number | null;
+        };
+        FiringAlerts: {
+            state: "ok" | "unavailable" | "not_configured";
+            firing?: number | null;
+            critical?: number | null;
+            error?: number | null;
+            warning?: number | null;
         };
         FleetGraphEdge: {
             from_agent: number;
@@ -3626,12 +3594,6 @@ export interface components {
             label: string;
             resets_at: string;
         };
-        StatsAlerts: {
-            unresolved: number;
-            critical: number;
-            error: number;
-            warning: number;
-        };
         StatsDashboard: {
             live_count: number;
             window_hours: components["schemas"]["StatsWindowHours"];
@@ -3644,7 +3606,7 @@ export interface components {
             openai_cost_usd?: number | null;
             anthropic_cost_usd?: number | null;
             google_cost_usd?: number | null;
-            alerts: components["schemas"]["StatsAlerts"];
+            alerts: components["schemas"]["FiringAlerts"];
             plugin_stats: components["schemas"]["PluginStat"][];
             as_of?: string | null;
         };
@@ -7577,39 +7539,7 @@ export interface operations {
             };
         };
     };
-    list_alerts_api_alerts_get: {
-        parameters: {
-            query?: {
-                window?: string;
-                status?: ("unresolved" | "resolved") | null;
-                severity?: ("critical" | "warning" | "error") | null;
-                limit?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AlertsListResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    ingest_alerts_api_alerts_post: {
+    receive_alert_webhook_api_alerts_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -7622,13 +7552,11 @@ export interface operations {
             };
         };
         responses: {
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["AlertIngestResult"];
-                };
+                content?: never;
             };
             422: {
                 headers: {
@@ -7640,7 +7568,7 @@ export interface operations {
             };
         };
     };
-    get_alerts_stream_api_alerts_stream_get: {
+    get_firing_alerts_api_alerts_firing_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7654,7 +7582,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["FiringAlerts"];
                 };
             };
         };

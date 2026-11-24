@@ -589,8 +589,8 @@ def exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int)
 
 
 def assert_alert_writes_denied(conn: psycopg.Connection) -> None:
-    """The alerts table is written only by the gateway ingest: the runner reads
-    it and holds neither INSERT nor UPDATE (nor DELETE)."""
+    """The alerts table has no writer left and is dropped by a follow-up migration: until then
+    the runner reads it and holds neither INSERT nor UPDATE (nor DELETE)."""
     assert conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         conn.execute(

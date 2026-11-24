@@ -2,7 +2,7 @@
 
 // meiva:note
 // The footer's icon row is ordered by standing state first, navigation second: the
-// unresolved-alert bell leads it, ahead of Fleet (user 2026-10-21), and renders only
+// firing-alert bell leads it, ahead of Fleet (user 2026-10-21), and renders only
 // while the count is non-zero.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
@@ -11,7 +11,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { fakeNavigation, navigationWrapper } from "@/lib/browser/navigation/testing";
-import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
+import { FIRING_ALERTS_QUERY_KEY } from "@/lib/notifications/use-firing-alerts";
 import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
 import { SidebarFooter } from "./footer";
@@ -20,7 +20,7 @@ import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
-  transport.getAlerts.mockImplementation(() => new Promise(() => undefined));
+  transport.getFiringAlerts.mockImplementation(() => new Promise(() => undefined));
   transport.getStatsDashboard.mockImplementation(() => new Promise(() => undefined));
   transport.getUiContributions.mockImplementation(() => Promise.resolve({ themes: [], nav: [], stats: [] }));
 });
@@ -38,7 +38,7 @@ const navigation = fakeNavigation();
 function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
-  qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
+  qc.setQueryData(FIRING_ALERTS_QUERY_KEY, { state: "ok", firing: 3, critical: 1, error: 1, warning: 1 });
   return rtlRender(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("SidebarFooter icon row", () => {
-  it("leads the row with the unresolved-alert bell", () => {
+  it("leads the row with the firing-alert bell", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const bell = screen.getByTestId("alerts-badge");
     expect(bell.parentElement?.firstElementChild).toBe(bell);
@@ -100,7 +100,7 @@ describe("SidebarFooter icon row", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const row = screen.getByTestId("alerts-badge").parentElement!;
     const labels = [...row.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label"));
-    expect(labels.slice(0, 4)).toEqual(["3 unresolved alerts", "Fleet", "Insights", "Control"]);
+    expect(labels.slice(0, 4)).toEqual(["3 firing alerts", "Fleet", "Insights", "Control"]);
     expect(screen.getByRole("link", { name: "Control" }).getAttribute("href")).toBe("/control");
   });
 });

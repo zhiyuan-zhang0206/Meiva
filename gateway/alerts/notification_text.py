@@ -1,7 +1,6 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from shlex import join
 
-from base.telemetry.alerts import parse_alertname, parse_ts
 from gateway.alerts.schemas import AlertWebhookAlert, AlertWebhookPayload, WebhookStatus
 
 _TRIAGE_LABELS = ("agent_id", "machine", "machine_name", "route", "event_name")
@@ -16,7 +15,7 @@ def notification_text(payload: AlertWebhookPayload, *, now: datetime) -> str:
         lines.append("")
         lines.append(
             f"[{status}] [{alert.labels.get('severity', 'unlabeled')}] "
-            f"{parse_alertname(alert.labels)}"
+            f"{alert.labels.get('alertname') or 'unknown'}"
         )
         if summary := alert.annotations.get("summary"):
             lines.append(summary)
@@ -32,8 +31,8 @@ def notification_text(payload: AlertWebhookPayload, *, now: datetime) -> str:
 
 def _events_command(alert: AlertWebhookAlert, *, status: WebhookStatus, now: datetime) -> str:
     command = ["meiva", "events", "ls"]
-    start = parse_ts(alert.starts_at)
-    recovered_at = parse_ts(alert.ends_at) if status == "resolved" else None
+    start = _parse_ts(alert.starts_at)
+    recovered_at = _parse_ts(alert.ends_at) if status == "resolved" else None
     end = recovered_at or now
     if start is not None and start < end:
         command += ["--from", start.isoformat(), "--to", end.isoformat()]
@@ -45,3 +44,16 @@ def _events_command(alert: AlertWebhookAlert, *, status: WebhookStatus, now: dat
     if event := alert.labels.get("event_name"):
         command.append(f"--name={event}")
     return join(command)
+
+
+_ZERO_TS = frozenset({"0001-01-01T00:00:00Z", "0001-01-01T00:00:00+00:00", ""})
+
+
+def _parse_ts(raw: str) -> datetime | None:
+    if raw in _ZERO_TS:
+        return None
+    try:
+        ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)

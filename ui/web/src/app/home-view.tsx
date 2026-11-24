@@ -33,6 +33,7 @@ import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contrac
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
+import type { AlertsSignal } from "@/lib/notifications/use-firing-alerts";
 import { useMobileAttention } from "@/lib/notifications/use-mobile-attention";
 import { useQuestions } from "@/lib/notifications/use-questions";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
@@ -111,8 +112,8 @@ type TimelineViewState = Pick<
 // meiva:note
 // Every field is one source's value, read once by the route: a hook's result narrowed to what the
 // surface renders, a store selection, or one of the child components the surface draws. `bfcacheId`
-// is the session-history entry the timeline keys its scroll memory on, and `unresolvedAlerts` is the
-// 24-hour alert count in the header badge -- both values, so the surface never looks either up.
+// is the session-history entry the timeline keys its scroll memory on, and `alerts` is the
+// firing-alert signal in the header badge -- both values, so the surface never looks either up.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export interface HomePageProps {
   showError: (msg: string) => void;
@@ -125,7 +126,7 @@ export interface HomePageProps {
   timeline: TimelineViewState;
   timelineStore: TimelineStoreView;
   bfcacheId: string;
-  unresolvedAlerts: number;
+  alerts: AlertsSignal;
   contextPanel: { open: boolean; setOpen: (open: boolean) => void };
   AgentSidebar: AgentSidebarSlot;
   ContextPanel: ContextPanelSlot;
@@ -156,7 +157,7 @@ export function HomePageView(props: HomePageProps) {
     TimelineView,
     timeline,
     timelineStore,
-    unresolvedAlerts,
+    alerts,
     UploadButton,
   } = props;
   const { isNarrow, isLarge } = breakpoint;
@@ -252,7 +253,7 @@ export function HomePageView(props: HomePageProps) {
         timeline={timeline}
         timelineStore={timelineStore}
         bfcacheId={bfcacheId}
-        unresolvedAlerts={unresolvedAlerts}
+        alerts={alerts}
         HeaderBar={HeaderBar}
         TimelineView={TimelineView}
         Composer={Composer}
@@ -327,7 +328,7 @@ interface HomeContentProps {
   timeline: TimelineViewState;
   timelineStore: TimelineStoreView;
   bfcacheId: string;
-  unresolvedAlerts: number;
+  alerts: AlertsSignal;
   HeaderBar: HeaderBarSlot;
   TimelineView: TimelineViewSlot;
   Composer: ComposerSlot;
@@ -351,7 +352,7 @@ function HomeContent({
   timeline,
   timelineStore,
   bfcacheId,
-  unresolvedAlerts,
+  alerts,
   HeaderBar,
   TimelineView,
   Composer,
@@ -592,7 +593,7 @@ function HomeContent({
             label={activeLabel}
             onOpenSidebar={() => store.setMobileSidebarOpen(true)}
             sidebarCollapsed={sidebar.collapsed}
-            alertCount={unresolvedAlerts}
+            alerts={alerts}
             mobileAttentionCount={breakpoint.isNarrow ? mobileAttention.count : 0}
             mobileAttentionState={breakpoint.isNarrow ? mobileAttention.state : "ready"}
             onToggleSidebar={() => {

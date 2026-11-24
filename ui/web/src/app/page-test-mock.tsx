@@ -12,6 +12,7 @@ import type { SharedContextPanel as ContextPanelComponent } from "@/components/c
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import type { TimelineView as TimelineViewComponent } from "@/components/timeline";
 import type { AgentRow, BackendTimelineItem, QuestionItem, ReplySuggestionResponse } from "@/lib/contracts/types";
+import type { AlertsSignal } from "@/lib/notifications/use-firing-alerts";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
 import { HomePageView } from "./home-view";
 import type { HomePageProps } from "./home-view";
@@ -60,7 +61,7 @@ export const hooksState = {
   inspectorToggle: vi.fn(),
   contextPanelOpen: false,
   contextPanelSetOpen: vi.fn(),
-  unresolvedAlerts: 0,
+  alerts: null as AlertsSignal,
   bfcacheId: "_b_test_",
 };
 
@@ -252,7 +253,7 @@ export function homePageProps(): HomePageProps {
     },
     timelineStore: { liveAnchorAt: 0 },
     bfcacheId: state.bfcacheId,
-    unresolvedAlerts: state.unresolvedAlerts,
+    alerts: state.alerts,
     contextPanel: { open: state.contextPanelOpen, setOpen: state.contextPanelSetOpen },
     AgentSidebar: AgentSidebarMock,
     ContextPanel: ContextPanelMock,
@@ -329,7 +330,7 @@ export async function resetHomePageTestState() {
       const agentId = Number(url.searchParams.get("agent_id"));
       return { kind: "json", body: pendingQuestions.filter((q) => q.agent_id === agentId) };
     }
-    if (request.path === "/api/alerts") return { kind: "json", body: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 0 } } };
+    if (request.path === "/api/alerts/firing") return { kind: "json", body: { state: "ok", firing: 0, critical: 0, error: 0, warning: 0 } };
     return { kind: "text", status: 404, body: "unexpected route" };
   });
   homePageRig = gatewayRig(homePageGateway);
@@ -383,5 +384,5 @@ export async function resetHomePageTestState() {
   hooksState.sidebarLoading = false;
   hooksState.inspectorOpen = false;
   hooksState.contextPanelOpen = false;
-  hooksState.unresolvedAlerts = 0;
+  hooksState.alerts = null;
 }

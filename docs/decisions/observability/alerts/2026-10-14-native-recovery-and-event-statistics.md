@@ -42,3 +42,5 @@ remained distinct episodes. Warning and error tiers could still coexist, by the
 user's choice. The badge counted instances, not root causes. API reconciliation
 added a read after SSE hints; the server remained authoritative for capped lists,
 ordering and counts. Activation required a separately authorized deployment.
+
+Superseded by: [2026-11-24-alerts-have-one-owner-grafana.md](2026-11-24-alerts-have-one-owner-grafana.md) for the header badge and the alert list: the badge now reads Grafana's firing alerts directly.

@@ -2,7 +2,12 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
-from gateway.tests.routers.alerts_api.alerts_support import alert, alerts_client, ingest, webhook
+from gateway.tests.routers.alerts_api.alerts_support import (
+    alert,
+    alerts_client,
+    post_webhook,
+    webhook,
+)
 
 _AUTH = {"Authorization": "Bearer test-token"}
 
@@ -14,10 +19,10 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def test_store_ingest_does_not_wake_an_agent(db_conn: psycopg.Connection) -> None:
+def test_the_alert_webhook_does_not_wake_an_agent(db_conn: psycopg.Connection) -> None:
     _agent(db_conn)
     with alerts_client() as client:
-        assert ingest(client, webhook()).status_code == 200
+        assert post_webhook(client, webhook()).status_code == 204
     assert db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone() == (0,)
 
 
@@ -48,7 +53,6 @@ def test_one_inbox_message_for_a_mixed_group(db_conn: psycopg.Connection) -> Non
     assert "meiva events ls --from 2026-08-04T10:00:00+00:00 --to " in content
     assert "--agent=77 --machine=runner-a --name=host_probe" in content
     assert "http://localhost:3002/alerting/xyz/edit" in content
-    assert db_conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
 
 
 def test_resolved_group_uses_alertmanagers_status_and_repeats_are_delivered(

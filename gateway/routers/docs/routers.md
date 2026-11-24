@@ -27,7 +27,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 - **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token usage + neighbor graph; plugin metric and inspector-widget surfaces — [Agent Inspect Router](../../inspect/docs/inspect.md)
 - **system** (`/api/system`, `/api/agents/{id}/system`, `/api/system/all`) — SSE broadcasting (see [SSE (Server-Sent Events)](../../events/docs/sse/sse.md))
 - **delivery** — chat inbound delivery helper (not a router); gateway callers attach server-owned credential, transport, content-hash, and source-assertion facts at the durable insert
-- **alerts** (`/api/alerts` + `/stream` + `/read`) — the system→human alert store (Alertmanager shape, `alerts` table), unresolved-first list + counts, SSE tail, mark-as-read [Alerts Router](../../alerts/docs/alerts.md)
+- **alerts** (`/api/alerts/firing`, `/api/alerts`, `/api/alerts/agents/{agent_id}`) — alert counts read live from Grafana (the gateway keeps no alert state), the watchdog heartbeat receiver, the agent-inbox Alertmanager receiver [Alerts Router](../../alerts/docs/alerts.md)
 
 ### Cluster & configuration
 - **cluster** (`/api/cluster/*`) — cluster status, multi-machine roster, admin events, and maintenance control (admin contracts: [Ops Surfaces (cluster admin + stats dashboard)](../../cluster/docs/ops-surfaces.md))

@@ -4,8 +4,9 @@
 frame naming its channel: `data: {"ch": "all", "events": [...], "dropped": 3}`.
 It exists because a browser allows six connections per origin and every
 single-channel endpoint holds one forever, so a few open tabs starve the
-document's own asset requests. `global` and `all` project the events channel,
-`alerts` projects `meiva:alerts`; one pubsub connection is subscribed to both.
+document's own asset requests. `global` and `all` project the events channel; one pubsub
+connection is subscribed to it. (A third `alerts` channel carried the gateway's alert rows until
+the alert copy was removed; `channels=alerts` is now refused with 422.)
 
 The five single-channel endpoints above are unchanged and remain the contract for
 the desktop app, the SDK and every other subscriber. The Web UI reaches the
@@ -14,7 +15,7 @@ default off).
 
 Merged mode keeps the batch cadence (`gateway.sse_throttle_rate`, one
 flush per window), so streaming deltas arrive exactly as fast as on
-`/api/system/all`; `global` and `alerts` gain at most one flush interval.
+`/api/system/all`; `global` gains at most one flush interval.
 
 Isolation, because the connection is now shared by every projection:
 
@@ -25,8 +26,8 @@ Isolation, because the connection is now shared by every projection:
   stream, which is what the single-channel endpoints always did (the browser
   reconnects).
 - **Per-channel bounded queues.** Each channel owns its own pending list
-  (`gateway.sse_channel_pending_limit`), so an alert burst cannot
-  starve `all`. A full queue sheds its OLDEST payload — the same policy as the
+  (`gateway.sse_channel_pending_limit`), so a burst on one projection cannot
+  starve the other. A full queue sheds its OLDEST payload — the same policy as the
   agent-side `AgentEventPublisher` — keeping the newest state; the turn-end
   snapshot repairs the gap.
 - **Drops are counted, never silent.** The flush after a drop carries
