@@ -301,6 +301,10 @@ def test_event_ids_are_stable_and_match_the_id_free_body() -> None:
     )
 
 
+def test_event_id_is_a_64_bit_blake2b_of_the_timestamp_and_line() -> None:
+    assert telemetry.event_id('{"a":1}', 1_700_000_000_000_000_000) == 0x973B29C16750A1AA
+
+
 def test_true_duplicate_events_have_equal_ids() -> None:
     marker = uuid4().hex
     ts = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
