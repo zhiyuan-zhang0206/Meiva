@@ -396,7 +396,7 @@ jobs:
       - name: Make meizel importable
         uses: ./.github/actions/meizel
 
-      - name: Scan for raw CJK (i18n locale files exempt)
+      - name: Scan for raw CJK (locale copy trees exempt)
         run: python3 scripts/content_lint/lint_no_cjk.py
 
       - name: Scan for tailnet IP literals (CIDR range notation exempt)

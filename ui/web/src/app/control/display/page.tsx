@@ -14,7 +14,6 @@ import {
   CircleDot,
   Clock,
   EyeOff,
-  Languages,
   Layers,
   MessageSquareText,
   MoveHorizontal,
@@ -106,21 +105,6 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
           description={t("replySuggestionsSummary")}
           value={settings["behavior.replySuggestions"] === true}
           onChange={(v) => setSetting("behavior.replySuggestions", v)}
-        />
-      </SettingsSection>
-      )}
-      {general && (
-      <SettingsSection id="display-language" title={t("language")}>
-        <RadioRow
-          icon={Languages}
-          label={t("language")}
-          description={t("languageDescription")}
-          options={[
-            { value: "en", label: t("english") },
-            { value: "zh", label: t("chinese") },
-          ]}
-          value={readStoredSetting(settings["display.language"], "en")}
-          onChange={(v) => setSetting("display.language", v)}
         />
       </SettingsSection>
       )}

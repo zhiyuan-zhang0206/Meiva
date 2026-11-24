@@ -1,10 +1,8 @@
 # meiva:note
 # The alert-copy contract (Task #1261, user ruling 2026-08-13): the user-visible
 # alert templates live in base/telemetry/alerts/copy.py -- no head/trigger/jump-link
-# literals in base/telemetry/alerts/__init__.py -- the template language follows
-# user_settings ``display.language`` ("zh" | "en", default "zh"), and only
-# template/framework copy is translated: alert labels/annotations data passes
-# through verbatim.
+# literals in base/telemetry/alerts/__init__.py -- and the copy is English only
+# (user ruling 2026-11-24): alert labels/annotations data passes through verbatim.
 
 from __future__ import annotations
 
@@ -13,15 +11,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 
 import base.telemetry.alerts as base_alerts
 from base.telemetry.alerts import (
     AlertMessageStyle,
     copy,
-    display_language,
     format_local,
     frontend_base_url,
     notify_text,
@@ -48,8 +43,8 @@ def _alert(*, status: str = "firing", severity: str = "error") -> dict[str, Any]
     }
 
 
-def _head(lang: str, *, resolved: bool, severity: str = "ERROR") -> str:
-    return copy.ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
+def _head(*, resolved: bool, severity: str = "ERROR") -> str:
+    return copy.ALERT_HEAD["resolved" if resolved else "firing"].format(
         severity=severity, alertname="test-rule"
     )
 
@@ -65,8 +60,6 @@ def test_alert_format_literals_not_hardcoded_in_alerts_module() -> None:
     for literal in (
         "⚠️ ALERT",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
         "✅ RESOLVED",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
-        "⚠️ \u544a\u8b66",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
-        "✅ \u5df2\u6062\u590d",  # emoji-ok: asserting the governance guard (head literals banned from base/telemetry/alerts/__init__.py)
     ):
         assert literal not in src
 
@@ -77,13 +70,12 @@ def test_notify_text_composes_from_copy_templates(
     """notify_text output is built from the alerts_copy templates — patching
     a template changes the message, so no format string is baked into the
     alerts module."""
-    monkeypatch.setitem(base_alerts.ALERT_HEAD["en"], "firing", "MARKER [{severity}] {alertname}")
-    monkeypatch.setitem(base_alerts.ALERT_TRIGGERED_AT, "en", "MARKER-TIME {time}")
+    monkeypatch.setitem(base_alerts.ALERT_HEAD, "firing", "MARKER [{severity}] {alertname}")
 
-    text = notify_text(_alert(), lang="en", style=STYLE)
+    text = notify_text(_alert(), style=STYLE)
 
     assert text.startswith("MARKER [ERROR] test-rule")
-    assert "MARKER-TIME " in text
+    assert copy.ALERT_TRIGGERED_AT.split("{")[0] in text
     assert text.endswith(copy.ALERT_JUMP_LINK.format(url=STYLE.base_url))
 
 
@@ -111,7 +103,7 @@ def test_frontend_base_url_derives_the_host_from_the_gateway_and_the_port_from_t
 # malformed jump-link line (issue #134): the line is omitted rather than rendered as a bare path.
 def test_notify_text_omits_jump_link_when_no_frontend_base_url() -> None:
 
-    text = notify_text(_alert(), lang="en", style=NO_LINK)
+    text = notify_text(_alert(), style=NO_LINK)
 
     assert copy.ALERT_JUMP_LINK.split("{")[0] not in text
     assert "ALERT [ERROR] test-rule" in text
@@ -120,44 +112,21 @@ def test_notify_text_omits_jump_link_when_no_frontend_base_url() -> None:
     assert text.count("\n") == 3
 
 
-# -- language selection -----------------------------------------------------
+# -- English-only copy ---------------------------------------------------------
 
 
-def test_notify_text_default_language_is_zh() -> None:
-    """No lang passed -> the zh template set (user ruling 2026-08-13 default)."""
+def test_notify_text_is_english_with_data_passed_through() -> None:
+    """Firing and resolved heads are the English templates; data (summary,
+    alertname, severity) passes through as received."""
 
-    text = notify_text(_alert(), style=STYLE)
-    assert text.startswith(_head("zh", resolved=False))
-    assert "\u89e6\u53d1\u65f6\u95f4 " in text
+    firing = notify_text(_alert(), style=STYLE)
+    resolved = notify_text(_alert(status="resolved"), style=STYLE)
 
-
-def test_notify_text_language_variants() -> None:
-    """zh/en template sets, both firing and resolved heads; data (summary,
-    alertname, severity) passes through untranslated; unknown lang -> zh."""
-
-    zh_firing = notify_text(_alert(), "zh", style=STYLE)
-    en_firing = notify_text(_alert(), "en", style=STYLE)
-    zh_resolved = notify_text(_alert(status="resolved"), "zh", style=STYLE)
-    en_resolved = notify_text(_alert(status="resolved"), "en", style=STYLE)
-
-    assert zh_firing.startswith(_head("zh", resolved=False))
-    assert en_firing.startswith(_head("en", resolved=False))
-    assert zh_resolved.startswith(_head("zh", resolved=True))
-    assert en_resolved.startswith(_head("en", resolved=True))
-    assert "triggered " in en_firing
-    assert "\u89e6\u53d1\u65f6\u95f4 " in zh_firing
-
-    # labels/annotations data is never translated
-    assert "test-rule" in zh_firing and "test-rule" in en_firing
-    assert "test summary" in zh_firing and "test summary" in en_firing
-    assert "ERROR" in zh_firing and "ERROR" in en_firing
-
-    # both languages share the fleet-UI jump link
-    jump = copy.ALERT_JUMP_LINK.format(url=STYLE.base_url)
-    assert zh_firing.endswith(jump) and en_firing.endswith(jump)
-
-    # unknown lang falls back to the default
-    assert notify_text(_alert(), "fr", style=STYLE) == zh_firing
+    assert firing.startswith(_head(resolved=False))
+    assert resolved.startswith(_head(resolved=True))
+    assert "triggered " in firing
+    assert "test-rule" in firing and "test summary" in firing and "ERROR" in firing
+    assert firing.endswith(copy.ALERT_JUMP_LINK.format(url=STYLE.base_url))
 
 
 # -- format_local (tz audit, 2026-08, PR-6) ----------------------------------
@@ -211,38 +180,6 @@ def test_format_local_host_zone_without_authoritative_value() -> None:
     assert text.split(" ")[-1] != ""
 
 
-def test_display_language_defaults_to_zh(db_conn: psycopg.Connection) -> None:
-    """No user_settings row -> the IM template default ("zh")."""
-
-    assert display_language(db_conn) == "zh"
-
-
-def test_display_language_reads_setting(db_conn: psycopg.Connection) -> None:
-    """display.language="en" -> English templates."""
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
-            (Jsonb("en"),),
-        )
-    db_conn.commit()
-    assert display_language(db_conn) == "en"
-
-
-def test_display_language_unknown_value_falls_back_to_zh(
-    db_conn: psycopg.Connection,
-) -> None:
-    """An unsupported language value falls back to the default — never raises."""
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
-            (Jsonb("fr"),),
-        )
-    db_conn.commit()
-    assert display_language(db_conn) == "zh"
-
-
 # -- grouped message ---------------------------------------------------------
 
 
@@ -255,24 +192,22 @@ def _instance(n: int, *, severity: str = "error", status: str = "firing") -> dic
 
 def test_a_lone_instance_keeps_the_single_alert_format() -> None:
     alert = _alert()
-    assert base_alerts.notify_group_text([alert], "en", style=STYLE) == notify_text(
-        alert, "en", style=STYLE
-    )
+    assert base_alerts.notify_group_text([alert], style=STYLE) == notify_text(alert, style=STYLE)
 
 
 def test_a_group_is_one_message_with_a_count_the_first_instances_and_the_rest_counted() -> None:
     alerts = [_instance(n, severity="warning" if n else "critical") for n in range(5)]
-    text = base_alerts.notify_group_text(alerts, "en", style=STYLE)
+    text = base_alerts.notify_group_text(alerts, style=STYLE)
     lines = text.splitlines()
-    assert lines[0] == _head("en", resolved=False, severity="CRITICAL") + " ×5"
+    assert lines[0] == _head(resolved=False, severity="CRITICAL") + " ×5"
     assert lines[1:4] == [f"- machine m{n} unreachable" for n in range(3)]
-    assert lines[4] == copy.ALERT_GROUP_MORE["en"].format(n=2)
+    assert lines[4] == copy.ALERT_GROUP_MORE.format(n=2)
     assert "m3" not in text and "m4" not in text
-    assert any(line.startswith(copy.ALERT_TRIGGERED_AT["en"].split("{")[0]) for line in lines)
+    assert any(line.startswith(copy.ALERT_TRIGGERED_AT.split("{")[0]) for line in lines)
 
 
 def test_a_resolved_group_swaps_the_head_and_a_small_group_has_no_remainder_line() -> None:
     alerts = [_instance(n, status="resolved") for n in range(2)]
-    text = base_alerts.notify_group_text(alerts, "zh", style=STYLE)
-    assert text.splitlines()[0] == _head("zh", resolved=True) + " ×2"
-    assert copy.ALERT_GROUP_MORE["zh"].split("{")[0] not in text
+    text = base_alerts.notify_group_text(alerts, style=STYLE)
+    assert text.splitlines()[0] == _head(resolved=True) + " ×2"
+    assert copy.ALERT_GROUP_MORE.split("{")[0] not in text

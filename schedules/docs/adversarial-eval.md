@@ -37,7 +37,7 @@ but automated cleanup of such children does not exist yet; this is accepted
 until OS-level sandboxing.
 
 Worker prompts and scenario material carry required CJK phrasing, escaped as
-`\uXXXX` because raw CJK is only allowed in the frontend locale files.
+`\uXXXX` because raw CJK is only allowed in locale copy trees (`locales/`, `*.po`).
 
 The scoreboard, alerting policy and the batch's loopback server are described in
 `schedules/README.md`.

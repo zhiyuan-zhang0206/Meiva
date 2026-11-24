@@ -23,8 +23,6 @@ from base.telemetry.alerts.copy import (
     ALERT_GROUP_MORE,
     ALERT_HEAD,
     ALERT_JUMP_LINK,
-    ALERT_LANGUAGE_DEFAULT,
-    ALERT_LANGUAGES,
     ALERT_TRIGGERED_AT,
 )
 
@@ -177,13 +175,6 @@ class _StoredAlertRow:
     created_at: datetime
     updated_at: datetime
     inserted: bool
-
-
-# meiva:note
-# The alert-copy language row: ``value`` is jsonb and only a string is a language.
-@dataclass(frozen=True)
-class _DisplayLanguageRow:
-    value: object
 
 
 def _existing_starts_at(conn: psycopg.Connection, fp: str, alertname: str) -> datetime | None:
@@ -470,22 +461,7 @@ def _summary(alert: AlertPayload) -> str:
     return str(annotations.get("summary") or annotations.get("description") or "")
 
 
-def display_language(conn: psycopg.Connection) -> str:
-    # meiva:note
-    # The alert-copy language, from ``user_settings`` key ``display.language``: the copy follows
-    # the UI language (user ruling 2026-08-13: one language source, no separate field for the
-    # alert text). Returns "zh" | "en"; a missing row or an unknown value falls back to
-    # ``ALERT_LANGUAGE_DEFAULT`` ("zh"). Only template/framework copy is translated -- alert
-    # data never is.
-
-    row = query_one(
-        conn, _DisplayLanguageRow, "SELECT value FROM user_settings WHERE key = 'display.language'"
-    )
-    raw = row.value if row else None
-    return raw if isinstance(raw, str) and raw in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
-
-
-def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMessageStyle) -> str:
+def notify_text(alert: AlertPayload, *, style: AlertMessageStyle) -> str:
     # meiva:note
     # The rendered alert message, in the alert-specific format (user design 2026-08-12): a
     # warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the summary body, the
@@ -495,17 +471,15 @@ def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMes
     # record that ``alert_notification_groups`` freezes.
     #
     # Templates live in ``base/telemetry/alerts/copy.py`` -- the single source of user-visible
-    # copy (governance ruling 2026-08-08). ``lang`` picks the template language ("zh" | "en");
-    # ``None`` (or an unknown value) falls back to ``ALERT_LANGUAGE_DEFAULT`` ("zh", user
-    # ruling 2026-08-13). Alert labels/annotations data (severity, alertname, summary,
-    # generator_url) passes through untranslated.
+    # copy (governance ruling 2026-08-08), English only (user ruling 2026-11-24). Alert
+    # labels/annotations data (severity, alertname, summary, generator_url) passes through as
+    # received.
 
     labels = _string_map(alert, "labels")
     severity = parse_severity(labels).upper()
     alertname = parse_alertname(labels)
     resolved = normalize_status(str(alert.get("status") or "")) == "resolved"
-    lang = lang if lang in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
-    head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
+    head = ALERT_HEAD["resolved" if resolved else "firing"].format(
         severity=severity, alertname=alertname
     )
     lines = [head]
@@ -517,15 +491,13 @@ def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMes
         lines.append(generator_url)
     start = format_local(parse_ts(_text(alert, "starts_at")), style.zone)
     if start:
-        lines.append(ALERT_TRIGGERED_AT[lang].format(time=start))
+        lines.append(ALERT_TRIGGERED_AT.format(time=start))
     if style.base_url:
         lines.append(ALERT_JUMP_LINK.format(url=style.base_url))
     return "\n".join(lines)
 
 
-def notify_group_text(
-    alerts: list[AlertPayload], lang: str | None = None, *, style: AlertMessageStyle
-) -> str:
+def notify_group_text(alerts: list[AlertPayload], *, style: AlertMessageStyle) -> str:
     # meiva:note
     # One rendered message for the instances of one rule that a single webhook POST carries.
     # Grafana groups a rule's instances into one notification (`group_by alertname`), so the
@@ -535,27 +507,26 @@ def notify_group_text(
     # holds one row per instance. Instances are expected to share their alertname and status.
 
     if len(alerts) == 1:
-        return notify_text(alerts[0], lang, style=style)
-    lang = lang if lang in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
-    lines = [_group_head(alerts, lang)]
+        return notify_text(alerts[0], style=style)
+    lines = [_group_head(alerts)]
     lines += [f"- {s[:200]}" for a in alerts[:_GROUP_LISTED] if (s := _summary(a))]
     if len(alerts) > _GROUP_LISTED:
-        lines.append(ALERT_GROUP_MORE[lang].format(n=len(alerts) - _GROUP_LISTED))
+        lines.append(ALERT_GROUP_MORE.format(n=len(alerts) - _GROUP_LISTED))
     starts = [t for a in alerts if (t := parse_ts(_text(a, "starts_at"))) is not None]
     if starts:
-        lines.append(ALERT_TRIGGERED_AT[lang].format(time=format_local(min(starts), style.zone)))
+        lines.append(ALERT_TRIGGERED_AT.format(time=format_local(min(starts), style.zone)))
     if style.base_url:
         lines.append(ALERT_JUMP_LINK.format(url=style.base_url))
     return "\n".join(lines)
 
 
-def _group_head(alerts: list[AlertPayload], lang: str) -> str:
+def _group_head(alerts: list[AlertPayload]) -> str:
     """The grouped message's head: highest severity, the alertname and the count."""
 
     labels_of = [_string_map(a, "labels") for a in alerts]
     severity = max((parse_severity(lab) for lab in labels_of), key=_SEVERITY_RANK.__getitem__)
     resolved = normalize_status(str(alerts[0].get("status") or "")) == "resolved"
-    head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
+    head = ALERT_HEAD["resolved" if resolved else "firing"].format(
         severity=severity.upper(), alertname=parse_alertname(labels_of[0])
     )
     return head + ALERT_GROUP_COUNT.format(n=len(alerts))

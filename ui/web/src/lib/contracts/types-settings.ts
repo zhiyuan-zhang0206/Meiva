@@ -24,8 +24,6 @@ export type DateFormat = "relative" | "absolute";
 export const DEFAULT_DATE_FORMAT: DateFormat = "absolute";
 
 export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
-
-  "display.language": "en",
   "behavior.navFallbackMs": 5000,
   "display.show_terminated": false,
   "display.date_format": DEFAULT_DATE_FORMAT,

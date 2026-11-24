@@ -192,21 +192,4 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
       expect(transport.putSetting).toHaveBeenCalledWith("display.theme_pack", null);
     });
   });
-
-  it("renders the Language row and persists a locale choice", async () => {
-    renderPage();
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Language").length).toBeGreaterThan(0);
-    });
-    const english = screen.getByLabelText("English") as unknown as HTMLInputElement;
-    const chinese = screen.getByLabelText("\u4e2d\u6587") as unknown as HTMLInputElement;
-    expect(english.checked).toBe(true);
-    expect(chinese.checked).toBe(false);
-
-    fireEvent.click(chinese);
-    await waitFor(() => {
-      expect(transport.putSetting).toHaveBeenCalledWith("display.language", "zh");
-    });
-  });
 });

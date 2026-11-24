@@ -8,7 +8,7 @@ import { AppConnectionBanner } from "@/components/connection/app-connection-bann
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
 import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
-import { LanguageProvider } from "@/i18n/language-provider";
+import { MessagesProvider } from "@/i18n/messages-provider";
 import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
 import type { Browser } from "@/lib/browser/browser";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
@@ -189,14 +189,14 @@ export function Providers({
             <EventStreamProvider>
               <AlertsProvider>
                 <theme.Provider nonce={nonce}>
-                  <LanguageProvider>
+                  <MessagesProvider>
                     <ThemedSlots theme={theme} />
                     <NavTimingReporter />
                     <AppConnectionBanner />
                     <AppUpdateBanner />
                     {children}
                     <ToastHost />
-                  </LanguageProvider>
+                  </MessagesProvider>
                 </theme.Provider>
               </AlertsProvider>
             </EventStreamProvider>

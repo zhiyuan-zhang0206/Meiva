@@ -1,4 +1,4 @@
-exports = ["language-provider.tsx"]
+exports = ["messages-provider.tsx"]
 
 [uses]
-"language-provider.test.tsx" = ["language-provider.tsx"]
+"messages-provider.test.tsx" = ["messages-provider.tsx"]

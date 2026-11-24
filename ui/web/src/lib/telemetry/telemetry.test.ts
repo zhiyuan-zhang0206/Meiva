@@ -162,7 +162,7 @@ describe("dedupe", () => {
     stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
-    track("setting-change", { key: "display.language", value: "zh" });
+    track("setting-change", { key: "display.clock_format", value: "12h" });
     track("spawn");
     expect(telemetryTestControl.bufferSize()).toBe(3);
   });

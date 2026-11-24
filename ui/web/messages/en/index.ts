@@ -1,5 +1,5 @@
 // The catalog is one JSON file per namespace; a new namespace is a new file plus its line here.
-// `messages-layout.test.ts` pins that every file in this directory is listed, in both locales.
+// `messages-layout.test.ts` pins that every file in this directory is listed, in the catalog.
 
 import agentRow from "./agents/agentRow.json";
 import alerts from "./operations/alerts.json";
