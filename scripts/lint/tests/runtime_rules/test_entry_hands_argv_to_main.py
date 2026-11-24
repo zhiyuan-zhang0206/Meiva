@@ -21,12 +21,6 @@ _ENTRIES = [
     ("base/cluster/frontend_build.py", None),
     ("base/deploy/git/check_git_hooks.py", None),
     (
-        "meiva_builtins/skills/integrations/web-sources/generic/scripts/feed.py",
-        "meiva_builtins/skills/integrations/web-sources/scripts/webscrape.py",
-    ),
-    ("meiva_builtins/skills/integrations/web-sources/rss/scripts/feed.py", None),
-    ("meiva_builtins/skills/integrations/web-sources/scripts/webscrape.py", None),
-    (
         "ops/private_files/__main__.py",
         "ops/private_files/__init__.py",
     ),

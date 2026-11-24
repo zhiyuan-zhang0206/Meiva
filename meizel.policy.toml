@@ -119,8 +119,6 @@ plugin-mechanism-files = "reasons"
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/skill_script.py" = ["meiva_builtins/skills"]
-"meiva_builtins/skills/tests/test_rss_feed.py" = ["meiva_builtins/skills"]
-"meiva_builtins/skills/tests/test_youtube_feed.py" = ["meiva_builtins/skills"]
 "meiva_builtins/tests/test_watcher_wake_delivery.py" = ["meiva_builtins/skills"]
 "base/events/loader.py" = ["base/events/declarations"]
 "base/events/tests/test_declarations_layout.py" = ["base/events/declarations"]
@@ -535,7 +533,6 @@ argv-wrappers = [
 pure-third-party = [
     "anthropic",
     "dotenv",
-    "feedparser",
     "langchain_anthropic",
     "langchain_core",
     "langchain_openai",
@@ -548,7 +545,6 @@ pure-third-party = [
     "pydantic",
     "pydantic_core",
     "pydantic_settings",
-    "trafilatura",
     "yaml",
 ]
 impure-calls = [

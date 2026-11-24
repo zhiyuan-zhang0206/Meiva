@@ -1,1 +1,1 @@
-exports = ["gmail", "web-sources"]
+exports = ["gmail"]

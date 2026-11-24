@@ -72,8 +72,7 @@ dependencies = [
     "zstandard>=0.25.0",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
-    # cryptography, websockets, trafilatura, feedparser) and
-    # invoked by built-in skills (yt-dlp).
+    # cryptography, websockets).
     # Heavy ML/numerical libraries are excluded outright: torch / tensorflow / jax /
     # transformers / opencv / numba / dask.
     "Pillow>=10.4.0",  # image processing (PIL)
@@ -82,9 +81,6 @@ dependencies = [
     "markdown-it-py>=4.0",  # Markdown document reference parsing
     "cryptography>=42.0.0",  # crypto primitives
     "websockets>=15.0.1",
-    "trafilatura>=2.1.0",  # main-content extraction (web-sources skill)
-    "feedparser>=6.0.12",  # RSS/Atom parsing (web-sources/rss skill)
-    "yt-dlp>=2026.3.17",  # YouTube/media metadata, captions, and audio extraction
 ]
 
 [project.scripts]
@@ -154,6 +150,7 @@ dev = [
     "pytest-split",
     "pytest-random-order>=1.2.0",  # opt-in only (--random-order): the nightly random-order run, .github/workflows/random-order.yml
     "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
+    "lxml>=6.0",  # the "lxml" tree builder that update_model_pricing.py asks BeautifulSoup for by name
     # The locality checker, pinned to a release of its own repository; its rule data (`meizel.toml`,
     # `meizel.policy.toml`, `meizel.timing_baseline.json`) stays here.
     "meizel @ git+https://github.com/zhiyuan-zhang0206/meizel@645438a7565bace670de9b1c51274602ed336979",
@@ -1535,19 +1532,6 @@ reportExplicitAny = "error"
 root = "meiva_builtins/skills/platform/meiva-self-evolution"
 reportAny = "error"
 reportExplicitAny = "error"
-
-# A sub-skill's script reaches its parent skill's scripts/ only through the
-# runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
-# not execute that guard, so it needs the same directory named explicitly to
-# resolve the sibling import statically. Each skill's own scripts/ resolves
-# its OWN same-directory siblings without help (a file's containing directory
-# is always on pyright's implicit search path); only the parent-reaching case
-# needs extraPaths.
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/web-sources"
-reportAny = "error"
-reportExplicitAny = "error"
-extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/practice"
