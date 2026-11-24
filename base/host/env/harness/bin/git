@@ -38,8 +38,14 @@ for arg in "$@"; do
 done
 [ -n "$push_seen" ] || exec "$real_git" "$@"
 
-if [ -z "${MEIVA_PYTHON:-}" ] || [ ! -x "$MEIVA_PYTHON" ]; then
-    echo "git: MEIVA_PYTHON is not usable, the zero-trace push guard did not run" >&2
-    exec "$real_git" "$@"
+guard_python=
+if [ -n "${MEIVA_PYTHON:-}" ] && [ -x "$MEIVA_PYTHON" ]; then
+    guard_python=$MEIVA_PYTHON
+else
+    guard_python=$(command -v python3 2>/dev/null) || guard_python=
 fi
-exec "$MEIVA_PYTHON" "$self_dir/../git_zero_trace_guard.py" "$real_git" "$@"
+if [ -z "$guard_python" ]; then
+    echo "git: refusing this push: MEIVA_ZERO_TRACE_GIT_REMOTES is set but neither MEIVA_PYTHON nor python3 is usable to run the zero-trace guard" >&2
+    exit 1
+fi
+exec "$guard_python" "$self_dir/../git_zero_trace_guard.py" "$real_git" "$@"

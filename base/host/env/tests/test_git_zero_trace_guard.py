@@ -268,6 +268,57 @@ def test_only_the_commits_the_push_adds_are_read(world: World) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_a_trailer_below_the_tip_is_found(world: World) -> None:
+    world.plain("checkout", "-q", "-b", "clean-name")
+    world.commit("deep\n\nCo-authored-by: Meiva #8720", name="a")
+    world.commit("clean one", name="b")
+    world.commit("clean two", name="c")
+    result = world.git("push", "origin", "clean-name", MEIVA_ZERO_TRACE_GIT_REMOTES=PATTERN)
+    assert _blocked(result), result.stderr
+    assert world.remote_branches(world.trace_free) == set()
+
+
+def test_another_remotes_tracking_refs_do_not_hide_a_first_push(world: World) -> None:
+    world.plain("checkout", "-q", "-b", "clean-name")
+    world.commit("history\n\nCo-authored-by: Meiva #8720")
+    world.plain("push", "other", "clean-name")
+    world.plain("fetch", "-q", "other")
+    assert world.plain("for-each-ref", "refs/remotes/origin/") == ""
+    result = world.git("push", "origin", "clean-name", MEIVA_ZERO_TRACE_GIT_REMOTES=PATTERN)
+    assert _blocked(result), result.stderr
+    assert world.remote_branches(world.trace_free) == set()
+
+
+def test_a_push_is_refused_when_nothing_can_run_the_guard(world: World, tmp_path: Path) -> None:
+    git_dir = tmp_path / "only-git"
+    git_dir.mkdir()
+    real = subprocess.run(
+        ["sh", "-c", "command -v git"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    (git_dir / "git").symlink_to(real)
+    bare_path = f"{GIT_SHIM_DIR.resolve()}:{git_dir}"
+    env = {**world.env({"MEIVA_ZERO_TRACE_GIT_REMOTES": PATTERN}), "PATH": bare_path}
+    env["MEIVA_PYTHON"] = str(tmp_path / "missing-python")
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603
+            ["git", *args], cwd=world.work, env=env, capture_output=True, text=True, check=False
+        )
+
+    refused = run("push", "origin", "HEAD:clean-name")
+    assert refused.returncode == 1
+    assert "refusing this push" in refused.stderr
+    assert world.remote_branches(world.trace_free) == set()
+    assert run("log", "-1", "--format=%s", "--grep=push").returncode == 0
+
+
+def test_a_missing_meiva_python_falls_back_to_python3(world: World) -> None:
+    world.plain("checkout", "-q", "-b", "meiva-topic")
+    env = {"MEIVA_ZERO_TRACE_GIT_REMOTES": PATTERN, "MEIVA_PYTHON": "/nonexistent/python"}
+    result = world.git("push", "origin", "HEAD", **env)
+    assert _blocked(result), result.stderr
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

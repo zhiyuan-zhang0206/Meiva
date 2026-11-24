@@ -61,7 +61,8 @@ non-empty **and** an argument is literally `push`. Only then does it start
    destination (`HEAD` is the current branch, `src:dst` is `dst`, `refs/heads/` is
    dropped), or with no refspec the `remote.<name>.push`/`push.default` choice, `--all`,
    `--branches`, `--mirror` and `--tags` — and every commit message the push would add
-   (`git log <tips> --not --remotes=<remote>`, newest 500).
+   (`git log <tips> --not --remotes=<remote>` when the target has tracking refs, else the
+   newest 500 commits of the tips; other remotes' tracking refs never narrow the scan).
    A remote ref name is refused when it contains `meiva`, `meizel` or `antigravity`
    (any case), or this agent's exact id as a delimited token
    (`(?:^|[-_/.#])<id>(?:$|[-_/.])`, so `fix-4367` passes for agent 8720). The id is
@@ -82,10 +83,13 @@ removed, the scp-like colon turned into a slash). `example-corp/` therefore matc
 `github.com[:/]example-corp/` matches the written form of both.
 
 **What it is not.** The guard stops an agent's accident, not an adversary: a git alias for
-`push`, an absolute path to the real binary, or a tool that links libgit2 is not seen. A remote
-with no fetched tracking refs makes the commit scan read up to 500 recent commits instead of
-only the new ones; `git fetch <remote>` narrows it. A fault inside the guard is printed and
-the real `git` still runs, so a broken guard never blocks cleaning up a pushed branch.
+`push`, an absolute path to the real binary, or a tool that links libgit2 is not seen. A target
+remote with no fetched tracking refs of its own (a first push, or a direct URL) makes the commit
+scan read up to 500 recent commits instead of only the new ones; `git fetch <remote>` narrows it.
+If the setting is non-empty and neither `MEIVA_PYTHON` nor `python3` can run the guard, the shim
+refuses every push, deletions included, with exit 1 rather than letting a protected remote's push
+through; non-push commands are unaffected. A fault inside the running guard is printed and the real
+`git` still runs, so a guard bug never blocks cleaning up a pushed branch.
 
 The same binary directory list feeds the probe in `base/agents/birth/harness.py`
 and the `launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three

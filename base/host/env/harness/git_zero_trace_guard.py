@@ -399,7 +399,7 @@ def _build_plan(git: GitRunner, request: PushRequest, remote: str, branch: str |
 
 def _pending_commits(git: GitRunner, remote: str, tips: Sequence[str]) -> list[tuple[str, str]]:
     has_tracking = bool(git.lines("for-each-ref", "--count=1", f"refs/remotes/{remote}/"))
-    exclusion = f"--remotes={remote}" if has_tracking else "--remotes"
+    exclusion = ["--not", f"--remotes={remote}"] if has_tracking else []
     output = git.run(
         "log",
         "--no-color",
@@ -407,8 +407,7 @@ def _pending_commits(git: GitRunner, remote: str, tips: Sequence[str]) -> list[t
         "--format=%x1e%H%x1f%B",
         f"--max-count={COMMIT_SCAN_LIMIT}",
         *tips,
-        "--not",
-        exclusion,
+        *exclusion,
     )
     commits: list[tuple[str, str]] = []
     for record in (output or "").split("\x1e"):
