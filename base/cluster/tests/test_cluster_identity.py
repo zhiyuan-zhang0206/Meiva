@@ -77,3 +77,11 @@ def test_db_and_redis_identity_read_supplied_urls():
 
 def test_session_name_has_no_cluster_segment():
     assert cluster.session_name("gateway") == "meiva-gateway"
+
+
+def test_cluster_id_is_a_stable_one_way_digest_of_the_token():
+    first = cluster.cluster_id("token-one")
+    assert first == cluster.cluster_id("token-one")
+    assert first != cluster.cluster_id("token-two")
+    assert len(first) == 16
+    assert "token-one" not in first

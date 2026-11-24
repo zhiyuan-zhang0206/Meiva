@@ -81,3 +81,46 @@ def test_collector_allowed_for_home_accepts_station_capability(tmp_path: Path) -
     assert not observability.collector_allowed_for_home(
         tmp_path, machine=machine_identity(roles=None), unit_home=tmp_path, endpoint_explicit=False
     )
+
+
+def test_cluster_identity_is_derived_from_the_telemetry_token(tmp_path: Path) -> None:
+    from base.cluster import cluster_id
+    from base.host.db_authority.api import ensure_telemetry_token
+
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    assert observability.cluster_identity(home) is None
+    assert observability.cluster_identity_attributes(home) == {}
+
+    ensure_telemetry_token(home.resolve(), "telemetry-token-one")
+
+    assert observability.cluster_identity(home) == cluster_id("telemetry-token-one")
+    assert observability.cluster_identity_attributes(home) == {
+        "meiva.cluster": cluster_id("telemetry-token-one")
+    }
+
+
+def test_same_named_homes_share_a_label_but_not_a_routing_identity(tmp_path: Path) -> None:
+    from base.host.db_authority.api import ensure_telemetry_token
+
+    homes = [tmp_path / name / ".meiva" for name in ("a", "b")]
+    for home, token in zip(homes, ("token-of-a", "token-of-b"), strict=True):
+        home.mkdir(parents=True)
+        ensure_telemetry_token(home.resolve(), token)
+
+    assert observability.cluster_label(homes[0]) == observability.cluster_label(homes[1])
+    assert observability.cluster_identity(homes[0]) != observability.cluster_identity(homes[1])
+
+
+def test_metrics_and_trace_resources_carry_the_routing_identity(tmp_path: Path) -> None:
+    from base.host.db_authority.api import ensure_telemetry_token
+    from base.telemetry.otlp.telemetry_otlp_metrics import metrics_resource_attributes
+
+    home = tmp_path / ".meiva"
+    home.mkdir()
+    ensure_telemetry_token(home.resolve(), "token-of-a")
+
+    attributes = metrics_resource_attributes(home=home, instance_id="i")
+
+    assert attributes["cluster"] == ".meiva"
+    assert attributes["meiva.cluster"] == observability.cluster_identity(home)

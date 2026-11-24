@@ -73,6 +73,7 @@ _EXPECTED_UIDS = {
     "meiva-ops-redis-memory",
     "meiva-ops-otelcol-queue-pressure",
     "meiva-ops-otelcol-enqueue-failures",
+    "meiva-ops-otelcol-cluster-allow-drops",
     "meiva-ops-otelcol-host-silent",
     "meiva-ops-prom-too-old-samples",
     "meiva-ops-memory-search-rows-warning",

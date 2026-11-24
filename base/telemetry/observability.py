@@ -20,6 +20,9 @@ ObservabilityEndpointVariable = Literal[
 # "no cluster". `init_telemetry` materializes the real one from the home the boot hands it.
 UNKNOWN_CLUSTER = ".unknown"
 
+# meiva:link docs/decisions/observability/telemetry/2026-11-24-cluster-routing-identity.md
+CLUSTER_ID_ATTRIBUTE = "meiva.cluster"
+
 
 # meiva:note
 # The home is the caller's: the boot that resolved `$MEIVA_HOME` states it here once, and
@@ -37,6 +40,19 @@ def cluster_label(home: Path) -> str:
         except Exception as slug_exc:
             _report_label_fallback("home slug", slug_exc)
             return UNKNOWN_CLUSTER
+
+
+def cluster_identity_attributes(home: Path) -> dict[str, str]:
+    identity = cluster_identity(home)
+    return {} if identity is None else {CLUSTER_ID_ATTRIBUTE: identity}
+
+
+def cluster_identity(home: Path) -> str | None:
+    from base import cluster
+    from base.host.db_authority.unit import telemetry_bearer
+
+    token = telemetry_bearer(home)
+    return None if token is None else cluster.cluster_id(token)
 
 
 def _resolve_non_empty_home_label(resolved_home: Path) -> str:

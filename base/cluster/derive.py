@@ -3,8 +3,8 @@
 Everything a cluster derives rather than stores: the data-plane identity read
 from `.env` URLs as data (`identity_from_url` / `db_identity` /
 `redis_identity`, plus the fixed `DATA_PLANE_IDENTITY` at birth); the
-home-derived display label and short-path token (`home_label` / `home_slug`);
-the session-name composer (`session_name`); the redis
+home-derived display label and short-path token (`home_label` / `home_slug`); the
+token-derived routing identity (`cluster_id`); the session-name composer (`session_name`); the redis
 channel name and admin URL; and
 `derive_env` — the record-to-env mapping a unit needs (plus its base-URL
 helper `per_cluster_base_urls`).
@@ -59,6 +59,12 @@ def home_label(home: Path) -> str:
     """The human-facing label for a cluster — its home's basename, computed on
     the fly (pure display; renaming the directory changes only the label)."""
     return Path(home).name
+
+
+# meiva:link docs/decisions/observability/telemetry/2026-11-24-cluster-routing-identity.md
+def cluster_id(telemetry_token: str) -> str:
+    digest = hashlib.sha256(f"meiva.cluster/v1:{telemetry_token}".encode()).hexdigest()
+    return digest[:16]
 
 
 def production_identity(machine: MachineIdentityReader, *, home: Path) -> bool:

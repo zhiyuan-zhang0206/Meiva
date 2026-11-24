@@ -266,7 +266,7 @@ def generate_config(
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
 ) -> str:
-    from base.cluster import home_label
+    from base.cluster import cluster_id, home_label
     from base.host.db_authority.unit import telemetry_bearer
     from base.telemetry.otlp.collector_listeners import LOCAL_INGRESS_HOST
 
@@ -280,6 +280,7 @@ def generate_config(
     values = CollectorValues(
         meiva_home=str(meiva_home),
         cluster_label=home_label(meiva_home),
+        cluster_id=None if bearer is None else cluster_id(bearer),
         machine_name=yaml_quote(machine.name()),
         tempo_endpoint=obs.telemetry_tempo_endpoint.rstrip("/"),
         loki_base=bases[0],

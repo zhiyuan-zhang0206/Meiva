@@ -188,6 +188,18 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
     assert threshold_params(rule) == [[0]]
 
 
+def test_collector_cluster_filter_drops_are_visible_as_a_window_delta() -> None:
+    rules = {r["uid"]: r for r in load_rules()}
+    rule = rules["meiva-ops-otelcol-cluster-allow-drops"]
+    expr = rule_query_exprs(rule, "prometheus")[0]
+    assert 'filter="filter/cluster_allow"' in expr
+    assert "otelcol_processor_filter_(logs|spans|datapoints)_filtered" in expr
+    assert "increase(" in expr
+    assert "[5m]" in expr
+    assert threshold_params(rule) == [[0]]
+    assert rule["for"] == "0m"
+
+
 def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-otelcol-host-silent"]
