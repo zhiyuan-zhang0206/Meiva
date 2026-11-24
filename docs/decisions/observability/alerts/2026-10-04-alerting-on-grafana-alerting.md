@@ -70,3 +70,5 @@ this page, why did that not", and every new alert had to choose which layer to p
 Forward: the IM-count trade-off above was reversed the same day: [2026-10-04-one-im-per-alert-group](2026-10-04-one-im-per-alert-group.md).
 
 Forward: [Alertmanager can route a notification group to an agent inbox](2026-11-24-alertmanager-agent-receiver.md).
+
+Partly superseded by: [2026-11-24-alerts-have-one-owner-grafana.md](2026-11-24-alerts-have-one-owner-grafana.md) — the gateway no longer stores alerts; Grafana remains the evaluator and notifier.

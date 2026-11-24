@@ -1,140 +1,47 @@
 # meiva:note
-# The alert store and its three HTTP surfaces (webhook ingest, unresolved-first list,
-# SSE tail) and the separate Alertmanager inbox webhook. Ingest owns writes to `alerts`. The auth split between the Grafana webhook and the UI/SDK callers is stated in
-# the document this site links.
+# The gateway's alert surfaces. Grafana owns alert state, so nothing here stores it:
+# `GET /api/alerts/firing` reads what Grafana reports firing right now (the top-bar badge),
+# and `POST /api/alerts` is the webhook receiver of the alert pipeline's dead-man switch.
 # meiva:link gateway/alerts/docs/alerts.md
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Mapping
-from datetime import timedelta
-from typing import LiteralString
-
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
-from psycopg.rows import kwargs_row
-from pydantic import TypeAdapter
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from base import telemetry
-from base.db.rows import count_one
-from base.db.transaction import write_transaction
-from base.host.boundary.json_values import is_object_dict
-from base.telemetry.alerts import (
-    AlertMessageStyle,
-    upsert_alert,
-)
-from base.telemetry.alerts.shadow import AlertShadowBatch
 from gateway.alerts.agent_webhook import router as agent_webhook_router
-from gateway.alerts.schemas import (
-    AlertIngestResult,
-    AlertsListMeta,
-    AlertsListResponse,
-    AlertWebhookPayload,
-)
-from gateway.events.sse import event_stream
-from gateway.events.sse_frames import SseCadence
+from gateway.alerts.firing import WATCHDOG_METRIC, read_firing_alerts
+from gateway.alerts.schemas import AlertWebhookPayload
 from gateway.http.auth.webhook import authenticate_webhook
-from gateway.http.config import gateway_clock, gateway_config, gateway_state
-from ops.alerts import (
-    ALERTS_CHANNEL,
-    NON_WATCHDOG_ALERT_SQL,
-    AlertRow,
-    AlertSeverity,
-    AlertStatus,
-    publish_alert_rows,
-)
+from gateway.http.config import gateway_clock, gateway_config, state_as
+from gateway.routers.proxies.grafana import GrafanaAppState
+from gateway.schemas.alerts import FiringAlerts
 
 router = APIRouter()
 router.include_router(agent_webhook_router)
 
 
-_log = logging.getLogger(__name__)
-
-_WINDOWS = {
-    "1h": timedelta(hours=1),
-    "6h": timedelta(hours=6),
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-}
-
-# Each SSE frame is one AlertRow JSON — validate what we forward so a bad
-# publish degrades to a dropped frame, never a crashed stream.
-_alert_frame_validator = TypeAdapter(AlertRow)
-
-
-# -- ingest auth -------------------------------------------------------------
-
-
-def ingest_authorized(request: Request) -> bool:
-    """Webhook-token header, else cluster-secret Bearer, else loopback trust.
-
-    ``X-Alerts-Token`` carries the webhook token; the Grafana contact point
-    sends it as a notifier-native Bearer instead (see ``gateway.http.auth.webhook``).
-    Loopback trust only applies when no webhook token is configured — the
-    single-box default, where Grafana (127.0.0.1:3003) is the only caller and
-    the gateway binds everything anyway. With a token set, loopback is not
-    enough: the token is the contract.
-    """
-
-    return authenticate_webhook(request, provider="alerts").authorized
-
-
-# -- ingest ------------------------------------------------------------------
-
-
-@router.post("/api/alerts")
+@router.post("/api/alerts", status_code=204, response_class=Response)
 # meiva:note
-# Alertmanager webhook endpoint: the body is the standard webhook payload (`status` +
-# `alerts[]`). One row per (fingerprint, starts_at); re-sends while firing update the row,
-# resolution flips status and sets ends_at. Ingest publishes rows to the SSE stream.
-def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestResult:
-    if not ingest_authorized(request):
+# The alert pipeline's heartbeat receiver: Grafana's contact point posts the standard
+# Alertmanager webhook payload here, and a firing watchdog alert in it moves the heartbeat
+# gauge the dead-man rule reads. Nothing else in the payload is kept or acted on — alert state
+# stays in Grafana, and agents are told through `POST /api/alerts/agents/{agent_id}`.
+def receive_alert_webhook(body: AlertWebhookPayload, request: Request) -> Response:
+    if not authenticate_webhook(request, provider="alerts").authorized:
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")
 
-    inserted = updated = 0
-    rows: list[dict[str, object]] = []
-    alert_settings = gateway_config(request).alerts
-    style = AlertMessageStyle(
-        zone=gateway_clock(request).zone(), base_url=alert_settings.frontend_base_url
-    )
-    with write_transaction(gateway_state(request).db_pool) as conn:
-        alerts = body.flattened()
-        shadow = AlertShadowBatch(conn, alerts, style=style)
-        for alert in shadow.items:
-            instance_key, previous = shadow.observe(alert)
-            if instance_key is None:
-                continue
-            _key, did_insert, should_notify, row = upsert_alert(
-                conn, alert, source=body.source, instance_key=instance_key
-            )
-            if not row:
-                continue
-            if did_insert:
-                inserted += 1
-            else:
-                updated += 1
-            rows.append(row)
-            shadow.record(alert, row, previous, should_notify=should_notify)
-        shadow.freeze()
-        conn.commit()
-
-    def _is_watchdog_row(row: Mapping[str, object]) -> bool:
-        labels = row.get("labels")
-        if is_object_dict(labels):
-            return labels.get("metric") == "alert_pipeline_watchdog"
-        return False
-
-    ui_rows = [r for r in rows if not _is_watchdog_row(r)]
-    if ui_rows:
-        publish_alert_rows(gateway_state(request).bus, ui_rows)
-
-    if rows:
+    if any(
+        alert.labels.get("metric") == WATCHDOG_METRIC
+        and (alert.status if "status" in alert.model_fields_set else body.status or alert.status)
+        == "firing"
+        for alert in body.alerts
+    ):
         # meiva:note
-        # The heartbeat the alert pipeline's dead-man rule reads: one event per accepted POST
-        # that wrote a row. The gauge keeps moving while the webhook path works and stops when
-        # it does not — a rotated token the gateway now rejects, a stopped gateway — without
-        # depending on an alert that the broken path would have had to deliver.
+        # One event per accepted watchdog POST. The gauge keeps moving while the webhook path
+        # works and stops when it does not — a rotated token the gateway now rejects, a stopped
+        # gateway, a contact point routed elsewhere — without depending on an alert that the
+        # broken path would have had to deliver.
         telemetry.emit(
             "telemetry",
             "alerts",
@@ -142,126 +49,17 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 "last_ingest_timestamp_seconds": gateway_clock(request).now().timestamp(),
             },
         )
-
-    return AlertIngestResult(processed=len(body.alerts), inserted=inserted, updated=updated)
-
-
-# -- SSE stream ---------------------------------------------------------------
+    return Response(status_code=204)
 
 
-@router.get("/api/alerts/stream")
-async def get_alerts_stream(request: Request) -> StreamingResponse:
-    """SSE endpoint — subscribe to the ``meiva:alerts`` Redis channel, forward.
+@router.get("/api/alerts/firing")
+async def get_firing_alerts(request: Request) -> FiringAlerts:
+    """Alerts Grafana reports firing right now — the top-bar badge.
 
-    Client ``EventSource`` receives ``data: {json}\n\n`` frames, one
-    ``AlertRow`` JSON per frame, on every ingest. Same machinery as the
-    agent-events stream (heartbeat frames, error frames, reconnection-safe);
-    this is the live tail — the initial fetch (GET /api/alerts) covers rows
-    ingested before the subscription opened.
+    `state` says whether the counts can be trusted: a Grafana that does not answer is
+    `unavailable` with no counts, never zero.
     """
 
-    return StreamingResponse(
-        event_stream(
-            gateway_state(request).bus,
-            0,
-            request,
-            channel=ALERTS_CHANNEL,
-            broadcast=True,
-            validator=_alert_frame_validator,
-            poll_s=gateway_config(request).sse.disconnect_poll_seconds,
-            cadence=SseCadence(),
-        ),
-        media_type="text/event-stream",
-        headers={
-            # Reverse proxies like nginx / cloudflare buffer text responses
-            # by default — these two headers tell them to pass bytes through.
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-# -- list ---------------------------------------------------------------------
-
-
-@router.get("/api/alerts")
-def list_alerts(
-    request: Request,
-    window: str = Query(default="24h", pattern="^(1h|6h|24h|7d)$"),
-    status: AlertStatus | None = None,
-    severity: AlertSeverity | None = None,
-    # `limit`'s range stays a protective constant (import-time Query bound;
-    # task #3696 exception inventory); the default *window* is
-    # display.alerts_default_limit.
-    limit: int | None = Query(default=None, ge=1, le=500),
-) -> AlertsListResponse:
-    """Unresolved-first alert history for the alert section.
-
-    Unresolved instances float above resolved ones (2026-08-05 user ruling);
-    within a status class, newest starts come first.
-    ``meta.unresolved_count`` backs the top-bar badge and ``meta.total`` is
-    the full match count.
-    """
-
-    effective_limit = (
-        limit if limit is not None else gateway_config(request).display.alerts_default_limit
-    )
-    since = gateway_clock(request).now() - _WINDOWS[window]
-    params: list[object] = [since]
-    # meiva:note
-    # Live problems never age out. The window limits recovery history, including long-running
-    # incidents that ended recently. Internal synthetic watchdogs are excluded from the human UI
-    # and badges.
-    where: list[LiteralString] = [
-        "(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)",
-        NON_WATCHDOG_ALERT_SQL,
-    ]
-    if status is not None:
-        where.append("status = %s")
-        params.append(status)
-    if severity is not None:
-        where.append("severity = %s")
-        params.append(severity)
-    where_sql = " AND ".join(where)
-
-    # meta counts (one connection, two cheap queries):
-    # - unresolved: every live instance in the severity scope. Trivially
-    #   0 when the caller already scopes to resolved.
-    # - total: rows matching the filters before the limit.
-    with gateway_state(request).db_pool.connection() as conn:
-        if status == "resolved":
-            unresolved_count = 0
-        else:
-            base: list[LiteralString] = [
-                "status = 'unresolved'",
-                NON_WATCHDOG_ALERT_SQL,
-            ]
-            base_params: list[object] = []
-            if severity is not None:
-                base.append("severity = %s")
-                base_params.append(severity)
-            unresolved_count = count_one(
-                conn,
-                f"SELECT count(*) AS n FROM alerts WHERE {' AND '.join(base)}",  # noqa: S608 — fixed fragments
-                base_params,
-            )
-        total = count_one(conn, f"SELECT count(*) AS n FROM alerts WHERE {where_sql}", params)  # noqa: S608 — fixed fragments
-
-        select_sql = (
-            "SELECT id, status, severity, alertname, labels, annotations, starts_at, ends_at,"  # noqa: S608 — where_sql built from fixed fragments only
-            "       fingerprint, generator_url, source, notified_at, created_at, updated_at"
-            f"  FROM alerts WHERE {where_sql}"
-            " ORDER BY (status = 'unresolved') DESC, starts_at DESC LIMIT %s"
-        )
-        with conn.cursor(row_factory=kwargs_row(AlertRow)) as rows_cur:
-            rows_cur.execute(select_sql, (*params, effective_limit))
-            rows = rows_cur.fetchall()
-
-    return AlertsListResponse(
-        alerts=rows,
-        meta=AlertsListMeta(
-            window=window,
-            total=total,
-            unresolved_count=unresolved_count,
-        ),
+    return await read_firing_alerts(
+        state_as(request, GrafanaAppState).grafana_client, gateway_config(request).grafana
     )

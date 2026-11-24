@@ -8,7 +8,7 @@ import type { SseChannel } from "../transport/stream/sse-plan";
 // the per-channel endpoints without touching the switch or the gateway. The
 // setting below only decides whether this set is used.
 // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
-export const MERGED_SSE_CHANNELS: readonly SseChannel[] = ["system", "systemAll", "alerts"];
+export const MERGED_SSE_CHANNELS: readonly SseChannel[] = ["system", "systemAll"];
 
 export const SEPARATE_SSE_CHANNELS: readonly SseChannel[] = [];
 

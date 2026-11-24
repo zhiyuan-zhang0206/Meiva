@@ -29,7 +29,7 @@ const defaultTimers: StreamTimers = {
   queueMicrotask: (callback) => globalThis.queueMicrotask(callback),
 };
 
-const ALL_SLOTS: readonly SseSlot[] = ["system", "alerts", "systemAll", "merged"];
+const ALL_SLOTS: readonly SseSlot[] = ["system", "systemAll", "merged"];
 
 type Message =
   | { type: "frame"; ch: SseChannel; data: string; leaderId: string }
@@ -82,14 +82,14 @@ export class ProfileSseTransport {
   private readonly timers: StreamTimers;
   private readonly channel: ChannelHandle | null;
   private readonly listeners: Record<SseChannel, Set<SseListener>> = {
-    system: new Set(), alerts: new Set(), systemAll: new Set(),
+    system: new Set(), systemAll: new Set(),
   };
   private readonly detailInterests = new Map<SseListener, number | null>();
   private readonly states: Record<SseChannel, SseState | null> = {
-    system: null, alerts: null, systemAll: null,
+    system: null, systemAll: null,
   };
   private readonly slots: Record<SseSlot, SourceSlot> = {
-    system: newSlot(), alerts: newSlot(), systemAll: newSlot(), merged: newSlot(),
+    system: newSlot(), systemAll: newSlot(), merged: newSlot(),
   };
   private readonly interests = new Map<string, { activeId: number | null; seen: number }>();
   private participating = false;
@@ -283,7 +283,7 @@ export class ProfileSseTransport {
         // A newly visible follower may have missed the original open message.
         if (firstAnnouncement) {
           this.post({ type: "ping", leaderId: this.tabId });
-          for (const ch of ["system", "alerts", "systemAll"] as const) {
+          for (const ch of ["system", "systemAll"] as const) {
             const state = this.states[ch];
             if (state !== null) this.post({ type: "state", ch, state, leaderId: this.tabId });
           }
@@ -343,11 +343,9 @@ export class ProfileSseTransport {
     }, PRUNE_MS);
     if (this.config.merged.size === 0) {
       this.openSource("system", `${this.config.base}/api/system`);
-      this.openSource("alerts", `${this.config.base}/api/alerts/stream`);
       return;
     }
     this.closeSource("system");
-    this.closeSource("alerts");
     this.openSource("merged", this.mergedUrl(this.detailUnion));
   }
 
@@ -472,7 +470,7 @@ export class ProfileSseTransport {
 
   // meiva:note
   // The merged wire frame names its channel; subscribers keep the per-channel
-  // payload shapes they already parse (an object for `system` and `alerts`, the
+  // payload shapes they already parse (an object for `system`, the
   // batch array for `systemAll`), so the fan-out lives here and nowhere else.
   // A channel-scoped `error` frame only degrades that channel, and a `dropped`
   // count means the server shed payloads: both surface to providers so they

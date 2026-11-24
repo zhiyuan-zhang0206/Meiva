@@ -1,4 +1,7 @@
-# Native alerts use the authenticated gateway webhook. Retired direct receivers are tombstoned.
+# Alert state lives in Grafana. The one receiver here is the gateway webhook, which keeps nothing:
+# a firing watchdog alert refreshes the heartbeat the alert-pipeline dead-man rule reads, and every
+# other alert is acknowledged and dropped. To notify an agent, add the agent receiver of
+# `contact.agent.example.yml` as a site policy. Retired direct receivers are tombstoned.
 apiVersion: 1
 contactPoints:
 - orgId: 1
@@ -24,39 +27,6 @@ policies:
   routes:
   - receiver: meiva-alerts-webhook
     object_matchers:
-    - - attributes_check
-      - '='
-      - gateway_liveness
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - health_probe_silent
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - root_unit_restart_attempts_exhausted
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
     - - metric
       - '='
       - alert_pipeline_watchdog
@@ -66,37 +36,6 @@ policies:
     group_wait: 0s
     group_interval: 5m
     repeat_interval: 5m
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - alert_pipeline_silent
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 1h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - severity
-      - '='
-      - critical
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 1m
-    repeat_interval: 1h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - alertname
-      - =~
-      - .+
-    group_by:
-    - alertname
-    group_wait: 30s
-    group_interval: 5m
-    repeat_interval: 4h
 deleteContactPoints:
 - orgId: 1
   uid: meiva-alerts-telegram

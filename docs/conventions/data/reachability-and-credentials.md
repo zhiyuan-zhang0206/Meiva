@@ -62,7 +62,7 @@ Three rules:
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/host/net/auth.py` `verify_bearer_digest` over digests only |
 | Gateway and station OTLP ingress (remote receiver) | the telemetry token (a random value the gateway home keeps in `db-authority/telemetry-token`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |
-| Alerts ingest (`POST /api/alerts`) | `MEIVA_ALERTS_WEBHOOK_TOKEN` (`X-Alerts-Token` header, or the same value as a bearer), else a cluster bearer; **with no token configured, any loopback caller is admitted** | `gateway.http.auth.webhook.authenticate_webhook` |
+| Alert webhook (`POST /api/alerts`, the watchdog heartbeat receiver) | `MEIVA_ALERTS_WEBHOOK_TOKEN` (`X-Alerts-Token` header, or the same value as a bearer), else a cluster bearer; **with no token configured, any loopback caller is admitted** | `gateway.http.auth.webhook.authenticate_webhook` |
 | Loki/Prometheus backend APIs | none — loopback-only (`MEIVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 

@@ -232,10 +232,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "validates the signal rules of deploy/lgtm/config/grafana/provisioning/alerting/rules.yml against the declared events",
     ),
-    "tests/scripts/test_alert_single_path.py": (
-        "contract",
-        "scans every production package for alert writers: its subject is the repository, which no package owns",
-    ),
     "tests/scripts/test_audit_branch_protection_contract.py": (
         "contract",
         "the branch-protection audit's required status checks match job names in .github/workflows/ci.yml",

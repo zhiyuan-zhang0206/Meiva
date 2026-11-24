@@ -116,8 +116,8 @@ def test_every_failure_has_a_verdict_that_ends_in_exactly_one_way(failure: Failu
     assert [plan.park, plan.reraise].count(True) <= 1
 
 
-def test_a_unit_without_the_grafana_credential_runs_two_loops() -> None:
-    loops = loop_roster.roster(dispatch_deadline_s=1500.0, reconcile_alerts=False)
+def test_the_service_runs_the_dispatch_and_registry_gauge_loops() -> None:
+    loops = loop_roster.roster(dispatch_deadline_s=1500.0)
 
     assert [(loop.name, loop.deadline_s) for loop in loops] == [
         ("dispatch", 1500.0),
@@ -125,18 +125,7 @@ def test_a_unit_without_the_grafana_credential_runs_two_loops() -> None:
     ]
 
 
-def test_a_unit_with_the_credential_adds_the_alert_reconciliation() -> None:
-    loops = loop_roster.roster(dispatch_deadline_s=1500.0, reconcile_alerts=True)
-
-    assert [loop.name for loop in loops] == [
-        "dispatch",
-        "registry_gauge",
-        "alert_reconciliation",
-    ]
-    assert loops[-1].deadline_s == loop_roster.ALERT_RECONCILIATION_DEADLINE_S
-
-
 def test_the_configured_deadlines_reach_the_blocking_loops_only() -> None:
-    loops = loop_roster.roster(dispatch_deadline_s=11.0, reconcile_alerts=True)
+    loops = loop_roster.roster(dispatch_deadline_s=11.0)
 
     assert {loop.name: loop.deadline_s for loop in loops}["dispatch"] == 11.0

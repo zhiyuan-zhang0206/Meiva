@@ -248,24 +248,6 @@ class DisplaySettings(EnvSettings):
         },
     )
 
-    alerts_default_limit: int = Field(
-        title="Default alerts page size",
-        default=100,
-        alias="MEIVA_ALERTS_DEFAULT_LIMIT",
-        description=(
-            "Default page (alerts) of GET /api/alerts when the caller passes no limit. "
-            "100 rows covers the unresolved-first view a dashboard read wants without "
-            "shipping the full resolution history; the 500 ceiling stays a protective "
-            "constant, and the web list's own pinned window is tracked in the task "
-            "#3696 user-flag list (deferred backend alignment)."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
     schedules_runs_default_limit: int = Field(
         title="Default schedule run history page size",
         default=50,

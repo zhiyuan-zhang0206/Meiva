@@ -1,7 +1,4 @@
 {
-  "unresolvedAlerts": "{count} unresolved alerts",
-  "rules": "Alert rules",
-  "pageOf": "Page {current} of {total}",
-  "previousPage": "Previous page",
-  "nextPage": "Next page"
+  "firingAlerts": "{count} firing alerts",
+  "unreachable": "Grafana unreachable, alert status unknown"
 }

@@ -7,8 +7,7 @@ import type {
 import type { HarnessAvailability } from "../../contracts/models";
 import type {
   AgentMachineRow,
-  AlertsResponse,
-  AlertsWindow,
+  FiringAlerts,
   ClusterStatus,
   CompactAgentResponse,
   ConfigView,
@@ -55,7 +54,7 @@ import type {
 } from "../../contracts/types";
 import { toUserPath } from "./routes/agent-routes";
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
-import { alertsPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
+import { fleetGraphPath, memoryNotePath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./plans";
 import { confirmDraftReceipt } from "./plans";
@@ -148,13 +147,8 @@ export function createControlApi(http: Http) {
       );
     },
 
-    getAlerts: (params: {
-      window?: AlertsWindow;
-      status?: string;
-      severity?: string;
-      limit?: number;
-    } = {}): Promise<AlertsResponse> => {
-      return f(alertsPath(params)).then(ok<AlertsResponse>);
+    getFiringAlerts: (): Promise<FiringAlerts> => {
+      return f("/api/alerts/firing").then(ok<FiringAlerts>);
     },
 
     getConfig: (machine?: string): Promise<ConfigView> => {

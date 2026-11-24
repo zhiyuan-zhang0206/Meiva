@@ -27,8 +27,8 @@ describe("stream hub", () => {
 
   it("providers asking for the same channel set share one transport", () => {
     const { hub } = hubOver("shared");
-    const first = hub.transportFor(["system", "alerts"]);
-    expect(hub.transportFor(["system", "alerts"])).toBe(first);
+    const first = hub.transportFor(["system", "systemAll"]);
+    expect(hub.transportFor(["system", "systemAll"])).toBe(first);
     expect(hub.transportFor(["system"])).not.toBe(first);
     hub.dispose();
   });
@@ -37,13 +37,13 @@ describe("stream hub", () => {
     vi.useFakeTimers();
     try {
       const { hub, fake } = hubOver("legacy");
-      const transport = hub.transportFor(["system", "systemAll", "alerts"]);
+      const transport = hub.transportFor(["system", "systemAll"]);
       expect(transport).not.toBeNull();
       const unsubscribe = transport?.subscribe("system", { onFrame: () => undefined, onState: () => undefined });
       await Promise.resolve();
       expect(transport?.isLeader()).toBe(true);
       expect(fake.sources).toHaveLength(1);
-      expect(fake.sources[0].url).toMatch(/^http:\/\/gateway\.test\/api\/stream\?channels=global,all,alerts/);
+      expect(fake.sources[0].url).toMatch(/^http:\/\/gateway\.test\/api\/stream\?channels=global,all/);
       expect(fake.sources[0].init).toEqual({ withCredentials: true });
       unsubscribe?.();
       hub.dispose();

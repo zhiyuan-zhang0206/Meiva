@@ -54,7 +54,7 @@
     "status-services": "Services",
     "status-gateway": "Gateway",
     "ops-metrics": "Metrics (Grafana)",
-    "alerts": "Alerts",
+    "ops-alerts": "Alerts (Grafana)",
     "app": "App"
   },
   "title": "Settings",

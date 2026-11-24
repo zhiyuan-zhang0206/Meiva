@@ -35,3 +35,5 @@ again under the configured policy, with no delivery guarantee for an individual 
 [Grafana webhook implementation](https://github.com/grafana/alerting/blob/e1a167a201a8/receivers/webhook/v1/webhook.go#L158-L162)
 
 [Setup and rollback](../../../../gateway/alerts/docs/alerts.md#alertmanager-agent-receiver)
+
+Partly superseded by: [2026-11-24-alerts-have-one-owner-grafana.md](2026-11-24-alerts-have-one-owner-grafana.md) — the gateway no longer stores or reconciles alert instances; the agent receiver is unchanged.

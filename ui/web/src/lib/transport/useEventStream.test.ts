@@ -190,7 +190,7 @@ describe("server rendering", () => {
       get page(): never { throw new Error("browser resource acquired during SSR"); },
     };
     hub = new StreamHub(transport, { checkAuth: auth.checkAuth, sessionInvalid: notifySessionInvalid }, "");
-    registerSseRuntime({ useMergedChannels: () => ["system", "alerts"] });
+    registerSseRuntime({ useMergedChannels: () => ["system", "systemAll"] });
     const Wrapper = withProvider();
     expect(() => renderToString(createElement(Wrapper, null, "server shell"))).not.toThrow();
     expect(tab.sources).toHaveLength(0);
@@ -344,7 +344,7 @@ describe("EventStreamProvider half-dead watchdog", () => {
   it("shared CONNECTING state keeps the watchdog armed until a frame arrives", async () => {
     useTransport("shared");
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
-    await waitFor(() => expect(tab.sources).toHaveLength(2));
+    await waitFor(() => expect(tab.sources).toHaveLength(1));
     const system = tab.sources.find((source) => source.url === "/api/system");
     if (!system) throw new Error("system source missing");
     vi.useFakeTimers();

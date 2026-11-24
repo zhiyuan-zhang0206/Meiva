@@ -54,7 +54,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | Card data | Source |
 |---|---|
 | `live_count` | Postgres `agents_meta` (not windowed) |
-| `alerts` (`unresolved`, `critical`, `error`, `warning`) | Postgres `alerts` (`status = 'unresolved'`, excluding synthetic `alert_pipeline_watchdog` rows — NOT windowed; single source of truth shared with `/api/alerts`, the header badge, and Insights Alerts) |
+| `alerts` (`state`, `firing`, `critical`, `error`, `warning`) | Grafana's embedded Alertmanager, read live per request (`gateway/alerts/firing.py`; active, unsilenced, uninhibited instances, excluding the synthetic `alert_pipeline_watchdog`) — NOT windowed; the same answer as `GET /api/alerts/firing` and the header badge. A Grafana that does not answer yields `state: "unavailable"` with null counts (never zero); a cluster without a Grafana upstream yields `not_configured`. The gateway keeps no copy of alert state |
 | windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, `google_cost_usd` | `llm_usage_ledger` (Postgres) |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), only rows of cards an enabled plugin declares in `contributions.ui.stats` / `statsFace` (an orphan row is not served; the console still joins the rest by `(plugin, id)`); NOT windowed — a plugin value is a point in time |
 
@@ -62,8 +62,8 @@ Every request computes its window in one pooled connection with an 8-second
 statement timeout (a timeout is a retriable 503): one grouped scan of the window's
 `llm_usage_ledger` rows (`gateway/cluster/monitor/stats_events.py`) gives the
 token sums, the metered API cost, the subscription-covered cost and per-model metered
-API cost slices, one count of unresolved `alerts` rows (`ops/alerts.py`) gives the
-live alert summary. `openai_cost_usd`, `anthropic_cost_usd`, and `google_cost_usd` resolve each model's
+API cost slices, the alert summary is read from Grafana on its own 2-second budget
+(`gateway/alerts/firing.py`), outside that connection. `openai_cost_usd`, `anthropic_cost_usd`, and `google_cost_usd` resolve each model's
 vendor through the gateway `ModelCatalog` (`None` only when catalog startup failed,
 preserving `200` for the rest of the dashboard). The window is the requested one
 (up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage_ledger.cost_usd`

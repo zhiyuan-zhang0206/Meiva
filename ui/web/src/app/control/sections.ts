@@ -5,7 +5,7 @@
 // anchor-nav and its section wrappers on the right. `id` is the element id
 // (URL hash + scroll target); `subs` are second-level anchors within a section.
 //
-// The two lists never overlap: Status + Ops + Alerts live only in Insights, the
+// The two lists never overlap: Status + Ops live only in Insights, the
 // remaining sections only in Control — see CONTROL_SECTIONS / INSIGHTS_SECTIONS
 // below.
 
@@ -103,7 +103,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
 // meiva:note
 // Render + nav order for Insights (the read-only observability surface). Status
 // leads — "how is the cluster right now" is the most common reason to open it —
-// followed by Ops (the Grafana dashboard link).
+// followed by Ops (the Grafana dashboard and alerts links).
 // The cluster Restart / Update actions ride the Status section header (see
 // status/page.tsx), so "watch health → act" stays one glance. Status has
 // Services + Gateway.
@@ -123,17 +123,13 @@ export const INSIGHTS_SECTIONS: ControlSectionDef[] = [
     labelKey: "ops",
     subs: [
       { id: "ops-metrics", label: "Metrics (Grafana)", labelKey: "ops-metrics" },
+      { id: "ops-alerts", label: "Alerts (Grafana)", labelKey: "ops-alerts" },
     ],
   },
   {
     id: "run-timeline",
     label: "Agent view",
     labelKey: "run-timeline",
-  },
-  {
-    id: "alerts",
-    label: "Alerts",
-    labelKey: "alerts",
   },
 ];
 

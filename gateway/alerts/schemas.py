@@ -1,16 +1,6 @@
-# meiva:note
-# Schemas for /api/alerts — the system→human alert store (Task #1224).
-#
-# The ingest side models the Alertmanager standard webhook payload (as Grafana's
-# embedded Alertmanager delivers it to a webhook contact point): one POST
-# carries ``status`` + ``alerts[]``, each alert an instance of a rule
-# (labels/annotations/startsAt/endsAt/fingerprint/values/generatorURL). The
-# query side is the alert section's
-# history list (unresolved-first); the SSE stream publishes the same row shape
-# the list returns.
-#
-# Alert is fully separate from Question — nothing here touches agent_questions.
-
+"""The Alertmanager standard webhook payload, as Grafana's embedded Alertmanager delivers it to a
+webhook contact point: one POST carries ``status`` + ``alerts[]``, each alert an instance of a rule
+(labels/annotations/startsAt/endsAt/generatorURL)."""
 
 from __future__ import annotations
 
@@ -18,21 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Label parsing helpers live in base/telemetry/alerts/__init__.py — the ingest core.
-from base.telemetry.alerts import parse_alertname, parse_severity
-from ops.alerts import AlertRow
-
-__all__ = [
-    "AlertIngestResult",
-    "AlertWebhookAlert",
-    "AlertWebhookPayload",
-    "AlertsListMeta",
-    "AlertsListResponse",
-    "parse_alertname",
-    "parse_severity",
-]
-
-# The webhook vocabulary Alertmanager sends (mapped to store vocabulary on ingest).
+# The webhook vocabulary Alertmanager sends.
 WebhookStatus = Literal["firing", "resolved"]
 
 
@@ -51,9 +27,7 @@ class AlertWebhookAlert(BaseModel):
     annotations: dict[str, str] = Field(default_factory=dict)
     starts_at: str = Field(default="", alias="startsAt")
     ends_at: str = Field(default="", alias="endsAt")
-    fingerprint: str = ""
     generator_url: str = Field(default="", alias="generatorURL")
-    values: dict[str, object] | None = None
 
 
 class AlertWebhookPayload(BaseModel):
@@ -61,55 +35,10 @@ class AlertWebhookPayload(BaseModel):
 
     Tolerates both the full Alertmanager v4 envelope (version/groupKey/
     receiver/commonLabels/… — ignored here) and the slimmer Grafana-managed
-    webhook shape; only ``status`` + ``alerts[]`` matter to the store.
-    ``source`` tags the row's provenance: the webhook omits it (default
-    ``grafana``).
+    webhook shape; only ``status`` + ``alerts[]`` matter to the gateway.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    source: str = "grafana"
     status: WebhookStatus | None = None
     alerts: list[AlertWebhookAlert] = Field(default_factory=list[AlertWebhookAlert])
-
-    def flattened(self) -> list[dict[str, object]]:
-        """Each alert as the plain dict base/telemetry/alerts/__init__.py consumes, with the
-        top-level status as the per-alert fallback (the Grafana-managed
-        webhook carries status only at the top level)."""
-
-        out: list[dict[str, object]] = []
-        for alert in self.alerts:
-            d = alert.model_dump(mode="json")
-            if self.status is not None and not d.get("status"):
-                d["status"] = self.status
-            out.append(d)
-        return out
-
-
-class AlertIngestResult(BaseModel):
-    """What one ingest POST did — counts the UI/ops can log."""
-
-    model_config = ConfigDict(frozen=True)
-
-    processed: int
-    inserted: int
-    updated: int
-
-
-class AlertsListMeta(BaseModel):
-    """Query provenance of one GET /api/alerts response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    window: str
-    total: int  # rows matching the filters before the limit
-    unresolved_count: int  # unresolved rows matching the filters (the top-bar badge)
-
-
-class AlertsListResponse(BaseModel):
-    """Unresolved-first alert history + the count the UI badge shows."""
-
-    model_config = ConfigDict(frozen=True)
-
-    alerts: list[AlertRow]
-    meta: AlertsListMeta

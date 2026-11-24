@@ -646,7 +646,6 @@ tree-scan-pins = [
     "tests/components/cli/test_main_dispatch_contract.py",
     "tests/components/base/test_crash_row_writers.py",
     "tests/integration/test_impersonation_audit_root_inventory.py",
-    "tests/scripts/test_alert_single_path.py",
 ]
 global-files = [".github/workflows/ci.yml"]
 global-prefixes = [".github/actions/"]

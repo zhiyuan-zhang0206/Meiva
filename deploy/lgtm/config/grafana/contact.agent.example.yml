@@ -1,7 +1,8 @@
 # Optional site policy. Copy to $MEIVA_HOME/lgtm/alerting/contact.yml and
 # replace 1234 with the on-duty agent's ID before converging.
-# Keep the agent route first so continuing siblings preserves every ingest route.
-# Native alerts use the authenticated gateway webhook. Retired direct receivers are tombstoned.
+# Keep the agent route first and continuing, so the watchdog heartbeat route below still
+# runs. The gateway webhook receiver keeps no alert state: it only counts the watchdog heartbeat.
+# Retired direct receivers are tombstoned.
 apiVersion: 1
 contactPoints:
 - orgId: 1
@@ -44,39 +45,6 @@ policies:
     continue: true
   - receiver: meiva-alerts-webhook
     object_matchers:
-    - - attributes_check
-      - '='
-      - gateway_liveness
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - health_probe_silent
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - root_unit_restart_attempts_exhausted
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 4h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
     - - metric
       - '='
       - alert_pipeline_watchdog
@@ -86,37 +54,6 @@ policies:
     group_wait: 0s
     group_interval: 5m
     repeat_interval: 5m
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - metric
-      - '='
-      - alert_pipeline_silent
-    continue: false
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 5m
-    repeat_interval: 1h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - severity
-      - '='
-      - critical
-    group_by:
-    - alertname
-    group_wait: 0s
-    group_interval: 1m
-    repeat_interval: 1h
-  - receiver: meiva-alerts-webhook
-    object_matchers:
-    - - alertname
-      - =~
-      - .+
-    group_by:
-    - alertname
-    group_wait: 30s
-    group_interval: 5m
-    repeat_interval: 4h
 deleteContactPoints:
 - orgId: 1
   uid: meiva-alerts-telegram

@@ -25,3 +25,5 @@ every four hours. Ingest silence at two hours is therefore compatible with a
 still-firing alert and cannot safely be treated as resolution truth.
 
 Forward: the notification policy that sets the repeat interval this reasoning relies on, and the other alert paths around it, are described in [2026-10-04](2026-10-04-alerting-on-grafana-alerting.md); the reconciliation itself stands.
+
+Superseded by: [2026-11-24-alerts-have-one-owner-grafana.md](2026-11-24-alerts-have-one-owner-grafana.md) — the stored copy and its reconciler are removed.

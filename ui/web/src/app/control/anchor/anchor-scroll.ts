@@ -6,7 +6,7 @@
 // bodies fetch asynchronously (live status data and section lists), so content
 // ABOVE the target grows after the first
 // scrollIntoView and pushes the anchored section below where it landed — on
-// /insights#alerts the section ended up at the bottom of the viewport (or
+// /insights#ops the section ended up at the bottom of the viewport (or
 // below the fold entirely, when an async section above it settled last). This hook
 // re-applies the scroll while the scroll container's content height is still
 // settling, then detaches — the user's own scrolling is never fought.
@@ -79,10 +79,10 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
         // meiva:note
         // Do not start the stable-height countdown while a section inside the
         // scroll container is still mounting its deferred body or loading its
-        // initial query (`data-settling`): on /insights#alerts the Alerts
-        // section resolves in ~15ms while Status above it probes every cluster
-        // machine (~500–1500ms), so arming the 500ms grace timer on the first
-        // resize detached the observer before Status finished growing.
+        // initial query (`data-settling`): on /insights#ops the Ops section
+        // resolves at once while Status above it probes every cluster machine
+        // (~500–1500ms), so arming the 500ms grace timer on the first resize
+        // detached the observer before Status finished growing.
         if (content.querySelector("[data-settling]") !== null) return;
         stableTimer = window.setTimeout(stop, SETTLE_STABLE_MS);
       };
@@ -117,7 +117,7 @@ export function useSettledAnchorScroll(scrollId: string, targetId: string | null
       start(initial);
     } else {
       // meiva:note
-      // During a client-side `<Link href="/insights#alerts">` transition, the
+      // During a client-side `<Link href="/insights#ops">` transition, the
       // incoming route renders before the App Router commits the new URL in
       // its own parent `useEffect` (React runs child `useEffect`s bottom-up
       // before parent `useEffect`s). Re-read the URL hash on the microtask

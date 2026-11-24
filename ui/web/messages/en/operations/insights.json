@@ -5,12 +5,12 @@
   "statusLabel": "Status",
   "statusDescription": "Live cluster health: services and agents.",
   "ops": "Ops",
-  "opsDescription": "Grafana dashboard link — SSE/event-log backlog, LLM latency + TPS, process restarts, host resources.",
-  "alerts": "Alerts",
-  "alertsDescription": "System alerts — separate from questions. Unresolved-first history, live via SSE.",
+  "opsDescription": "Grafana links — the ops dashboard (SSE/event-log backlog, LLM latency + TPS, process restarts, host resources) and the alerts firing now.",
   "opsPanel": {
     "metrics": "Metrics (Grafana)",
-    "openDashboard": "Open the Meiva ops dashboard"
+    "openDashboard": "Open the Meiva ops dashboard",
+    "alerts": "Alerts (Grafana)",
+    "openAlerts": "Open Grafana alerts"
   },
   "status": {
     "couldNotReach": "Couldn't reach the gateway — retrying…",

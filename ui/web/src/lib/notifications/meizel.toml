@@ -1,7 +1,7 @@
-exports = ["use-mobile-attention.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-questions.ts"]
+exports = ["use-mobile-attention.ts", "use-firing-alerts.ts", "use-cluster-health.ts", "use-questions.ts"]
 
 [uses]
-"use-alerts.test.tsx" = ["use-alerts.tsx"]
 "use-cluster-health.test.tsx" = ["use-cluster-health.ts"]
+"use-firing-alerts.test.ts" = ["use-firing-alerts.ts"]
 "use-mobile-attention.test.tsx" = ["use-mobile-attention.ts"]
 "use-questions.test.ts" = ["use-questions.ts"]

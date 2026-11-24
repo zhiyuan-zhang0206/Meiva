@@ -1,7 +1,7 @@
 // meiva:note
 // Old deep links point at /insights/alerts (the URL the retired alert IM messages
-// carried). The alert history lives as a section of the Insights page
-// (/insights#alerts) — this route forwards the link there.
+// carried). Meiva keeps no alert history of its own any more — Grafana owns it, and the
+// link to it sits in the Insights Ops section (/insights#ops), where this route forwards.
 
 import type { Route } from "next";
 import { redirect } from "next/navigation";
@@ -19,6 +19,6 @@ export interface AlertsRedirectViewProps {
 }
 
 export function AlertsRedirectView({ redirect }: AlertsRedirectViewProps) {
-  redirect("/insights#alerts");
+  redirect("/insights#ops");
   return null;
 }

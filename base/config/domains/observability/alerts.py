@@ -11,10 +11,8 @@ class AlertsSettings(EnvSettings):
         default=None,
         alias="GRAFANA_ADMIN_PASSWORD",
         description=(
-            "Admin password for the co-located Grafana API, also used for alert "
-            "silences. When set, the "
-            "events-maintenance service periodically reconciles stored Grafana "
-            "alert instances against Grafana's active Alertmanager view."
+            "Admin password for the co-located Grafana API, used for alert silences "
+            "and the Grafana admin login."
         ),
         json_schema_extra={
             "restart_required": "all",
@@ -30,9 +28,9 @@ class AlertsSettings(EnvSettings):
         default=None,
         alias="MEIVA_ALERTS_WEBHOOK_TOKEN",
         description=(
-            "Shared secret the Grafana alert webhook contact point sends as "
-            "`X-Alerts-Token` on "
-            "POST /api/alerts. Empty = the ingest endpoint trusts loopback "
+            "Shared secret the Grafana alert webhook contact points send as "
+            "`X-Alerts-Token` (or a Bearer credential) on POST /api/alerts and "
+            "POST /api/alerts/agents/{agent_id}. Empty = those endpoints trust loopback "
             "callers only (Grafana is co-located); set it when the gateway is "
             "reachable from another host. It admits callers to this gateway, so "
             "the config API never writes it: edit the gateway `.env` on its host."

@@ -5,10 +5,9 @@ from typing import Any
 
 import yaml
 
-_CONTACT = (
-    Path(__file__).resolve().parents[2]
-    / "deploy/lgtm/config/grafana/provisioning/alerting/contact.yml"
-)
+_ALERTING = Path(__file__).resolve().parents[2] / "deploy/lgtm/config/grafana"
+_CONTACT = _ALERTING / "provisioning/alerting/contact.yml"
+_RULES = _ALERTING / "provisioning/alerting/rules.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -20,34 +19,16 @@ def _policy() -> dict[str, Any]:
     return policy
 
 
-# meiva:note
-# Every route keyed by its single matcher (`label:value`), in policy order.
-def _routes() -> dict[str, dict[str, Any]]:
-    routes: dict[str, dict[str, Any]] = {}
-    for route in _policy()["routes"]:
-        label, _operator, value = route["object_matchers"][0]
-        routes[f"{label}:{value}"] = route
-    return routes
-
-
-def test_every_alert_reaches_the_webhook_receiver() -> None:
+def test_the_only_receiver_is_the_gateway_webhook() -> None:
     contacts = {c["name"]: c for c in _document()["contactPoints"]}
+    assert list(contacts) == ["meiva-alerts-webhook"]
     (receiver,) = contacts["meiva-alerts-webhook"]["receivers"]
     assert receiver["type"] == "webhook"
     assert receiver["disableResolveMessage"] is False
     policy = _policy()
     assert policy["receiver"] == "meiva-alerts-webhook"
     assert policy["matchers"] == []
-    assert _routes()["alertname:.+"]["object_matchers"] == [["alertname", "=~", ".+"]]
-    assert list(_routes()) == [
-        "attributes_check:gateway_liveness",
-        "metric:health_probe_silent",
-        "metric:root_unit_restart_attempts_exhausted",
-        "metric:alert_pipeline_watchdog",
-        "metric:alert_pipeline_silent",
-        "severity:critical",
-        "alertname:.+",
-    ]
+    assert {route["receiver"] for route in policy["routes"]} == {"meiva-alerts-webhook"}
 
 
 def test_instances_of_one_rule_are_merged_into_one_notification_group() -> None:
@@ -58,54 +39,34 @@ def test_instances_of_one_rule_are_merged_into_one_notification_group() -> None:
         "5m",
         "4h",
     )
-    catch_all = _routes()["alertname:.+"]
-    assert catch_all["group_by"] == ["alertname"]
-    assert (catch_all["group_wait"], catch_all["group_interval"], catch_all["repeat_interval"]) == (
-        "30s",
-        "5m",
-        "4h",
-    )
 
 
-def test_critical_alerts_skip_the_batching_wait() -> None:
-    route = _routes()["severity:critical"]
-    assert route["object_matchers"] == [["severity", "=", "critical"]]
-    assert "continue" not in route
-    assert (route["group_wait"], route["group_interval"], route["repeat_interval"]) == (
-        "0s",
-        "1m",
-        "1h",
-    )
+def test_retired_receivers_are_removed() -> None:
+    assert _document()["deleteContactPoints"] == [{"orgId": 1, "uid": "meiva-alerts-telegram"}]
 
 
-# meiva:note
-# Retirement retains webhook routes and prevents duplicate catch-all delivery.
-def test_retired_receivers_are_removed_and_all_routes_use_the_webhook() -> None:
-    document = _document()
-    assert [c["name"] for c in document["contactPoints"]] == ["meiva-alerts-webhook"]
-    assert document["deleteContactPoints"] == [{"orgId": 1, "uid": "meiva-alerts-telegram"}]
-    assert {route["receiver"] for route in _policy()["routes"]} == {"meiva-alerts-webhook"}
-    for key in (
-        "attributes_check:gateway_liveness",
-        "metric:health_probe_silent",
-        "metric:root_unit_restart_attempts_exhausted",
-        "metric:alert_pipeline_silent",
-    ):
-        assert _routes()[key]["continue"] is False
+def test_the_watchdog_is_the_only_route_and_does_not_fall_through() -> None:
+    (route,) = _policy()["routes"]
+    assert route["object_matchers"] == [["metric", "=", "alert_pipeline_watchdog"]]
+    assert route["continue"] is False
+    assert route["repeat_interval"] == route["group_interval"] == "5m"
+    assert route["group_wait"] == "0s"
 
 
-# meiva:note
-# The watchdog is the only route that must NOT fall through: it repeats every five
-# minutes, so a `continue: true` or a missing route would deliver it twice (once from
-# its own route, once from the catch-all). Its period is the N the silent rule judges
-# on, so both numbers are asserted together -- a change to one without the other is
-# how a dead-man switch silently stops covering the gap it was built for.
-def test_the_watchdog_repeats_at_the_period_the_silent_rule_judges_on() -> None:
-    watchdog = _routes()["metric:alert_pipeline_watchdog"]
-    silent = _routes()["metric:alert_pipeline_silent"]
-    assert watchdog["receiver"] == "meiva-alerts-webhook"
-    assert watchdog["continue"] is False
-    assert watchdog["repeat_interval"] == watchdog["group_interval"] == "5m"
-    assert watchdog["group_wait"] == "0s"
-    assert silent["receiver"] == "meiva-alerts-webhook"
-    assert silent["continue"] is False
+def test_the_silent_rule_judges_on_three_watchdog_periods() -> None:
+    (route,) = _policy()["routes"]
+    period_seconds = 5 * 60
+    assert route["repeat_interval"] == "5m"
+    rules = yaml.safe_load(_RULES.read_text(encoding="utf-8"))
+    (silent,) = [
+        rule
+        for group in rules["groups"]
+        for rule in group["rules"]
+        if rule["uid"] == "meiva-ops-alert-pipeline-silent"
+    ]
+    (threshold,) = [
+        condition["evaluator"]["params"]
+        for step in silent["data"]
+        for condition in step["model"].get("conditions", [])
+    ]
+    assert threshold == [3 * period_seconds]

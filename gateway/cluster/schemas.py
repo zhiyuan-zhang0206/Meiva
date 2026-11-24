@@ -23,6 +23,7 @@ from pydantic import (
 
 from base.api_contracts.status import MachineStatus
 from base.packages.plugins.surface.stats_types import StatReset
+from gateway.schemas.alerts import FiringAlerts
 from gateway.schemas.models import (
     HarnessAvailability as HarnessAvailability,
 )
@@ -218,17 +219,6 @@ class PluginStat(BaseModel):
 
 
 # meiva:note
-# Point-in-time unresolved Grafana alert counts from `alerts`, matching `/api/alerts`.
-class StatsAlerts(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    unresolved: NonNegativeInt = 0
-    critical: NonNegativeInt = 0
-    error: NonNegativeInt = 0
-    warning: NonNegativeInt = 0
-
-
-# meiva:note
 # GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.
 # All windowed fields aggregate over the applied_window_hours horizon; `live_count`, `alerts`
 # and `plugin_stats` are point-in-time live state.
@@ -241,8 +231,9 @@ class StatsDashboard(BaseModel):
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
                 "Point-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\n"
                 "Windowed fields (`tokens`, cost slices) aggregate over `applied_window_hours`.\n\n"
-                "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), "
-                "using the same single source of truth as `/api/alerts`."
+                "- `alerts`: alerts Grafana reports firing now (excluding the synthetic watchdog heartbeat "
+                "and silenced or inhibited instances), the same answer as `/api/alerts/firing`; "
+                "`state` says whether the counts are known."
             )
         },
     )
@@ -258,6 +249,6 @@ class StatsDashboard(BaseModel):
     openai_cost_usd: float | None = Field(default=None, ge=0)
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     google_cost_usd: float | None = Field(default=None, ge=0)
-    alerts: StatsAlerts
+    alerts: FiringAlerts
     plugin_stats: list[PluginStat]
     as_of: datetime | None = None

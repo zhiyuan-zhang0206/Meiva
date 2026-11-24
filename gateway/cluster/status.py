@@ -48,6 +48,7 @@ from base.packages.plugins.loading.ui_declarations import (
     declared_stat_cards,
 )
 from base.packages.plugins.surface import stats
+from gateway.alerts.firing import read_firing_alerts
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
 from gateway.cluster.roster import roster_probe, roster_rows
@@ -66,7 +67,6 @@ from gateway.cluster.schemas import (
     PluginStat,
     ServiceItem,
     ServicesStatus,
-    StatsAlerts,
     StatsDashboard,
     StatsTokens,
     SystemStatus,
@@ -82,8 +82,9 @@ from gateway.http.config import (
     state_as,
 )
 from gateway.http.model_catalog import catalog_for_observation, request_catalog
+from gateway.routers.proxies.grafana import GrafanaAppState
+from gateway.schemas.alerts import FiringAlerts
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from ops.alerts import unresolved_alert_counts
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -138,12 +139,13 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
         "Pull all data for the sidebar Status popover in one shot.\n\n"
         "Data sources:\n"
         "- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n"
-        "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog "
-        "heartbeats) — single source of truth shared with `/api/alerts`\n"
+        "- `alerts`: alerts Grafana reports firing now, read from Grafana (excluding the "
+        "synthetic watchdog heartbeat and silenced or inhibited instances) — shared with "
+        "`/api/alerts/firing`; `state` says whether the counts are known\n"
         "- `tokens` / cost slices: the window's usage-ledger rows"
     ),
 )
-def get_stats_dashboard(
+async def get_stats_dashboard(
     request: Request,
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> StatsDashboard:
@@ -154,8 +156,10 @@ def get_stats_dashboard(
     # manifest on disk would otherwise take down the core agent, cost, and error panels too.
     declared_cards: frozenset[tuple[str, str]]
     try:
-        declared_cards = declared_stat_cards(
-            home=gateway_state(request).gateway_process.home, report=_note_unloaded_stats_face
+        declared_cards = await asyncio.to_thread(
+            declared_stat_cards,
+            home=gateway_state(request).gateway_process.home,
+            report=_note_unloaded_stats_face,
         )
     except InvalidPluginManifestError as exc:
         _log.warning(
@@ -164,8 +168,12 @@ def get_stats_dashboard(
             exc,
         )
         declared_cards = frozenset()
+    firing = await read_firing_alerts(
+        state_as(request, GrafanaAppState).grafana_client, gateway_config(request).grafana
+    )
     try:
-        return _compute_stats_dashboard(
+        return await asyncio.to_thread(
+            _compute_stats_dashboard,
             gateway_state(request).db_pool,
             hours,
             gateway_state(request).gateway_config,
@@ -173,6 +181,7 @@ def get_stats_dashboard(
             cluster=gateway_cluster(request),
             catalog=catalog_for_observation(request_catalog(request)),
             declared_cards=declared_cards,
+            firing=firing,
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
@@ -217,6 +226,7 @@ def _compute_stats_dashboard(
     cluster: str,
     catalog: ModelCatalog | None,
     declared_cards: frozenset[tuple[str, str]],
+    firing: FiringAlerts,
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
 
@@ -225,7 +235,6 @@ def _compute_stats_dashboard(
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
-        live_alerts = unresolved_alert_counts(conn)
         live_count = count_one(
             conn, "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'"
         )
@@ -254,12 +263,7 @@ def _compute_stats_dashboard(
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
         google_cost_usd=google_cost_usd,
-        alerts=StatsAlerts(
-            unresolved=live_alerts.unresolved,
-            critical=live_alerts.critical,
-            error=live_alerts.error,
-            warning=live_alerts.warning,
-        ),
+        alerts=firing,
         plugin_stats=_plugin_stat_rows(pool, declared_cards),
         as_of=clock.now(),
     )

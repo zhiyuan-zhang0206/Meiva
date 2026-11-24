@@ -21,7 +21,7 @@ function Harness({ targetId }: { targetId: string | null }) {
   return (
     <div id="scroll">
       <div data-testid="content">
-        <section id="alerts">Alerts</section>
+        <section id="ops">Ops</section>
       </div>
     </div>
   );
@@ -45,9 +45,9 @@ afterEach(cleanup);
 
 describe("useSettledAnchorScroll", () => {
   it("scrolls the resolved target into view on mount", () => {
-    const { scrolled } = mount("alerts");
+    const { scrolled } = mount("ops");
     expect(scrolled()).toHaveLength(1);
-    expect((scrolled()[0].target as HTMLElement).id).toBe("alerts");
+    expect((scrolled()[0].target as HTMLElement).id).toBe("ops");
     expect(scrolled()[0].block).toBe("start");
   });
 
@@ -61,7 +61,7 @@ describe("useSettledAnchorScroll", () => {
     vi.useFakeTimers();
     try {
       const page = fakeBrowser();
-      const { container, scrolled } = mount("alerts", page);
+      const { container, scrolled } = mount("ops", page);
       const scrollContainer = container.querySelector("#scroll")!;
       expect(page.sizeWatches).toHaveLength(1);
       const watch = page.sizeWatches[0];
@@ -98,7 +98,7 @@ describe("useSettledAnchorScroll", () => {
 
   it("stops re-scrolling once the user takes over the scroll position", () => {
     const page = fakeBrowser();
-    const { container, scrolled } = mount("alerts", page);
+    const { container, scrolled } = mount("ops", page);
     const scrollContainer = container.querySelector("#scroll")!;
     const watch = page.sizeWatches[0];
 
@@ -120,17 +120,17 @@ describe("useSettledAnchorScroll", () => {
     expect(scrolled()).toHaveLength(1);
   });
 
-  it("scrolls when the URL hash commits after render (client-side <Link href='/insights#alerts'>)", async () => {
+  it("scrolls when the URL hash commits after render (client-side <Link href='/insights#ops'>)", async () => {
     // meiva:note
     // Next.js App Router renders the incoming route with `targetId = null` before its parent
-    // `useEffect` commits `history.pushState(..., "/insights#alerts")`.
+    // `useEffect` commits `history.pushState(..., "/insights#ops")`.
     const page = fakeBrowser({ href: "http://fake.local/insights" });
     const { scrolled } = mount(null, page);
-    page.moveTo("http://fake.local/insights#alerts");
+    page.moveTo("http://fake.local/insights#ops");
     await Promise.resolve();
 
     expect(scrolled()).toHaveLength(1);
-    expect((scrolled()[0].target as HTMLElement).id).toBe("alerts");
+    expect((scrolled()[0].target as HTMLElement).id).toBe("ops");
     expect(scrolled()[0].block).toBe("start");
   });
 
@@ -138,7 +138,7 @@ describe("useSettledAnchorScroll", () => {
     vi.useFakeTimers();
     try {
       const page = fakeBrowser();
-      const { container, scrolled } = mount("alerts", page);
+      const { container, scrolled } = mount("ops", page);
       const scrollContainer = container.querySelector("#scroll")!;
       const content = container.querySelector("[data-testid=content]")!;
       const settling = document.createElement("div");

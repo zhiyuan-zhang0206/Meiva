@@ -39,7 +39,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.packages.composer_commands import CommandCatalog
 from base.paths.scratch import ScratchSpace
 from base.sessions.protocol import SessionBackend
-from base.telemetry.alerts import frontend_base_url
 from base.telemetry.observability import cluster_label
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 from gateway.http.process import GatewayProcess
@@ -65,7 +64,6 @@ class DisplayDefaults:
     messages_default_limit: int
     questions_open_default_limit: int
     schedules_runs_default_limit: int
-    alerts_default_limit: int
     metrics_default_window_days: int
     events_default_limit: int
     timeline_default_limit: int
@@ -103,11 +101,10 @@ class SseTuning:
 
 
 # meiva:note
-# Alert intake: the base URL an alert's links open on, and the scoped webhook token an alert
-# sender presents (empty when no scoped token is configured).
+# Alert intake: the scoped webhook token an alert sender presents (empty when no scoped token
+# is configured).
 @dataclass(frozen=True)
 class AlertSettings:
-    frontend_base_url: str
     webhook_token: str = field(repr=False)
 
 
@@ -326,7 +323,6 @@ def gateway_config_from_boot(
             messages_default_limit=view.display.messages_default_limit,
             questions_open_default_limit=view.display.questions_open_default_limit,
             schedules_runs_default_limit=view.display.schedules_runs_default_limit,
-            alerts_default_limit=view.display.alerts_default_limit,
             metrics_default_window_days=view.display.metrics_default_window_days,
             events_default_limit=view.display.events_default_limit,
             timeline_default_limit=view.display.timeline_default_limit,
@@ -346,7 +342,6 @@ def gateway_config_from_boot(
             channel_pending_limit=gateway.sse_channel_pending_limit,
         ),
         alerts=AlertSettings(
-            frontend_base_url=frontend_base_url(gateway_url, services.frontend_healthcheck_url),
             webhook_token="" if alerts_token is None else alerts_token.get_secret_value(),
         ),
         to_user=ToUserLimits(

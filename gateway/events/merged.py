@@ -1,5 +1,5 @@
 # meiva:note
-# One SSE connection carries the Web UI's two Redis sources as three named
+# One SSE connection carries the Web UI's event projections as two named
 # channels, so a browser holds one socket instead of one per projection. Every
 # channel owns its bounded queue and its own error frame; a shed payload is
 # counted for the client and for the ops series, never silently dropped.
@@ -15,7 +15,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from redis.asyncio.client import PubSub
 
 from base import telemetry
@@ -32,21 +32,16 @@ from gateway.events.sse import (
 from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_frame, warm_frame
 from gateway.http.config import gateway_config, gateway_state
 from gateway.http.middleware import runtime_metrics, stopping
-from ops.alerts import ALERTS_CHANNEL, AlertRow
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-Channel = Literal["global", "all", "alerts"]
-CHANNELS: tuple[Channel, ...] = ("global", "all", "alerts")
-
-_EVENT_CHANNELS: frozenset[Channel] = frozenset({"global", "all"})
+Channel = Literal["global", "all"]
+CHANNELS: tuple[Channel, ...] = ("global", "all")
 
 _EVENTS_SOURCE_OWNER: Channel = "all"
 
 _DROP_REPORT_INTERVAL_S = 10.0
-
-_alert_frame_validator = TypeAdapter(AlertRow)
 
 
 def parse_channels(raw: str | None) -> tuple[Channel, ...]:
@@ -176,19 +171,9 @@ def open_pubsub(bus: EventBus) -> PubsubPair:
 
 def _route(
     payload: str,
-    source: str,
     queues: dict[Channel, ChannelQueue],
     agent_filter: set[int] | None,
 ) -> None:
-    if source == ALERTS_CHANNEL:
-        try:
-            _alert_frame_validator.validate_json(payload)
-        except ValidationError:
-            queues["alerts"].add_unparseable()
-            return
-        queues["alerts"].add(payload)
-        return
-
     try:
         event = EVENT_ADAPTER.validate_json(payload)
     except ValidationError:
@@ -224,24 +209,16 @@ async def _drain(
         if msg is None:
             break
         payload = msg["data"]
-        source = msg["channel"]
-        if not isinstance(payload, str) or not isinstance(source, str):
+        if not isinstance(payload, str):
             continue
-        _route(payload, source, queues, agent_filter)
+        _route(payload, queues, agent_filter)
     return False
 
 
 # meiva:note
 # The Redis channels a stream subscribes to, each with the merged channels it serves.
 def plan_sources(bus_channel: str, channels: Sequence[Channel]) -> list[tuple[str, list[Channel]]]:
-    event_channels: list[Channel] = [channel for channel in channels if channel in _EVENT_CHANNELS]
-    alert_channels: list[Channel] = [channel for channel in channels if channel == "alerts"]
-    sources: list[tuple[str, list[Channel]]] = []
-    if event_channels:
-        sources.append((bus_channel, event_channels))
-    if alert_channels:
-        sources.append((ALERTS_CHANNEL, alert_channels))
-    return sources
+    return [(bus_channel, list(channels))]
 
 
 async def attach_sources(

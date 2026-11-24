@@ -268,7 +268,7 @@ def test_oversized_contact_refuses_before_replacing_installed_config(
     assert _installed_contact(lgtm_unit) == previous
 
 
-def test_agent_policy_example_preserves_the_ingest_policy() -> None:
+def test_agent_policy_example_preserves_the_builtin_policy() -> None:
     default = yaml.safe_load(_DEFAULT.read_text(encoding="utf-8"))
     example = yaml.safe_load(_EXAMPLE.read_text(encoding="utf-8"))
     agent_receiver = example["contactPoints"].pop()

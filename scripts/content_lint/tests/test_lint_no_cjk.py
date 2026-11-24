@@ -72,7 +72,7 @@ def test_documented_locale_copy_is_exempt(
     "rel",
     [
         "meiva_builtins/skills/pkg/SKILL.md",
-        "base/telemetry/alerts/copy.py",
+        "gateway/alerts/firing.py",
         "ui/web/messages/zh/interface/common.json",
         "docs/messages.md",
         "docs/decisions/history.md",

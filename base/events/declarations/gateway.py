@@ -197,12 +197,12 @@ class GateAuthProbeFailed(TypedDict):
 
 
 # meiva:note
-# The `alerts` payload — gateway/alerts/router.py:ingest_alerts. One event per accepted webhook
-# POST that wrote an alert row (a new instance or a re-send of a firing one), carrying the epoch
-# seconds of that write. Its only consumer is the OTLP gauge `alerts_last_ingest_timestamp_seconds`:
-# a rule fires when `time() - <gauge> > 900`, so a broken webhook path (a rotated token the gateway
-# no longer accepts, a stopped gateway) becomes visible without waiting for an alert that the
-# broken path would have had to deliver.
+# The `alerts` payload — gateway/alerts/router.py:receive_alert_webhook. One event per accepted
+# webhook POST that carried a firing watchdog alert, carrying the epoch seconds of its arrival. Its
+# only consumer is the OTLP gauge `alerts_last_ingest_timestamp_seconds`: a rule fires when
+# `time() - <gauge> > 900`, so a broken webhook path (a rotated token the gateway no longer
+# accepts, a stopped gateway) becomes visible without waiting for an alert that the broken path
+# would have had to deliver.
 class AlertsLastIngest(TypedDict):
     last_ingest_timestamp_seconds: float
 
@@ -220,15 +220,15 @@ EVENTS: dict[str, EventSpec] = {
         "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
     ),
     # meiva:note
-    # The alert ingest heartbeat: an unpersisted event whose only consumer is the OTLP
+    # The alert webhook heartbeat: an unpersisted event whose only consumer is the OTLP
     # gauge (`alerts_last_ingest_timestamp_seconds`), so the dead-man rule can tell
     # "the webhook path is silent" from "nothing happened".
     "alerts": telemetry_event(
         "alerts",
-        "alert webhook ingest heartbeat — epoch seconds of the last alert the ingest accepted",
+        "alert webhook heartbeat — epoch seconds of the last watchdog alert the webhook accepted",
         payload=AlertsLastIngest,
         tier="noise",
-        site='gateway/alerts/router.py:ingest_alerts telemetry.emit("telemetry", "alerts", ...)',
+        site='gateway/alerts/router.py:receive_alert_webhook telemetry.emit("telemetry", "alerts", ...)',
     ),
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/http/middleware/latency.py — one event per (route, bucket), never per request

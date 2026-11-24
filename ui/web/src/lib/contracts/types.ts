@@ -163,23 +163,12 @@ export type PendingInbound = Schemas["PendingInbound"];
 
 export type StatsDashboard = Schemas["StatsDashboard"];
 export type StatsTokens = Schemas["StatsTokens"];
-export type StatsAlerts = Schemas["StatsAlerts"];
 export type PluginStat = Schemas["PluginStat"];
 
-export type AlertsWindow = "1h" | "6h" | "24h" | "7d";
-
 // meiva:note
-// --- Alerts (the system→human alert store, Task #1224) ---
-//
-// Generated re-exports of the gateway's Pydantic models (AlertRow /
-// AlertsListMeta / AlertsListResponse) — the pre-commit types-codegen-fresh
-// gate fails on any drift, so the alert types can never silently diverge
-// from the backend. Alert is fully separate from Question.
-export type Alert = Schemas["AlertRow"];
-export type AlertsResponse = Schemas["AlertsListResponse"];
-export type AlertSeverity = Alert["severity"];
-export type AlertStatus = Alert["status"];
-
+// The alerts Grafana reports firing right now (`GET /api/alerts/firing`, and the `alerts` field
+// of the stats dashboard). Counts are null unless `state` is "ok".
+export type FiringAlerts = Schemas["FiringAlerts"];
 
 // SpawnAgentRequest: backend `spawner: str = Field(default="user")` is
 // emitted in OpenAPI as "required + default" (Pydantic default behavior),

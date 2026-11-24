@@ -3,7 +3,6 @@ import contextlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any, cast
 
 import psycopg
@@ -26,7 +25,6 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 # bounded-queue drop that must reach both the frame and `sse_drop`.
 # meiva:link gateway/events/docs/sse/sse.md
 from gateway.events.merged import (
-    ALERTS_CHANNEL,
     CHANNELS,
     ChannelQueue,
     merged_event_stream,
@@ -39,29 +37,8 @@ from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.sse_support import FakeRequest, refused_redis_url
 from gateway.tests.events.test_sse import redis_client as redis_client
-from ops.alerts import AlertRow
 
 Channels = dict[str, list[dict[str, Any]]]
-
-
-def _alert_payload(row_id: int = 1) -> str:
-    now = datetime.now(UTC)
-    return AlertRow(
-        id=row_id,
-        status="unresolved",
-        severity="warning",
-        alertname="DiskFillingUp",
-        labels={},
-        annotations={},
-        starts_at=now,
-        ends_at=None,
-        fingerprint="fp-1",
-        generator_url="http://grafana.local/alert",
-        source="grafana",
-        notified_at=None,
-        created_at=now,
-        updated_at=now,
-    ).model_dump_json()
 
 
 def _decode(frame: bytes) -> dict[str, Any]:
@@ -169,19 +146,13 @@ def test_merged_stream_names_each_channel_and_keeps_their_filters(
             [
                 (None, LabelUpdated(agent_id=tid, label="busy").model_dump_json()),
                 (None, ChatDelta(agent_id=tid, item_id="5.0", content="tok").model_dump_json()),
-                (ALERTS_CHANNEL, _alert_payload()),
             ],
-            stop=lambda seen: (
-                len(seen.events("global")) >= 1
-                and len(seen.events("alerts")) >= 1
-                and len(seen.events("all")) >= 2
-            ),
+            stop=lambda seen: len(seen.events("global")) >= 1 and len(seen.events("all")) >= 2,
         )
     )
     assert seen.errors == []
     assert _roles(seen.events("global")) == ["label_updated"]
     assert sorted(_roles(seen.events("all"))) == ["chat_delta", "label_updated"]
-    assert seen.events("alerts")[0]["alertname"] == "DiskFillingUp"
 
 
 def test_merged_stream_batches_deltas_at_the_throttle_cadence(
@@ -251,7 +222,6 @@ def test_merged_stream_honours_a_channel_subset(
             [
                 (None, ChatDelta(agent_id=tid, item_id="5.0", content="tok").model_dump_json()),
                 (None, LabelUpdated(agent_id=tid, label="busy").model_dump_json()),
-                (ALERTS_CHANNEL, _alert_payload()),
             ],
             stop=_seen("global", 1),
             channels=("global",),
@@ -261,20 +231,14 @@ def test_merged_stream_honours_a_channel_subset(
     assert set(seen.by_channel) == {"global"}
 
 
-def test_each_redis_channel_is_subscribed_once_for_the_channels_it_serves() -> None:
-    assert plan_sources("meiva:events", CHANNELS) == [
-        ("meiva:events", ["global", "all"]),
-        (ALERTS_CHANNEL, ["alerts"]),
-    ]
-    assert plan_sources("meiva:events", ("alerts",)) == [(ALERTS_CHANNEL, ["alerts"])]
+def test_the_events_channel_is_subscribed_once_for_the_channels_it_serves() -> None:
+    assert plan_sources("meiva:events", CHANNELS) == [("meiva:events", ["global", "all"])]
     assert plan_sources("meiva:events", ("global",)) == [("meiva:events", ["global"])]
 
 
 def test_a_failed_source_flags_only_the_channels_it_serves() -> None:
-    error = sync_redis.ConnectionError("alerts unavailable")
-    assert subscribe_errors(["alerts"], error) == {
-        "alerts": "event stream interrupted: ConnectionError"
-    }
+    error = sync_redis.ConnectionError("redis unavailable")
+    assert subscribe_errors(["all"], error) == {"all": "event stream interrupted: ConnectionError"}
     assert subscribe_errors(["global", "all"], error) == {
         "global": "event stream interrupted: ConnectionError",
         "all": "event stream interrupted: ConnectionError",
@@ -345,7 +309,7 @@ def test_merged_frame_reports_drops_per_flush() -> None:
 
 
 def test_channel_queue_unparseable_payloads_are_counted() -> None:
-    queue = ChannelQueue("alerts", limit=10)
+    queue = ChannelQueue("global", limit=10)
     queue.add_unparseable()
     assert queue.take() == ([], 1)
     assert queue.dropped == 1
@@ -367,7 +331,7 @@ def test_channel_queue_reports_the_first_drop_immediately_then_aggregates() -> N
     [
         (None, CHANNELS),
         ("global", ("global",)),
-        ("alerts,global", ("alerts", "global")),
+        ("all,global", ("all", "global")),
         (" global , all ", ("global", "all")),
         ("global,global", ("global",)),
     ],
@@ -376,7 +340,7 @@ def test_parse_channels_accepts_subsets(raw: str | None, expected: tuple[str, ..
     assert parse_channels(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["bogus", "global,bogus", "", "  "])
+@pytest.mark.parametrize("raw", ["bogus", "global,bogus", "alerts", "", "  "])
 def test_parse_channels_rejects_unknown_or_empty_selection(raw: str) -> None:
     with pytest.raises(HTTPException) as caught:
         parse_channels(raw)

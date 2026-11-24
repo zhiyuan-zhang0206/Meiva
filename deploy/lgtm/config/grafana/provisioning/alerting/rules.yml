@@ -3844,7 +3844,7 @@ groups:
                   query:
                     params: [C]
 
-      # ── meiva-ops-service-start-unready: replaces cli/commands/probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
+      # ── meiva-ops-service-start-unready: replaces the start-readiness alert rows cli/commands/probe.py used to write (fingerprint reuse, resolved edge) ──
       - uid: meiva-ops-service-start-unready
         title: "Non-critical service not ready after start"
         condition: D
@@ -5292,8 +5292,8 @@ groups:
       # there is no flap to damp — the condition is a count over a 15m window,
       # so it stays true for 15m after the last failure and then resolves. One
       # episode = one firing IM + one resolved IM, the same dedup semantics the
-      # siblings get from their `for` window (alerts are deduped on
-      # fingerprint x starts_at by base/telemetry/alerts/__init__.py, not on `for`).
+      # siblings get from their `for` window (Alertmanager groups an episode by
+      # its label set, not by `for`).
       #
       # `billing` is emitted by base/lm/errors.py from its cross-provider
       # predicate (HTTP 402, plus a
@@ -5960,12 +5960,11 @@ groups:
       # ── R27: alert-pipeline watchdog (synthetic, always firing) ──
       # meiva:note
       # The heartbeat half of the alert path's dead-man switch. It fires on every evaluation
-      # with no condition on real traffic, so its webhook POST keeps refreshing one `alerts`
-      # row (and the `alerts_last_ingest_timestamp_seconds` gauge) whether or not anything is
-      # wrong. R28 reads the age of that row: a broken webhook path (a rotated token the
-      # gateway rejects, a stopped gateway) stops the refresh, and absence becomes an event
-      # instead of looking like a quiet night. `notify_im: "false"` keeps the per-5m repeat
-      # out of the user's IM, while the webhook copy keeps the row complete.
+      # with no condition on real traffic, so its webhook POST keeps refreshing the
+      # `alerts_last_ingest_timestamp_seconds` gauge (the gateway counts each one it accepts)
+      # whether or not anything is wrong. R28 reads the age of that gauge: a broken webhook
+      # path (a rotated token the gateway rejects, a stopped gateway) stops the refresh, and
+      # absence becomes an event instead of looking like a quiet night.
       - uid: meiva-ops-alert-pipeline-watchdog
         title: "Alert pipeline watchdog (synthetic heartbeat)"
         condition: D
@@ -5984,7 +5983,7 @@ groups:
           summary: "Alert pipeline watchdog heartbeat"
           description: >-
             Synthetic heartbeat. Its only job is to walk the whole delivery path
-            (Grafana -> webhook -> ingest -> `alerts` row) every evaluation so R28 can
+            (Grafana -> webhook -> gateway -> heartbeat gauge) every evaluation so R28 can
             tell "the pipeline is silent" from "nothing happened". Never act on this
             alert itself.
         data:
@@ -6035,15 +6034,15 @@ groups:
 
       # ── R28: alert pipeline silent (the watchdog stopped arriving) ──
       # meiva:note
-      # The dead-man half. It reads the gauge R27 refreshes on every accepted ingest, so the
-      # judgment is on a metric derived from the ingest itself (`time() - gauge`), not on how
+      # The dead-man half. It reads the gauge R27 refreshes on every accepted webhook, so the
+      # judgment is on a metric derived from the delivery itself (`time() - gauge`), not on how
       # many alerts happened to fire: a quiet night cannot trip it, and a rotated webhook token
       # or a misrouted contact point does. 900s = three watchdog periods (R27's route repeats at
       # 5m); the `for: 5m` keeps one dropped POST from firing it.
       #
       # `noDataState: OK` is deliberate. The gauge rides the gateway's own OTLP push, so a
       # stopped gateway takes its gauge with it and this query returns nothing; absence then says
-      # nothing about the ingest path (a dead gateway is `meiva-ops-gateway-metrics-silent`'s
+      # nothing about the webhook path (a dead gateway is `meiva-ops-gateway-metrics-silent`'s
       # job), and reading it as an alert here would page on every collector restart and during
       # the first minutes of a fresh install, before any heartbeat has been accepted. The price
       # is a series lost for longer than the 5m lookback staying silent until the next accepted
@@ -6063,10 +6062,10 @@ groups:
           metric: alert_pipeline_silent
           team: meiva-ops
         annotations:
-          summary: "No alert has reached the ingest for 15 minutes"
+          summary: "No watchdog heartbeat has reached the gateway for 15 minutes"
           description: >-
-            The synthetic watchdog's last accepted ingest is older than 900s. The
-            delivery path is broken somewhere between Grafana and the `alerts` table —
+            The synthetic watchdog's last accepted webhook is older than 900s. The
+            delivery path is broken somewhere between Grafana and the gateway —
             a rotated webhook token the gateway rejects, or a contact point routed
             somewhere the gateway does not answer. Every other rule is silent for the
             same reason, which is why the external host sentinel remains a separate observer. A gateway

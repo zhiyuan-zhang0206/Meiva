@@ -27,8 +27,8 @@ constant:
    user, or decide the machine is legitimately busy and leave it.
 
 Alert rules (R8-R12: sustained CPU, memory pressure, per-volume disk
-watermark, Postgres connection saturation, Redis memory) fire into the same
-alerts table as the application rules. Their thresholds are
+watermark, Postgres connection saturation, Redis memory) are Grafana alert
+rules like the application rules. Their thresholds are
 deployment facts living in
 `deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` — a box whose
 normal state trips a rule wants that file edited, never a special case in

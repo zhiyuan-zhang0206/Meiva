@@ -42,7 +42,6 @@ RESTART_PREFIXES = (
     "gateway/alerts/",
     "gateway/lgtm/",
     "gateway/routers/proxies/grafana.py",
-    "ops/alerts.py",
 )
 
 RESTART_PATTERNS = (re.compile(r"^meiva_builtins/plugins/[^/]+/metrics[^/]*$"),)

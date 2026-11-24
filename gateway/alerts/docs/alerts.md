@@ -1,88 +1,70 @@
 # Alerts Router
 
-The Alert system (user design 2026-08-12): Alert is fully separate from
-Question — own table, own UI section; nothing here touches `agent_questions`. Grafana's embedded Alertmanager evaluates the alert rules
-(`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
-standard webhook payload to the gateway; this router is the other half of
-the loop. This router is the only way alerts enter the store: no other process writes
-`alerts` (`tests/scripts/test_alert_single_path.py`); every other condition is an
-event plus a Grafana rule
-([decision](../../../docs/decisions/observability/alerts/2026-10-04-alerting-on-grafana-alerting.md)).
-One row per episode. The store core lives in `base/telemetry/alerts/__init__.py`. Four HTTP surfaces plus one background
-reconciler:
+Grafana owns alert state. Its embedded Alertmanager evaluates the alert rules
+(`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and decides what is firing,
+silenced, inhibited or recovered; the gateway stores none of it. Every other condition is an event
+plus a Grafana rule
+([decision](../../../docs/decisions/observability/alerts/2026-11-24-alerts-have-one-owner-grafana.md)).
+The gateway has three alert surfaces:
 
-- `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
-  point, `deploy/lgtm/config/grafana/provisioning/alerting/contact.yml`). Upserts each alert instance
-  into `alerts` and publishes it on the SSE channel. It delivers nothing: the IM
-  fan-out retired with the IM channels on 2026-11-08.
+- `GET /api/alerts/firing` — what Grafana reports firing right now, for the top-bar badge.
+- `POST /api/alerts` — the receiver of the alert pipeline's dead-man switch (the built-in Grafana
+  contact point). It stores and delivers nothing.
 - `POST /api/alerts/agents/{agent_id}` — an optional Alertmanager contact point that queues one
   message per notification group in the selected agent inbox.
-- `GET /api/alerts` — the alert section's unresolved-first history list +
-  unresolved count for the top-bar badge.
-- `GET /api/alerts/stream` — SSE tail (channel `meiva:alerts`, broadcast) of
-  every ingest; the UI's initial fetch covers rows ingested before the
-  subscription opened.
-- Grafana reconciliation — on events-maintenance service start and every five minutes, fetch
-  Grafana's current Alertmanager instances and resolve stored rows
-  absent from that truth set. This closes the lost-RESOLVE-webhook gap.
 
-## Store — `alerts`
-
-One row = one alert instance, deduped by **(fingerprint, starts_at)**
-(unique constraint, migration `20260813T042527_alerts`). Alertmanager may
-re-send the same instance while firing and sends it once more on resolution;
-the upsert updates the row instead of duplicating it.
-Columns: `status` (unresolved|resolved — no ack state) /
-`severity` (critical|warning|error, read from the rule's `severity` label,
-normalized — anything else defaults to warning) / `alertname` / `labels` /
-`annotations` (jsonb, the Alertmanager shape) / `starts_at` / `ends_at` /
-`fingerprint` (Alertmanager-standard fnv-1a over sorted labels, computed
-when the payload omits it) / `generator_url` / `source` (`grafana`; rows
-written before 2026-10-04 also carry the retired in-process writers' tags) /
-`notified_at` / timestamps.
-Index: `(status, starts_at DESC)` serves the list path.
+History is Grafana's: the alerting history page (`/grafana/alerting/history`),
+`GET /api/annotations?type=alert` and `GET /api/v1/rules/history?ruleUID=...` (one call returns at
+most 100 rows; page with `to`). The Web UI has no alert list: its badge links to Grafana's alert
+list in a new tab.
 
 ## Contract
 
-### Ingest (Alertmanager webhook)
+### Firing alerts
 
-Body = the Alertmanager standard webhook payload: `{status, alerts: [{
-status, labels, annotations, startsAt, endsAt, fingerprint, values,
-generatorURL}]}` — the full v4 envelope (version/groupKey/receiver/
-commonLabels/… ) and the slimmer Grafana-managed shape are both accepted
-(extra fields tolerated; a missing per-alert status falls back to the
-top-level one). Webhook `firing` maps to store `unresolved`. Alertmanager's
-zero time (`0001-01-01T00:00:00Z`) in `endsAt` is stored as NULL.
+`GET /api/alerts/firing` → `{state, firing, critical, error, warning}`. The gateway asks Grafana's
+embedded Alertmanager for its active instances
+(`/grafana/api/alertmanager/grafana/api/v2/alerts?active=true&silenced=false&inhibited=false`,
+anonymous Viewer, 2-second budget) and counts them by their `severity` label, excluding the
+synthetic watchdog (`metric=alert_pipeline_watchdog`). A `severity` that is not `critical`, `error`
+or `warning` counts as a warning. A silenced or inhibited instance, and one still inside its rule's
+`for` window, does not count.
 
-Auth — the webhook cannot hold the cluster secret, so the ingest path
-bypasses the session/bearer middleware and authenticates itself:
-`X-Alerts-Token` == the webhook token
-(`MEIVA_ALERTS_WEBHOOK_TOKEN` — constant-time), or a cluster Bearer (the human secret or the active write generation's machine API token, which in-cluster posters present), or — only when no token is
-configured — loopback trust (the single-box default: Grafana is co-located).
+`state` says how far the counts can be trusted:
 
-Response: `{processed, inserted, updated}`.
+| `state` | Meaning | Counts |
+|---|---|---|
+| `ok` | Grafana answered | exact |
+| `unavailable` | Grafana is configured but did not give a usable answer (down, error status, not JSON, not an alert list) | `null` |
+| `not_configured` | the gateway's Grafana proxy is off, so there is no Grafana upstream | `null` |
 
-### Lost-resolution reconciliation
+A reader shows `unavailable` as unknown and never as zero: a dead Grafana cannot be told from a quiet
+cluster by a count. The route sits behind the normal session/Bearer middleware and never returns an
+error status for a Grafana failure. `/api/stats/dashboard.alerts` carries the same object, and
+`meiva stats` prints it (`alerts: unavailable (grafana unreachable)` when it cannot count).
 
-With Grafana admin auth configured, the events-maintenance service's startup + five-minute loop resolves
-stored Grafana instances absent from Grafana's current Alertmanager truth.
-Exact identity, race boundaries, failure posture, and the rejected timestamp
-sweep: [Alert Resolution Reconciliation](alert-reconciliation.md).
+### Alert webhook (the heartbeat receiver)
 
-### SSE stream
+Body = the Alertmanager standard webhook payload: `{status, alerts: [{status, labels, annotations,
+startsAt, endsAt, generatorURL}]}`. The full v4 envelope (version/groupKey/receiver/commonLabels/…)
+and the slimmer Grafana-managed shape are both accepted (extra fields tolerated; a missing per-alert
+status falls back to the top-level one). A firing alert labelled `metric=alert_pipeline_watchdog`
+emits the `alerts` telemetry event, which moves the gauge `alerts_last_ingest_timestamp_seconds`
+that the dead-man rule (`meiva-ops-alert-pipeline-silent`) and the host sentinel read. Anything else
+in the payload is acknowledged and dropped. Response: HTTP 204.
 
-Every ingested row is published to the Redis channel `meiva:alerts` as one
-`AlertRow` JSON frame; `GET /api/alerts/stream` forwards the channel in
-broadcast mode through the same `event_stream` machinery as agent events
-(heartbeat + error frames, reconnection-safe). A Redis outage never fails
-the ingest — the publish is best-effort and the initial fetch covers the
-gap.
+Auth — the webhook cannot hold the cluster secret, so the route bypasses the session/bearer
+middleware and authenticates itself: `X-Alerts-Token` == the webhook token
+(`MEIVA_ALERTS_WEBHOOK_TOKEN` — constant-time), or a cluster Bearer (the human secret or the
+active write generation's machine API token, which in-cluster posters present), or — only when no
+token is configured — loopback trust (the single-box default: Grafana is co-located). A wrong
+credential is 401 and moves no heartbeat.
 
 ### Alertmanager agent receiver
 
-The built-in Grafana provisioning routes to the alert store. A site can add
-`POST /api/alerts/agents/{agent_id}` as a second contact point. It accepts the
-same webhook authentication as ingest and returns HTTP 204 after inbox
+The built-in Grafana provisioning notifies nobody. A site adds
+`POST /api/alerts/agents/{agent_id}` as a contact point. It accepts the
+same webhook authentication as `POST /api/alerts` and returns HTTP 204 after inbox
 acceptance. The URL selects the recipient. Use an active on-duty agent so it can
 act on the usual inbox wake. A terminated agent's system message remains queued
 for a later life.
@@ -95,8 +77,7 @@ the admin API at `POST /api/admin/provisioning/alerting/reload`.
 [Grafana provisioning reload](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/admin/#reload-provisioning-configurations)
 
 The example uses the station's existing webhook URL and Bearer token environment references.
-Keep the agent route first with `continue: true` to retain the existing ingest
-routes. The example sends error and critical notifications, including resolved
+Keep the agent route first with `continue: true` so the watchdog heartbeat route still runs. The example sends error and critical notifications, including resolved
 groups, and inherits the root grouping and timers. The override replaces the
 whole contact and policy file. Use the example's webhook receiver and policy
 structure. Each receiver needs a unique UID, a webhook URL and a named contact
@@ -126,7 +107,7 @@ policy when upgrading.
 
 To stop agent routing, remove the override, converge and reload alerting
 provisioning. Grafana may retain the unused contact point. The restored policy
-routes to ingest only.
+routes the watchdog heartbeat only.
 
 The receiver formats the instances in the POST into one message with statuses,
 summaries, diagnostic labels, Grafana rule links and event query commands.
@@ -135,30 +116,3 @@ ends a failed attempt, with future sends determined by Alertmanager's subsequent
 group evaluations. An ambiguous replay can duplicate a message because a
 webhook group key also identifies intentional repeats. See the
 [delivery decision](../../../docs/decisions/observability/alerts/2026-11-24-alertmanager-agent-receiver.md).
-
-### Shadow transition facts
-
-The alert-specific renderer preserves its localized text in the transition group.
-
-The ingest transaction freezes immutable revision/group/member snapshots through
-`base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve
-input-order instance resolution. Repeated observations retain the original group.
-`notification_revision` advances on each frozen transition; `notified_at` has no
-writer left and stays NULL. The Grafana label `notify_im: "false"` is inert: it gated a
-delivery, the ingest does not read it any more, and a rule that carries it records its
-transitions like every other rule. Shadow history is never proof of non-delivery and
-cannot be automatically dispatched. See
-[Alert Notification Shadow Facts](alert-shadow-facts.md) for transaction ownership and the retained history boundary.
-
-### List
-
-`GET /api/alerts?window=1h|6h|24h|7d&status=&severity=&limit=`
-→ `{alerts: [row...], meta: {window, total, unresolved_count}}`, ordered
-`(status = 'unresolved') DESC, starts_at DESC`. `unresolved_count` backs the
-top-bar badge (all unresolved instances in the severity scope, 0 when scoped to resolved).
-Unresolved instances never age out. The window limits resolved history by
-`ends_at` (falling back to `starts_at` for legacy rows without a recovery time).
-SSE frames invalidate the frontend's alert snapshots: the API owns exact counts
-and ordering even when a page is capped or an updated instance is absent from it.
-GET and
-stream sit behind the normal session/Bearer middleware (the UI + SDK).

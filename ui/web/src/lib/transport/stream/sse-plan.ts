@@ -1,4 +1,4 @@
-export type SseChannel = "system" | "alerts" | "systemAll";
+export type SseChannel = "system" | "systemAll";
 export type SseSlot = SseChannel | "merged";
 export type SseState = "open" | "reconnecting" | "closed";
 export type ReadyStateKind = "connecting" | "open" | "closed";

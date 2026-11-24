@@ -29,3 +29,5 @@ stall burst) paged as many messages as instances. The user asked for like alerts
   policy's `group_interval`.
 
 Forward: [Alertmanager can route a notification group to an agent inbox](2026-11-24-alertmanager-agent-receiver.md).
+
+Superseded by: [2026-11-24-alerts-have-one-owner-grafana.md](2026-11-24-alerts-have-one-owner-grafana.md) — the ingest that rendered group messages is removed (the IM channels retired on 2026-11-08).

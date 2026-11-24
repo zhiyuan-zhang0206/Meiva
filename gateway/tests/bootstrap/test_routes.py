@@ -136,7 +136,7 @@ def _insert_agent(db: psycopg.Connection, *, status: str = "running", spawner: s
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     db_conn.commit()  # let truncate take effect before starting client
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"grafana_proxy_enabled": False}) as client:
         resp = client.get("/api/stats/dashboard")
     assert resp.status_code == 200
     body = resp.json()
@@ -160,63 +160,14 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
         "openai_cost_usd": 0,
         "anthropic_cost_usd": 0,
         "google_cost_usd": 0,
-        "alerts": {"unresolved": 0, "critical": 0, "error": 0, "warning": 0},
+        "alerts": {
+            "state": "not_configured",
+            "firing": None,
+            "critical": None,
+            "error": None,
+            "warning": None,
+        },
     }
-
-
-def _insert_live_alert(
-    db: psycopg.Connection,
-    *,
-    fingerprint: str,
-    alertname: str,
-    severity: str,
-    status: str = "unresolved",
-    extra_labels: dict[str, str] | None = None,
-) -> None:
-    now = datetime.now(UTC)
-    ends_at = now if status == "resolved" else None
-    labels = {"alertname": alertname, "severity": severity, **(extra_labels or {})}
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO alerts (fingerprint, starts_at, ends_at, status, alertname, severity, "
-            "labels, annotations, source) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 'grafana')",
-            (
-                fingerprint,
-                now - timedelta(minutes=5),
-                ends_at,
-                status,
-                alertname,
-                severity,
-                json.dumps(labels),
-                json.dumps({"summary": alertname}),
-            ),
-        )
-
-
-def test_dashboard_alerts_match_grafana_live_alerts_ssot(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    _insert_live_alert(db_conn, fingerprint="f-crit", alertname="db_down", severity="critical")
-    _insert_live_alert(db_conn, fingerprint="f-err", alertname="llm_fail", severity="error")
-    _insert_live_alert(db_conn, fingerprint="f-warn", alertname="high_lag", severity="warning")
-    _insert_live_alert(
-        db_conn, fingerprint="f-res", alertname="recovered", severity="critical", status="resolved"
-    )
-    _insert_live_alert(
-        db_conn,
-        fingerprint="f-wd",
-        alertname="Alert pipeline watchdog (synthetic heartbeat)",
-        severity="warning",
-        extra_labels={"metric": "alert_pipeline_watchdog"},
-    )
-    event_rows.add(event="turn_end", level="error")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        dashboard = client.get("/api/stats/dashboard").json()
-        alerts_api = client.get("/api/alerts").json()
-    assert dashboard["alerts"] == {"unresolved": 3, "critical": 1, "error": 1, "warning": 1}
-    assert dashboard["alerts"]["unresolved"] == alerts_api["meta"]["unresolved_count"]
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:

@@ -21,7 +21,6 @@ from typing import Any
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
-from pydantic import SecretStr
 
 import base.db
 from base.clock.tests.fakes import system_clock
@@ -292,14 +291,11 @@ def _port(boot: ConfigBoot, tmp_path: Path) -> int:
     )
 
 
-# meiva:note
-# The alert reconciliation loop exists only on a unit holding the Grafana credential.
-@pytest.mark.parametrize("credential", [True, False])
 async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
-    db_conn: psycopg.Connection, pool_probe: PoolProbe, tmp_path: Path, *, credential: bool
+    db_conn: psycopg.Connection, pool_probe: PoolProbe, tmp_path: Path
 ) -> None:
     database = pool_probe.database()
-    boot = _boot(grafana_admin_password=SecretStr("grafana-test-password") if credential else None)
+    boot = _boot()
     port = _port(boot, tmp_path)
     service = _run(boot, database, tmp_path)
     try:
@@ -310,8 +306,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
         await asyncio.gather(service, return_exceptions=True)
 
     assert status == 200
-    expected = ["dispatch", "registry_gauge"]
-    assert component_names(body) == expected + (["alert_reconciliation"] if credential else [])
+    assert component_names(body) == ["dispatch", "registry_gauge"]
     await assert_released(pool_probe, tmp_path / "run" / "events_maintenance.pid", port)
 
 

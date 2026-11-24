@@ -15,8 +15,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import SecretStr
-
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config import ConfigBoot
 from base.db import Database
@@ -34,11 +32,6 @@ class EventsMaintenanceConfig:
     events_maintenance_interval_seconds: float
     events_maintenance_pass_deadline_s: float
     timezone: str
-    # The co-located Grafana the alert reconciliation reads; no admin password means
-    # this unit does not reconcile alerts.
-    grafana_host: str
-    grafana_port: int
-    grafana_admin_password: SecretStr | None
     # meiva:note
     # The directory holding the telemetry JSONL mirror files the hourly pass replays.
     mirror_dir: Path

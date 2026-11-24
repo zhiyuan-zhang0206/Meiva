@@ -19,7 +19,7 @@ const fakeTheme: ThemeRuntime = {
 
 // meiva:note
 // Authentication stays pending while real root readers own their explicit wire
-// boundaries. Alert I/O is asserted blocked; settings and themes still read.
+// boundaries. Settings and themes still read.
 // meiva:link ui/web/src/docs/frontend.md
 
 import { ApiError } from "@/lib/transport/api";

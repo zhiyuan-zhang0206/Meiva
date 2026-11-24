@@ -12,7 +12,7 @@ function openStatus() {
   fireEvent.click(screen.getByLabelText("Status"));
 }
 
-const ZERO_ALERTS = { unresolved: 0, critical: 0, error: 0, warning: 0 };
+const ZERO_ALERTS = { state: "ok" as const, firing: 0, critical: 0, error: 0, warning: 0 };
 
 function makeStats(overrides: Partial<StatsDashboard> = {}): StatsDashboard {
   return {
@@ -50,7 +50,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
   it("stats has data → live agents and 7 windowed usage cards show real numbers without alerts or diagnostics", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = makeStats({
-      alerts: { unresolved: 3, critical: 1, error: 1, warning: 1 },
+      alerts: { state: "ok" as const, firing: 3, critical: 1, error: 1, warning: 1 },
     });
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
@@ -337,7 +337,7 @@ describe("StatusCards window selector", () => {
       openai_cost_usd: 4.2,
       anthropic_cost_usd: 3.1,
       google_cost_usd: 1.4,
-      alerts: { unresolved: 2, critical: 1, error: 1, warning: 0 },
+      alerts: { state: "ok" as const, firing: 2, critical: 1, error: 1, warning: 0 },
       plugin_stats: [
         {
           plugin: "deepseek_balance",

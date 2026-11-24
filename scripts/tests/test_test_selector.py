@@ -782,5 +782,4 @@ def test_the_registry_tests_of_the_real_repository_are_pinned() -> None:
         "tests/components/cli/test_main_dispatch_contract.py",
         "tests/components/base/test_crash_row_writers.py",
         "tests/integration/test_impersonation_audit_root_inventory.py",
-        "tests/scripts/test_alert_single_path.py",
     } <= pinned

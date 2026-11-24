@@ -2,7 +2,6 @@
 # Gateway-owned events-maintenance daemon. Resident loops under one `TaskGroup`:
 # - Hourly dispatch (`telemetry_replay`, `blob_vacuum`, checkpoint size sample)
 # - 60s `registry_gauge` (`max(agents.id)` -> `agent_registry`)
-# - 5m Grafana `alert_reconciliation` (when credentialed)
 # Each loop tracks independent progress and hard deadlines for `/healthz`; exceeding a deadline
 # fails healthz until the watchdog restarts the process.
 # meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.md
@@ -36,7 +35,6 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -46,7 +44,6 @@ from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.events_maintenance import (
-    alert_reconciler,
     audit_identity,
     health_components,
     loop_roster,
@@ -68,7 +65,7 @@ from services.upkeep.events_maintenance.telemetry_replay import recover_telemetr
 
 
 # meiva:note
-# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# The process's random generator, built once at its entry for the telemetry pipeline's retry jitter. Jitter
 # is not a secret, so it is a plain `random.Random`.
 def _new_rng() -> random.Random:
     return random.Random()  # noqa: S311
@@ -82,9 +79,6 @@ def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> Events
         events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
         timezone=config.view.general.timezone,
-        grafana_host=config.view.gateway.grafana_host,
-        grafana_port=config.view.gateway.grafana_port,
-        grafana_admin_password=config.view.alerts.grafana_admin_password,
         mirror_dir=mirror_dir,
     )
 
@@ -304,16 +298,11 @@ async def run(
     # The telemetry mirror lives in the home's logs directory, beside the runtime directory.
     config = events_maintenance_config(process_config, mirror_dir=runtime.parent / "logs")
     # meiva:note
-    # The health component times and the alert reconciler's snapshot stamps share this one instance,
+    # The health component times and the loops' stamps share this one instance,
     # so a single clock decides both and a test that steers it steers them together. The dispatch and
     # resolution loops still build their own from the same configuration.
     clock = _clock(config)
-    # Only a unit holding the Grafana credential reconciles alerts; one without it
-    # carries no such loop (and no tracker to read as idle).
-    loops = loop_roster.roster(
-        dispatch_deadline_s=config.events_maintenance_pass_deadline_s,
-        reconcile_alerts=alert_reconciler.grafana_reconciliation_configured(config),
-    )
+    loops = loop_roster.roster(dispatch_deadline_s=config.events_maintenance_pass_deadline_s)
     liveness = LivenessGroup(clock=clock)
     progress = {spec.name: liveness.register(spec.name, spec.deadline_s) for spec in loops}
     timeouts = {spec.name: spec.deadline_s for spec in loops}
@@ -340,17 +329,6 @@ async def run(
         async with asyncio.TaskGroup() as group:
             group.create_task(dispatch_loop(pool, progress["dispatch"], config, db, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
-            if "alert_reconciliation" in progress:
-                bus = EventBus(
-                    event_bus_config_from_config(process_config),
-                    rng=_new_rng(),
-                    timers=SYSTEM_TIMERS,
-                )
-                group.create_task(
-                    alert_reconciler.reconciliation_loop(
-                        pool, bus, progress["alert_reconciliation"], config, clock=clock
-                    )
-                )
     finally:
         pool.close()
         await stop_health_server(health)

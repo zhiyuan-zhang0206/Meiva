@@ -1,9 +1,9 @@
-exports = ["router.py"]
+exports = ["firing.py", "router.py"]
 
 [uses]
 "agent_webhook.py" = ["notification_text.py", "schemas.py"]
 "notification_text.py" = ["schemas.py"]
-"router.py" = ["agent_webhook.py", "schemas.py"]
+"router.py" = ["agent_webhook.py", "firing.py", "schemas.py"]
 
 [purity]
 "__init__.py" = "strict"

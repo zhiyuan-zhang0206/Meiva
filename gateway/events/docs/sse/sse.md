@@ -38,7 +38,7 @@ Agent process ──▶ Redis pub/sub (meiva:events)
 
 ## Merged multi-channel stream (`/api/stream`)
 
-`gateway/events/merged.py` carries several projections (`global`, `all`, `alerts`) over one connection; its channels, per-channel error frames, bounded queues and drop accounting are in [Merged SSE stream](merged-stream.md).
+`gateway/events/merged.py` carries several projections (`global`, `all`) over one connection; its channels, per-channel error frames, bounded queues and drop accounting are in [Merged SSE stream](merged-stream.md).
 
 ## Key Features
 

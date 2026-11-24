@@ -93,7 +93,6 @@ def test_every_file_naming_a_backend_is_a_restart_reason_or_a_reviewed_consumer(
         "deploy/otel-collector/otel-collector.yaml",
         "cli/commands/observability/lgtm_native.py",
         "cli/commands/observability/plans/collector/render.py",
-        "base/telemetry/alerts/copy.py",
         "base/telemetry/metrics/core/panels.py",
         "base/telemetry/lgtm_local.py",
         "base/config/domains/observability/tempo.py",

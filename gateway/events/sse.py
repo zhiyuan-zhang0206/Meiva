@@ -29,7 +29,7 @@ from collections.abc import AsyncGenerator, Mapping, Sequence
 
 import redis
 from fastapi import Request
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from redis.asyncio.client import PubSub
 from redis.exceptions import AuthenticationError, NoPermissionError
 
@@ -45,7 +45,6 @@ from gateway.events.sse_frames import (
     warm_frame,
 )
 from gateway.http.middleware import runtime_metrics, stopping
-from ops.alerts import AlertRow
 
 _log = logging.getLogger(__name__)
 
@@ -69,13 +68,8 @@ def _error_payload(agent_id: int, exc: Exception) -> str:
 
 
 def _matches_filter(
-    event: Event | AlertRow, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
+    event: Event, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
 ) -> bool:
-    if isinstance(event, AlertRow):
-        # meiva:note
-        # An alert frame carries neither an agent nor a role: only an unfiltered broadcast
-        # forwards it.
-        return broadcast and not role_filter
     return (broadcast or event.agent_id == agent_id) and (
         not role_filter or event.role in role_filter
     )
@@ -161,9 +155,6 @@ async def close_pubsub(
 #   poll_s: the client-disconnect polling window of one Redis read
 #     (`gateway.sse_disconnect_poll_seconds`).
 #   cadence: when a quiet stream still speaks (heartbeat, keep-alive comment).
-#   validator: the pydantic validator each frame must parse as (default EVENT_ADAPTER). A
-#     non-agent-events channel (e.g. the alerts stream) passes its own TypeAdapter so frames
-#     are validated against the channel's shape instead of being dropped.
 #
 # Yields:
 #   bytes: SSE frame (`data: ...\n\n`).
@@ -175,7 +166,6 @@ async def event_stream(
     channel: str | None = None,
     role_filter: frozenset[str] | None = None,
     broadcast: bool = False,
-    validator: TypeAdapter[Event] | TypeAdapter[AlertRow] = EVENT_ADAPTER,
     poll_s: float,
     cadence: SseCadence,
 ) -> AsyncGenerator[bytes, None]:
@@ -229,7 +219,7 @@ async def event_stream(
             data = msg["data"] if msg is not None else None
             if isinstance(data, str):
                 try:
-                    event = validator.validate_json(data)
+                    event = EVENT_ADAPTER.validate_json(data)
                 except ValidationError:
                     yield f": dropped unparseable payload ({len(data)} bytes)\n\n".encode()
                     last_comment = now

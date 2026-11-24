@@ -13,12 +13,15 @@ it by design; it neither shares the composer's band nor follows the composer's
 height (user ruling 2026-11-01;
 [Bottom rules](home-shell-chrome/bottom-rules.md)).
 
-Below the list, one row of shortcuts in a fixed order: the unresolved-alert bell,
+Below the list, one row of shortcuts in a fixed order: the firing-alert bell,
 Fleet, Insights, Control, then whatever a plugin contributes (`PluginNavIcons` renders
 nothing when no plugin declares an entry). The bell leads the
-row because a standing cluster state outranks navigation (user 2026-10-21), it
-links to the alert section, and it renders only while the count is non-zero. The
-row leaves with the rail when it collapses; the count then rides `HeaderBar`'s
+row because a standing cluster state outranks navigation (user 2026-10-21). Its
+count is what Grafana reports firing now (30s poll of `GET /api/alerts/firing`), it
+opens Grafana's firing-alert list in a new tab, and it renders only while the count is
+non-zero — or as a grey "?" while Grafana cannot be reached, which is unknown, not zero
+([Alerts boundary](alert-classes.md)). The
+row leaves with the rail when it collapses; the signal then rides `HeaderBar`'s
 restore button (desktop) or its menu button (phone drawer) instead of vanishing
 ([Home Shell Chrome](home-shell-chrome/home-shell-chrome.md)).
 
@@ -38,8 +41,8 @@ below:
   2-column grid (at most two cards per row) covering `Tokens`, `Cache hit`,
   `Cost (API)`, `Cost (subscription)`, `OpenAI API`, `Anthropic API`, and
   `Google API`.
-  Unresolved Grafana alerts live solely on the footer bell badge (hidden at zero)
-  and `/insights#alerts`; the popover carries no diagnostics (user ruling 2026-11-22).
+  Firing Grafana alerts live solely on the footer bell badge (hidden at zero) and in
+  Grafana itself; the popover carries no diagnostics (user ruling 2026-11-22).
   The two cost cards are the same disjoint split the Inspector shows, by the
   billing mode of the harness that ran each call: `Cost (API)` is the fee the
   account is billed (subscription harnesses excluded, so monthly API credit
