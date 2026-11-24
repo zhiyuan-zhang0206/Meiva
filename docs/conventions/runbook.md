@@ -607,8 +607,12 @@ half, use the separate commands:
   Grafana that does not answer, prints a `WARNING: alert silence not open/close` line and
   the half goes on (a window without a silence is noisy, not unsafe). Expire a stuck silence
   by hand in Grafana (Alerting > Silences) or shorten it with `python - close` from that file.
-- The first failure stops a half and nothing rolls back: fix the cause and
-  rerun the whole half, which is idempotent. `--dry-run` runs only the
+- A gateway failure stops a half: fix the cause and rerun the whole half, which is
+  idempotent (a failed gateway stop or switch first brings the stopped hosts back on their
+  old commit; a gateway start failure leaves the cluster stopped, since the start may have
+  migrated the database). A failing runner never stops it: that runner is deferred, the rest
+  finish, and the window exits 3 with a `fleet-update-result:` JSON line naming it, to catch
+  up in a later window. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
   `DIR`.
 - **A manual step that rewrites a state file comes before any command of the new

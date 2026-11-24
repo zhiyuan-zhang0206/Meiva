@@ -38,8 +38,9 @@ drain at their turn boundary (a wedged process holds the stop until its
 timeout; only the operator's explicit `--force` cuts it short), the cluster
 stops, each unit's source checkout switches to the released commit, and the
 units start again. An update is an attended, full-cluster outage by design,
-and it never rolls back on its own: a failure stops the half, the operator
-fixes the cause and reruns it — each half is idempotent. An authorized operator
+and a gateway failure stops the half, the operator
+fixes the cause and reruns it — each half is idempotent; a failing runner is deferred
+and never holds the rest of the cluster down. An authorized operator
 agent can submit the complete update to an OS-owned job, then drain and resume
 with the rest of the cluster; see the
 [agent update guide](../meiva_builtins/skills/platform/meiva-guide/ops/references/agent-update.md).
