@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
-import json
 import os
 import re
 import subprocess
@@ -219,12 +218,11 @@ def _agent_id_of_handle(handle: str, environ: Mapping[str, str]) -> int | None:
     digest = hashlib.sha256(handle.encode("utf-8")).hexdigest()
     for path in sorted((home / "harness" / "registrations").glob("*.json")):
         try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            text = path.read_text(encoding="utf-8")
+        except OSError:
             continue
-        if isinstance(document, dict) and document.get("handle_sha256") == digest:
-            agent_id = document.get("agent_id")
-            return agent_id if isinstance(agent_id, int) else None
+        if path.stem.isdecimal() and digest in text:
+            return int(path.stem)
     return None
 
 

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,7 +27,7 @@ class World:
     elsewhere: Path
     home: Path
 
-    def env(self, *, shim: bool = True, **extra: str) -> dict[str, str]:
+    def env(self, extra: Mapping[str, str] | None = None, *, shim: bool = True) -> dict[str, str]:
         return {
             "HOME": str(self.root),
             "MEIVA_HOME": str(self.home),
@@ -35,16 +36,17 @@ class World:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
             **meiva_python_env(sys.executable),
-            **extra,
+            **(extra or {}),
         }
 
-    def git(
-        self, *args: str, cwd: Path | None = None, **env: str
-    ) -> subprocess.CompletedProcess[str]:
+    def git(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+        return self.git_from(self.work, *args, **env)
+
+    def git_from(self, cwd: Path, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(  # noqa: S603
             ["git", *args],
-            cwd=cwd or self.work,
-            env=self.env(**env),
+            cwd=cwd,
+            env=self.env(env),
             capture_output=True,
             text=True,
             timeout=60,
@@ -143,7 +145,8 @@ def test_a_clean_branch_with_clean_commits_is_pushed_to_a_guarded_remote(world: 
 def test_global_options_before_push_are_skipped_and_the_push_is_still_guarded(world: World) -> None:
     world.plain("checkout", "-q", "-b", f"agent-{SELF_ID}-fix")
     elsewhere_cwd = world.root
-    result = world.git(
+    result = world.git_from(
+        elsewhere_cwd,
         "-C",
         str(world.work),
         "-c",
@@ -152,7 +155,6 @@ def test_global_options_before_push_are_skipped_and_the_push_is_still_guarded(wo
         "push",
         "origin",
         "HEAD",
-        cwd=elsewhere_cwd,
         MEIVA_ZERO_TRACE_GIT_REMOTES=PATTERN,
         MEIVA_AGENT_ID=str(SELF_ID),
     )
@@ -160,7 +162,8 @@ def test_global_options_before_push_are_skipped_and_the_push_is_still_guarded(wo
     assert f"agent-{SELF_ID}-fix" in result.stderr
     assert "git branch -m" in result.stderr
     assert world.remote_branches(world.trace_free) == set()
-    long_form = world.git(
+    long_form = world.git_from(
+        elsewhere_cwd,
         f"--git-dir={world.work / '.git'}",
         "--work-tree",
         str(world.work),
@@ -169,7 +172,6 @@ def test_global_options_before_push_are_skipped_and_the_push_is_still_guarded(wo
         "push",
         "origin",
         "HEAD",
-        cwd=elsewhere_cwd,
         MEIVA_ZERO_TRACE_GIT_REMOTES=PATTERN,
         MEIVA_AGENT_ID=str(SELF_ID),
     )
