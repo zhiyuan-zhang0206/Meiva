@@ -62,9 +62,11 @@ from base.telemetry.delivery.reporting import (
     report_no_pipeline,
     report_sink_failure,
 )
+from base.telemetry.delivery.state import process_name
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.plans import (
+    HOST_SWAP_PROCESSES,
     LOSS_ONLY_PROCESSES,
     select_metric_attributes,
 )
@@ -74,10 +76,13 @@ from base.telemetry.otlp.plans import (
 from base.telemetry.otlp.telemetry_otlp_barrier import QueueItem
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from base.telemetry.otlp.telemetry_otlp_gauges import (
+    SWAP_USAGE_METRIC,
     GaugeValues,
     MetricAttributes,
     observable_gauge_callback,
+    read_swap_bytes,
     record_gauge,
+    swap_usage_callback,
 )
 from base.telemetry.otlp.telemetry_otlp_logs import emit_log_record
 from base.telemetry.otlp.telemetry_otlp_metrics import (
@@ -557,6 +562,13 @@ class OtlpBackend:
                     log_deadline=self._log_deadline,
                 )
             meter = worker.metrics.get_meter("meiva.telemetry")
+            if process_name() in HOST_SWAP_PROCESSES:
+                meter.create_observable_gauge(
+                    SWAP_USAGE_METRIC,
+                    callbacks=[swap_usage_callback(read_swap_bytes)],
+                    unit="By",
+                    description="Swap pool size by state, read from the host (psutil)",
+                )
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
         except Exception as exc:
             # meiva:note

@@ -220,6 +220,8 @@ fixture="$(mktemp)"
 | `meiva-ops-host-disk-free-low` | data-volume free bytes | min by machine of `system_filesystem_usage_bytes{state="free"}` on `/` or `/System/Volumes/Data` < 20 GiB (Prometheus) | 5m | warning |
 | `meiva-ops-host-disk-free-critical` | data-volume free bytes | same series < 10 GiB (Prometheus) | 2m | critical |
 | `meiva-ops-host-disk-draining` | hours until the volume is empty | free bytes ÷ the last hour's loss, only while the loss exceeds 8 GiB, < 6 h (Prometheus) | 10m | warning |
+| `meiva-ops-host-swap-used-high` | swap in use | max by machine of `system_paging_usage_bytes{state="used"}` > 8 GiB (Prometheus) | 10m | warning |
+| `meiva-ops-host-swap-used-critical` | swap in use | same series > 15 GiB (Prometheus) | 5m | critical |
 | `meiva-ops-pgbouncer-write-stall` | PgBouncer per-minute stats | `pgbouncer_query_time_microseconds` > 300000 while `pgbouncer_transactions_per_second` < 20 (Prometheus) | 3m | critical |
 | `meiva-ops-pg-connection-saturation` | Postgres backends vs max | ratio > 0.80 (Prometheus) | 15m | warning |
 | `meiva-ops-redis-memory` | Redis resident set | > 2 GiB (Prometheus) | 15m | warning |
@@ -503,7 +505,7 @@ Alertmanager. Replaced, with what is *not* covered:
 | Watcher group | Replaced by | Not covered |
 |---|---|---|
 | macmini / company-mini free-space and rapid-drop watchers (`mm-descend-watch`, `disk-rapid-watch`, `disk-monitor`, `cm-watch`, `cm-avail-watch2`, `tier1-trigger`, the launchd disk samplers' alert half) | `host-disk-free-low`, `host-disk-free-critical`, `host-disk-draining` | per-process write attribution and the `disk17` emergency reclaim (an action, not an alert; it keeps its own trigger) |
-| swap watchers (`swap-guard-v15`, `cm-pool-watch`, `cm-mem-watch`) | nothing yet: the host_metrics `paging` scraper reads 0 on macOS (it was measured on macmini, company-mini and macbook-air against `sysctl vm.swapusage`), so a swap rule needs another source first | all of it |
+| swap watchers (`swap-guard-v15`, `cm-pool-watch`, `cm-mem-watch`) | `host-swap-used-high`, `host-swap-used-critical` (swap in use, from the agent host's own gauge because the host_metrics `paging` scraper reads 0 on macOS) | kernel vm-pressure level and jetsam kills (not swap-pool signals); the page-out rate and the swap-pool growth steps have no signal here |
 | `db-write-stall-watch` (#39) | `pgbouncer-write-stall` | none: same 3-minute judgement over the same stats line |
 | `cm-4318-probe` (#149) | `otelcol-receiver-refused`, `otelcol-host-silent` | the :4318 empty-POST reachability probe |
 | host-liveness watchers (`company-air-probe`, `mba-probe`, `monsora-sre-host-liveness-crosscheck` and its watchdogs) | `machine-offline-*`, `machine-stopped-too-long`, `health-probe-*` | an agent host that is dead while its machine's ops endpoint still answers (the heartbeat records `agent_host_online`; no rule reads it) |

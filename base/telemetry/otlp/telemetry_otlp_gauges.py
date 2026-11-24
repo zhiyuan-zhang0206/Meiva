@@ -18,6 +18,29 @@ GaugeValues = dict[
 ]
 
 
+SWAP_USAGE_METRIC = "system.paging.usage"
+
+
+def read_swap_bytes() -> tuple[int, int]:
+    import psutil
+
+    swap = psutil.swap_memory()
+    return swap.used, swap.free
+
+
+def swap_usage_callback(
+    read_swap: Callable[[], tuple[int, int]],
+) -> Callable[[object], list[Observation]]:
+    def observe(_options: object) -> list[Observation]:
+        used, free = read_swap()
+        return [
+            Observation(used, attributes={"state": "used"}),
+            Observation(free, attributes={"state": "free"}),
+        ]
+
+    return observe
+
+
 def record_gauge(
     gauge_values: GaugeValues,
     gauge_lock: threading.Lock,
