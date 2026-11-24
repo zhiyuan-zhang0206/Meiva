@@ -26,6 +26,7 @@ reporter on every failed load; recovery never makes an unknown name enabled.
 entries are dropped and reported like any dangling name, but `meiva plugins verify`
 shows them as a `WARN` rather than a failure; the PR that deletes a built-in plugin
 adds its name. Any other missing plugin stays a failure.
+Gateway startup (`plugin_enable.initialize`) also deletes the checkout-shipped registry rows of those names, so a retired plugin leaves the Settings list and the policy cache; an installed extension that reuses such a name is kept.
 
 Local enable updates first resolve the requested name against the actual local
 set. Unknown names fail before a write. The written image contains only plugins

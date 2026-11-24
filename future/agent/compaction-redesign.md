@@ -53,8 +53,7 @@ compaction.
   leaving room for the housekeeping turns). The reminder hook defers above the ceiling, where the LLM node runs forced
   compaction through the durable cancellation boundary. Agent-side
   only: no `InboundKind`, no nudge / heartbeat rail. It fires at most once per context window
-  (re-arms via `compact.version`) and defers to meiva_sdk_reminder's agent-reply note when both would
-  write `messages` in one pass. The reminder does **not** report a remaining-token count.
+  (re-arms via `compact.version`). The reminder does **not** report a remaining-token count.
 - **spontaneous**: no trigger — the agent calls `meiva.self.compact` whenever it judges its
   context should be reset. This already exists; it is distinct from the parked item below
   (which is about the *framework feeding the model its budget* so it decides timing).

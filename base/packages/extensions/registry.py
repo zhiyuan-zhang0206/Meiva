@@ -50,6 +50,7 @@ from __future__ import annotations
 import hashlib
 import io
 import tarfile
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -326,6 +327,16 @@ def list_enabled(conn: psycopg.Connection, *, kind: ExtensionKind | None = None)
 def list_all(conn: psycopg.Connection, *, kind: ExtensionKind) -> list[Extension]:
     with conn.cursor(row_factory=class_row(Extension)) as cur:
         return cur.execute(f"{_SELECT} WHERE kind = %s ORDER BY name", (kind,)).fetchall()
+
+
+def delete_repo_rows(
+    conn: psycopg.Connection, names: Collection[str], *, kind: ExtensionKind
+) -> list[str]:
+    rows = conn.execute(
+        "DELETE FROM extensions WHERE kind = %s AND source = %s AND name = ANY(%s) RETURNING name",
+        (kind, REPO_SOURCE, sorted(names)),
+    ).fetchall()
+    return sorted(row[0] for row in rows)
 
 
 def set_default_enabled(conn: psycopg.Connection, name: str, *, enabled: bool) -> bool:
