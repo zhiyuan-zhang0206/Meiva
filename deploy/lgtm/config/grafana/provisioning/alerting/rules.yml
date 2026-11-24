@@ -2518,7 +2518,10 @@ groups:
       # succeeded but the machine reported its agent host as not running. The probe rules above
       # cannot see it (the probe succeeded) and an announced stop is out of the target set, so
       # a half-up machine, where no agent can run, was silent. The event repeats every pass;
-      # 3m is the debounce (a rollout restart of the host is shorter), and the same load grading
+      # the debounce is the pair `for: 3m` with a [2m] window (the same as the offline-warning rule):
+      # one pass leaves the window non-empty for only two evaluations, so it takes three
+      # consecutive passes to fire and a rollout restart of the host (shorter) never does. The
+      # window must stay shorter than `for`, or a single event would fire it. The same load grading
       # as the offline rules leaves out a machine that carries nothing. It resolves when the
       # host process is back and the stream goes idle.
       - uid: meiva-ops-agent-host-down
@@ -2555,11 +2558,11 @@ groups:
                 sum by (attributes_machine) (count_over_time({service_name="unknown_service",
                 event_name="machine_agent_host_down"} | json | cluster=".meiva" | category="telemetry" |
                 (attributes_carries_service = "true" or attributes_agent_count > 0 or
-                attributes_agent_count = "") [5m]))
+                attributes_agent_count = "") [2m]))
               instant: true
               queryType: instant
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
           - refId: C
             datasourceUid: __expr__

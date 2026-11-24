@@ -154,6 +154,15 @@ def test_the_rule_only_groups_and_filters_by_fields_the_event_carries(uid: str) 
         assert label in _ENVELOPE or label.removeprefix("attributes_") in declared
 
 
+def test_the_agent_host_down_window_is_shorter_than_its_debounce() -> None:
+    rule = _rules()["meiva-ops-agent-host-down"][1]
+    (window,) = re.findall(r"\[(\d+)m\]", _query(rule))
+    (node,) = [d for d in rule["data"] if d["refId"] == "A"]
+    pending = int(rule["for"].removesuffix("m"))
+    assert int(window) < pending
+    assert node["relativeTimeRange"]["from"] == int(window) * 60
+
+
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
     for uid in ("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"):
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])

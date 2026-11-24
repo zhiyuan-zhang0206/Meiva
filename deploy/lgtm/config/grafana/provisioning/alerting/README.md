@@ -378,7 +378,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-schedule-convergence-abandoned` | `schedule_convergence_abandoned` (24h) | 0m | warning | nothing: the manager's reap and sync retries had no bound and no report |
 | `meiva-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
 | `meiva-ops-machine-stopped-too-long` | `machine_stopped_too_long` per machine (an announced stop, 20m+ old, no `--maintenance-for` window) | 0m | error | nothing: an intentionally stopped host leaves the probe target set, so a forgotten stop was invisible inside the cluster (10-14: 53 minutes) |
-| `meiva-ops-agent-host-down` | `machine_agent_host_down` per machine (the ops server answers the probe, the agent host does not run) | 3m | error | nothing: the probe succeeded, so no offline rule and no `machine_probe_failed` saw it |
+| `meiva-ops-agent-host-down` | `machine_agent_host_down` per machine (the ops server answers the probe, the agent host does not run; 2m window, so three consecutive passes) | 3m | error | nothing: the probe succeeded, so no offline rule and no `machine_probe_failed` saw it |
 | `meiva-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
