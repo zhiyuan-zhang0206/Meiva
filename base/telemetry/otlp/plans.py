@@ -34,6 +34,8 @@ METRIC_DISPOSITION: dict[str, dict[str, Literal["counter", "histogram", "gauge"]
 
 LOSS_ONLY_PROCESSES = frozenset({"agent-exec", "sdk", "schedule-runner", "cli-health-probe"})
 
+HOST_SWAP_PROCESSES = frozenset({"agent_host"})
+
 
 # meiva:note
 # Pure configuration plan for constructing the OTLP LoggerProvider and MeterProvider.

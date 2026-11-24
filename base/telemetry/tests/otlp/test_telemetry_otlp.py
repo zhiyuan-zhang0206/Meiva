@@ -447,6 +447,31 @@ def test_warmup_initializes_enabled_backend(
     assert backend._thread is not None
 
 
+def test_the_agent_host_reports_the_swap_pool_as_the_semconv_paging_usage_metric(
+    otlp_backend: OtlpFixture,
+) -> None:
+    backend, _log_exporter, metric_reader = otlp_backend
+    pipeline = telemetry.process_state["pipeline"]
+    assert isinstance(pipeline, ExportingEventPipeline)
+    telemetry.init_telemetry(home=meiva_home(), process="agent_host", pipeline=pipeline)
+
+    backend.warmup()
+
+    usage = collected_metrics(metric_reader)["system.paging.usage"]
+    assert usage.unit == "By"
+    assert sorted(point.attributes["state"] for point in usage.data.data_points) == ["free", "used"]
+
+
+def test_a_process_that_is_not_the_agent_host_reports_no_swap_pool(
+    otlp_backend: OtlpFixture,
+) -> None:
+    backend, _log_exporter, metric_reader = otlp_backend
+
+    backend.warmup()
+
+    assert "system.paging.usage" not in collected_metrics(metric_reader)
+
+
 def test_export_batch_builds_backend_once(
     otlp_backend: tuple[telemetry_otlp.OtlpBackend, Any, Any],
 ) -> None:

@@ -41,6 +41,26 @@ Meiva code participates and a box with no agents running still reports.
   logs pipeline and never reach Loki. The write-stall rule on these gauges lives in
   Grafana (it replaced the `db-write-stall-watch` schedule).
 
+- `system.paging.usage` (bytes, `state` = `used` | `free`) is the machine's swap
+  pool and comes from the agent host, not from the `host_metrics` paging scraper
+  (left disabled, so the series has one origin on every OS). The scraper's
+  non-Linux, non-Windows build reads `gopsutil`'s `mem.VirtualMemory()`, whose darwin
+  implementation never fills the swap fields, so on macOS it reports 0 while
+  `sysctl vm.swapusage` shows GiB (measured with otelcol-contrib 0.162.0 on macmini,
+  company-mini and macbook-air). The call that works, `mem.SwapMemory()`, is used there only
+  for the operation counters. The same defect is reported against another gopsutil
+  consumer ([beszel#2770](https://github.com/henrygd/beszel/issues/2770)), and the one
+  collector change that touched this path
+  ([PR #51465](https://github.com/open-telemetry/opentelemetry-collector-contrib/pull/51465))
+  was closed unmerged and would not have changed darwin. The agent host registers an
+  observable gauge in its own meter provider (`swap_usage_callback` in `telemetry_otlp_gauges.py`) that reads
+  `psutil.swap_memory()` (the same `vm.swapusage` on macOS, equal to it to the byte on
+  macmini) on every 15-second metrics export, so there is no sampling thread or schedule.
+  Only the agent host reports it, because the figure is machine-wide. The metric name and the
+  `state` attribute are the scraper's, so when a collector release fixes darwin the source
+  changes (enable the scraper, drop the gauge) and the rules do not. A restarting agent host
+  answers for a few minutes under two instance ids, so rules take `max by (machine)`.
+
 Not a node_exporter / postgres_exporter / redis_exporter trio: the pinned
 contrib collector already carries equivalent receivers, and one supervised
 binary per machine is the whole point of the sidecar architecture.
