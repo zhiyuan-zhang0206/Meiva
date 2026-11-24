@@ -643,7 +643,6 @@ def main() -> None:
     # `random.Random` (the same choice `meiva.boot` makes for general entropy).
     rng = random.Random()  # noqa: S311
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=now,

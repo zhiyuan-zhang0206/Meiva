@@ -141,38 +141,25 @@ def test_operator_handle_preserves_the_original_constructor_error(
     assert caught.value is error
 
 
-def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
+def test_command_pipeline_is_lazy_and_opens_no_database(
     tmp_path: Path,
     command_runtime: CommandRuntime,
 ) -> None:
     from cli.database import operator_event_pipeline
 
-    opened: list[ProcessDbGate] = []
-
-    def open_database(
-        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> Database:
-        opened.append(gate)
-        return open_operator_database(config, gate, direct_url)
-
-    factory = _factory(command_runtime, open_database)
-    command_home = tmp_path / "command-home"
     producer = operator_event_pipeline(
-        factory,
         machine=command_runtime.machine,
-        home=command_home,
+        home=tmp_path / "command-home",
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
         rng=command_runtime.rng,
     )
     try:
-        assert not opened
+        assert producer.close() is None
         pipeline = producer()
         assert isinstance(pipeline, EventPipeline)
         assert producer() is pipeline
-        assert producer._database_factory is factory
-        assert not opened
     finally:
         producer.close()
 

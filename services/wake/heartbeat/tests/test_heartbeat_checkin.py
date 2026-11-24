@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import random
 import time
-from collections.abc import Iterator
-from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
-from base.clock.tests.fakes import system_clock
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -26,7 +21,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
-from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.wake.heartbeat.daemon import (
     backoff_deadlines,
     reconcile_checkin_outcomes,
@@ -67,32 +63,6 @@ async def _await_subscribed(bus: EventBus, channel: str) -> None:
         probe.close()
 
 
-@pytest.fixture
-def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[telemetry.EventPipeline]:
-    """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
-    try:
-        telemetry.init_telemetry(
-            home=meiva_home(),
-            process="test-wake-service",
-            pipeline=pipeline,
-            machine_reader=machine_identity.name,
-        )
-        yield pipeline
-    finally:
-        pipeline.stop(timeout=2)
-
-
 def _selected(pool: ConnectionPool) -> dict[int, float]:
     """agent_id -> idle_minutes for every agent the daemon would check in on."""
     return {
@@ -109,32 +79,16 @@ def _selected_ids(rows: list[tuple[int, float, str | None]]) -> set[int]:
     return {agent_id for agent_id, _idle, _reason in rows}
 
 
-def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
-    """The latest heartbeat_nudged mirror line for `agent_id` — (event_name,
-    level, idle_minutes), or None while the drain thread has not landed it."""
-    import json
-    from datetime import UTC, datetime
-
-    from base.paths import logs_dir
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
+def _emitted_nudge(events: EmittedEvents, agent_id: int) -> tuple[str, str, int] | None:
+    """The latest heartbeat_nudged event for `agent_id` — (event_name, level, idle_minutes)."""
+    nudges = [event for event in events.named("heartbeat_nudged") if event.agent_id == agent_id]
+    if not nudges:
         return None
-    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if obj.get("event_name") == "heartbeat_nudged" and obj.get("agent_id") == agent_id:
-            return obj["event_name"], obj["level"], int(obj["attributes"]["idle_minutes"])
-    return None
+    event = nudges[-1]
+    return event.event_name, event.level, int(event.attributes["idle_minutes"])
 
 
 class TestSendHeartbeatCheckin:
-    @pytest.mark.usefixtures("event_pipeline")
     def test_inserts_heartbeat_inbound_and_event(
         self,
         pool: ConnectionPool,
@@ -146,6 +100,7 @@ class TestSendHeartbeatCheckin:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         aid = spawn_agent(
             spawner="user",
@@ -155,18 +110,7 @@ class TestSendHeartbeatCheckin:
             machine=machine_identity,
         )
         send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
-        # The emitter drains asynchronously (0.5s cadence) — flush() can
-        # race the drain thread for the queue, so poll briefly for the line.
-        # The PG events copy was retired at the LGTM cutover (task #1197 close-C)
-        # and later dropped; the durable local copy is the JSONL mirror.
-        ev = None
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            telemetry.flush()
-            ev = _mirror_nudged(aid)
-            if ev is not None:
-                break
-            time.sleep(0.05)
+        ev = _emitted_nudge(emitted_events, aid)
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT content, kind, source FROM inbound_messages WHERE agent_id = %s",
@@ -588,41 +532,3 @@ class TestConsecutiveFailureBackoff:
         assert d1[1] - time.time() == pytest.approx(2 * THRESHOLD_S, abs=1.0)
         assert d2[1] - d1[1] == pytest.approx(2 * THRESHOLD_S, abs=1.0)
         assert d10[1] - d2[1] == pytest.approx((BACKOFF_MAX_WINDOWS - 4) * THRESHOLD_S, abs=1.0)
-
-
-def _mirror_event(agent_id: int, event_name: str) -> dict[str, object] | None:
-    """The latest mirror line for (agent, event), or None while the drain
-    thread has not landed it."""
-    import json
-    from datetime import UTC, datetime
-
-    from base.paths import logs_dir
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
-        return None
-    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if obj.get("event_name") == event_name and obj.get("agent_id") == agent_id:
-            return obj
-    return None
-
-
-def _poll_mirror(
-    agent_id: int, event_name: str, timeout_s: float = 2.0
-) -> dict[str, object] | None:
-    deadline = time.monotonic() + timeout_s
-    ev = None
-    while time.monotonic() < deadline:
-        telemetry.flush()
-        ev = _mirror_event(agent_id, event_name)
-        if ev is not None:
-            break
-        time.sleep(0.05)
-    return ev

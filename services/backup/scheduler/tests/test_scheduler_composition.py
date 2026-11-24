@@ -55,20 +55,6 @@ def _application_name(database: Database) -> str:
     return str(row[0])
 
 
-def test_the_scheduler_log_database_carries_the_process_gate_and_reads_its_owner_when_built(
-    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentityReader
-) -> None:
-    config = _config(db_url)
-
-    first = daemon.scheduler_database(config, machine_identity, database_gate, home=meiva_home())
-
-    assert _application_name(first) == database_gate.application_name()
-    config.view.data_plane.db_url = _refused(db_url)
-    rebuilt = daemon.scheduler_database(config, machine_identity, database_gate, home=meiva_home())
-    with pytest.raises(psycopg.OperationalError):
-        rebuilt.connect()
-
-
 def test_every_worker_handle_shares_one_gate_and_the_scratch_url_replaces_only_the_dial(
     db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentityReader
 ) -> None:

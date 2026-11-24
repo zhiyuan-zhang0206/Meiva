@@ -49,10 +49,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="agent/graph/claim/lost_turn.py:report_lost_turn",
     ),
-    # meiva:note
-    # Stored on its warning level (`base.telemetry.event_store.is_persisted`), not on a reader: no
-    # module selects this name from the event table, and the JSONL mirror and Loki keep it beyond
-    # the table's window.
     "inbound_consumed_unknown": telemetry_event(
         "inbound_consumed_unknown",
         "a claimed inbound was consumed without knowing whether its work ran "
@@ -77,6 +73,5 @@ EVENTS: dict[str, EventSpec] = {
         payload=DeliveryStalled,
         tier="anomaly",
         site="services/wake/delivery_watchdog/daemon.py:_alert_stalled",
-        persist=True,
     ),
 }

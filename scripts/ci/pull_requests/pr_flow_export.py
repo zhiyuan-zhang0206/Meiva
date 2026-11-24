@@ -635,7 +635,7 @@ def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
         save_json(state_dir / "snapshot.json", snapshot)
         from scripts.ci.pull_requests.export_process import owned_event_pipeline
 
-        with owned_event_pipeline(PROCESS_NAME, image=image, home=home) as pipeline:
+        with owned_event_pipeline(PROCESS_NAME, home=home) as pipeline:
             emit_snapshot(
                 snapshot,
                 dry_run=False,

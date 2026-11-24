@@ -18,13 +18,12 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
-from base.telemetry.delivery import loss, mirror
+from base.telemetry.delivery import loss
 
 
 def _event(i: int, category: str = "log") -> telemetry.Event:
@@ -257,48 +256,28 @@ def test_shed_records_report_one_event_log_drop() -> None:
 # ── emitter self-diagnostics (audit-round2 events-obs P2) ────────────────────
 
 
-def test_jsonl_mirror_failure_is_reported_not_silent(unit_home: Path) -> None:
-    """A JSONL mirror write failure must be REPORTED (first + every 50th), not
-    swallowed: the mirror is the durable local copy, and a disk-full /
-    permission error would otherwise degrade it without a trace. The report
-    carries the `_no_emitter` marker so it never re-enters the pipeline
-    (a mirror-down process would otherwise loop failure -> warn -> emit ->
-    failure)."""
+def test_sink_failure_is_reported_first_and_every_fiftieth_not_silent() -> None:
+    """A failing best-effort seam must be REPORTED (first + every 50th), not
+    swallowed. The report carries the `_no_emitter` marker so it never
+    re-enters the pipeline (a failing-sink process would otherwise loop
+    failure -> warn -> emit -> failure)."""
     from loguru import logger
 
     captured: list[str] = []
-    mirror_dir = unit_home / "logs"
-    mirror_dir.mkdir(exist_ok=True)
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    bad_file = mirror_dir / f"events-{day}.jsonl"
-    previous = bad_file.read_bytes() if bad_file.exists() else None
-    bad_file.unlink(missing_ok=True)
-    bad_file.mkdir()
-
-    initial_failures = mirror.jsonl_failures
     sink_id = logger.add(
         lambda m: captured.append(m.record["message"]),
         level="WARNING",
         filter=lambda r: bool(r["extra"].get("_no_emitter")),
     )
     try:
-        for index in range(50):
-            telemetry.append_jsonl([_event(index)], target_dir=mirror_dir, now=system_clock().now())
+        for _ in range(50):
+            telemetry.report_sink_failure("log-batching-probe", OSError("disk full"))
     finally:
         logger.remove(sink_id)
-        bad_file.rmdir()
-        if previous is not None:
-            bad_file.write_bytes(previous)
 
-    expected = [
-        count
-        for count in range(initial_failures + 1, initial_failures + 51)
-        if count == 1 or count % 50 == 0
-    ]
-    assert mirror.jsonl_failures == initial_failures + 50
-    assert len(captured) == len(expected)
-    for message, count in zip(captured, expected, strict=True):
-        assert f"JSONL mirror write failed ({count} consecutive)" in message
+    assert len(captured) == 2
+    assert "log-batching-probe failed (1 time(s)" in captured[0]
+    assert "log-batching-probe failed (50 time(s)" in captured[1]
 
 
 def test_sync_reports_timeout_when_drain_thread_wedged() -> None:

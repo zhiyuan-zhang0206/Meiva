@@ -135,7 +135,6 @@ EVENTS: dict[str, EventSpec] = {
         "a resident schedule's own next-round deadline passed while its session stayed live",
         payload=ScheduleNotProgressing,
         tier="anomaly",
-        persist=True,
         site=("services/wake/schedule_manager/manager.py:_report_late_rounds telemetry.emit"),
     ),
     "schedule_stalled": telemetry_event(

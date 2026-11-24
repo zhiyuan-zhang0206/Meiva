@@ -485,7 +485,7 @@ notifies when the silence ends.
 ## Events-stream cutover (task #1197, done)
 
 The unified emitter ships events as OTLP logs to Loki. Explicitly mapped
-telemetry fields feed Prometheus. The JSONL mirror stays as the local copy.
+telemetry fields feed Prometheus. Loki and Prometheus are the only stores of an event; nothing keeps a local copy.
 These rules read LGTM.
 
 ## Metric-name test evidence

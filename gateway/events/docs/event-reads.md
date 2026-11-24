@@ -44,8 +44,7 @@ matches no `sse` line, so a tier built from the registry's 244 names silently lo
 ## Row identity, windows and pages
 
 - A row's `id` is `blake2b(<Loki entry timestamp in ns>:<line>)` (`telemetry.event_id`) and
-  `line_sha256` is the digest of the line, so a row has the identity the emitter gave it in the
-  JSONL mirror.
+  `line_sha256` is the digest of the line, so a row has the identity the emitter gives the event.
 - A Loki entry's timestamp is the event's `ts` after a float conversion, within about 250 ns of
   the line's own microsecond `ts`. A read pads its window by 500 ns, which includes every row of
   the window and excludes the neighbouring microseconds, and keeps the rows whose line `ts` lies

@@ -3,12 +3,11 @@
 One event stream serves audit, telemetry, and log records under one schema and
 one correlation key (`trace_id`). This module is its only writer.
 
-Pipeline (Layer 1): a bounded queue and drain thread batch every event into
-local JSONL mirrors, the `telemetry_events` table (telemetry and log events), best-effort
-compact metrics, and OTLP logs/metrics. The record of an event is a Postgres table: audit
-events in `audit_events` (written before the event is emitted), telemetry and log events in
-`telemetry_events` (written here, from the drain thread, with the mirror as the fallback).
-Loki and Prometheus hold the observation copy for Grafana and short windows.
+Pipeline (Layer 1): a bounded queue and drain thread batch every event into OTLP logs and
+metrics. Loki (seven days) and Prometheus are the only stores of a telemetry or log event;
+nothing is written to Postgres or to a local file here. The record of an audit event is the
+`audit_events` table, written in the producer's business transaction before the event is
+emitted; the stream carries only its projection.
 
 Backpressure sheds records under overload, audit events included: their record
 is `audit_events`, written before the event is emitted, so shedding the
@@ -16,16 +15,14 @@ projection loses nothing. Trace ids are captured at enqueue, and machine and
 cluster dimensions are always populated.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
-(JSONL mirror + loguru file sinks are the durable backfill for everything
-that reaches the drain thread; the mirror is replayed into `telemetry_events`).
+(the loguru file sinks keep a local copy of every log line).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
 Import discipline: this module imports `base.log`, `base.db`, and `base.paths` lazily
 (inside functions) — `base/db/connections.py` imports `base/log/__init__.py` at module scope
 for `logger`, so a top-level import of log or DB from here is a circular-import
-failure for any process that reaches `base.db` first. Mirror path resolution stays
-inside its write/prune operations so entry inputs can be typed before Settings admission.
+failure for any process that reaches `base.db` first.
 """
 
 from __future__ import annotations
@@ -37,7 +34,6 @@ from pathlib import Path
 from base.api_contracts.agent_contract import EventSink
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
-from base.telemetry.delivery.mirror import event_id
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import (
     Category,
@@ -52,7 +48,12 @@ from base.telemetry.delivery.reporting import (
     report_no_pipeline,
     report_sink_failure,
 )
-from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
+from base.telemetry.delivery.serialization import (
+    event_id,
+    event_line,
+    event_line_digest,
+    event_payload,
+)
 from base.telemetry.delivery.state import (
     UNKNOWN_PROCESS,
     ambient_agent_id,
@@ -212,8 +213,8 @@ def init_telemetry(
     process shares): `init_gateway_process(name)` → process=name; the exec
     child's `add_event_sink` → process="agent-exec" plus its agent id. The
     entry supplies its owned writer; later calls reuse that same resource and
-    refresh the identity binding. Startup never depends on the DB (the `telemetry_events` sink connects
-    lazily on the drain thread)."""
+    refresh the identity binding. Startup never depends on the DB: the pipeline holds no
+    database sink."""
     bound = process_state["pipeline"]
     if bound is not None and bound is not pipeline:
         if not bound.stopped:
@@ -272,11 +273,11 @@ def process_now() -> datetime:
 #
 # `emit()`'s default is the process clock `_process_now()` returns; an explicit `ts` — the loguru
 # adapter passes loguru's local-zone record time, replay/migration passes stored rows — is converted
-# to UTC here so the Event and every serialization of it (the JSONL mirror `ts` field, the OTLP
-# body) carries one offset. A naive `ts` is UTC by contract (the one-time-source rule); treating it
-# as local would mix clocks. The 2026-08-25 mirror audit: loguru rows wrote +08:00 into the mirror
-# while direct emits wrote +00:00, which made any local-wall-clock filter of the mirror misread
-# gateway telemetry as missing since the UTC-day rollover (task #1638).
+# to UTC here so the Event and every serialization of it (the OTLP body) carries one
+# offset. A naive `ts` is UTC by contract (the one-time-source rule); treating it as local would mix
+# clocks. The 2026-08-25 audit: loguru rows wrote +08:00 while direct emits wrote +00:00, which made
+# any local-wall-clock filter misread gateway telemetry as missing since the UTC-day rollover
+# (task #1638).
 def _as_utc(ts: datetime | None) -> datetime:
     if ts is None:
         return _process_now()()
@@ -293,7 +294,7 @@ def _as_utc(ts: datetime | None) -> datetime:
 # instead of stamping a second time source. An explicitly supplied producer capture callback
 # also propagates its errors before observation delivery; no current participant is inferred.
 # The loguru adapter wraps its call with `catch=True`, so a logging line that drifts
-# off-contract stays visible (JSONL mirror) without crashing the producer.
+# off-contract stays visible (the loguru file sinks) without crashing the producer.
 #
 # An event is a named log record (OTel LogRecord semantics: events = logs with names);
 # `event_name` is that name — the `event.name` field, and the registry key (`EVENTS`).
@@ -303,7 +304,7 @@ def _as_utc(ts: datetime | None) -> datetime:
 # (init_telemetry); explicit wins. `ts` defaults to the PROCESS clock at enqueue time — the one
 # `bind_identity` was handed — the single time source for the entire stream, and an explicit
 # `ts` is normalized to UTC before enqueue (`_as_utc`), so every serialization of the Event
-# (the JSONL mirror `ts` field, the OTLP body) carries one offset. Callers pass an explicit `ts`
+# (the OTLP body) carries one offset. Callers pass an explicit `ts`
 # only for loguru-adapter records (loguru stamps local zone — normalized here) and
 # replayed/migrated rows; a DB-derived timestamp would silently mix two clocks (W7 rewired the
 # last DB-clock writers, heartbeat + delivery watchdog, onto this path).

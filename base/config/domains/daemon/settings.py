@@ -334,7 +334,7 @@ class DaemonSettings(
         title="Event maintenance interval (seconds)",
         default=3600.0,
         alias="MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
-        description="Events-maintenance daemon poll interval (seconds): how often it recovers observations, replays the mirror and re-aggregates the last closed days. Hourly keeps the durable ledger fresh and recovers a downtime gap within the hour.",
+        description="Events-maintenance daemon poll interval (seconds): how often it runs its maintenance steps (unknown-writer audit, checkpoint size sample, blob vacuum, usage-ledger repricing). Hourly keeps the durable ledger priced and the samples dense.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

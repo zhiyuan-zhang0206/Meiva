@@ -36,9 +36,8 @@ Rules the whole tree obeys:
 - **Wrap every count in `sum(...)`.** An unaggregated `count_over_time` over many streams hits
   Loki's per-query series cap.
 
-Retention is 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and Loki never holds DEBUG. The
-per-machine JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`, also 7 days) holds every event
-Loki missed; DEBUG is only in the machine's local files.
+Retention is 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and Loki never holds DEBUG. No
+other store holds an event Loki missed; DEBUG is only in the machine's local files.
 
 ## The line shape
 

@@ -32,7 +32,7 @@ class _OkProbeHandler(http.server.BaseHTTPRequestHandler):
 
 
 def _backend(
-    mirror_dir: Path,
+    home: Path,
     *,
     logs: FakeProvider | None = None,
     metrics: FakeProvider | None = None,
@@ -47,8 +47,7 @@ def _backend(
         enabled=enabled,
         providers=(resolved_logs, resolved_metrics),
         queue_maxsize=queue_maxsize,
-        mirror_dir=mirror_dir,
-        home=mirror_dir,
+        home=home,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
     return backend, resolved_logs, resolved_metrics
@@ -192,7 +191,6 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, metrics),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -422,7 +420,6 @@ def test_real_sdk_partial_build_reader_is_owned_and_closed(tmp_path: Path) -> No
             enabled=lambda: True,
             endpoint=lambda: f"http://127.0.0.1:{port}",
             home=tmp_path / "missing-home",
-            mirror_dir=tmp_path,
             instance_id="test-instance",
         )
         assert backend._ensure() is False
@@ -457,7 +454,6 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
         enabled=lambda: True,
         retry_interval_s=0.05,
         providers=(logs, metrics),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -508,7 +504,6 @@ def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path)
         exporter=default_exporter(
             now=system_clock().now,
             export_allowed=reject,
-            mirror_dir=tmp_path,
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
@@ -531,7 +526,6 @@ def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
         exporter=default_exporter(
             now=system_clock().now,
             export_allowed=reject,
-            mirror_dir=tmp_path,
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
@@ -647,7 +641,6 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) ->
         exporter=default_exporter(
             now=system_clock().now,
             export_allowed=lambda: True,
-            mirror_dir=tmp_path,
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
@@ -709,7 +702,6 @@ def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
         exporter=default_exporter(
             now=system_clock().now,
             export_allowed=lambda: True,
-            mirror_dir=tmp_path,
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",

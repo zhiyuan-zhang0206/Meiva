@@ -36,7 +36,7 @@ from services.wake.delivery_watchdog.stranded_wake import (
 _AGE_BOUND_S = 86400.0
 _COOLDOWN_S = 300.0
 
-pytestmark = pytest.mark.usefixtures("event_pipeline", "redis_url")
+pytestmark = pytest.mark.usefixtures("emitted_events", "redis_url")
 
 
 @pytest.fixture

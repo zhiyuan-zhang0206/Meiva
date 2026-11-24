@@ -56,7 +56,6 @@ def identity_child_record() -> dict[str, object]:
             exporter=default_exporter(
                 now=system_clock().now,
                 export_allowed=lambda: True,
-                mirror_dir=Path(home),
                 home=Path(home),
                 enabled=lambda: True,
                 endpoint=lambda: "http://127.0.0.1:4318",

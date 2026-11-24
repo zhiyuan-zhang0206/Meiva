@@ -15,6 +15,12 @@ assert "base.config" not in sys.modules
 pipelines: list[object] = []
 
 
+def machine_reader() -> str:
+    import base.config  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
+    return "probe-host"
+
+
 def producer() -> object:
     from base.telemetry.delivery.pipeline import EventPipeline
 
@@ -28,7 +34,7 @@ try:
         base.telemetry.process_logging.init_cli_process(
             name="probe",
             producer=producer,  # type: ignore[arg-type]
-            machine_reader=lambda: "probe-host",
+            machine_reader=machine_reader,
             home=Path(sys.argv[3]),
         )
     else:
@@ -37,7 +43,7 @@ try:
         base.telemetry.process_logging.init_gateway_process(
             name="probe",
             producer=producer,  # type: ignore[arg-type]
-            machine_reader=lambda: "probe-host",
+            machine_reader=machine_reader,
             image=LoadedCommit(Path(sys.argv[1]), None),
             home=Path(sys.argv[3]),
         )

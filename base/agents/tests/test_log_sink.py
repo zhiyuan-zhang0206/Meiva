@@ -1,35 +1,24 @@
 """Unit tests for the loguru -> event-emitter adapter — locks event resolution /
-agent_id sentinel / payload shape on the JSONL mirror (the durable local copy
-of the unified event stream).
+agent_id sentinel / payload shape of the events the unified event stream carries.
 
 The loguru handler enqueues into the unified emitter (`base.telemetry`),
 whose drain thread batch-writes; `_last_event` flushes the queue first so
-assertions see the written lines without sleeps. The Postgres `events` copy
-was retired with the LGTM cutover (task #1197 close-C) and dropped with the
-archive cleanup (task #1281/#1823); these assertions read the day-stamped
-JSONL mirror
-(`logs_dir()/events-YYYYMMDD.jsonl`) instead — same row shape, one JSON
-object per line.
+assertions see the written events without sleeps. The pipeline under test
+has a list as its writer; each event is read as the row `event_payload`
+serializes (the shape the OTLP export carries).
 """
 
 from __future__ import annotations
 
-import json
-import random
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-import psycopg
 import pytest
 from loguru import logger as _global_logger
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
-from base.cluster.machine import MachineIdentityReader
-from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.db import Database
 from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry.delivery.receipts import DrainStatus
@@ -39,28 +28,26 @@ if TYPE_CHECKING:
     from loguru import Logger
 
 
+_WRITTEN: list[telemetry.Event] = []
+
+
 @pytest.fixture
-def sink_logger(database: Database, machine_identity: MachineIdentityReader) -> Iterator[Logger]:
+def sink_logger() -> Iterator[Logger]:
     """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
 
     The adapter enqueues (non-blocking); tests flush via `_last_event`. bind
     agent_id="-" simulates the gateway init form; within tests when the agent
     process perspective is needed, logger.bind() overrides it.
     """
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=meiva_home(),
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
+    _WRITTEN.clear()
+    pipeline = telemetry.EventPipeline(
+        now=system_clock().now, writer=_WRITTEN.extend, flush_interval_s=0.01
     )
 
     def producer() -> telemetry.EventPipeline:
         return pipeline
 
-    add_event_sink(home=meiva_home(), producer=producer, machine_reader=machine_identity.name)
+    add_event_sink(home=meiva_home(), producer=producer, machine_reader=lambda: "test-host")
     _global_logger.remove()
     sink_id = _global_logger.add(
         partial(event_sink, producer=producer), level="INFO", enqueue=False, catch=False
@@ -77,19 +64,12 @@ pytestmark = pytest.mark.usefixtures("unit_home")
 
 
 def _last_event() -> tuple[str, int | None, str, dict[str, object]]:
-    """Flush the emitter, then return the last mirror line (event_name,
-    agent_id, level, attributes). Fail loud on an empty mirror."""
-    from base.paths import logs_dir
-
+    """Flush the emitter, then return the last event (event_name, agent_id,
+    level, attributes). Fail loud when nothing was written."""
     telemetry.sync()
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
-        raise AssertionError("events mirror is empty — test didn't emit any event")
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert lines, "events mirror is empty — test didn't emit any event"
-    obj = json.loads(lines[-1])
-    return obj["event_name"], obj.get("agent_id"), obj.get("level"), obj.get("attributes", {})
+    assert _WRITTEN, "the writer received no event — test didn't emit any event"
+    row = telemetry.event_payload(_WRITTEN[-1])
+    return row["event_name"], row.get("agent_id"), row.get("level"), row.get("attributes", {})  # type: ignore[return-value]
 
 
 def test_sink_event_resolution_explicit_event(sink_logger: Logger) -> None:
@@ -130,22 +110,12 @@ def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger: Logger) -> None:
     assert agent_id is None
 
 
-def _insert_agent(db: psycopg.Connection) -> int:
-    """The mirror keeps the agent dimension; use a real agents row (the row the events would have referenced) so the assertion is against a real id."""
-    with db.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES ('sink-test') RETURNING id")
-        row = cur.fetchone()
-    assert row is not None, "INSERT ... RETURNING must return a row"
-    return row[0]
+_AGENT = 8905
 
 
-def test_sink_agent_id_numeric_string_converts_to_int(
-    sink_logger: Logger,
-    db_conn: psycopg.Connection,
-) -> None:
-    """agent_id="42" (the string `init_subprocess_logger` binds) → the mirror row carries 42."""
-    tid = _insert_agent(db_conn)
-    db_conn.commit()
+def test_sink_agent_id_numeric_string_converts_to_int(sink_logger: Logger) -> None:
+    """agent_id="42" (the string `init_subprocess_logger` binds) → the event carries 42."""
+    tid = _AGENT
     sink_logger.bind(agent_id=str(tid)).info("from agent", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
     _event, agent_id, _level, _payload = _last_event()
     assert agent_id == tid
@@ -170,13 +140,10 @@ def test_stdlib_intercept_routes_through_sink(sink_logger: Logger) -> None:
     assert payload["msg"] == "stdlib warn via intercept handler"
 
 
-def test_sink_agent_id_int_kwarg_overrides_bind(
-    sink_logger: Logger, db_conn: psycopg.Connection
-) -> None:
+def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger: Logger) -> None:
     """log call passing agent_id=N overrides the bind default — used by base/api_contracts/agent_contract.py for cross-process
     lifecycle events (the caller process bind may not be the target)."""
-    tid = _insert_agent(db_conn)
-    db_conn.commit()
+    tid = _AGENT
     sink_logger.info("spawned", event="agent_spawned", agent_id=tid)  # pyright: ignore[reportUnknownMemberType]
     _event, agent_id, _level, _payload = _last_event()
     assert agent_id == tid
@@ -213,7 +180,7 @@ def test_sink_preserves_llm_usage_source_in_payload(sink_logger: Logger) -> None
 
 
 def test_sink_level_is_recorded(sink_logger: Logger) -> None:
-    """WARNING / ERROR level goes into DB level column — used by sidebar warn_24h/err_24h."""
+    """WARNING / ERROR level goes into level field — used by sidebar warn_24h/err_24h."""
     sink_logger.warning("uh oh", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
     _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
@@ -355,7 +322,7 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
 
     Drives the real `log_reconstruction` through the real loguru → emitter
     sink. Before the fix the call raised `ValueError` inside the sink
-    (catch=False here) and nothing reached the mirror; this locks both the
+    (catch=False here) and nothing reached the stream; this locks both the
     explicit `event=` at the call site and the name's registration."""
     from types import SimpleNamespace
 
@@ -372,27 +339,14 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
     )
     log_reconstruction(tuple_, 3, span=ReadSpan())
 
-    # Find the row by name rather than taking the mirror's last line: ambient
-    # metered `sdk_call` rows can land in the per-test mirror after this test's
-    # own row. (The historical source was the conftest cluster-spawn guard's
-    # `meiva.mcps` probe, fixed in task #3950; the find-by-name defense stays for
-    # any other ambient emitter.)
-    from base.paths import logs_dir
-
+    # Find the event by name rather than taking the last one: ambient metered `sdk_call` events can
+    # land after this test's own. (The historical source was the conftest cluster-spawn guard's
+    # `meiva.mcps` probe, fixed in task #3950; the find-by-name defense stays for any other ambient
+    # emitter.)
     telemetry.sync()
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    rows = [
-        json.loads(line)
-        for line in (logs_dir(home=meiva_home()) / f"events-{day}.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
-    matches = [row for row in rows if row["event_name"] == "delta_read_compat"]
-    assert matches, (
-        f"no delta_read_compat row in the mirror (got {[r['event_name'] for r in rows]})"
-    )
-    payload = matches[-1]["attributes"]
+    events = [event for event in list(_WRITTEN) if event.event_name == "delta_read_compat"]
+    assert events, f"no delta_read_compat event (got {[e.event_name for e in _WRITTEN]})"
+    payload = events[-1].attributes
     assert payload["label"] == "delta-read-compat"
     assert payload["body"] == (
         "reconstructed messages for thread=thread-1 checkpoint=checkpoint-1: 3 messages"

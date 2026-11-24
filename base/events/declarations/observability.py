@@ -89,22 +89,6 @@ class AuditMachineUnknown(TypedDict):
     window_seconds: int
 
 
-class TelemetryStoreFailed(TypedDict):
-    """`telemetry_store_failed` payload — base/telemetry/event_store.py.
-
-    A drain-thread batch did not land in `telemetry_events`. The events are still
-    in the local JSONL mirror and in Loki; the replay writes them once the database
-    answers. Emitted on the first failure and every 50th consecutive one, so
-    ``consecutive_failures`` says how long the outage has run and ``rows`` is the
-    size of the batch that failed.
-    """
-
-    rows: int
-    consecutive_failures: int
-    error_class: str
-    error: str
-
-
 class LogPayload(TypedDict):
     """`log` payload — bare-log fallback; `msg` rides every loguru-sourced row."""
 
@@ -131,7 +115,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=EventLogDrop,
         tier="anomaly",
         site="base/telemetry/loss.py:loss_event constructs Event directly",
-        persist=True,
     ),
     "otlp_backend_disabled": telemetry_event(
         "otlp_backend_disabled",
@@ -173,15 +156,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=AuditMachineUnknown,
         tier="anomaly",
         site="services/upkeep/events_maintenance/audit_identity.py:report_unknown_writers",
-    ),
-    "telemetry_store_failed": telemetry_event(
-        "telemetry_store_failed",
-        "a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror "
-        "and Loki still hold them); host-level, no agent_id: one batch mixes every agent's "
-        "events",
-        payload=TelemetryStoreFailed,
-        tier="anomaly",
-        site='base/telemetry/event_store.py:_Writer._failed telemetry.emit("telemetry", ...)',
     ),
     "log": EventSpec(
         name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"

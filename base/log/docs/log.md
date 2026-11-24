@@ -20,7 +20,7 @@ migration of logger consumers.
 
 `agent_id` comes from an explicit caller or the process startup binding. Shared services default to the `-` sentinel (NULL in events); exec subprocesses bind their own agent. `logger.bind(agent_id=N)` and `telemetry.emit(..., agent_id=N)` provide explicit attribution. Ordinary unannotated host logs retain their process and machine dimensions, but do not appear in an agent-filtered view. Business audit, cancellation and lifecycle operations still require their explicit owner; ordinary logging is not an identity source.
 
-Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `base/telemetry` — the unified emitter — which writes the JSONL mirror, the `telemetry_events` table and the OTLP export (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events are recorded in Postgres (`audit_events`, append-only) by `base/telemetry/audit_events.py` first and flow through the same emitter afterwards as a projection. Telemetry and log events are appended to `telemetry_events` (append-only, partitioned by month) by the emitter's drain thread (`base/telemetry/event_store.py`); a batch that does not land stays in the mirror, which `services/upkeep/events_maintenance/telemetry_replay.py` replays.
+Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `base/telemetry` — the unified emitter — which exports it over OTLP, to Loki and Prometheus (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events are recorded in Postgres (`audit_events`, append-only) by `base/telemetry/audit_events.py` first and flow through the same emitter afterwards as a projection. Telemetry and log events are stored in Loki for seven days only: no Postgres table and no local event file holds them.
 
 ## Core Responsibilities
 
@@ -36,9 +36,8 @@ Every log line is also an **event** in the unified event stream (event-system de
 ### Three sink types
 stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [log sinks](sinks.md).
 
-### Two key mechanisms
-- The seven-day full and 90-day rollup-source JSONL mirrors preserve Loki-stable IDs; [events maintenance](../../../services/docs/gateway_side/events_maintenance/events_maintenance.md) replays the rollup tier.
-- The emitter's bounded queue + daemon drain thread (`base/telemetry.EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$MEIVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [Queue loss](../../telemetry/otlp/docs/telemetry-otlp/export-backpressure.md).
+### Key mechanism
+- The emitter's bounded queue + daemon drain thread (`base/telemetry.EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the loguru file sinks keep a local copy of every log line. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [Queue loss](../../telemetry/otlp/docs/telemetry-otlp/export-backpressure.md).
 
 ## Two surfaces, and where they diverge
 
@@ -60,8 +59,7 @@ The PG `events` table was RANGE-partitioned by month on `ts`; the
 events-maintenance daemon kept the current and next month ahead of the write
 frontier so nothing stranded in the DEFAULT catch-all. Retention DROP was
 never enabled: the archive cleanup dropped the table whole (task
-#1281/#1823). Live retention is the JSONL mirror tiers (7d full / 90d
-rollup-source) plus Loki's own. The usage ledger
+#1281/#1823). Live retention is Loki's seven days. The usage ledger
 (`llm_usage_ledger`) keeps since-birth usage independent of that retention.
 
 ## Notes

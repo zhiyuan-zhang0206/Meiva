@@ -43,14 +43,15 @@ its original worker error is collected before replacement. Downstream exit
 cleanup still runs through the last concrete binding.
 
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
-its worker and requires the root's writer and the stream's clock. `build_pipeline(database=..., machine=..., home=..., now=...,
-otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5, rng=...)` binds
-ordinary sinks to that root's database factory and owns one lazy OTLP backend.
+its worker and requires the root's writer and the stream's clock. `build_pipeline(machine=..., home=..., now=...,
+otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5, rng=...)` owns one lazy OTLP backend,
+the pipeline's only sink: Loki and Prometheus, behind the collector, are the only stores of a
+telemetry or log event. Nothing is written to Postgres or to a local event file, so a root hands
+the pipeline no database.
 
-`now` is the process clock the stream stamps with: the write instant and retention cutoff of every
-JSONL mirror batch, the loss alarm of a saturated queue, and the default timestamp of an event whose
-producer passed none. The root reads the clock once and hands it down, and `init_telemetry` binds it
-beside the pipeline (`process_state["now"]`), so the stream has one time source: a process that binds
+`now` is the process clock the stream stamps with: the loss alarm of a saturated queue and the
+default timestamp of an event whose producer passed none. The root reads the clock once and hands it
+down, and `init_telemetry` binds it beside the pipeline (`process_state["now"]`), so the stream has one time source: a process that binds
 a stream but no clock raises at its first default-stamped event instead of reading the host clock a
 second time.
 The backend reads its machine eligibility only when enabled export is requested;

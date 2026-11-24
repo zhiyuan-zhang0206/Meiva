@@ -131,8 +131,8 @@ class CompactionCompleted(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage, persist=True),
-    "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd, persist=True),
+    "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage),
+    "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd),
     "turn_end_declaration_rejected": telemetry_event(
         "turn_end_declaration_rejected",
         "an agent's turn-end declaration was refused (recorded as invalid); the turn continued",
@@ -144,7 +144,6 @@ EVENTS: dict[str, EventSpec] = {
         "direct model call accounting failed (the call ran; its llm_usage row is dropped)",
         payload=LlmUsageMeteringFailed,
         tier="anomaly",
-        persist=True,
     ),
     "llm_usage_ledger_write_failed": telemetry_event(
         "llm_usage_ledger_write_failed",
@@ -164,7 +163,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=LlmTurnAborted,
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
-        persist=True,
     ),
     "recovery_breaker_halt": telemetry_event(
         "recovery_breaker_halt",
@@ -181,7 +179,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=LlmProviderError,
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
-        persist=True,
     ),
     "thinking_block_sanitized": telemetry_event(
         "thinking_block_sanitized", "thinking block sanitized", tier="noise"

@@ -15,7 +15,7 @@ input and no cache metering returns a null cache-hit rate.
 The statistics path serves only the explicit hour windows whitelisted by `StatsWindowHours`
 (0/1/6/24/72/168/720) and cumulative-since-spawn; turn counts, exec outcomes, durations, TPS and
 active time are not served (they came from persisted observations of `telemetry_events`, which
-has no consumer left). The `/inspect/live` half remains
+has no consumer and no writer left). The `/inspect/live` half remains
 window-independent — see [Ops Surfaces (cluster admin + stats dashboard)](../../cluster/docs/ops-surfaces.md).
 
 The Gateway lifespan owns shared SQL work until its native executor future

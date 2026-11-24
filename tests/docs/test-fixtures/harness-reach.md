@@ -23,6 +23,6 @@ revokes that permission after errors or skips, and session cleanup removes the f
 restores patched names. `tests/fixtures/tests/test_helper_door_guard.py` checks
 the real door's wrapper identity and proves refusal/admission with a pure Python fixture door,
 without native effects even when the guard regresses.
-`_telemetry_event_store_off` and `_clean_db` quiesce only the telemetry already loaded.
+`_telemetry_drained` and `_clean_db` quiesce only the telemetry already loaded.
 
 Roster and load order of the root plugins: [Test Fixtures — Root Plugins](test-fixtures.md).

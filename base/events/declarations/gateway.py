@@ -233,9 +233,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site='gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)',
     ),
-    "sse_drop": telemetry_event(
-        "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
-    ),
+    "sse_drop": telemetry_event("sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly"),
     # meiva:note
     # The alert webhook heartbeat: an unpersisted event whose only consumer is the OTLP
     # gauge (`alerts_last_ingest_timestamp_seconds`), so the dead-man rule can tell
@@ -255,7 +253,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=GatewayLatency,
         tier="noise",
         site=('gateway/http/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)'),
-        persist=True,
     ),
     "staged_upload_received": telemetry_event(
         "staged_upload_received",

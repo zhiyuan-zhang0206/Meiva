@@ -1145,8 +1145,8 @@ groups:
             runs; its normal restarts leave gaps under two hours, so a longer
             silence means the checkpoint telemetry or its export path stopped
             — and while it is silent the checkpoint footprint growth rule is
-            blind. Triage the events_maintenance daemon's health,
-            [otlp-exporter] log lines, and ~/.meiva/logs/events-*.jsonl. With
+            blind. Triage the events_maintenance daemon's health and its
+            [otlp-exporter] log lines. With
             MEIVA_TELEMETRY_OTLP_ENABLED=off the gateway-metrics-silent rule
             fires too.
         data:
@@ -2048,8 +2048,8 @@ groups:
             the whole OTLP surface (the R6 events rule also fires), the gateway's
             OTLP exporter is blind after an init-time collector blip (the
             five-minute retry and otlp_backend_recovered event close that
-            episode), or the collector/Prometheus path broke. Triage
-            ~/.meiva/logs/events-*.jsonl, [otlp-exporter] log lines, and
+            episode), or the collector/Prometheus path broke. Triage the
+            gateway's [otlp-exporter] log lines and
             meiva_gateway_latency_count_total in Prometheus.
         data:
           - refId: A

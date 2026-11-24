@@ -166,7 +166,6 @@ def main() -> None:
         )
 
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS).now,

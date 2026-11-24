@@ -85,10 +85,9 @@ def test_state_alert_gauges_payload_and_metric_dispositions() -> None:
         assert METRIC_DISPOSITION["schedule_manager_state"][field] == "gauge", field
 
 
-def test_main_red_watch_round_counts_rounds_and_is_not_persisted() -> None:
-    from base.events.contract import EVENTS, payload_keys
+def test_main_red_watch_round_counts_rounds() -> None:
+    from base.events.contract import payload_keys
     from base.telemetry.otlp.telemetry_otlp import METRIC_DISPOSITION
 
     assert "rounds" in (payload_keys("main_red_watch_round") or ())
     assert METRIC_DISPOSITION["main_red_watch_round"] == {"rounds": "counter"}
-    assert not EVENTS["main_red_watch_round"].persist

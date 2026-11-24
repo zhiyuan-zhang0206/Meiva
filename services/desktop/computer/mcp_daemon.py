@@ -749,7 +749,6 @@ def main() -> None:
     database = lambda: Database.from_settings(gate=entry.gate, direct_url=entry.direct_url)  # noqa: E731
     clock = Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS)
     pipeline = build_pipeline(
-        database=database,
         machine=entry.machine,
         home=process_home,
         now=clock.now,

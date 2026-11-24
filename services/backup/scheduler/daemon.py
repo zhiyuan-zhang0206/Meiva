@@ -19,21 +19,14 @@ from pathlib import Path
 from base import telemetry
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
-from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.child_env import inherited_process_env
-from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
@@ -307,18 +300,6 @@ async def run(
 
 
 # meiva:note
-# The lazy log-database handle: the config as its owner holds it when the handle is built.
-def scheduler_database(
-    config: ConfigBoot, machine: MachineIdentityReader, gate: ProcessDbGate, *, home: Path
-) -> Database:
-    return Database(
-        db_config_from_boot(config),
-        gate=gate,
-        direct_url=ClusterDirectUrl(machine.host, home=home),
-    )
-
-
-# meiva:note
 # SIGTERM exits within the shutdown bound even while a default-executor job is wedged.
 # meiva:link services/backup/scheduler/docs/timing-and-exit.md
 def main() -> None:
@@ -330,13 +311,10 @@ def main() -> None:
     process_home = meiva_home().resolve()
     image = LoadedCommit.capture()
     assert_schema_current(config.view.data_plane.db_url)
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="pg_backup", end_process=hard_exit)
     pipeline = build_pipeline(
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
-        database=lambda: scheduler_database(config, machine, gate, home=process_home),
         machine=machine,
         home=process_home,
         rng=_new_rng(),

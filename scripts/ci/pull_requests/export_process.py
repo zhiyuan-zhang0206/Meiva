@@ -1,4 +1,4 @@
-"""The standalone CI samplers' database gate and finite event-writer lifetime."""
+"""The standalone CI samplers' finite event-writer lifetime."""
 
 import random
 from collections.abc import Generator
@@ -7,18 +7,12 @@ from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.host.exit_codes import hard_exit
 from base.log import logger
-from base.native_process.code_version import CodeVersion
-from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
-__all__ = ["drain_event_pipeline", "owned_event_pipeline", "process_gate"]
+__all__ = ["drain_event_pipeline", "owned_event_pipeline"]
 
 
 # meiva:note
@@ -27,13 +21,6 @@ __all__ = ["drain_event_pipeline", "owned_event_pipeline", "process_gate"]
 # `random.Random`.
 def _new_rng() -> random.Random:
     return random.Random()  # noqa: S311
-
-
-def process_gate(process: str, *, image: LoadedCommit | None) -> ProcessDbGate:
-    if image is None:
-        raise ValueError("a standalone exporter requires its entry's loaded image")
-    version = CodeVersion(image)
-    return ProcessDbGate(process=process, version=version.get, end_process=hard_exit)
 
 
 @contextmanager
@@ -56,22 +43,11 @@ def drain_event_pipeline(process: str, pipeline: EventPipeline) -> Generator[Eve
 
 
 @contextmanager
-def owned_event_pipeline(
-    process: str, *, image: LoadedCommit | None, home: Path
-) -> Generator[EventPipeline]:
+def owned_event_pipeline(process: str, *, home: Path) -> Generator[EventPipeline]:
     """Own the sampler's actual writer; a scheduled caller supplies its existing producer."""
-    gate = process_gate(process, image=image)
-
-    def database() -> Database:
-        return Database.from_settings(
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host, home=home),
-        )
-
     config = ConfigBoot()
     machine = ConfiguredMachineIdentity(config)
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=home,
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,

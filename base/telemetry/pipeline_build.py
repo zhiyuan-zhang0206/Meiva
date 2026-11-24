@@ -1,9 +1,8 @@
-"""Compose the event pipeline's writer from its sinks, and close them at process exit.
+"""Compose the event pipeline's writer from its one sink, the OTLP exporter, and close it at exit.
 
 The emitter (`base.telemetry.emitter`) only enqueues into whatever pipeline a root binds; this
-module is where the sinks meet: the JSONL mirror, the `telemetry_events` store, the
-observed-metrics projection and the OTLP exporter. It sits above all of them, so none of them
-needs to import the emitter's composition.
+module builds the pipeline a root binds. Loki and Prometheus, reached through the exporter, are the
+only stores of a telemetry or log event: nothing is written to Postgres or to a local file.
 """
 
 from __future__ import annotations
@@ -16,84 +15,24 @@ from pathlib import Path
 
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
-from base.paths import logs_path
-from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.delivery.receipts import DrainStatus, Event
-from base.telemetry.delivery.reporting import failure_isolated, report_no_pipeline
 from base.telemetry.delivery.state import process_state
 
 
-def write_batch(
-    events: list[Event],
-    *,
-    database: Callable[[], object] | None,
-    export: Callable[[list[Event]], None],
-    target_dir: Path,
-    now: datetime,
-) -> None:
-    """Mirror first, then the telemetry_events record, the compact metric projection
-    and OTLP export.
-
-    A process without database authority passes None and keeps the mirror and OTLP sinks.
-    Persistence and exporter transport failures retain their sink isolation.
-    Required identity defects propagate to the writer's failure receipt. The
-    projection cannot turn an observation into a billing proof.
-    """
-    if not events:
-        return
-    append_jsonl(events, target_dir=target_dir, now=now)
-    if database is not None:
-        _write_database_sinks(events, database)
-    export(events)
-
-
-def _write_database_sinks(events: list[Event], database: Callable[[], object]) -> None:
-    # meiva:note
-    # The factory is typed `object`: naming `Database` at module level would load the settings stack
-    # with `base.telemetry`, which every cold process imports. The check is made here, where the
-    # sinks that need it are imported.
-    with failure_isolated("telemetry_events store"):
-        from base.db import Database
-        from base.telemetry.event_store import store_events
-
-        store = database()
-        if not isinstance(store, Database):
-            raise TypeError(
-                f"the event pipeline's database factory returned {type(store).__name__}"
-            )
-        store_events(store, events)
-    try:
-        from base.db import Database
-        from base.telemetry.metrics.observed_metrics import project_events
-
-        projected = database()
-        if isinstance(projected, Database):
-            project_events(projected, events)
-        else:
-            report_no_pipeline(
-                "[observed-metrics] sink unavailable: database factory returned {kind}",
-                kind=type(projected).__name__,
-            )
-    except Exception as exc:
-        report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
-
-
 # meiva:note
-# Own the writer and lazy exporter with the root's optional database and machine.
+# Own the writer and lazy exporter with the root's machine.
 #
 # `flush_interval_s` is how long the drain thread holds a partial batch before it writes it. The
-# mirror and the exporter's loss reports land under `home`, so `home` must be absolute: a relative
-# one would put them under whatever directory the process happens to be in. Raises ValueError when
+# exporter derives the process's resource identity from `home`, so `home` must be absolute: a
+# relative one would name whatever directory the process happens to be in. Raises ValueError when
 # it is not.
 #
-# `now` is the clock this stream stamps with — the write instant of every mirror batch, the loss
-# alarm, and the default timestamp of an event whose producer passed none. It is the process clock
-# the root already builds, read once there and handed down: the stream has exactly one time source,
-# and a module below this one never reaches for the host clock.
+# `now` is the clock this stream stamps with — the loss alarm, and the default timestamp of an
+# event whose producer passed none. It is the process clock the root already builds, read once
+# there and handed down: the stream has exactly one time source, and a module below this one never
+# reaches for the host clock.
 def build_pipeline(
     *,
-    database: Callable[[], object] | None,
     machine: MachineIdentityReader,
     home: Path,
     now: Callable[[], datetime],
@@ -121,26 +60,18 @@ def build_pipeline(
     # The process environment is read once, here: every daemon builds its pipeline at its
     # composition root, after its boot loaded the `.env` it will run with.
     explicit = endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment())
-    mirror_dir = logs_path(home)
     exporter = default_exporter(
         export_allowed=lambda: observability_export_allowed(
             machine, home=home, endpoint_explicit=explicit
         ),
         enabled=otlp_enabled,
         endpoint=otlp_endpoint,
-        mirror_dir=mirror_dir,
         home=home,
         now=now,
         instance_id=instance_id,
     )
     return ExportingEventPipeline(
-        writer=lambda events, owned: write_batch(
-            events,
-            database=database,
-            export=owned.export_batch,
-            target_dir=mirror_dir,
-            now=now(),
-        ),
+        writer=lambda events, owned: owned.export_batch(events),
         exporter=exporter,
         now=now,
         flush_interval_s=flush_interval_s,
@@ -150,24 +81,14 @@ def build_pipeline(
 def drain_on_exit() -> None:
     """Close ordinary admission and finitely join its single writer at normal exit.
 
-    The ordered exit seam closes downstream sinks only after the writer finishes.
-    Providers leave shutdown to their worker; an unfinished writer is reported;
-    process exit may shed its ordinary tail. ``hard_exit`` bypasses this hook.
+    The pipeline closes the exporter only after the writer finishes. Providers leave shutdown
+    to their worker; an unfinished writer is reported; process exit may shed its ordinary
+    tail. ``hard_exit`` bypasses this hook.
     """
     pipeline = process_state["pipeline"]
     if pipeline is None:
         return
-    result = pipeline.stop()
-    if result.status is DrainStatus.UNFINISHED:
-        return  # the owned writer still uses these sinks; process exit sheds its tail
-    with failure_isolated("close observed-metrics projection"):
-        from base.telemetry.metrics.observed_metrics import close_projection
-
-        close_projection()
-    with failure_isolated("close telemetry_events store"):
-        from base.telemetry.event_store import close_store
-
-        close_store()
+    pipeline.stop()
 
 
 atexit.register(drain_on_exit)

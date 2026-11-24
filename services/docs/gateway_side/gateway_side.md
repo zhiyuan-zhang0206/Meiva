@@ -15,7 +15,7 @@ Source of truth = services in `build_services()` of `services/supervision/roster
 | ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / impersonation leases, lifecycle-pointer scans, fire-log prune | [TTL Reaper — wall-clock deadline enforcement](ttl_reaper.md) |
 | schedule-manager | Keeps one resident session alive per enabled schedule (reconcile + crash backoff/breaker, API sync requests) | [Schedule Manager — resident schedule sessions](schedule_manager.md) |
 | insights | CPU-heavy read models over agent history (run timeline) on a Unix socket; the gateway authenticates and proxies | [Insights service — read models over agent history](../../derived/insights/README.md) |
-| events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + mirror replay + checkpoint maintenance) | [Events Maintenance — mirror replay, checkpoint maintenance + alert maintenance](events_maintenance/events_maintenance.md) |
+| events-maintenance | unified `events` stream maintenance (unknown-writer audit + ledger repricing + checkpoint maintenance) | [Events Maintenance — ledger repricing, checkpoint maintenance + alert maintenance](events_maintenance/events_maintenance.md) |
 | memory-indexer | memory pool vector index | [Memory Indexer](memory_indexer/memory_indexer.md) |
 | labeler | agent auto-naming | [Labeler — Agent Auto-Naming](labeler.md) |
 | pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [PG-Backup — Daily Local Postgres Backup](../../backup/artifact/docs/backup.md) |

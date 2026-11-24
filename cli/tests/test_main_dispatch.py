@@ -186,8 +186,7 @@ def test_dispatch_invokes_per_subcommand_handler(
         argv,
         declared=tmp_path,
         checkout=Path(_main.__file__).resolve().parents[1],
-        producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
-            db,
+        producer_factory=lambda machine, home, command: OperatorEventPipeline.recording(
             machine=machine,
             home=home,
             now=system_clock().now,

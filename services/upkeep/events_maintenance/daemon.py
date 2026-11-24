@@ -1,6 +1,6 @@
 # meiva:note
 # Gateway-owned events-maintenance daemon. Resident loops under one `TaskGroup`:
-# - Hourly dispatch (`telemetry_replay`, `blob_vacuum`, checkpoint size sample)
+# - Hourly dispatch (unknown-writer audit, `blob_vacuum`, checkpoint size sample, ledger repricing)
 # - 60s `registry_gauge` (`max(agents.id)` -> `agent_registry`)
 # Each loop tracks independent progress and hard deadlines for `/healthz`; exceeding a deadline
 # fails healthz until the watchdog restarts the process.
@@ -10,7 +10,6 @@ import asyncio
 import os
 import random
 import signal
-import socket
 import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime
@@ -61,7 +60,6 @@ from services.upkeep.events_maintenance.ledger_repricing import (
     reprice_unpriced_ledger,
 )
 from services.upkeep.events_maintenance.passes import events_maintenance_log
-from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 
 
 # meiva:note
@@ -72,14 +70,12 @@ def _new_rng() -> random.Random:
 
 
 # meiva:note
-# The service's configuration, read once from the process's `ConfigBoot`. `mirror_dir` is where the
-# telemetry JSONL mirror lives; the entry knows its home, so the replay does not look it up.
-def events_maintenance_config(config: ConfigBoot, *, mirror_dir: Path) -> EventsMaintenanceConfig:
+# The service's configuration, read once from the process's `ConfigBoot`.
+def events_maintenance_config(config: ConfigBoot) -> EventsMaintenanceConfig:
     return EventsMaintenanceConfig(
         events_maintenance_interval_seconds=config.view.daemon.events_maintenance_interval_seconds,
         events_maintenance_pass_deadline_s=config.view.daemon.events_maintenance_pass_deadline_s,
         timezone=config.view.general.timezone,
-        mirror_dir=mirror_dir,
     )
 
 
@@ -93,7 +89,7 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 
 # meiva:note
-# One hourly pass: the telemetry mirror replay, the unknown-writer audit, the hourly checkpoint
+# One hourly pass: the unknown-writer audit, the hourly checkpoint
 # size/row-count telemetry sample, the blob VACUUM, and the pricing of usage-ledger rows that have no
 # cost yet (`ledger_repricing.py`). One `now` drives the time-based steps. Logs what each step did; a
 # no-op pass logs nothing.
@@ -104,21 +100,7 @@ def run_maintenance(
     db: Database,
     *,
     now: datetime,
-    host: str,
 ) -> None:
-    # The telemetry_events record is independent of the other steps: its writer reports its own
-    # failures and the mirror holds what it missed, so a failing replay must not prevent the
-    # remaining maintenance work from making progress.
-    try:
-        with pool.connection() as conn:
-            replayed = recover_telemetry_events(conn, logs=config.mirror_dir, host=host)
-        if replayed:
-            events_maintenance_log.info(
-                "[events-maintenance] replayed %d telemetry events from the mirror", replayed
-            )
-    except Exception:
-        events_maintenance_log.exception("[events-maintenance] telemetry events replay incomplete")
-    progress.beat()
     # meiva:note
     # A row whose writer could not name its machine is the shape `#6089` made readable and nothing
     # read. The window spans one interval plus the pass deadline, so a slow pass cannot open a gap
@@ -256,7 +238,6 @@ async def dispatch_loop(
         "[events-maintenance] daemon started, interval=%.0fs",
         interval,
     )
-    host = socket.gethostname()
     await passes.pass_loop(
         progress,
         label="maintenance",
@@ -267,7 +248,6 @@ async def dispatch_loop(
             config,
             db,
             now=_clock(config).now(),
-            host=host,
         ),
         tasks=tasks,
     )
@@ -294,9 +274,7 @@ async def run(
         "[events-maintenance] pidfile written: %s", _pidfile(process_config, runtime=runtime)
     )
 
-    # meiva:note
-    # The telemetry mirror lives in the home's logs directory, beside the runtime directory.
-    config = events_maintenance_config(process_config, mirror_dir=runtime.parent / "logs")
+    config = events_maintenance_config(process_config)
     # meiva:note
     # The health component times and the loops' stamps share this one instance,
     # so a single clock decides both and a test that steers it steers them together. The dispatch and
@@ -363,7 +341,6 @@ def main() -> None:
         )
 
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS).now,

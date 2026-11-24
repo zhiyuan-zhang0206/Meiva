@@ -54,11 +54,6 @@ class EventSpec:
     (positional emit, dynamic name, SQL write) emits this name. A non-empty
     ``site`` is the producer evidence ``tests/contracts/test_lint_event_kinds.py`` accepts
     for the name, so the exemption lives with the declaration.
-
-    ``persist``: the event is kept in ``telemetry_events``. Set it on every event a Postgres
-    reader queries by name or prefix; an event nobody reads by name is not stored (it stays in
-    the JSONL mirror and Loki), unless its level is warning or higher or its name is
-    unregistered. ``base.telemetry.event_store.is_persisted`` is the one judgment.
     """
 
     name: str
@@ -70,7 +65,6 @@ class EventSpec:
     family: str | None = None
     doc: str = ""
     site: str = ""
-    persist: bool = False
 
 
 def audit_event(
@@ -117,7 +111,6 @@ class TelemetryEventOptions(TypedDict, total=False):
     destination: Literal["events", "file"]
     tier: EventTier
     site: str
-    persist: bool
 
 
 def telemetry_event(
@@ -134,5 +127,4 @@ def telemetry_event(
         destination=options.get("destination", "events"),
         doc=doc,
         site=options.get("site", ""),
-        persist=options.get("persist", False),
     )

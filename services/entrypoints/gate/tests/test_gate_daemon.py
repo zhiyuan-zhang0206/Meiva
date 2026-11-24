@@ -17,11 +17,8 @@ import pytest
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
-from base.cluster.machine import MachineIdentityReader
 from base.host.env import port_lease
 from base.log.tests.log_records import LogRecords, loguru_records
-from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from services.entrypoints.gate import daemon
 from services.entrypoints.gate.daemon import Gate, GateConfig, GateServer
@@ -179,21 +176,6 @@ def test_a_clean_writer_stop_reports_nothing(loguru_records: LogRecords) -> None
     assert not [m for m in loguru_records.messages() if "unfinished" in m]
 
 
-def test_the_database_factory_shares_one_gate_between_opens() -> None:
-    from base.cluster.machine.configured import ConfiguredMachineIdentity
-    from base.config import ConfigBoot
-
-    config = ConfigBoot()
-    machine: MachineIdentityReader = ConfiguredMachineIdentity(config)
-    factory = daemon.gate_database(
-        image=LoadedCommit.capture(), machine=machine, config=config, home=meiva_home()
-    )
-    first, second = factory(), factory()
-    assert first is not second
-    assert first._gate is second._gate
-    assert first._gate.application_name().startswith("meiva:gate:v")
-
-
 def _child_env(home: Path) -> dict[str, str]:
     (home / ".env").write_text(
         "MEIVA_MACHINE_NAME=gate-test\nMEIVA_TIMEZONE=UTC\nMEIVA_TELEMETRY_OTLP_ENABLED=false\n",
@@ -265,7 +247,6 @@ def test_the_entry_serves_until_stopped_and_then_exits_cleanly(tmp_path: Path) -
     log = (tmp_path / "logs" / "gate.log").read_text(encoding="utf-8")
     assert f"gate serving on :{port}" in log
     assert "received SIGTERM" in log
-    assert list((tmp_path / "logs").glob("events-*.jsonl"))
 
 
 def test_a_taken_port_fails_the_entry_with_the_bind_error(tmp_path: Path) -> None:

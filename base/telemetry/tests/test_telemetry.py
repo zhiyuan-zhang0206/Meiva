@@ -1,12 +1,12 @@
 """The unified event emitter (`base.telemetry`) — event-shape contract.
 
-Pins the Layer-1 contract of the event-system refactor: every `emit()` lands
-one line in the JSONL mirror (the durable local copy; the Postgres `events`
-copy was retired with the LGTM cutover, task #1197) with the unified event
-shape (event_name, category, level, source, attributes, trace correlation),
-and `trace_id`/`span_id` are captured from the active OTel span at enqueue
-time — no per-callsite plumbing. The OTLP export (Loki/Prometheus) is the
-same batch, covered by telemetry_otlp's tests.
+Pins the Layer-1 contract of the event-system refactor: every `emit()` hands
+the pipeline's writer one event with the unified event shape (event_name,
+category, level, source, attributes, trace correlation), and `trace_id`/`span_id`
+are captured from the active OTel span at enqueue time — no per-callsite
+plumbing. The tests read the writer's batches as the rows `event_payload`
+serializes. The OTLP export (Loki/Prometheus) is the same batch, covered by
+telemetry_otlp's tests.
 
 The emitter pipeline is a per-process singleton; tests bind process identity
 explicitly and flush before every assertion (the drain thread writes batches
@@ -16,7 +16,6 @@ asynchronously).
 from __future__ import annotations
 
 import json
-import random
 import socket
 import threading
 from collections.abc import Iterator
@@ -31,11 +30,9 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import cluster, telemetry
 from base.clock.tests.fakes import system_clock
-from base.db import Database
 from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry import emitter, observability
-from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 _AGENT = 8901
 
@@ -43,54 +40,46 @@ _AGENT = 8901
 # meiva:note
 # `telemetry.flush()` is `Pipeline.sync(timeout=5.0)`: a drain that misses its deadline returns
 # `DrainStatus.UNFINISHED` and reports it rather than raising, so a bare flush does not prove the
-# mirror row exists yet (2026-11-07, #8601). The helpers below prove the drain finished first.
+# writer saw the event yet (2026-11-07, #8601). The helpers below prove the drain finished first.
 def _drained() -> None:
     result = telemetry.flush()
     assert result.status is telemetry.DrainStatus.COMPLETED, result
 
 
-def _mirror_rows(event_name: str, agent: int | None = None) -> list[dict[str, Any]]:
-    """Every mirror line for (event_name[, agent]) — fail loud on absence.
+def _emitted_rows(event_name: str, agent: int | None = None) -> list[dict[str, Any]]:
+    """Every event the writer received for (event_name[, agent]) as its serialized row, with the
+    surrogate `id` a Loki reader derives.
 
-    The mirror is day-stamped and cumulative across tests, so callers filter
-    by event_name (each test uses its own event name); `_mirror_last` is for
-    the cases that need the most recent row only.
-    """
-    from base.paths import logs_dir
-
+    The capture list is fresh for each test; callers still filter by event_name."""
     _drained()
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
-        return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            obj = json.loads(line)
-        except ValueError:
+    for event in list(_WRITTEN):
+        if event.event_name != event_name or (agent is not None and event.agent_id != agent):
             continue
-        if obj.get("event_name") == event_name and (agent is None or obj.get("agent_id") == agent):
-            rows.append(obj)
+        ts_ns = int(event.ts.timestamp() * 1_000_000_000)
+        row: dict[str, Any] = {
+            **telemetry.event_payload(event),
+            "id": telemetry.event_id(telemetry.event_line(event), ts_ns),
+        }
+        rows.append(row)
     return rows
 
 
-def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
-    rows = _mirror_rows(event_name, agent)
-    assert rows, f"expected a mirror line for {event_name}/{agent}, got none"
+def _emitted_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
+    rows = _emitted_rows(event_name, agent)
+    assert rows, f"expected an event for {event_name}/{agent}, got none"
     return rows[-1]
 
 
+_WRITTEN: list[telemetry.Event] = []
+
+
 @pytest.fixture(autouse=True)
-def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
-    """Bind a stable identity to this test's explicit native writer owner."""
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity(),
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
+def bind_telemetry(unit_home: Path) -> Iterator[None]:
+    """Bind a stable identity to this test's explicit event pipeline, whose writer is a list."""
+    _WRITTEN.clear()
+    pipeline = telemetry.EventPipeline(
+        now=system_clock().now, writer=_WRITTEN.extend, flush_interval_s=0.01
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -111,7 +100,7 @@ def test_emit_writes_unified_event_shape() -> None:
         source="system",
         attributes={"in_total": 100, "model": "deepseek-v4"},
     )
-    obj = _mirror_last("llm_usage", _AGENT)
+    obj = _emitted_last("llm_usage", _AGENT)
     assert obj["event_name"] == "llm_usage"
     assert obj["category"] == "telemetry"
     assert obj["level"] == "info"
@@ -135,18 +124,18 @@ def test_audit_event_writes_unified_shape() -> None:
         target_agent_id=_AGENT + 1,
         attributes={"inbound_id": 42},
     )
-    obj = _mirror_last("send_message", _AGENT)
+    obj = _emitted_last("send_message", _AGENT)
     assert obj["category"] == "audit"
     assert obj["source"] == "agent:8902"
     assert obj["target_agent_id"] == _AGENT + 1
     assert obj["attributes"] == {"inbound_id": 42}
 
 
-def test_telemetry_and_log_events_land_in_mirror() -> None:
+def test_telemetry_and_log_events_reach_the_writer() -> None:
     telemetry.emit("telemetry", "turn_end", agent_id=_AGENT, attributes={"ok": True})
     telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "hello"})
-    turn_end = _mirror_last("turn_end", _AGENT)
-    bare_line = _mirror_last("log", _AGENT)
+    turn_end = _emitted_last("turn_end", _AGENT)
+    bare_line = _emitted_last("log", _AGENT)
     assert turn_end["category"] == "telemetry"
     assert bare_line["category"] == "log"
     assert bare_line["attributes"] == {"msg": "hello"}
@@ -166,11 +155,11 @@ def test_trace_ids_captured_from_active_otel_span() -> None:
     with otel_trace.use_span(NonRecordingSpan(span_ctx), end_on_exit=False):
         telemetry.emit("telemetry", "exec", agent_id=_AGENT, attributes={"tool": "shell"})
         telemetry.emit("audit", "label_change", agent_id=_AGENT, source="self")
-    obj = _mirror_last("exec", _AGENT)
+    obj = _emitted_last("exec", _AGENT)
     assert obj["trace_id"] == "1234567890abcdef1234567890abcdef"
     assert obj["span_id"] == "1234567890abcdef"
     # business (audit) events get the same correlation
-    obj2 = _mirror_last("label_change", _AGENT)
+    obj2 = _emitted_last("label_change", _AGENT)
     assert obj2["trace_id"] == obj["trace_id"] and obj2["span_id"] == obj["span_id"]
 
 
@@ -178,7 +167,7 @@ def test_no_span_means_null_trace() -> None:
     # ensure we are OUTSIDE any span context (previous test's use_span exited)
     assert otel_trace.get_current_span().get_span_context().is_valid is False
     telemetry.emit("log", "log", agent_id=None, source="system")
-    obj = _mirror_last("log")
+    obj = _emitted_last("log")
     assert obj["trace_id"] is None and obj["span_id"] is None
 
 
@@ -249,7 +238,7 @@ def test_the_cluster_label_is_materialized_from_the_home_the_boot_hands_in(
     assert emitter.process_state["cluster"] == observability.cluster_label(other)
     assert emitter.process_state["cluster"] != observability.cluster_label(meiva_home())
     telemetry.emit("telemetry", "llm_usage", level="info", agent_id=_AGENT)
-    assert _mirror_last("llm_usage", _AGENT)["cluster"] == observability.cluster_label(other)
+    assert _emitted_last("llm_usage", _AGENT)["cluster"] == observability.cluster_label(other)
 
 
 # meiva:note
@@ -260,7 +249,7 @@ def test_an_uninitialized_process_emits_the_unknown_cluster(
 ) -> None:
     monkeypatch.setitem(emitter.process_state, "cluster", None)
     telemetry.emit("telemetry", "llm_usage", level="info", agent_id=_AGENT)
-    assert _mirror_last("llm_usage", _AGENT)["cluster"] == ".unknown"
+    assert _emitted_last("llm_usage", _AGENT)["cluster"] == ".unknown"
 
 
 def test_category_for_kind_mapping() -> None:
@@ -270,77 +259,11 @@ def test_category_for_kind_mapping() -> None:
     assert telemetry.category_for_kind("no_such_event") == "log"
 
 
-# ── JSONL mirror ──────────────────────────────────────────────────────────────
+# ── event ids and timestamps ──────────────────────────────────────────────────
 
 
-def test_jsonl_mirror_holds_every_event() -> None:
-    from base.paths import logs_dir
-
-    telemetry.emit("audit", "fork", agent_id=_AGENT, source="system")
-    _drained()
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    assert path.exists(), f"mirror file missing: {path}"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)
-
-
-def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
-    tmp_path: Path,
-) -> None:
-    now = datetime.now(UTC)
-    event_names = ["llm_usage", "turn_end", "exec", "exec_failed", "exec_timeout", "fork"]
-    events = [
-        telemetry.Event(
-            ts=now,
-            trace_id=None,
-            span_id=None,
-            agent_id=_AGENT,
-            machine="test-machine",
-            cluster="test-cluster",
-            process="test-proc",
-            category="telemetry" if event_name != "fork" else "audit",
-            event_name=event_name,
-            level="info",
-            source="system",
-            target_agent_id=None,
-        )
-        for event_name in event_names
-    ]
-
-    telemetry.append_jsonl(events, target_dir=tmp_path, now=now)
-
-    day = now.strftime("%Y%m%d")
-    full_rows = [
-        json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
-    ]
-    assert [row["event_name"] for row in full_rows] == event_names
-    assert sorted(path.name for path in tmp_path.iterdir()) == [f"events-{day}.jsonl"]
-
-
-def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_leftovers(
-    tmp_path: Path,
-) -> None:
-    today = datetime.now(UTC)
-    full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
-    full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
-    rollup_old = tmp_path / f"events-{today - timedelta(days=5):%Y%m%d}.rollup.jsonl"
-    rollup_kept = tmp_path / f"events-{today - timedelta(days=1):%Y%m%d}.rollup.jsonl"
-    malformed = tmp_path / "events-0000000x.jsonl"
-    for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
-        path.write_text("{}\n", encoding="utf-8")
-
-    telemetry.prune_jsonl_mirror(target_dir=tmp_path, now=today, retention_days=2)
-
-    assert not full_old.exists()
-    assert full_kept.exists()
-    assert not rollup_old.exists()
-    assert rollup_kept.exists()
-    assert malformed.exists()
-
-
-def test_jsonl_mirror_ids_are_stable_and_match_the_id_free_body() -> None:
-    """Mirror rows share Loki's id derivation, so mirror consumers can deduplicate."""
+def test_event_ids_are_stable_and_match_the_id_free_body() -> None:
+    """A row's id derives from its id-free body and timestamp, as a Loki reader derives it."""
     marker = uuid4().hex
     ts = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
     for sequence in range(3):
@@ -348,14 +271,14 @@ def test_jsonl_mirror_ids_are_stable_and_match_the_id_free_body() -> None:
             "telemetry",
             "exec",
             agent_id=_AGENT,
-            attributes={"mirror_id_test": marker, "sequence": sequence},
+            attributes={"event_id_test": marker, "sequence": sequence},
             ts=ts,
         )
 
     rows = [
         row
-        for row in _mirror_rows("exec", _AGENT)
-        if row["attributes"].get("mirror_id_test") == marker
+        for row in _emitted_rows("exec", _AGENT)
+        if row["attributes"].get("event_id_test") == marker
     ]
     assert len(rows) == 3
     assert all(isinstance(row["id"], int) for row in rows)
@@ -378,7 +301,7 @@ def test_jsonl_mirror_ids_are_stable_and_match_the_id_free_body() -> None:
     )
 
 
-def test_jsonl_mirror_true_duplicate_rows_have_equal_ids() -> None:
+def test_true_duplicate_events_have_equal_ids() -> None:
     marker = uuid4().hex
     ts = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
     for _ in range(2):
@@ -386,24 +309,24 @@ def test_jsonl_mirror_true_duplicate_rows_have_equal_ids() -> None:
             "telemetry",
             "exec",
             agent_id=_AGENT,
-            attributes={"mirror_id_duplicate_test": marker},
+            attributes={"event_id_duplicate_test": marker},
             ts=ts,
         )
 
     rows = [
         row
-        for row in _mirror_rows("exec", _AGENT)
-        if row["attributes"].get("mirror_id_duplicate_test") == marker
+        for row in _emitted_rows("exec", _AGENT)
+        if row["attributes"].get("event_id_duplicate_test") == marker
     ]
     assert len(rows) == 2
     assert rows[0]["id"] == rows[1]["id"]
 
 
-def test_emit_normalizes_explicit_local_ts_to_utc_in_mirror() -> None:
+def test_emit_normalizes_explicit_local_ts_to_utc() -> None:
     """An explicit local-offset ts (the loguru adapter's record time) must
-    land in the mirror as UTC — one offset for the whole stream, or any
-    local-wall-clock filter of the mirror misreads telemetry as missing
-    from the UTC-day rollover (2026-08-25 mirror audit, task #1638)."""
+    be serialized as UTC — one offset for the whole stream, or any
+    local-wall-clock filter misreads telemetry as missing from the UTC-day
+    rollover (2026-08-25 audit, task #1638)."""
     marker = uuid4().hex
     local = datetime(2026, 8, 25, 12, 0, tzinfo=timezone(timedelta(hours=8)))
     telemetry.emit(
@@ -416,7 +339,7 @@ def test_emit_normalizes_explicit_local_ts_to_utc_in_mirror() -> None:
 
     rows = [
         row
-        for row in _mirror_rows("exec", _AGENT)
+        for row in _emitted_rows("exec", _AGENT)
         if row["attributes"].get("ts_normalize_test") == marker
     ]
     assert len(rows) == 1
@@ -449,7 +372,7 @@ def test_drain_on_exit_lands_queued_events() -> None:
     This test stops its own writer; the next test owns its own fresh writer."""
     telemetry.emit("telemetry", "service_started", agent_id=_AGENT)
     telemetry.drain_on_exit()  # flush + stop — no explicit telemetry.flush() here
-    assert _mirror_rows("service_started", _AGENT), "service_started must land in the mirror"
+    assert _emitted_rows("service_started", _AGENT), "service_started must reach the writer"
 
 
 def test_resolve_machine_falls_back_only_on_documented_absence() -> None:
@@ -619,7 +542,7 @@ def test_bind_identity_if_unbound_and_init_cli_process_propagate_deployed_sha(
     )
     assert emitter.process_state["deployed_sha"] == sdk_sha
     telemetry.emit("telemetry", "turn_end", attributes={"probe": "sdk_sha"})
-    assert _mirror_last("turn_end")["deployed_sha"] == sdk_sha
+    assert _emitted_last("turn_end")["deployed_sha"] == sdk_sha
 
     pipeline = emitter.process_state["pipeline"]
     assert isinstance(pipeline, telemetry.EventPipeline)
@@ -633,7 +556,7 @@ def test_bind_identity_if_unbound_and_init_cli_process_propagate_deployed_sha(
     try:
         assert emitter.process_state["deployed_sha"] == cli_sha
         telemetry.emit("telemetry", "turn_end", attributes={"probe": "cli_sha"})
-        assert _mirror_last("turn_end")["deployed_sha"] == cli_sha
+        assert _emitted_last("turn_end")["deployed_sha"] == cli_sha
     finally:
         if close is not None:
             close()

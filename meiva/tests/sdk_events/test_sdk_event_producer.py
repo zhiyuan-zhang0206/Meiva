@@ -21,11 +21,13 @@ from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
-from base.paths import logs_dir, meiva_home
+from base.paths import meiva_home
 from base.telemetry import emit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
+from base.telemetry.otlp.telemetry_otlp import bind_exporter
 from meiva.sdk_surface import metering, process_context
+from meiva.tests.sdk_events.recording_backend import recording_backend
 
 _CHILD = Path(__file__).with_name("sdk_exit_child.py")
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -173,15 +175,9 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
 
 
 # meiva:note
-# Every record of the JSONL event mirror under `logs` whose SDK call is `fn`.
-def _mirrored_calls(logs: Path, fn: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for path in sorted(logs.glob("events-*.jsonl")):
-        for text in path.read_text(encoding="utf-8").splitlines():
-            record = json.loads(text)
-            if record["attributes"].get("fn") == fn:
-                records.append(record)
-    return records
+# Every recorded event whose SDK call is `fn`.
+def _recorded_calls(events: list[dict[str, Any]], fn: str) -> list[dict[str, Any]]:
+    return [event for event in events if event["attributes"].get("fn") == fn]
 
 
 # meiva:note
@@ -198,6 +194,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
     from meiva.sdk_surface import install
     from meiva.sdk_surface.installation import installed
 
+    recorded: list[dict[str, Any]] = []
     prior = install.uninstall()
     install.clear_load_attempt()
     attachment = ClientSet(pipeline_factory=lambda: pytest.fail("closed attachment was borrowed"))
@@ -210,18 +207,21 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         )
     )
     try:
-        meiva.ensure_plugins_loaded(config=process_config, machine=machine_identity)
-        installation = installed()
-        assert installation is not None
-        bare = installation.clients
-        assert isinstance(bare, ClientSet) and bare is not attachment
-        assert bare.exports_deferred() is None
-        attachment.close()
-        process_context.unbind_context()
-        wrapped = metering.make_recorder(lambda: "done", "probe.detached", sampling, bare)
-        assert wrapped() == "done"
-        assert bare.sync_events(timeout=5).status is DrainStatus.COMPLETED
-        [record] = _mirrored_calls(logs_dir(home=meiva_home()), "probe.detached")
+        backend = recording_backend(sink=recorded.append, home=meiva_home(), now=system_clock().now)
+        with bind_exporter(backend):
+            meiva.ensure_plugins_loaded(config=process_config, machine=machine_identity)
+            installation = installed()
+            assert installation is not None
+            bare = installation.clients
+            assert isinstance(bare, ClientSet) and bare is not attachment
+            assert bare.exports_deferred() is None
+            attachment.close()
+            process_context.unbind_context()
+            wrapped = metering.make_recorder(lambda: "done", "probe.detached", sampling, bare)
+            assert wrapped() == "done"
+            assert bare.sync_events(timeout=5).status is DrainStatus.COMPLETED
+            assert backend.flush(timeout=5).status is DrainStatus.COMPLETED
+        [record] = _recorded_calls(recorded, "probe.detached")
         assert record["source"] == "system"
         assert record["agent_id"] is None
     finally:
@@ -243,10 +243,11 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
 
 # meiva:note
 # Run `sdk_exit_child.py` in `mode` with a home of its own and a database nothing listens on, and
-# return the mirrored records of its one bare call.
+# return the events its writer exported for its one bare call.
 def _bare_call_of_a_child(tmp_path: Path, mode: str) -> list[dict[str, Any]]:
     home = tmp_path / "home"
     home.mkdir()
+    events_file = tmp_path / "events.jsonl"
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -254,7 +255,7 @@ def _bare_call_of_a_child(tmp_path: Path, mode: str) -> list[dict[str, Any]]:
     env["MEIVA_HOME"] = str(home)
     env["MEIVA_DB_URL"] = f"postgresql://nobody@127.0.0.1:{port}/none"
     subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(_REPO_ROOT), mode],
+        [sys.executable, "-I", "-X", "utf8", str(_CHILD), str(_REPO_ROOT), mode, str(events_file)],
         env=env,
         cwd=_REPO_ROOT,
         capture_output=True,
@@ -262,12 +263,15 @@ def _bare_call_of_a_child(tmp_path: Path, mode: str) -> list[dict[str, Any]]:
         timeout=180,
         check=True,
     )
-    return _mirrored_calls(home / "logs", "probe.exit")
+    if not events_file.exists():
+        return []
+    recorded = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines()]
+    return _recorded_calls(recorded, "probe.exit")
 
 
 # meiva:note
 # The client set a plugin load installs is closed when the process exits normally: its writer is
-# stopped then, so a call made just before the exit still reaches the event mirror, with the system
+# stopped then, so a call made just before the exit still reaches the exporter, with the system
 # source and no agent. A hard exit runs no exit hook and loses the same call, which is how the
 # first outcome is known to come from the registered hook.
 def test_the_installations_clients_are_closed_at_process_exit(tmp_path: Path) -> None:

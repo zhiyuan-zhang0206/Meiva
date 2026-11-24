@@ -53,8 +53,7 @@ Enablement flags, endpoint defaults and the read topology have their own node:
 
 ## Key dependencies
 
-- `base/telemetry/pipeline_build.py` — caller: `_write_batch` runs the OTLP export after
-  the JSONL mirror append; the concrete pipeline closes its own exporter after
+- `base/telemetry/pipeline_build.py` — caller: the pipeline's writer runs the OTLP export (its only sink); the concrete pipeline closes its own exporter after
   joining the ordinary writer. `_drain_on_exit` observes that same pipeline.
 - OTel SDK (`opentelemetry-*`) — `telemetry_otlp_sdk` (providers, views, resource) is imported
   lazily at worker bring-up, so flag-off processes never pay for the SDK; the backend modules
@@ -78,13 +77,13 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   writer beside the exporter it owns; every stop stage receives only the deadline's
   real remaining time.
 - `base/telemetry/pipeline_build.py:build_pipeline` — constructs the concrete writer
-  and passes its backend export callback to `_write_batch`.
+  and hands its backend export to the pipeline's writer.
 
 ## Notes
 
 - Routine OTLP diagnostics use loguru with `_no_emitter`, reaching stderr/file
   without re-entering the pipeline. Registered disabled/recovered events also
-  record the otherwise invisible episode in the JSONL mirror.
+  record the otherwise invisible episode in the event stream (when the collector is reachable).
 - Runner exporter component IDs stay `otlphttp/tempo`, `otlphttp/loki` and
   `otlphttp/prometheus` across the direct-backend → relay cutover so their
   collector self-metrics keep their series. Every exporter keeps a bounded

@@ -14,8 +14,8 @@ from collections.abc import Generator
 
 # Loguru extra key marking the emitter's own diagnostics. Records carrying it
 # are filtered OUT of the emitter adapter's sink (see
-# `base.telemetry.process_logging.add_event_sink`) so they reach stderr / JSONL file sinks only
-# and never re-enter this pipeline — a mirror-down process would otherwise loop
+# `base.telemetry.process_logging.add_event_sink`) so they reach stderr / the loguru file sinks only
+# and never re-enter this pipeline — a failing-sink process would otherwise loop
 # failure → warning → emit → failure forever.
 NO_EMITTER = "_no_emitter"
 
@@ -53,9 +53,8 @@ _sink_failures: dict[str, int] = {}
 def report_sink_failure(sink: str, exc: BaseException) -> None:
     """Report a failure of a best-effort side channel (an emitter sink export,
     a missing producer, an exit-time close, SDK-call or billing telemetry)
-    with its traceback — the first and every 50th per `sink`, like the JSONL
-    mirror: a seam that fails on every call must be loud without flooding the
-    log. Goes through the `_no_emitter` path, so a failing telemetry pipeline
+    with its traceback — the first and every 50th per `sink`: a seam that
+    fails on every call must be loud without flooding the log. Goes through the `_no_emitter` path, so a failing telemetry pipeline
     cannot loop its own report back into itself."""
     n = _sink_failures[sink] = _sink_failures.get(sink, 0) + 1
     if n == 1 or n % 50 == 0:

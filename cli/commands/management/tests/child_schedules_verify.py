@@ -4,23 +4,13 @@ from datetime import UTC, datetime
 from base.clock.tests.fakes import system_clock
 from base.paths import meiva_home
 from cli.commands.management.schedules_verify import RowsFromFile, cmd_schedules_verify
-from cli.database import (
-    open_operator_database,
-    operator_database_factory,
-    operator_event_pipeline,
-)
+from cli.database import operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 
 
 def _check_rows(rows_file: str) -> None:
     command = CommandRuntime.create(meiva_home().resolve())
-    database = operator_database_factory(
-        local_host=command.machine.host,
-        home=command.home,
-        open_database=open_operator_database,
-    )
     producer = operator_event_pipeline(
-        database,
         machine=command.machine,
         home=meiva_home(),
         now=system_clock().now,

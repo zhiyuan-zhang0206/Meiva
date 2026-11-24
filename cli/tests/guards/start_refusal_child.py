@@ -34,7 +34,6 @@ def main(home: Path, checkout: Path) -> None:
         local_host=command.machine.host, home=command.home, open_database=open_operator_database
     )
     producer = operator_event_pipeline(
-        database,
         machine=command.machine,
         home=home,
         now=system_clock().now,

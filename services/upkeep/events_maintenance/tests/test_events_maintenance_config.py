@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
 from typing import Any
 
 from base.config import ConfigBoot
@@ -17,33 +16,28 @@ def _owner() -> ConfigBoot:
     return owner
 
 
-def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
+def test_the_slice_carries_the_value_each_field_holds() -> None:
     owner = _owner()
     owner.set_field("events_maintenance_interval_seconds", 17.0)
     owner.set_field("timezone", "Asia/Shanghai")
 
-    config = daemon.events_maintenance_config(owner, mirror_dir=tmp_path)
+    config = daemon.events_maintenance_config(owner)
 
     for name, value in dataclasses.asdict(config).items():
-        if name == "mirror_dir":
-            continue
         flat: Any = owner.get_field(name)
         assert value == flat, name
     assert config.events_maintenance_interval_seconds == 17.0
     assert config.timezone == "Asia/Shanghai"
-    assert config.mirror_dir == tmp_path
 
 
-def test_two_entry_slices_remain_independent_at_each_lookup(tmp_path: Path) -> None:
+def test_two_entry_slices_remain_independent_at_each_lookup() -> None:
     first = _owner()
     second = _owner()
     first.set_field("events_maintenance_interval_seconds", 17.0)
     second.set_field("events_maintenance_interval_seconds", 23.0)
 
     def interval(owner: ConfigBoot) -> float:
-        return daemon.events_maintenance_config(
-            owner, mirror_dir=tmp_path
-        ).events_maintenance_interval_seconds
+        return daemon.events_maintenance_config(owner).events_maintenance_interval_seconds
 
     assert interval(first) == 17.0
     assert interval(second) == 23.0

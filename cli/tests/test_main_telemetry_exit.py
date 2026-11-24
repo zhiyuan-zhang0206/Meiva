@@ -8,9 +8,9 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
 
 import pytest
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
@@ -19,14 +19,16 @@ _CHILD = Path(__file__).with_name("bootstrap") / "child_telemetry_exit.py"
 
 
 @pytest.fixture
-def receiver() -> Generator[tuple[http.server.ThreadingHTTPServer, list[bytes]]]:
+def receiver() -> Generator[tuple[http.server.ThreadingHTTPServer, list[bytes], list[float]]]:
     bodies: list[bytes] = []
+    arrivals: list[float] = []
 
     class Receiver(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers["Content-Length"]))
             if self.path == "/v1/logs" and not body.startswith(b"{"):
                 bodies.append(body)
+                arrivals.append(time.time())
             self.send_response(200)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -37,7 +39,7 @@ def receiver() -> Generator[tuple[http.server.ThreadingHTTPServer, list[bytes]]]
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        yield server, bodies
+        yield server, bodies, arrivals
     finally:
         server.shutdown()
         server.server_close()
@@ -45,9 +47,11 @@ def receiver() -> Generator[tuple[http.server.ThreadingHTTPServer, list[bytes]]]
 
 @pytest.mark.parametrize("mode", ["success", "exception", "empty", "unavailable"])
 def test_cli_first_event_reaches_otlp_before_exit(
-    tmp_path: Path, mode: str, receiver: tuple[http.server.ThreadingHTTPServer, list[bytes]]
+    tmp_path: Path,
+    mode: str,
+    receiver: tuple[http.server.ThreadingHTTPServer, list[bytes], list[float]],
 ) -> None:
-    server, bodies = receiver
+    server, bodies, arrivals = receiver
     if mode == "unavailable":
         server.shutdown()
         server.server_close()
@@ -68,27 +72,17 @@ def test_cli_first_event_reaches_otlp_before_exit(
     )
     assert child.returncode == 0, child.stderr
     # The child holds the command open for several default flush intervals with a 60 s pipeline
-    # timer: any batch written meanwhile came from a timer, not from the drain after the command.
-    assert "early_batch_writes=0" in child.stdout, child.stdout + child.stderr
-    rows = _mirror_rows(tmp_path / "home")
-    disabled = [row for row in rows if row["event_name"] == "otlp_backend_disabled"]
+    # timer: any request that arrived meanwhile came from a timer, not from the drain after it.
+    (line,) = [
+        line for line in child.stdout.splitlines() if line.startswith("command_returned_at=")
+    ]
+    returned_at = float(line.removeprefix("command_returned_at="))
+    assert all(arrival >= returned_at for arrival in arrivals), (arrivals, returned_at)
     names = _log_names(bodies)
-    if mode == "empty":
+    if mode in ("empty", "unavailable"):
         assert not bodies
-        assert not (tmp_path / "home" / "logs").exists()
-    elif mode == "unavailable":
-        _assert_unavailable(bodies, rows, disabled)
     else:
         assert "health_probe_ran" in names, child.stderr
-        assert not disabled, disabled
-
-
-def _mirror_rows(home: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for path in (home / "logs").glob("events-*.jsonl")
-        for line in path.read_text().splitlines()
-    ]
 
 
 def _log_names(bodies: list[bytes]) -> list[str]:
@@ -100,13 +94,3 @@ def _log_names(bodies: list[bytes]) -> list[str]:
                 for record in scope.log_records:
                     names.append(json.loads(record.body.string_value)["event_name"])
     return names
-
-
-def _assert_unavailable(
-    bodies: list[bytes], rows: list[dict[str, Any]], disabled: list[dict[str, Any]]
-) -> None:
-    assert not bodies
-    assert any(row["event_name"] == "health_probe_ran" for row in rows)
-    assert disabled and all(
-        row["attributes"]["reason"] == "endpoint not answering" for row in disabled
-    )

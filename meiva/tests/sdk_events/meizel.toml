@@ -1,2 +1,3 @@
 [uses]
-"test_sdk_event_producer.py" = ["sdk_exit_child.py"]
+"sdk_exit_child.py" = ["recording_backend.py"]
+"test_sdk_event_producer.py" = ["recording_backend.py", "sdk_exit_child.py"]

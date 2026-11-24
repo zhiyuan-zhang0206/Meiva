@@ -139,7 +139,6 @@ class OperatorEventPipeline:
 
     def __init__(
         self,
-        database_factory: OperatorDatabaseFactory,
         *,
         machine: MachineIdentityReader,
         home: Path,
@@ -159,7 +158,6 @@ class OperatorEventPipeline:
         self._otlp_enabled = otlp_enabled
         self._otlp_endpoint = otlp_endpoint
         self._flush_interval_s = flush_interval_s
-        self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
         self._close_logging: Callable[[], None] | None = None
         self._attach_process_logging = True
@@ -172,7 +170,6 @@ class OperatorEventPipeline:
         cls,
         pipeline: EventPipeline,
         *,
-        database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
         now: Callable[[], datetime],
@@ -182,7 +179,6 @@ class OperatorEventPipeline:
         attach_process_logging: bool = False,
     ) -> OperatorEventPipeline:
         owner = cls(
-            database_factory,
             machine=machine,
             home=home,
             now=now,
@@ -199,7 +195,6 @@ class OperatorEventPipeline:
     @classmethod
     def recording(
         cls,
-        database_factory: OperatorDatabaseFactory,
         *,
         machine: MachineIdentityReader,
         home: Path,
@@ -210,7 +205,6 @@ class OperatorEventPipeline:
         rng: random.Random,
     ) -> OperatorEventPipeline:
         owner = cls(
-            database_factory,
             machine=machine,
             home=home,
             now=now,
@@ -227,7 +221,6 @@ class OperatorEventPipeline:
             from base.telemetry import build_pipeline
 
             self._pipeline = build_pipeline(
-                database=self._database_factory,
                 machine=self._machine,
                 home=self._home,
                 now=self._now,
@@ -282,7 +275,6 @@ class OperatorEventPipeline:
 
 
 def operator_event_pipeline(
-    database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,
     home: Path,
     now: Callable[[], datetime],
@@ -291,9 +283,8 @@ def operator_event_pipeline(
     otlp_endpoint: Callable[[], str],
     rng: random.Random,
 ) -> OperatorEventPipeline:
-    """Construct a lazy command owner without opening a writer or database."""
+    """Construct a lazy command owner without opening a writer."""
     return OperatorEventPipeline(
-        database_factory,
         machine=machine,
         home=home,
         now=now,

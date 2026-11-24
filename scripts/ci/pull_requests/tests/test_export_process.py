@@ -1,70 +1,20 @@
 import ast
 import inspect
-import subprocess
 import textwrap
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 
 from base.clock.tests.fakes import system_clock
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import ConfigBoot
-from base.db import Database
-from base.db.config import db_config_from_settings
-from base.native_process import code_version
-from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import export_process
 
 
-# meiva:note
-# These test-owned git commands build the temporary history whose captured version is asserted.
-def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(  # noqa: S603
-        ["git", "-c", "user.name=C2 Test", "-c", "user.email=c2@example.test", *args],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=10,
-    )
-    return result.stdout.strip()
-
-
-@pytest.mark.parametrize("known", [True, False])
-def test_writer_uses_one_captured_gate_and_is_joined(known: bool, tmp_path: Path) -> None:
-    _git(tmp_path, "init", "--initial-branch=main")
-    _git(tmp_path, "commit", "--allow-empty", "-m", "captured")
-    captured = LoadedCommit.capture(tmp_path)
-    _git(tmp_path, "commit", "--allow-empty", "-m", "later-head")
-    image = captured if known else LoadedCommit(tmp_path, None)
-    with pytest.raises(ValueError, match="loaded image"):
-        export_process.process_gate("exporter", image=None)
-    gate = export_process.process_gate("exporter", image=image)
-    config = ConfigBoot()
-    config.set_field("machine_name", "export-owner")
-    machine = ConfiguredMachineIdentity(config)
-    assert machine.name() == "export-owner"
-    config.set_field("machine_name", "changed-after-first-read")
-    assert machine.name() == "export-owner"
-    direct_url = ClusterDirectUrl(machine.host, home=meiva_home())
-    assert direct_url.local_host == machine.host
-    db = Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
-    assert db is not None
+def test_the_writer_is_joined_when_its_body_ends() -> None:
     with export_process.drain_event_pipeline(
         "exporter", EventPipeline(now=system_clock().now, writer=lambda _events: None)
     ) as pipeline:
         assert not pipeline.stopped
-        if not known:
-            with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
-                gate.application_name()
-        else:
-            assert gate.application_name() == "meiva:exporter:v1"
-            (tmp_path / ".git").rename(tmp_path / "captured-history")
-            assert gate.application_name() == "meiva:exporter:v1"
 
     assert pipeline.stopped
 
@@ -105,8 +55,8 @@ def test_body_error_preserves_the_original_writer_error_during_close() -> None:
 
 
 # meiva:note
-# A shape lock, because the writer dials Postgres and the cluster URL it builds cannot be observed
-# without it: the function reads no `meiva_home` and hands its `home` argument to both calls.
+# A shape lock: the writer is built from the home it is given, reads no `meiva_home`, and holds no
+# database or image to gate one.
 def test_the_owned_writer_takes_the_home_it_is_given_and_reads_none() -> None:
     source = inspect.getsource(export_process.owned_event_pipeline)
     function = ast.parse(textwrap.dedent(source)).body[0]
@@ -120,7 +70,6 @@ def test_the_owned_writer_takes_the_home_it_is_given_and_reads_none() -> None:
         for keyword in node.keywords
         if keyword.arg == "home"
     ]
-    assert len(homes) == 2
+    assert len(homes) == 1
     assert all(isinstance(value, ast.Name) and value.id == "home" for value in homes)
-    assert [arg.arg for arg in function.args.kwonlyargs] == ["image", "home"]
-    assert not function.args.kw_defaults[1]
+    assert [arg.arg for arg in function.args.kwonlyargs] == ["home"]

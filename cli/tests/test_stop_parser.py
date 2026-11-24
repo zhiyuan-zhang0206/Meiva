@@ -298,7 +298,6 @@ def _refusing_args(argv: list[str], home: Path, command: CommandRuntime) -> argp
     args.runtime = runtime
     args.database_factory = database
     args.producer = OperatorEventPipeline(
-        database,
         machine=runtime.machine,
         home=home,
         now=runtime.clock.now,

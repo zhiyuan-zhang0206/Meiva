@@ -180,7 +180,6 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
     """
     pipeline = telemetry.build_pipeline(
         now=system_clock().now,
-        database=lambda: database,
         machine=machine_identity,
         home=unit_home,
         otlp_enabled=lambda: False,

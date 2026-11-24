@@ -1,47 +1,31 @@
 """Child that dispatches one CLI verb and lets the exit drain deliver its telemetry.
 
-Usage: `child_telemetry_exit.py <success|exception|empty|unavailable>`. Receiver and
-OTel providers are real; only data persistence is isolated.
+Usage: `child_telemetry_exit.py <success|exception|empty|unavailable>`. Receiver, exporter and
+OTel providers are all real.
 
 The command's event pipeline holds a partial batch for `FLUSH_INTERVAL_S`, far longer than
 the handler runs, and the handler waits `HOLD_S` (several default flush intervals) after it
-emits. A batch written inside that window can only come from a timer, so the child prints how
-many there were: the parent requires zero, which proves the first batch was written by the
-drain that follows the command, not by the timer.
+emits. The child prints the wall-clock instant the command returned: the parent requires every
+OTLP request to have arrived after it, which proves the first batch was written by the drain
+that follows the command, not by the timer.
 """
 
 import argparse
 import sys
-import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from base import telemetry
 from base.cluster.machine import MachineIdentityReader
 from base.paths.home import resolve_meiva_home
-from base.telemetry import event_store
 from cli import main
-from cli.database import OperatorDatabaseFactory, OperatorEventPipeline, open_operator_database
+from cli.database import OperatorEventPipeline, open_operator_database
 from cli.database.runtime import CommandRuntime
 
 FLUSH_INTERVAL_S = 60
 HOLD_S = 1.5
 
-command_returned = threading.Event()
-early_writes: list[float] = []
-
-
-class WatchedDatabase(OperatorDatabaseFactory):
-    """The database handle the writer asks for before every batch it persists."""
-
-    def __call__(self) -> Any:
-        if not command_returned.is_set():
-            early_writes.append(time.monotonic())
-        return super().__call__()
-
-
-event_store.set_enabled(enabled=False)
+returned_at: list[float] = []
 
 
 def dispatch(args: argparse.Namespace) -> int:
@@ -56,22 +40,13 @@ def dispatch(args: argparse.Namespace) -> int:
             raise RuntimeError("handler failure")
         return 7
     finally:
-        command_returned.set()
+        returned_at.append(time.time())
 
 
 def _producer(
-    database_factory: OperatorDatabaseFactory,
-    machine: MachineIdentityReader,
-    home: Path,
-    command: CommandRuntime,
+    machine: MachineIdentityReader, home: Path, command: CommandRuntime
 ) -> OperatorEventPipeline:
-    del database_factory
     return OperatorEventPipeline(
-        WatchedDatabase(
-            local_host=machine.host,
-            home=home,
-            open_database=open_operator_database,
-        ),
         machine=machine,
         home=home,
         now=command.clock.now,
@@ -95,4 +70,4 @@ except RuntimeError as exc:
     assert str(exc) == "handler failure"
 else:
     assert result == 7
-print(f"early_batch_writes={len(early_writes)}")
+print(f"command_returned_at={returned_at[0]!r}")

@@ -2,10 +2,10 @@
 
 Standalone `pr_flow_export.py` captures its source image after argument
 validation and before remote collection. Only actual emission constructs its
-writer through `export_process.owned_event_pipeline`: one CodeVersion and
-nonexempt ProcessDbGate supply its live database factory, and the home the
-entry's `__main__` block resolved once locates the cluster it dials.
-A missing loaded SHA remains unknown; no dial captures the current checkout.
+writer through `export_process.owned_event_pipeline`; the home the entry's `__main__` block
+resolved once is the only thing it takes. The writer holds no database: the event reaches Loki
+through the local collector. A missing loaded SHA remains unknown; no emission captures the
+current checkout.
 
 The writer receives a finite two-second stop/join budget. An unfinished receipt
 is reported when the writer or exporter has not finished; this is not a drain guarantee;

@@ -50,7 +50,7 @@ def _event(**overrides: Any) -> Event:
     return Event(**fields)
 
 
-def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
+def _make_backend(*, home: Path, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import (
         InMemoryLogRecordExporter,
@@ -73,8 +73,7 @@ def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=queue_maxsize,
-        mirror_dir=mirror_dir,
-        home=mirror_dir,
+        home=home,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
     return backend, log_exporter, metric_reader
@@ -96,7 +95,7 @@ def _metrics(metric_reader: Any) -> dict[str, Any]:
 def otlp_backend(tmp_path: Path) -> Any:
     """An `OtlpBackend` with in-memory providers, retained by this test
     owner (so module-level wrappers hit it); not yet armed."""
-    backend, log_exporter, metric_reader = _make_backend(mirror_dir=tmp_path)
+    backend, log_exporter, metric_reader = _make_backend(home=tmp_path)
 
     yield backend, log_exporter, metric_reader
     backend.shutdown()
@@ -154,7 +153,7 @@ def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any)
 
 
 def test_saturation_goes_live_once(tmp_path: Path) -> None:
-    backend, log_exporter, _ = _make_backend(queue_maxsize=4, mirror_dir=tmp_path)
+    backend, log_exporter, _ = _make_backend(queue_maxsize=4, home=tmp_path)
     try:
         backend.defer_until_exit(CHILD_DEFER)
         backend.export_batch([_event() for _ in range(4)])
@@ -245,8 +244,7 @@ def test_ensure_refuses_during_finalization(otlp_backend: Any) -> None:
 
     The old eager warmup() existed to keep construction off the shutdown path;
     exec children now defer instead, and `_ensure()` enforces the invariant at
-    the single construction point — the record path degrades to unsent (the
-    JSONL mirror retains it)."""
+    the single construction point — the record path degrades to unsent."""
     backend, log_exporter, _ = otlp_backend
 
     assert backend._ensure(finalizing=True) is False
@@ -257,7 +255,7 @@ def test_ensure_refuses_during_finalization(otlp_backend: Any) -> None:
 
 def test_deferred_completion_during_finalization_keeps_hold(deferred_backend: Any) -> None:
     """The deferral's shutdown fallback must not construct during finalization:
-    the hold stays intact instead (JSONL-only), never a shutdown-time bring-up."""
+    the hold stays intact instead, never a shutdown-time bring-up."""
     backend, log_exporter, _ = deferred_backend
     backend.export_batch([_event()])
 
@@ -280,7 +278,6 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(tmp_path:
         now=system_clock().now,
         export_allowed=invalid,
         enabled=lambda: True,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
         instance_id="test-instance",

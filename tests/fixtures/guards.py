@@ -145,23 +145,15 @@ def _otlp_export_off(request: pytest.FixtureRequest) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _telemetry_event_store_off() -> Iterator[None]:
-    """Restore an existing telemetry sink without loading telemetry for a pure test.
+def _telemetry_drained() -> Iterator[None]:
+    """Drain any telemetry pipeline this test created before its access window closes.
 
-    DB consumers disable the sink before admitting writes. A late telemetry
-    producer with no DB dependency remains behind the default driver refusal.
-    Drain any pipeline created by this test before its access window closes.
+    Telemetry is looked up only when already loaded, so a pure test never loads it.
     """
-    set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
-    if set_enabled is not None:
-        set_enabled(enabled=False)
     yield
     sync = loaded_attribute("base.telemetry.emitter", "sync")
     if sync is not None:
         sync()
-        set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
-        if set_enabled is not None:
-            set_enabled(enabled=False)
 
 
 @pytest.fixture

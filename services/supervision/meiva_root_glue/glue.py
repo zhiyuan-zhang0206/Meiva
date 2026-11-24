@@ -430,7 +430,6 @@ def build_wiring(
     clients = ClientSet(
         database=database,
         pipeline_factory=lambda: build_pipeline(
-            database=database,
             machine=machine,
             home=home,
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
