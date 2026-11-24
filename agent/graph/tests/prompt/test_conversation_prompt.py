@@ -1,4 +1,5 @@
 import os
+from typing import cast
 
 import pytest
 
@@ -76,7 +77,7 @@ def test_reply_routing_and_handoff_policy_are_always_present() -> None:
 
 @pytest.fixture(params=[False, True])
 def communication_prompt(request: pytest.FixtureRequest) -> str:
-    slices = _slices(agent__prompt_output_conciseness_enabled=request.param)
+    slices = _slices(agent__prompt_output_conciseness_enabled=cast(bool, request.param))
 
     return build_system_prompt(
         EMPTY,
