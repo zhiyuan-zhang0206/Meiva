@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -241,9 +242,7 @@ def test_every_listed_host_ends_with_serving_its_failures_or_why_it_was_skipped(
 
 def _result(lines: tuple[str, ...]) -> dict[str, object]:
     assert lines[-1].startswith(RESULT_PREFIX)
-    record = json.loads(lines[-1][len(RESULT_PREFIX) :])
-    assert isinstance(record, dict)
-    return record
+    return cast("dict[str, object]", json.loads(lines[-1][len(RESULT_PREFIX) :]))
 
 
 def test_a_partial_up_is_summarised_one_line_per_failure_then_the_count() -> None:

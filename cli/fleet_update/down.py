@@ -98,7 +98,7 @@ class _Preflight:
     serving: frozenset[str]
     rebuilding: frozenset[str] = frozenset()
     legacy_stop: frozenset[str] = frozenset()
-    heads: Mapping[str, str] = field(default_factory=dict)
+    heads: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
