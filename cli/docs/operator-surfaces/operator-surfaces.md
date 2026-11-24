@@ -92,7 +92,8 @@ instead of SQL or hand-built HTTP calls.
   `meiva schedules verify` reads each stored script through the gateway (which must be
   reachable; `--rows-file` and `--check-file` read none, and `--rows-file` overlays
   `schedules/manifest.json` templates for built-in rows that `up` resyncs) and checks its imports, the names
-  it reads and its calls into repo code in this checkout.
+  it reads and its calls into repo code in this checkout. Each script is checked by its own child
+  interpreter; half this host's CPUs of them run at once and the verdicts keep the stored order.
 - `meiva observability on/off/status/render` (short alias `meiva obs`; the former `lgtm`
   verb is retired): observability-stack toggle on this host, represented by its marker and
   native lifecycle. The runtime tree stays `$MEIVA_HOME/lgtm/`.

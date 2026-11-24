@@ -22,11 +22,12 @@ from cli.fleet_update.plan.gateway_commands import (
     refresh_command,
     roster_command,
 )
+from cli.fleet_update.plan.helper_gate import helper_probe_command
 from cli.fleet_update.plan.host_commands import (
     CLEAN,
     HOME,
+    adopt_frontend_build,
     fetch_command,
-    helper_probe_command,
     login_shell,
     start_command,
     stop_command,
@@ -48,8 +49,10 @@ def test_a_stop_always_confirms_and_carries_the_flags_it_was_given() -> None:
 
 def test_the_switch_checks_new_out_detached_syncs_the_venv_and_requires_a_clean_tree() -> None:
     command = switch_command(_NEW)
+    command = command.replace(f" && {adopt_frontend_build(_NEW)}", "", 1)
     steps = command.split(" && ")
     assert steps[0].endswith(f"git checkout -q --detach {_NEW}")
+    assert adopt_frontend_build(_NEW) in switch_command(_NEW)
     assert steps[1].startswith("find .venv/bin .venv/lib") and "chmod u+w" in steps[1]
     assert (
         steps[2]
@@ -482,3 +485,136 @@ def test_a_credential_in_a_line_is_replaced_and_the_rest_of_the_line_is_kept(
 def test_a_line_without_a_credential_is_left_alone() -> None:
     line = 'head=0123 op={"operation": "stop"} https://example.invalid/path'
     assert redact(line) == line
+
+
+_PREBUILD_PYTHON = """#!/bin/sh
+case "$*" in *frontend_prebuild*) ;; *) exit 0 ;; esac
+echo "prebuild:$PWD:$*" >> "{log}"
+[ "${{FAKE_PREBUILD_RC:-0}}" = 0 ] || exit "$FAKE_PREBUILD_RC"
+mkdir -p "$PWD/ui/web/.next" && echo staged-key > "$PWD/ui/web/.next/meiva-build-key"
+"""
+
+
+def _commit_ui_source(rig: _PrestageRig, *, deps: bool = False) -> str:
+    _git_in(
+        rig.repo,
+        "checkout",
+        "-q",
+        rig.pnpm_sha if deps else _git_in(rig.repo, "rev-list", "--max-parents=0", "HEAD"),
+    )
+    src = rig.repo / "ui" / "web" / "src"
+    src.mkdir(exist_ok=True)
+    (src / "page.tsx").write_text("export default 1;\n", encoding="utf-8")
+    _git_in(rig.repo, "add", "ui/web/src")
+    _git_in(rig.repo, "commit", "-qm", "ui source")
+    target = _git_in(rig.repo, "rev-parse", "HEAD")
+    _git_in(rig.repo, "checkout", "-q", target + "~1")
+    return target
+
+
+def _prebuild_rig(tmp_path: Path, *, node_modules: bool = True) -> _PrestageRig:
+    rig = _build_prestage_rig(tmp_path)
+    if node_modules:
+        (rig.repo / "ui" / "web" / "node_modules").mkdir()
+    write_executable(rig.source_py, _PREBUILD_PYTHON.format(log=rig.log_file))
+    return rig
+
+
+def _prebuild_calls(rig: _PrestageRig) -> list[str]:
+    if not rig.log_file.exists():
+        return []
+    return [c for c in rig.log_file.read_text().splitlines() if c.startswith("prebuild:")]
+
+
+def test_prestage_prebuilds_the_frontend_when_only_ui_web_source_changed(tmp_path: Path) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    result = rig.run(target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    stage = rig.home / "frontend-prebuild"
+    (call,) = _prebuild_calls(rig)
+    assert call == (
+        f"prebuild:{stage.resolve()}:-m services.supervision.roster.frontend_prebuild "
+        f"--stage {stage} --serving {rig.repo}"
+    )
+    assert _git_in(stage, "rev-parse", "HEAD") == target
+    assert (stage / "ui/web/.next/meiva-build-key").read_text() == "staged-key\n"
+    assert not (rig.repo / "ui/web/.next").exists()
+
+
+@pytest.mark.parametrize("reason", ["ui_unchanged", "no_node_modules", "lockfile_changed"])
+def test_prestage_does_not_prebuild_when_the_staged_tree_could_not_be_the_serving_one(
+    tmp_path: Path, reason: str
+) -> None:
+    rig = _prebuild_rig(tmp_path, node_modules=reason != "no_node_modules")
+    target = {
+        "ui_unchanged": rig.pyproject_sha,
+        "no_node_modules": _commit_ui_source(rig),
+        "lockfile_changed": rig.pnpm_sha,
+    }[reason]
+    result = rig.run(target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _prebuild_calls(rig) == []
+    assert not (rig.home / "frontend-prebuild").exists()
+
+
+def test_a_failed_prebuild_does_not_fail_prestage_and_leaves_no_stage(tmp_path: Path) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    result = rig.run(target, FAKE_PREBUILD_RC="3")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "frontend prebuild failed: meiva start builds the frontend instead" in result.stdout
+    assert not (rig.home / "frontend-prebuild").exists()
+    assert "frontend-prebuild" not in _git_in(rig.repo, "worktree", "list")
+
+
+def test_prestage_removes_a_stage_left_by_an_earlier_window_first(tmp_path: Path) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    stale = rig.home / "frontend-prebuild"
+    stale.mkdir()
+    (stale / "old.txt").write_text("old\n")
+    assert rig.run(rig.pyproject_sha).returncode == 0
+    assert not stale.exists()
+    assert rig.run(target).returncode == 0
+    assert (stale / "ui/web/.next/meiva-build-key").is_file()
+
+
+def _adopt(rig: _PrestageRig, target: str) -> subprocess.CompletedProcess[str]:
+    script = f"{HOME}\n{adopt_frontend_build(target)}"
+    env = {**os.environ, "HOME": str(rig.user_home)}
+    return run_host_shell(["bash", "-c", script], env=env)
+
+
+def test_the_switch_adopts_the_stage_built_for_exactly_the_target(tmp_path: Path) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    assert rig.run(target).returncode == 0
+    serving_next = rig.repo / "ui/web/.next"
+    serving_next.mkdir()
+    (serving_next / "meiva-build-key").write_text("old-key\n")
+    result = _adopt(rig, target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (serving_next / "meiva-build-key").read_text() == "staged-key\n"
+    assert not (rig.home / "frontend-prebuild/ui/web/.next").exists()
+
+
+def test_the_switch_ignores_a_stage_for_another_commit_or_without_a_finished_build(
+    tmp_path: Path,
+) -> None:
+    rig = _prebuild_rig(tmp_path)
+    target = _commit_ui_source(rig)
+    assert rig.run(target).returncode == 0
+    serving_next = rig.repo / "ui/web/.next"
+    serving_next.mkdir()
+    (serving_next / "meiva-build-key").write_text("old-key\n")
+
+    assert _adopt(rig, rig.pyproject_sha).returncode == 0
+    assert (serving_next / "meiva-build-key").read_text() == "old-key\n"
+
+    (rig.home / "frontend-prebuild/ui/web/.next/meiva-build-key").unlink()
+    assert _adopt(rig, target).returncode == 0
+    assert (serving_next / "meiva-build-key").read_text() == "old-key\n"
+
+    shutil.rmtree(rig.home / "frontend-prebuild")
+    assert _adopt(rig, target).returncode == 0

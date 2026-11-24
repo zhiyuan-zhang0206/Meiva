@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Mapping
 
+from .host_commands import HOME
 from .probe_values import HelperPresence, helper_presence, probe_flag
 
 # meiva:note
@@ -144,3 +146,19 @@ def rebuilding_hosts(probes: Probes, *, rebuild: bool) -> frozenset[str]:
     if not rebuild:
         return frozenset()
     return frozenset(alias for alias, facts in probes.items() if needs_rebuild(facts))
+
+
+_HELPER_PROBE_PATHS = "scripts/host_ops/tcc base services/desktop"
+
+
+def helper_probe_command(new: str) -> str:
+    return (
+        f"{HOME}\n"
+        "tmp=$(mktemp -d)\n"
+        f'git -C "$S" archive {shlex.quote(new)} -- {_HELPER_PROBE_PATHS} | tar -x -C "$tmp"\n'
+        'out=$(cd "$tmp" && PYTHONPATH="$tmp" "$S/.venv/bin/python" '
+        '"$tmp/scripts/host_ops/tcc/helper-signing.py" facts 2>&1); rc=$?\n'
+        'echo "h_rc=$rc"\n'
+        "printf '%s\\n' \"$out\" | sed 's/^/h_/'\n"
+        'rm -rf "$tmp"'
+    )

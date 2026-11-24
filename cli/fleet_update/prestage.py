@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shlex
 
-from .plan.host_commands import HOME
+from .plan.host_commands import FRONTEND_STAGE, HOME
 
 _PRESTAGE_PATHS = (
     "pyproject.toml uv.lock .python-version base cli ui/web/package.json ui/web/pnpm-lock.yaml"
@@ -55,6 +55,33 @@ if raw.get("MEIVA_MACHINE_SERVE_AGENT_RUNNER", "").strip().lower() in ("1", "tru
 """
 
 
+_PREBUILD_FIXED_PATHS = (
+    "ui/web/package.json ui/web/pnpm-lock.yaml ui/web/pnpm-workspace.yaml ui/web/scripts/patches "
+    "uv.lock .python-version"
+)
+
+
+def _frontend_prebuild(quoted_new: str) -> str:
+    return (
+        f"W={FRONTEND_STAGE}\n"
+        'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; '
+        'git -C "$S" worktree prune\n'
+        'if [ -d "$S/ui/web/node_modules" ] && command -v pnpm >/dev/null 2>&1 \\\n'
+        f'  && ! git -C "$S" diff --quiet HEAD {quoted_new} -- ui/web \\\n'
+        f'  && git -C "$S" diff --quiet HEAD {quoted_new} -- {_PREBUILD_FIXED_PATHS} \\\n'
+        f'  && git -C "$S" worktree add -q --detach "$W" {quoted_new}; then\n'
+        '  (cd "$W" && MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" '
+        '-m services.supervision.roster.frontend_prebuild --stage "$W" --serving "$S") '
+        '|| echo "frontend prebuild failed: meiva start builds the frontend instead"\n'
+        '  if [ ! -f "$W/ui/web/.next/meiva-build-key" ]; then\n'
+        '    git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; '
+        'git -C "$S" worktree prune\n'
+        "  fi\n"
+        "fi\n"
+        "true"
+    )
+
+
 def prestage_command(new: str) -> str:
     quoted = shlex.quote(new)
     return (
@@ -85,5 +112,6 @@ def prestage_command(new: str) -> str:
         '  py="$S/.venv/bin/python"\n'
         '  [ -x "$tmp/.venv/bin/python" ] && py="$tmp/.venv/bin/python"\n'
         f'  PYTHONPATH="$tmp" MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$py" -c {shlex.quote(_PRESTAGE_HARNESS_SCRIPT)}\n'
-        "fi"
+        "fi\n"
+        f"{_frontend_prebuild(quoted)}"
     )

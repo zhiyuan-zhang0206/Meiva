@@ -169,6 +169,11 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
     return None
 
 
+def _remove_foreign_markers(node_modules: Path) -> None:
+    for marker in _FOREIGN_NODE_MODULES_MARKERS:
+        (node_modules / marker).unlink(missing_ok=True)
+
+
 def _frontend_deps_stamp_hash(fe: Path) -> str:
     digest = hashlib.sha256(b"pnpm-lock.yaml\0")
     digest.update((fe / "pnpm-lock.yaml").read_bytes())
@@ -189,7 +194,9 @@ def _frontend_deps_stamp_hash(fe: Path) -> str:
 # `node_modules/.meiva-lock-hash` stamps `_frontend_deps_stamp_hash(fe)` after a successful
 # `pnpm install --frozen-lockfile`. When the stamp matches, `_node_modules_drift` verifies
 # `.modules.yaml`, rejects foreign markers, and checks direct dependency versions against
-# `pnpm-lock.yaml` (cf. docs/postmortems/0007).
+# `pnpm-lock.yaml` (cf. docs/postmortems/0007). pnpm never deletes a foreign marker, so a
+# successful install clears them before the stamp is written (else every start reports drift);
+# a failed install leaves them.
 def ensure_frontend_deps(
     repo: Path, *, environ: Mapping[str, str], install_argv: tuple[str, ...]
 ) -> None:
@@ -221,6 +228,7 @@ def ensure_frontend_deps(
         check=True,
         env={**frontend_toolchain_env(environ), "CI": "true"},
     )
+    _remove_foreign_markers(node_modules)
     stamp.write_text(want)
 
 

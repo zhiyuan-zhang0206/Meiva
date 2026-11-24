@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -67,7 +69,12 @@ def _sweep(
     source: _verify.SweepSource, producer: Callable[[], EventPipeline], *, notify: bool = True
 ) -> int:
     return _verify.cmd_schedules_verify(
-        python=sys.executable, source=source, notify=notify, now=_NOW, producer=producer
+        python=sys.executable,
+        source=source,
+        notify=notify,
+        now=_NOW,
+        producer=producer,
+        children=2,
     )
 
 
@@ -363,3 +370,55 @@ def test_a_wedged_or_unspawnable_child_is_a_red_detail() -> None:
     assert spawn_failure_verdict("FileNotFoundError", "m" * 300) == (
         f"tool-error:FileNotFoundError:{'m' * 100}"
     )
+
+
+def test_a_concurrent_sweep_gives_the_same_verdicts_in_row_order() -> None:
+    started: list[str] = []
+
+    def slow_first(script: str) -> str | None:
+        started.append(script)
+        if script == "first":
+            time.sleep(0.2)
+        return "missing=middle" if script == "middle" else None
+
+    rows = (
+        StoredSchedule(1, "a", "first"),
+        StoredSchedule(2, "b", "middle"),
+        StoredSchedule(3, "c", "   \n"),
+        StoredSchedule(4, "d", "last"),
+    )
+    results = _verify.check_rows(rows, check=slow_first, children=4)
+    assert [(row.schedule_id, verdict) for row, verdict in results] == [
+        (1, None),
+        (2, "missing=middle"),
+        (3, None),
+        (4, None),
+    ]
+    assert sorted(started) == ["first", "last", "middle"]
+
+
+def test_a_sweep_runs_checks_at_the_same_time_not_one_after_another() -> None:
+    lock = threading.Lock()
+    running = 0
+    peak = 0
+
+    def overlapping(script: str) -> str | None:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.1)
+        with lock:
+            running -= 1
+        return None
+
+    rows = tuple(StoredSchedule(i, f"s{i}", "print(1)") for i in range(6))
+    _verify.check_rows(rows, check=overlapping, children=3)
+    assert peak == 3
+
+
+@pytest.mark.parametrize(("cpus", "expected"), [(16, 8), (8, 4), (2, 1), (1, 1), (None, 1)])
+def test_the_children_leave_half_the_cpus_to_the_serving_cluster(
+    cpus: int | None, expected: int
+) -> None:
+    assert _verify.children_for(cpus) == expected

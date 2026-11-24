@@ -74,6 +74,28 @@ def stop_command(flags: str) -> str:
     return f"{HOME}; {MEIVA} stop --yes {flags}"
 
 
+FRONTEND_STAGE = '"$H/frontend-prebuild"'
+
+
+def adopt_frontend_build(new: str) -> str:
+    """Move the frontend build prestage staged for exactly NEW into the checkout just switched to.
+
+    `meiva start` then finds `.next/meiva-build-key` current and skips `next build`. Only a stage
+    whose worktree is at NEW and that holds a finished build (the key is written after a
+    successful build) is taken; otherwise nothing changes and the start builds as before, which
+    is also what the recovery switch back to OLD does. The stage (a git worktree of NEW beside the
+    serving checkout, on the same filesystem so the move is one rename) is not deleted here,
+    because that would spend seconds of the outage: the next prestage removes it. Always succeeds.
+    """
+    return (
+        f"W={FRONTEND_STAGE}; "
+        f'if [ "$(git -C "$W" rev-parse HEAD 2>/dev/null)" = {new} ] '
+        '&& [ -f "$W/ui/web/.next/meiva-build-key" ]; then '
+        'rm -rf "$S/ui/web/.next" && mv "$W/ui/web/.next" "$S/ui/web/.next" '
+        '|| echo "frontend prebuild not adopted: meiva start builds the frontend"; fi; true'
+    )
+
+
 # meiva:note
 # Check NEW out detached, repair legacy read-only `.venv` directories (early converge passes left
 # them 0555, which `uv sync` cannot write through), sync (reinstalling the editable `meiva` wheel so
@@ -81,7 +103,7 @@ def stop_command(flags: str) -> str:
 # `uv.lock` is unchanged), and require a clean tree.
 def switch_command(new: str) -> str:
     return (
-        f"{HOME}; git checkout -q --detach {new} && {_VENV_DIRS} && "
+        f"{HOME}; git checkout -q --detach {new} && {adopt_frontend_build(new)} && {_VENV_DIRS} && "
         f"env -u VIRTUAL_ENV uv sync --frozen --compile-bytecode --reinstall-package meiva && {CLEAN}"
     )
 
@@ -95,23 +117,3 @@ def start_command(flags: str) -> str:
 # puts its own tools on PATH.
 def login_shell(os_name: str, script: str) -> str:
     return f"{'zsh' if os_name == 'Darwin' else 'bash'} -lc {shlex.quote(script)}"
-
-
-_HELPER_PROBE_PATHS = "scripts/host_ops/tcc base services/desktop"
-
-
-# meiva:note
-# The helper facts of the commit the wave switches to, read by that commit's own module: the
-# script and the package it imports are extracted from NEW's objects, because the installed
-# checkout is the OLD commit and on a first wave does not carry this command at all.
-def helper_probe_command(new: str) -> str:
-    return (
-        f"{HOME}\n"
-        "tmp=$(mktemp -d)\n"
-        f'git -C "$S" archive {shlex.quote(new)} -- {_HELPER_PROBE_PATHS} | tar -x -C "$tmp"\n'
-        'out=$(cd "$tmp" && PYTHONPATH="$tmp" "$S/.venv/bin/python" '
-        '"$tmp/scripts/host_ops/tcc/helper-signing.py" facts 2>&1); rc=$?\n'
-        'echo "h_rc=$rc"\n'
-        "printf '%s\\n' \"$out\" | sed 's/^/h_/'\n"
-        'rm -rf "$tmp"'
-    )

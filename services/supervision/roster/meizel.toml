@@ -1,13 +1,14 @@
-exports = ["__main__.py", "composition.py", "field_values.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+exports = ["__main__.py", "composition.py", "frontend_prebuild.py", "field_values.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
 
 [uses]
 "__init__.py" = ["healthz.py", "service_spec.py"]
 "composition.py" = ["field_values.py", "gate_plan.py", "healthz.py", "listeners.py", "plugin_services.py", "service_spec.py"]
 "__main__.py" = ["composition.py"]
+"frontend_prebuild.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
 "spec.py" = ["composition.py", "gate_plan.py", "plugin_services.py", "service_spec.py"]
-"tests" = ["__init__.py", "composition.py", "field_values.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
+"tests" = ["__init__.py", "composition.py", "field_values.py", "frontend_prebuild.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
 
 [external]
 "plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
@@ -17,5 +18,6 @@ exports = ["__main__.py", "composition.py", "field_values.py", "healthz.py", "pl
 "gate_plan.py" = "strict"
 
 [roots]
+"frontend_prebuild.py" = { kinds = ["argv", "environ", "platform", "settings"], why = "Fleet-update prestage entry (`python -m services.supervision.roster.frontend_prebuild`) run from the target commit's worktree: it reads its command line once, this host's machine roles and frontend build settings, the platform (to pick the copy-on-write `cp` flags) and its own process environment (the NEXT_PUBLIC_* values the build bakes), then hands them to `prebuild` as values" }
 "__main__.py" = { kinds = ["home"], why = "`python -m services.supervision.roster` resolves the home whose plugins declare the services it prints" }
 "composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis URLs, the gateway settings that the service specs take, and the enablement flags the roster gates judge; builds the health-endpoint table for the supplied home" }

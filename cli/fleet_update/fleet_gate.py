@@ -12,7 +12,8 @@ import subprocess
 from pathlib import Path
 from typing import TypeGuard
 
-from .plan.host_commands import PROBE, helper_probe_command
+from .plan.helper_gate import helper_probe_command
+from .plan.host_commands import PROBE
 from .plan.host_probe import facts_of, was_serving
 from .plan.release_target import (
     ResolvedTarget,

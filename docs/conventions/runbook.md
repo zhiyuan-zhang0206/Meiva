@@ -469,7 +469,10 @@ Alternatives per choice: `--channel stable` or preview-only `--track-branch BRAN
 the latest commit on `origin/BRANCH`) instead of the default `--channel latest`; `--no-runners` instead of
 `--runner`; `--dry-run` instead
 of `--execute`; `--close-shell-sessions`, `--stop-browser`, `--stop-extras`,
-`--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
+`--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`
+(`python scripts/host_ops/observability_keep.py OLD NEW` prints the five observability
+`--keep-service` flags when no changed path can reach the stack, or the paths that force a
+restart; see [observability keep advice](../../scripts/host_ops/docs/observability-keep.md));
 `--mode force`; `--no-message` instead of `--message TEXT`; `--allow-python-change`,
 `--allow-red-schedules`;
 `--only-service NAME` or `--disable-service NAME` (repeatable) instead of

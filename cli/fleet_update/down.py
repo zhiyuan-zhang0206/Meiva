@@ -416,17 +416,21 @@ def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight
         new = resolve_target(s.repo, args.target_request).sha
     else:
         raise RefusedError("refused: no target to resolve")
-    pre = _preflight(s, args, new)
+    with s.timed("preflight"):
+        pre = _preflight(s, args, new)
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
-    _kept_roots(s, args, new)
-    _stored_schedules(s, args, new)
-    s.gather_hosts(
-        _hosts(s, args),
-        gateway=args.gateway,
-        step="prestage",
-        work=lambda alias: s.run(alias, prestage_command(new)),
-    )
+    with s.timed("kept-root check"):
+        _kept_roots(s, args, new)
+    with s.timed("stored-schedule verify"):
+        _stored_schedules(s, args, new)
+    with s.timed("prestage"):
+        s.gather_hosts(
+            _hosts(s, args),
+            gateway=args.gateway,
+            step="prestage",
+            work=lambda alias: s.run(alias, prestage_command(new)),
+        )
     return pre
 
 
@@ -444,17 +448,21 @@ def down(
     if before_stop is not None:
         before_stop()
     silence_note = f" ({args.message_text})" if args.message_text else ""
-    run_silence(
-        s,
-        args.gateway,
-        "open",
-        hours=_chosen(args).silence_hours,
-        comment=(
-            f"fleet update to {new[:12]}: planned outage{silence_note}; `up` expires this silence"
-        ),
-    )
-    _stop_wave(s, args, pre)
-    _switch_wave(s, args, pre, new)
+    with s.timed("silence open"):
+        run_silence(
+            s,
+            args.gateway,
+            "open",
+            hours=_chosen(args).silence_hours,
+            comment=(
+                f"fleet update to {new[:12]}: planned outage{silence_note}; "
+                "`up` expires this silence"
+            ),
+        )
+    with s.timed("stop wave"):
+        _stop_wave(s, args, pre)
+    with s.timed("switch wave"):
+        _switch_wave(s, args, pre, new)
     next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"
     left_out = f" except {', '.join(s.deferred)}" if s.deferred else ""
     s.say(f"down complete: every host{left_out} is stopped on {new[:12]}; {next_step}")

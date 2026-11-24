@@ -125,6 +125,7 @@ def test_check_file_prints_the_call_signature_verdict(
             notify=True,
             now=_NOW,
             producer=operator_pipeline,
+            children=2,
         )
         == 1
     )
@@ -147,6 +148,7 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
             notify=False,
             now=_NOW,
             producer=operator_pipeline,
+            children=2,
         )
         == 1
     )
@@ -275,6 +277,7 @@ def test_check_file_prints_the_undefined_name_verdict(
             notify=True,
             now=_NOW,
             producer=operator_pipeline,
+            children=2,
         )
         == 1
     )

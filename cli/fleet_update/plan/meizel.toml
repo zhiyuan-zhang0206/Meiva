@@ -2,7 +2,7 @@ exports = ["gateway_commands.py", "helper_gate.py", "host_commands.py", "host_fa
 
 [uses]
 "gateway_commands.py" = ["host_commands.py"]
-"helper_gate.py" = ["probe_values.py"]
+"helper_gate.py" = ["host_commands.py", "probe_values.py"]
 "host_probe.py" = ["journal.py", "probe_values.py"]
 "recovery.py" = ["journal.py"]
 "root_generation.py" = ["host_commands.py"]

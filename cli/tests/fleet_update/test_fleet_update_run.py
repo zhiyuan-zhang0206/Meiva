@@ -218,6 +218,17 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     assert "down complete" in output and "up complete" in output
     assert "run `up` when ready" not in output
     assert cluster.silence_hours == 2
+    timed = [line.split()[1] for line in output.splitlines() if line.startswith("timing: ")]
+    assert timed[:7] == [
+        "preflight",
+        "kept-root",
+        "stored-schedule",
+        "prestage",
+        "silence",
+        "stop",
+        "switch",
+    ]
+    assert {"gateway", "runner", "verify"} <= set(timed[7:])
 
 
 def test_a_path_with_no_ssh_fails_the_window_in_one_line_before_any_host(

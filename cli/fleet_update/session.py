@@ -11,6 +11,7 @@ import os
 import subprocess
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -124,6 +125,14 @@ class Session:
         with ThreadPoolExecutor(max_workers=min(len(items), _MAX_PARALLEL)) as pool:
             futures = [pool.submit(_call, item) for item in items]
             return [future.result() for future in futures]
+
+    @contextmanager
+    def timed(self, step: str) -> Iterator[None]:
+        started = self.timers.monotonic()
+        try:
+            yield
+        finally:
+            self.say(f"timing: {step} {self.timers.monotonic() - started:.1f}s")
 
     def defer(self, failure: HostFailure) -> None:
         if failure.alias in self.deferred:

@@ -16,7 +16,10 @@ and start choices are forwarded unchanged, never checked against the diff.
 - `down` / `run`, forwarded to every host's `meiva stop --yes`:
   `--keep-shell-sessions|--close-shell-sessions`, `--keep-browser|--stop-browser`,
   `--keep-extras|--stop-extras`, `--keep-service NAME` (repeatable) or
-  `--keep-no-services`, `--mode smooth|force`, `--stop-timeout` (as `--timeout`),
+  `--keep-no-services` (a window that changes nothing the observability stack reads keeps it
+  with `--keep-service loki|prometheus|tempo|grafana|otel-collector`;
+  [the read-only advice helper](../../scripts/host_ops/docs/observability-keep.md) prints the
+  flags or the paths that forbid it, and the window never decides it), `--mode smooth|force`, `--stop-timeout` (as `--timeout`),
   `--message TEXT` (non-blank natural-language explanation for live agents and
   closed busy shells, also appended to the Grafana silence comment) or
   `--no-message` (omitted from a host's stop command when its pre-switch
