@@ -96,5 +96,5 @@ def cmd_reconcile_usage_ledger(
             batch_size=batch_size,
             prices=load_price_book(),
         )
-    print(json.dumps(asdict(report), default=str, sort_keys=True))
-    return int(report.mismatched_groups != 0)
+    print(json.dumps(asdict(report) | {"matches": report.matches}, default=str, sort_keys=True))
+    return int(not report.matches)

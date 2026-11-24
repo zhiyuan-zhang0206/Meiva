@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import psycopg
+import pytest
 from psycopg.types.json import Jsonb
 
 from services.upkeep.events_maintenance.unpriced_backfill import load_price_book
@@ -99,6 +100,7 @@ def test_reconcile_reads_both_sides_and_identifies_duplicate_and_live_reports(
     api = {
         "model": "deepseek-flash",
         "call_id": "api:live",
+        "occurred_at": start.isoformat(),
         "cost_usd_exact": str(exact),
         "in_total": 90,
         "out_total": 9,
@@ -147,7 +149,9 @@ def test_reconcile_reads_both_sides_and_identifies_duplicate_and_live_reports(
         imported.catalog_priced,
         imported.still_unpriced,
     ) == (4, 3, 1, 1)
-    db_conn.execute("UPDATE llm_usage_ledger SET price_source = 'live' WHERE call_id = 'api:live'")
+    db_conn.execute(
+        "UPDATE llm_usage_ledger SET price_source = 'live', recorded_at = occurred_at WHERE call_id = 'api:live'"
+    )
     db_conn.commit()
     matched = reconcile_usage_ledger(db_conn, start=start, end=end, batch_size=1, prices=prices)
     assert (matched.source_events, matched.repeated_source_reports, matched.mismatched_groups) == (
@@ -185,3 +189,107 @@ def _assert_reconciled_totals(matched: UsageReconcileReport, day: date, exact: D
     assert catalog_group.cost_usd == catalog_group.historical_price_usd > 0
     assert unpriced_group is not None
     assert (unpriced_group.incomplete_reports, unpriced_group.unpriced_calls) == (1, 2)
+
+
+_DAY = datetime(2026, 11, 1, tzinfo=UTC)
+_END = _DAY + timedelta(days=1)
+
+
+def _emit_report(
+    conn: psycopg.Connection,
+    uid: int,
+    call_id: str,
+    *,
+    tokens: int = 10,
+    usd: str = "0.1",
+    machine: str = "actual-gateway",
+    process: str = "gateway",
+    cluster: str = "test",
+    occurred_at: datetime = _DAY,
+) -> None:
+    conn.execute(
+        """INSERT INTO telemetry_events
+           (event_uid, ts, machine, cluster, process, category, event_name, level, source, attributes)
+           VALUES (%s, %s, %s, %s, %s, 'telemetry', 'llm_usage', 'info', 'system', %s)""",
+        (
+            uid,
+            _DAY + timedelta(seconds=uid),
+            machine,
+            cluster,
+            process,
+            Jsonb(
+                {
+                    "call_id": call_id,
+                    "occurred_at": occurred_at.isoformat(),
+                    "model": "deepseek-flash",
+                    "in_total": tokens,
+                    "out_total": 1,
+                    "cost_usd_exact": usd,
+                    "cache_write_5m": 0,
+                    "cache_write_1h": 0,
+                }
+            ),
+        ),
+    )
+    conn.commit()
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_reconcile_finds_record_differences_with_equal_group_totals(
+    db_conn: psycopg.Connection,
+    drift: bool,
+) -> None:
+    _emit_report(db_conn, 1, "call-a")
+    _emit_report(db_conn, 2, "call-b")
+    prices = load_price_book()
+    backfill_usage_ledger(db_conn, start=_DAY, end=_END, batch_size=1, prices=prices)
+    if drift:
+        db_conn.execute(
+            """UPDATE llm_usage_ledger
+               SET tokens_in = CASE call_id WHEN 'call-a' THEN 9 ELSE 11 END,
+                   cost_usd = CASE call_id WHEN 'call-a' THEN 0.09 ELSE 0.11 END"""
+        )
+    else:
+        db_conn.execute("UPDATE llm_usage_ledger SET call_id = 'call-c' WHERE call_id = 'call-b'")
+    db_conn.commit()
+
+    result = reconcile_usage_ledger(db_conn, start=_DAY, end=_END, batch_size=1, prices=prices)
+    assert result.mismatched_groups == 0
+    assert not result.matches
+    differences = [(row.call_id, row.kind, row.fields) for row in result.record_differences]
+    assert differences == (
+        [
+            ("call-a", "different_fields", ("tokens_in", "cost_usd")),
+            ("call-b", "different_fields", ("tokens_in", "cost_usd")),
+        ]
+        if drift
+        else [("call-b", "source_only", ()), ("call-c", "ledger_only", ())]
+    )
+
+
+def test_reconcile_attributes_only_the_live_writer_and_retains_unknown_process(
+    db_conn: psycopg.Connection,
+) -> None:
+    _emit_report(db_conn, 1, "call-a")
+    _emit_report(db_conn, 2, "ambiguous")
+    prices = load_price_book()
+    backfill_usage_ledger(db_conn, start=_DAY, end=_END, batch_size=1, prices=prices)
+    db_conn.execute(
+        """UPDATE llm_usage_ledger SET price_source = 'live', recorded_at = %s,
+           cache_write_5m = NULL, cache_write_1h = NULL""",
+        (_DAY + timedelta(seconds=1),),
+    )
+    db_conn.commit()
+    _emit_report(db_conn, 3, "call-a", machine="failed-runner", process="agent_host")
+    _emit_report(
+        db_conn, 4, "call-a", process="agent_host", occurred_at=_DAY - timedelta(seconds=1)
+    )
+    _emit_report(db_conn, 5, "ambiguous", process="agent_host")
+    _emit_report(db_conn, 6, "call-a", cluster="different-cluster", process="agent_host")
+    _emit_report(db_conn, 0, "call-a", process="agent_host")
+    result = reconcile_usage_ledger(db_conn, start=_DAY, end=_END, batch_size=1, prices=prices)
+    assert result.matches
+    assert result.live_writers == [
+        LiveUsageWriter("actual-gateway", "gateway", 1),
+        LiveUsageWriter("actual-gateway", None, 1),
+    ]
