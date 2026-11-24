@@ -85,7 +85,7 @@ down:
 - **Agent.** A frozen `AgentConfig` built when the agent's runtime is constructed,
   merged from overlay, birth config and cluster default in the existing precedence.
   It splits into an identity part (the fields the registry marks frozen, such as the
-  model, reasoning effort, injected skills, communication style and system-prompt
+  model, reasoning effort, injected skills and system-prompt
   extras) and an operational part. Only the identity type is accepted by the system-prompt
   builder, so a compaction that quietly rebuilds identity from live defaults, the
   failure that motivated the per-agent lifecycle decision, cannot be written.

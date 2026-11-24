@@ -429,37 +429,6 @@ describe("ConfigPage enum select", () => {
 
 describe("Settings scope", () => {
 
-  it("leads General with communication style and saves its declared enum value", async () => {
-    const style = {
-      ...VIEW.fields[0], name: "agent_communication_style", label: "Agent communication style",
-      env_var: "MEIVA_AGENT_COMMUNICATION_STYLE", field_type: "enum" as const,
-      choices: ["oriented", "silent", "concise", "off"], current_value: null, default_value: null,
-    };
-    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [...VIEW.fields, style] });
-    const put = transport.putConfig.mockResolvedValue(OK_RESULT([style.name], ["agent"]));
-    wrap(<ConfigEditor mode="general" />);
-    const select = await screen.findByRole("combobox", { name: style.label });
-    expect(screen.getByRole("option", { name: "Model default" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Keep me involved" })).toBeTruthy();
-    expect(screen.queryByText("Context compaction threshold")).toBeNull();
-    fireEvent.change(select, { target: { value: "concise" } });
-    await waitFor(() => expect(put).toHaveBeenCalledWith(expect.objectContaining({ agent_communication_style: "concise" }), undefined));
-    expect(await screen.findByRole("status")).toBeTruthy();
-  });
-
-  it("restores model-default communication without writing an empty enum", async () => {
-    const style = {
-      ...VIEW.fields[0], name: "agent_communication_style", label: "Agent communication style",
-      env_var: "MEIVA_AGENT_COMMUNICATION_STYLE", field_type: "enum" as const,
-      choices: ["oriented", "silent", "concise", "off"], current_value: "concise", default_value: null,
-    };
-    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [style], raw_overrides: { agent_communication_style: "concise" } });
-    const put = transport.putConfig.mockResolvedValue(OK_RESULT([style.name]));
-    wrap(<ConfigEditor mode="general" />);
-    fireEvent.change(await screen.findByRole("combobox", { name: style.label }), { target: { value: "" } });
-    await waitFor(() => expect(put).toHaveBeenCalledWith({ agent_communication_style: null }, undefined));
-  });
-
   it("shows fast acknowledgement in General working-together and saves boolean updates", async () => {
     const fastAck = {
       ...VIEW.fields[0], name: "fast_acknowledgement", label: "Fast acknowledgement",

@@ -1,60 +1,6 @@
-"""Field-surface contracts of the env-decode helpers: communication style, helper port, delay lists and disabled adapters; split from base/tests/test_config.py (task #4922)."""
+"""Field-surface contracts of the env-decode helpers: helper port, delay lists and disabled adapters; split from base/tests/test_config.py (task #4922)."""
 
 from __future__ import annotations
-
-import pytest
-
-from base import config
-
-# --- agent_communication_style: enum ---
-
-
-def _style_from_env(**env: str) -> str | None:
-    from base.config.domains.agent.settings import AgentSettings
-
-    return AgentSettings.from_environment(env).agent_communication_style
-
-
-def test_communication_style_defaults_to_off() -> None:
-    """No env at all leaves the None sentinel (unset -> per-model resolution),
-    whose shared floor is 'off' by user ruling (2026-08-22), so the section is
-    omitted unless explicitly enabled."""
-    from base.lm.registry import DEFAULT_TUNING
-
-    assert _style_from_env() is None
-    assert DEFAULT_TUNING.agent_communication_style == "off"
-
-
-@pytest.mark.parametrize("style", ["oriented", "concise", "silent", "off"])
-def test_communication_style_accepts_each_member(style: str) -> None:
-    assert _style_from_env(MEIVA_AGENT_COMMUNICATION_STYLE=style) == style
-
-
-@pytest.mark.parametrize("bad", ["loud", "", "verbose", "2"])
-def test_unknown_communication_style_fails_fast(bad: str) -> None:
-    """A value outside the documented members reaches Literal validation and
-    raises rather than being coerced."""
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        _style_from_env(MEIVA_AGENT_COMMUNICATION_STYLE=bad)
-
-
-def test_communication_style_is_a_per_agent_enum() -> None:
-    """The field is overridable per agent (spawn config_overlay) and surfaces to
-    the config panel as an enum with its three members."""
-    from base.config import FIELD_INFOS
-
-    field = FIELD_INFOS["agent_communication_style"]
-    extra = field.json_schema_extra
-    assert isinstance(extra, dict)
-    assert extra["per_agent"] is True
-    assert extra["writable"] is True
-    assert extra["scope"] == "cluster-default"
-    assert extra["restart_required"] == "agent"
-    assert (
-        config.field_alias_map()["agent_communication_style"] == "MEIVA_AGENT_COMMUNICATION_STYLE"
-    )
 
 
 def _helper_port_from_env(**env: str) -> int:

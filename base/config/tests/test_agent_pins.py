@@ -26,6 +26,14 @@ def test_none_maps() -> None:
     assert resolve_agent_config_pins(None, None) == {}
 
 
+def test_agents_born_with_the_retired_communication_style_pin_still_resolve() -> None:
+    pins = resolve_agent_config_pins(
+        {"agent_communication_style": "silent", "llm_model": "m"},
+        {"agent_communication_style": "off", "reasoning_effort": "high"},
+    )
+    assert pins == {"llm_model": "m", "reasoning_effort": "high"}
+
+
 def test_retired_gemini_cache_pins_do_not_reach_model_policy() -> None:
     pins = resolve_agent_config_pins(
         {"gemini_explicit_cache_enabled": True, "llm_model": "gemini-3.8-flash"},

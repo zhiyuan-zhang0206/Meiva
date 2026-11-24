@@ -24,7 +24,6 @@ _CHILD = str(Path(__file__).with_name("_boot_lite_child.py"))
 # The real merged pin map of a `deepseek-v4-flash` exec child (task #3621
 # BLK-1): what `MEIVA_AGENT_CONFIG_OVERLAY` carries in production.
 _PINMAP: dict[str, object] = {
-    "agent_communication_style": "off",
     "claude_thinking_budget_tokens": None,
     "eval_isolation": False,
     "eval_network_allowlist": [],

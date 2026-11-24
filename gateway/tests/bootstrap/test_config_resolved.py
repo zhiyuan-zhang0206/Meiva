@@ -35,7 +35,9 @@ def tuned_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple[str
         {
             TUNED_MODEL: ModelSpec(
                 provider="claude",
-                tuning=ModelTuning(auto_compact_fraction=0.55, agent_communication_style="silent"),
+                tuning=ModelTuning(
+                    auto_compact_fraction=0.55, prompt_output_conciseness_enabled=True
+                ),
             )
         },
     )
@@ -102,13 +104,12 @@ def test_model_default_layer(tuned_model: tuple[str, ModelCatalog]) -> None:
     assert row["shared_default"] == DEFAULT_TUNING.auto_compact_fraction
     assert row["explicit_value"] is None
 
-    style = fields["agent_communication_style"]
-    assert style["source"] == "model-default"
-    assert style["effective_value"] == "silent"
-    # Enum metadata rides along so a per-model row renders the same vocabulary
+    conciseness = fields["prompt_output_conciseness_enabled"]
+    assert conciseness["source"] == "model-default"
+    assert conciseness["effective_value"] is True
+    # Field-type metadata rides along so a per-model row renders the same control
     # the field's own editor offers.
-    assert style["field_type"] == "enum"
-    assert "oriented" in (style["choices"] or [])
+    assert conciseness["field_type"] == "bool"
 
 
 def test_explicit_layer_beats_the_model(

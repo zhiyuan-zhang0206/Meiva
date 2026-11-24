@@ -317,28 +317,6 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
-    agent_communication_style: Literal["oriented", "silent", "concise", "off"] | None = Field(
-        title="Agent communication style",
-        default=None,
-        alias="MEIVA_AGENT_COMMUNICATION_STYLE",
-        description=(
-            "Optional communication style. 'oriented': live pairing with substantive "
-            "findings and checkpoints. 'concise': brief milestone updates. 'silent': "
-            "one report for human-requested work. 'off': only the optional style "
-            "section is omitted; language and substantive communication rules remain active. Unset "
-            "resolves the per-model default (base/lm/registry.py; shared floor "
-            "'off')."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "frozen",
-        },
-    )
-
     prompt_memory_behavior_enabled: bool | None = Field(
         title="Include memory guidance",
         default=None,

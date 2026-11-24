@@ -3,10 +3,6 @@
 `invest_in_the_future_section` is gated by `prompt_invest_future_enabled`
 (MEIVA_SYSTEM_PROMPT_INVEST_FUTURE). The section renders when it is on, is
 suppressed when it is off, and defaults on through the per-model floor.
-
-`communication_style_section` is the odd one out: it is selected, not gated —
-'oriented' / 'concise' / 'silent' always render something — except for the
-fourth member, 'off', which is a gate like any other and renders nothing.
 """
 
 import os
@@ -25,7 +21,6 @@ from agent.graph.prompt.system_prompt import (
     align_before_action_section,
     build_system_prompt,
     codeact_section,
-    communication_style_section,
     cross_machine_delegation_section,
     invest_in_the_future_section,
     keep_it_simple_section,
@@ -34,7 +29,6 @@ from agent.graph.prompt.system_prompt import (
     user_tone_section,
 )
 from base.config.tests.configuration import defaults
-from base.host.boundary.untyped import object_sequence
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -330,100 +324,6 @@ def test_ui_delivery_section_prefers_ui_over_file_paths():
     assert "telling the user its path" in rendered
     assert "persistence" in rendered and "other agents" in rendered
     assert "meiva.ui." not in rendered  # example-free: no SDK function names
-
-
-# --- Communication style ---
-
-
-@pytest.mark.parametrize("style", ["oriented", "concise", "silent"])
-def test_communication_style_only_renders_optional_narration(style: str) -> None:
-    """Reply routing has one unconditional owner, independent from narration."""
-
-    rendered = communication_style_section(_inputs(agent__agent_communication_style=style))
-
-    assert rendered.startswith("# ")
-    assert "meiva.ui.ask for persistent questions" in rendered
-    assert "Reply in ordinary assistant text" not in rendered
-
-
-def test_oriented_style_keeps_the_user_oriented() -> None:
-    """Explicit live pairing allows substantive checkpoints, not a tool log."""
-
-    rendered = communication_style_section(_inputs(agent__agent_communication_style="oriented"))
-
-    assert rendered.startswith("# Keeping the user oriented")
-    assert "This agent is configured for live pairing" in rendered
-    assert "meaningful findings and checkpoints" in rendered
-    assert "why it matters and what remains unresolved" in rendered
-    assert "self-contained and useful to the user" in rendered
-    assert "alongside each action" not in rendered
-
-
-def test_silent_style_asks_for_no_narration_and_a_closing_report() -> None:
-    """Silent means quiet *while working* plus one standalone report at the end —
-    not silence about the outcome. Blockers still interrupt immediately."""
-
-    rendered = communication_style_section(_inputs(agent__agent_communication_style="silent"))
-
-    assert "Work without narrating" in rendered
-    assert "one complete report" in rendered
-    assert "blocker" in rendered
-    # The oriented guidance is gone, not merely appended to.
-    assert "Keeping the user oriented" not in rendered
-    assert "don't work in long silences" not in rendered
-
-
-def test_concise_style_speaks_only_at_milestones() -> None:
-    """Between milestones the agent works without commenting — and neither of
-    the other two styles' guidance leaks in."""
-
-    rendered = communication_style_section(_inputs(agent__agent_communication_style="concise"))
-
-    assert "Speak at milestones" in rendered
-    assert "Keeping the user oriented" not in rendered
-    assert "Work without narrating" not in rendered
-
-
-def test_every_narrating_style_renders_a_distinct_section() -> None:
-    """The Literal members minus 'off' and the rendered-section keys are the
-    same set, and no two styles produce the same text — a missing style would
-    KeyError at render time rather than silently fall back."""
-    from typing import get_args
-
-    from agent.graph.prompt.conversation import COMMUNICATION_STYLE_SECTIONS
-    from base.config.domains.agent.settings import AgentSettings
-
-    annotation = AgentSettings.model_fields["agent_communication_style"].annotation
-    # The field is None-sentinel'd (`Literal[...] | None` — unset resolves the
-    # per-model default); unwrap the union to the Literal member set.
-    literal = next(a for a in object_sequence(get_args(annotation)) if a is not type(None))
-    members = set(get_args(literal))
-    assert set(COMMUNICATION_STYLE_SECTIONS) == members - {"off"}
-    assert len(set(COMMUNICATION_STYLE_SECTIONS.values())) == len(COMMUNICATION_STYLE_SECTIONS)
-
-
-def test_off_style_omits_the_section_entirely() -> None:
-    """Off omits optional narration while the core reply policy stays active."""
-
-    rendered = communication_style_section(_inputs(agent__agent_communication_style="off"))
-
-    assert rendered == ""
-
-
-def test_off_style_is_absent_from_the_full_system_prompt() -> None:
-    """End-to-end: build_system_prompt() carries no trace of the communication
-    style section when the style is 'off' — not just the leaf function."""
-    prompt = build_system_prompt(
-        EMPTY,
-        _slices(agent__agent_communication_style="off"),
-        agent_id=1,
-        catalog=build_model_catalog(home=meiva_home()),
-        home=meiva_home(),
-        environ=ENVIRON,
-    )
-
-    assert "# Keeping the user oriented" not in prompt
-    assert "# Talking to the user" not in prompt
 
 
 # --- User tone (MEIVA_SYSTEM_PROMPT_USER_TONE) ---

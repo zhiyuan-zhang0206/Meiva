@@ -28,7 +28,6 @@ class Prompt:
     skills_to_inject_into_system_prompt: tuple[str, ...]
     skills_to_expand_at_start: tuple[str, ...]
     user_delivery_mode: str
-    agent_communication_style: str | None
     prompt_codeact_enabled: bool
     prompt_sequential_tool_calls_enabled: bool
     fast_acknowledgement: bool

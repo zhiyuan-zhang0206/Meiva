@@ -162,13 +162,6 @@ export function ConfigRow({
   const t = useTranslations("config");
   const isEditing = editingField === field.name;
   const label = field.label;
-  const communicationStyle = field.name === "agent_communication_style";
-  const communicationOptions: Record<string, string> = {
-    oriented: t("communication.oriented"),
-    concise: t("communication.concise"),
-    silent: t("communication.silent"),
-    off: t("communication.off"),
-  };
   const displayValue = simple && (field.current_value == null || field.current_value === "")
     ? t("automaticDefault") : displayFieldValue(field);
   const capabilityBlocked = field.field_type === "bool" && field.can_enable === false;
@@ -198,7 +191,6 @@ export function ConfigRow({
             </span>
           )}
         </div>
-        {communicationStyle && <p className="text-xs text-muted-foreground leading-snug">{t("communication.help")}</p>}
         {field.help_text && (
           <p className="text-xs text-muted-foreground leading-snug">
             {field.help_text}
@@ -299,14 +291,14 @@ export function ConfigRow({
               data-testid={`select-${field.name}`}
               onChange={(e) => onSelectEnum(e.target.value)}
             >
-              {(communicationStyle || field.current_value == null || field.current_value === "") && (
-                <option value="" disabled={!communicationStyle}>
-                  {communicationStyle ? t("automaticDefault") : t("notSet")}
+              {(field.current_value == null || field.current_value === "") && (
+                <option value="" disabled>
+                  {t("notSet")}
                 </option>
               )}
               {(field.choices ?? []).map((c) => (
                 <option key={c} value={c}>
-                  {communicationStyle ? communicationOptions[c] : c}
+                  {c}
                 </option>
               ))}
             </NativeSelect>

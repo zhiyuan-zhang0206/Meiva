@@ -47,15 +47,6 @@ def test_shared_floor_applies_when_nothing_set(*, model_catalog: ModelCatalog) -
     )
     assert (
         resolve_setting(
-            "agent_communication_style",
-            model="gpt-5.6-sol",
-            models=model_catalog.models,
-            explicit=get_field("agent_communication_style"),
-        )
-        == "off"
-    )
-    assert (
-        resolve_setting(
             "prompt_temporal_awareness_enabled",
             model="glm-5.2",
             models=model_catalog.models,
@@ -109,7 +100,7 @@ def test_per_model_default_wins_over_shared_floor(
         max_output_tokens=spec.max_output_tokens,
         knowledge_cutoff=spec.knowledge_cutoff,
         effort_levels=spec.effort_levels,
-        tuning=ModelTuning(auto_compact_fraction=0.9, agent_communication_style="silent"),
+        tuning=ModelTuning(auto_compact_fraction=0.9, prompt_output_conciseness_enabled=True),
     )
     model_catalog = add_models(model_catalog, {"deepseek-flash": tuned})
     assert (
@@ -123,12 +114,12 @@ def test_per_model_default_wins_over_shared_floor(
     )
     assert (
         resolve_setting(
-            "agent_communication_style",
+            "prompt_output_conciseness_enabled",
             model="deepseek-flash",
             models=model_catalog.models,
-            explicit=get_field("agent_communication_style"),
+            explicit=get_field("prompt_output_conciseness_enabled"),
         )
-        == "silent"
+        is True
     )
     assert (
         resolve_setting(

@@ -143,12 +143,13 @@ def test_retired_env_aliases_are_not_read() -> None:
         "MEIVA_SKIP_AUTH": "true",
         "MEIVA_NATIVE_HELPER_PORT": "11111",
         "MEIVA_SYSTEM_PROMPT_PROGRESS": "true",
+        "MEIVA_AGENT_COMMUNICATION_STYLE": "off",
         "MEIVA_OPS_ALERTS_WEBHOOK_TOKEN": "tok-legacy",
     }
 
     assert GatewaySettings.from_environment(legacy_env).gateway_url == ""
     assert ServiceSettings.from_environment(legacy_env).permissions_helper_port == 9223
-    assert AgentSettings.from_environment(legacy_env).agent_communication_style is None
+    assert not hasattr(AgentSettings.from_environment(legacy_env), "agent_communication_style")
     assert AlertsSettings.from_environment(legacy_env).webhook_token is None
 
 

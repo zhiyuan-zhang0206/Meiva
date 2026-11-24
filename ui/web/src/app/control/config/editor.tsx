@@ -44,9 +44,7 @@ import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 import { isImeComposition } from "@/lib/input/enter-to-send";
 
-const COMMON_FIELDS = new Set([
-  "MEIVA_AGENT_COMMUNICATION_STYLE", "MEIVA_FAST_ACKNOWLEDGEMENT", "MEIVA_REASONING_EFFORT",
-]);
+const COMMON_FIELDS = new Set(["MEIVA_FAST_ACKNOWLEDGEMENT", "MEIVA_REASONING_EFFORT"]);
 
 const configQueryKey = (machine: MachineSelection) => ["config", machine] as const;
 const MACHINES_QUERY_KEY = ["machines"] as const;
@@ -210,7 +208,6 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
       let parsed: unknown = value;
       if (field.field_type === "int") parsed = parseInt(value, 10);
       else if (field.field_type === "float") parsed = parseFloat(value);
-      else if (field.name === "agent_communication_style" && value === "") parsed = null;
       const result = await writeConfigOwners(
         applyDelta(current.raw_overrides, name, parsed), current.fields,
         (patch) => client.putConfig(patch, machine ?? undefined),
@@ -323,7 +320,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
     filter,
   );
   const generalFields = allGroups.flatMap((group) => group.fields);
-  const communicationFields = new Set(["agent_communication_style", "fast_acknowledgement"]);
+  const communicationFields = new Set(["fast_acknowledgement"]);
   const groupSections = mode === "general" ? [
     { id: "config-communication", label: t("workingTogether"), fields: generalFields.filter((field) => communicationFields.has(field.name)) },
     { id: "config-model-preferences", label: t("modelsHeading"), fields: generalFields.filter((field) => !communicationFields.has(field.name)) },

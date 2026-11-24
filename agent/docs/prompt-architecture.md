@@ -145,14 +145,6 @@ Capabilities rather than standing as its own section.
   agents to emit one concise `MEIVA_DISPLAY_TO_USER` (or `meiva.ui.publish`)
   confirmation before calling tools on new, unambiguous requests sent directly
   by the human in the conversation (not agent briefs or relays), and stay silent after pure-action commands instead of interrupting a second time.
-- **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
-  selected by `settings.agent.agent_communication_style` (env
-  `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
-  while it works — `oriented` selects live pairing with substantive checkpoints,
-  `concise` keeps progress updates to one or two sentences, `silent` works quietly
-  and reports once for human-requested work, `off` omits only the optional style
-  section. The core language and milestone policy remains active. General-agent behavior
-  (see the section below for the deliberate restraint vs Codex).
 - **`meiva_memory` behavior** — `meiva_builtins/plugins/meiva_memory/plugin.py:memory_discipline_section()`
   (declared in the plugin's `contribute()`; the old `agent/graph/prompt/system_prompt.py:_memory_behavior_section`
   moved out of core with the plugin split),
@@ -343,7 +335,7 @@ Review every section with these questions:
 - Would the rule still hold with every plugin disabled?
 - Is the same rule restated generically anywhere else? (exactly-one-owner check)
 
-## Communication style (implemented, config-selected)
+## Communication policy (implemented)
 
 An unconditional communication policy lives in `conversation.user_reply_section`: a
 human request gets a direct answer, and `## Fast acknowledgement` (`fast_acknowledgement`,
@@ -354,7 +346,7 @@ or empty acknowledgements are suppressed until results/blockers (`False`).
 It owns ordinary assistant-text reply routing, including text alongside tool calls,
 and applies to unfinished human requests resumed from handoff records. Once enough
 evidence is available, answer instead of investigating unstated response requirements.
-It applies with every communication style. Ordinary assistant text follows the
+It is always on; no setting selects a narration volume. Ordinary assistant text follows the
 current human language request, then standing user preferences from injected
 memory or project instructions, otherwise the latest human message. English
 prompts, code, logs and peer messages do not reset that preference; code,
@@ -375,32 +367,24 @@ reads, bookkeeping and unchanged status stay in tool feedback or working notes.
 There is no fixed cadence. Updates stand alone instead of introducing a tool
 call. Direct answers, necessary questions and complete final deliverables remain valid; a brief-update policy does not limit
 requested explanations or necessary evidence. Automated wakes and peer messages
-require neither courtesy replies nor automatic closing summaries. The optional
-style text is owned by the same `agent/graph/prompt/conversation.py` module.
-An explicitly selected live-pairing style can add more frequent substantive
-updates, but every message must remain self-contained and useful to the user.
+require neither courtesy replies nor automatic closing summaries. Every message
+must remain self-contained and useful to the user.
 
-A lightweight conversation section lives in the **Meiva core** prompt
-(`_communication_style_section`) — it is general-agent behavior, not
-coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
-env `MEIVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
-`concise` / `silent`. These select subsequent narration volume; `off` omits only
-that optional section. Reply routing is always present alongside language,
-milestone rules, and `## Fast acknowledgement` (`fast_acknowledgement`). All are owned by
-`conversation.user_reply_section`.
+The conversation section lives in the **Meiva core** prompt — it is general-agent
+behavior, not coding-specific. Reply routing, language, milestone rules, and
+`## Fast acknowledgement` (`fast_acknowledgement`) are all owned by
+`conversation.user_reply_section`. There is no communication-style enum: the
+former `MEIVA_AGENT_COMMUNICATION_STYLE` setting (`off` / `oriented` / `concise` /
+`silent`) was removed; its default `off` omitted the section, and the other
+values only re-tuned the always-on milestone policy.
 
 Text alongside `execute_code` follows the configured delivery protocol. Required
 process narration can stay in Details under prefix delivery or unpublished under
-SDK delivery; naive ordinary text has no hidden-label mechanism. `oriented` selects live pairing and adds substantive
-findings or checkpoints with their significance and remaining uncertainty.
-Existing per-agent overlays can select it for particular agents while the fleet
-default stays milestone-driven. `concise` keeps milestone updates to one or two
-sentences. `silent` asks for no narration after the initial human response and
-one complete standalone report for human-requested work. The common attention
-policy still preserves changed commitments, adverse results, needed corrections,
-actionable blockers and user-only questions during the work. These styles cannot enable
-routine per-action narration, assume the user watches in real time or
-disable the user's language preference.
+SDK delivery; naive ordinary text has no hidden-label mechanism. The common attention
+policy preserves changed commitments, adverse results, needed corrections,
+actionable blockers and user-only questions during the work. Nothing enables
+routine per-action narration, assumes the user watches in real time or
+disables the user's language preference.
 
 Deliberately **not** as prescriptive as Codex. We do **not** want:
 
@@ -414,7 +398,7 @@ Peer communication remains separate: Fleet owns directed delivery through
 the latest output when an agent forgets to send a peer message; it does not
 define the audience of ordinary assistant text or prove completion or freshness.
 
-Validation combines full-prompt contract tests across all four styles, with
+Validation combines full-prompt contract tests with
 optional output-shape guidance enabled and disabled, and behavior review on
 representative tasks. Review whether a standing non-English preference survives
 English source/tool content, each message independently serves the user,
@@ -431,7 +415,7 @@ Dimensions the upstream prompts cover that Meiva's is silent on, classified.
 
 | Dimension | Lands in | Status |
 |-----------|----------|--------|
-| Progress narration / interleaved updates | Meiva core (config-selected style) | ✅ `_communication_style_section` |
+| Progress narration / interleaved updates | Meiva core (always-on milestone policy) | ✅ `user_reply_section` |
 | Tone / candor toward the user (honesty over flattery, directness, no condescension) | Meiva core (per-model family gradient) | ✅ `_user_tone_section` |
 | Output conciseness + final-answer shape (don't dump files, reference paths) | Meiva core | ✅ `_output_conciseness_section` |
 | Verify-before-claiming-done (run the narrow test, then widen) | `meiva_code` | ✅ `_coding_tools_section` preamble |
@@ -464,10 +448,10 @@ Dimensions the upstream prompts cover that Meiva's is silent on, classified.
 Landed so far:
 
 - The `_engineering_workflow_section` move into `meiva_code` (responsibility split).
-- The core conversation section, since generalized from an on/off progress-narration
-  toggle into a four-way communication style (`MEIVA_AGENT_COMMUNICATION_STYLE`:
-  `off` (default) / `oriented` / `concise` / `silent`, with `off` omitting the section
-  entirely).
+- The core conversation section: always-on reply routing, visibility, language and
+  milestone rules (`conversation.user_reply_section`), with the `fast_acknowledgement`
+  switch as its only volume control. The earlier on/off narration toggle, later a
+  four-way communication style, no longer exists.
 - The core user-tone section (`MEIVA_SYSTEM_PROMPT_USER_TONE`, default on), with a
   per-family strength gradient and the Claude family defaulting off.
 - The `meiva_memory` behavior section (`MEIVA_SYSTEM_PROMPT_MEMORY`, default on) —
