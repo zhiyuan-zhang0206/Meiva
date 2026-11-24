@@ -73,8 +73,7 @@ _PGBOUNCER_RECEIVER_BLOCK = """
   # per second and the average query time in microseconds. The source is the
   # pooler's own log, not its admin console: `SHOW STATS` needs the SCRAM admin
   # password over TCP, while the log needs no credential and carries the numbers
-  # the retired `db-write-stall-watch` schedule read (the regex mirrors
-  # schedules/plans/watch/stall_rule.py). The stall rule itself (under 20
+  # the retired `db-write-stall-watch` schedule read. The stall rule itself (under 20
   # transactions/s with an average query above 300 ms for 3 minutes) lives in
   # Grafana; the collector only emits the signal. The lines go through their own
   # pipeline into a connector, never the main logs pipeline, so they do not

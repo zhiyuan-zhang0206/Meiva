@@ -1,5 +1,5 @@
 [uses]
-"watch" = ["children", "support"]
+"watch" = ["support"]
 "adversarial" = ["support"]
 "debt_sweep" = ["support"]
 "test_agent_directory.py" = ["support"]

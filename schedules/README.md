@@ -38,7 +38,6 @@ directory. The manifest is the single expression of the built-in policy
 | `model-update-tracker` | cron `0 6 * * *` | product | **enabled** |
 | `harness-cli-update` | cron `30 4 * * *` per machine | product | **enabled** |
 | `claude-auth-keepalive` | cron `10 0,6,12,18 * * *` per machine | product | **enabled** |
-| `db-write-stall-watch` | every 60 s | operator | disabled |
 | `sched-dry-import-weekly` | cron `0 9 * * 1` | operator | disabled |
 | `log-cred-mask-monthly` | cron `0 10 15 * *` | operator | disabled |
 | `qa-keepalive` | every 600 s | operator | disabled |
@@ -159,13 +158,8 @@ no router sends an unlabeled issue anywhere, so the card is the signal that reac
   identity skips, as `harness-cli-update` does.
 - **operator** schedules (cluster-operator tooling) ship with the product but
   start **disabled**: they exist so they are discoverable, and start only when
-  the operator enables them. `db-write-stall-watch` is the first: three
-  consecutive minutes under 20 xacts/s with an average query time above 300 ms
-  means the write path has stopped completing transactions, which is the
-  root-cause signal an agent-host crash wave follows. It wakes the operator and
-  the P0 lead only — never a user notification path — and stops with
-  `meiva schedules stop db-write-stall-watch`.
-- `agent-watch` is the other half of the same problem (#5594): a duty that
+  the operator enables them.
+- `agent-watch` (#5594) is an operator schedule for one problem: a duty that
   stops taking its rounds looks like a duty with nothing to report. Every ten
   minutes it reads the signals a stopped duty leaves behind — no live shell
   session, no real turn for longer than its cadence allows, a schedule the

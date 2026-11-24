@@ -3,7 +3,6 @@ exports = [
     "blind_window.py",
     "keepalive_rule.py",
     "release_gate_slot.py",
-    "stall_rule.py",
     "main_red.py",
     "main_red_issues.py",
     "workflow_graph.py",
@@ -17,7 +16,6 @@ exports = [
 "blind_window.py" = "strict"
 "keepalive_rule.py" = "strict"
 "release_gate_slot.py" = "strict"
-"stall_rule.py" = "strict"
 "main_red.py" = "strict"
 "main_red_issues.py" = "strict"
 "workflow_graph.py" = "strict"

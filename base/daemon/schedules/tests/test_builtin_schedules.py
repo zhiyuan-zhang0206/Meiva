@@ -39,7 +39,6 @@ class TestLoadManifest:
             "model-update-tracker": "product",
             "harness-cli-update": "product",
             "claude-auth-keepalive": "product",
-            "db-write-stall-watch": "operator",
             "sched-dry-import-weekly": "operator",
             "log-cred-mask-monthly": "operator",
             "qa-keepalive": "operator",
