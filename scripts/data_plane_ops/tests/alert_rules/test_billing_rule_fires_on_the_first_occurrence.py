@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 import yaml
@@ -181,11 +182,27 @@ def test_collector_enqueue_failure_rule_uses_window_delta() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-otelcol-enqueue-failures"]
     expr = rule_query_exprs(rule, "prometheus")[0]
-    assert "otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total" in expr
-    assert "increase(" in expr
+    for signal in ("log_records", "metric_points", "spans"):
+        assert f"increase(otelcol_exporter_enqueue_failed_{signal}_total{{" in expr
+    assert "__name__" not in expr
+    assert "offset 5m" in expr
     assert "[5m]" in expr
     assert "sum by (machine, exporter)" in expr
     assert threshold_params(rule) == [[0]]
+
+
+def test_collector_cluster_filter_drops_are_visible_as_a_window_delta() -> None:
+    rules = {r["uid"]: r for r in load_rules()}
+    rule = rules["meiva-ops-otelcol-cluster-allow-drops"]
+    expr = rule_query_exprs(rule, "prometheus")[0]
+    assert 'filter="filter/cluster_allow"' in expr
+    for signal in ("logs", "spans", "datapoints"):
+        assert f"increase(otelcol_processor_filter_{signal}_filtered_total{{" in expr
+    assert "__name__" not in expr
+    assert "increase(" in expr
+    assert "[5m]" in expr
+    assert threshold_params(rule) == [[0]]
+    assert rule["for"] == "0m"
 
 
 def test_collector_silence_rule_tracks_recently_seen_machines() -> None:
@@ -384,3 +401,37 @@ def test_retired_rule_inventory_is_disjoint_and_outside_provisioning() -> None:
     for path in RULES.parent.iterdir():
         if path.suffix in {".yaml", ".yml", ".json"}:
             assert "deleteRules" not in yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+_NAME_DROPPING = ("increase", "rate", "irate", "delta", "idelta", "deriv", "resets", "changes")
+
+
+def _name_regex_inside_name_dropping_functions(expr: str) -> list[str]:
+    found: list[str] = []
+    for match in re.finditer(rf"\b({'|'.join(_NAME_DROPPING)})\(", expr):
+        depth, end = 1, match.end()
+        while depth and end < len(expr):
+            depth += {"(": 1, ")": -1}.get(expr[end], 0)
+            end += 1
+        if re.search(r"__name__\s*=~", expr[match.end() : end]):
+            found.append(expr[match.start() : end])
+    return found
+
+
+def test_no_prometheus_rule_applies_a_name_dropping_function_to_a_name_regex() -> None:
+    offenders = {
+        rule["uid"]: bad
+        for rule in load_rules()
+        for expr in rule_query_exprs(rule, "prometheus")
+        if (bad := _name_regex_inside_name_dropping_functions(expr))
+    }
+    assert offenders == {}
+
+
+def test_the_name_regex_detector_sees_the_collision_shape() -> None:
+    assert _name_regex_inside_name_dropping_functions(
+        'sum by (m) (increase({__name__=~"a_(x|y)_total"}[5m]))'
+    )
+    assert not _name_regex_inside_name_dropping_functions(
+        "sum by (m) (increase(a_x_total[5m]) or increase(a_y_total[5m]))"
+    )

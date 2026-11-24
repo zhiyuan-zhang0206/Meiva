@@ -21,6 +21,7 @@ from opentelemetry.sdk.resources import Resource
 
 from base.telemetry.delivery.loss import install_exporter_drop_observer
 from base.telemetry.delivery.state import process_name
+from base.telemetry.observability import cluster_identity_attributes
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 from base.telemetry.otlp.http_logs.deadline import LogExportDeadline
 from base.telemetry.otlp.http_logs.exporter import BoundedHTTPLogExporter
@@ -61,8 +62,9 @@ def metric_views(process: str) -> list[View]:
 # plus a per-process-instance `service.instance.id`. Without it every series lands as
 # job="unknown_service" and two same-named processes exporting the same counter collide into ONE
 # series with interleaved cumulative values (increase() reads garbage). Metrics only: the logs
-# Resource is deliberately untouched, because Loki default-promotes resource attributes to index
-# labels, so a per-process-unique instance id there would mint a new stream per process start.
+# Resource gets no instance id, because Loki default-promotes resource attributes to index
+# labels, so a per-process-unique instance id there would mint a new stream per process start
+# (the logs Resource carries just the per-cluster routing identity, below).
 # Per-agent event indexing (Task #1327) keeps this resource as-is: the collector promotes the
 # per-record agent_id/event_name resource attributes (set in EventDimensionResourceExporter) to
 # Loki index labels, and the read side era-slices its selector around the cutover
@@ -117,7 +119,11 @@ def build_providers(
     )
     if keep_metrics is not None:
         keep_metrics(metrics)
-    logs = LoggerProvider(shutdown_on_exit=plan.shutdown_on_exit, meter_provider=metrics)
+    logs = LoggerProvider(
+        resource=Resource.create(cluster_identity_attributes(home)),
+        shutdown_on_exit=plan.shutdown_on_exit,
+        meter_provider=metrics,
+    )
     if keep_logs is not None:
         keep_logs(logs)
     log_exporter = EventDimensionResourceExporter(

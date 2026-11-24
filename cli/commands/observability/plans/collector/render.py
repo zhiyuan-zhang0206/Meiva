@@ -45,7 +45,8 @@ _HARNESS_PIPELINES = """    traces/harness:
 
 
 # meiva:note
-# Every value the collector template substitutes.
+# Every value the collector template substitutes (`cluster_id` is the routing identity, None for a
+# unit that holds no telemetry token).
 #
 # `data_plane` holds the fragments for this unit's own Postgres, Redis and PgBouncer stats,
 # `exporters` is the role-specific fan-out block, and `tempo_endpoint`, `loki_base` and
@@ -55,6 +56,7 @@ _HARNESS_PIPELINES = """    traces/harness:
 class CollectorValues:
     meiva_home: str
     cluster_label: str
+    cluster_id: str | None
     machine_name: str
     tempo_endpoint: str
     loki_base: str
@@ -80,6 +82,7 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
     substitutions = {
         "MEIVA_HOME": values.meiva_home,
         "CLUSTER_LABEL": values.cluster_label,
+        "CLUSTER_ID_PATTERN": ".*" if values.cluster_id is None else f"^{values.cluster_id}$",
         "MACHINE_NAME": values.machine_name,
         "TEMPO_ENDPOINT": values.tempo_endpoint,
         "LOKI_BASE": values.loki_base,

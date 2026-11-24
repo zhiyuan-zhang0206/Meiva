@@ -258,6 +258,38 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     assert trace_readiness.ready is True
 
 
+def test_traceloop_resource_carries_the_routing_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    collector_up: CollectorStubServer,
+    *,
+    trace_readiness: TraceReadiness,
+) -> None:
+    from base.cluster import cluster_id
+    from base.host.db_authority.api import ensure_telemetry_token
+
+    home = tmp_path / ".meiva-test"
+    home.mkdir()
+    ensure_telemetry_token(home.resolve(), "fixture-token-a")
+    calls: list[dict[str, Any]] = []
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
+
+    initialize_tracing(
+        now=system_clock().now,
+        machine=machine_identity(),
+        home=home,
+        config=trace_config(enabled=True, endpoint=collector_up.endpoint, endpoint_explicit=True),
+        readiness=trace_readiness,
+    )
+    wait_init_resolved(trace_readiness=trace_readiness)
+
+    assert calls[0]["resource_attributes"]["meiva.cluster"] == cluster_id("fixture-token-a")
+
+
 def test_gateway_trace_recording_skips_without_lgtm_marker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:

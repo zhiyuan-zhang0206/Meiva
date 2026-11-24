@@ -396,6 +396,7 @@ def values() -> CollectorValues:
     return CollectorValues(
         meiva_home="/h",
         cluster_label=".meiva",
+        cluster_id="c0ffee",
         machine_name='"box"',
         tempo_endpoint="http://t",
         loki_base="http://l",
@@ -416,7 +417,7 @@ def values() -> CollectorValues:
 
 def test_the_template_is_filled_from_the_named_values() -> None:
     template = (
-        "home=$MEIVA_HOME label=$CLUSTER_LABEL machine=$MACHINE_NAME tempo=$TEMPO_ENDPOINT "
+        "home=$MEIVA_HOME label=$CLUSTER_LABEL id=$CLUSTER_ID_PATTERN machine=$MACHINE_NAME tempo=$TEMPO_ENDPOINT "
         "loki=$LOKI_BASE prom=$PROM_BASE self=$SELF_METRICS_PORT "
         "otlp=$OTLP_RECEIVER_ENDPOINT dp=$DATA_PLANE_RECEIVERS|$DATA_PLANE_PIPELINE_RECEIVERS "
         "pipes=$DATA_PLANE_PIPELINES conn=$CONNECTORS "
@@ -424,7 +425,7 @@ def test_the_template_is_filled_from_the_named_values() -> None:
     )
 
     assert render_collector_config(template, values()) == (
-        'home=/h label=.meiva machine="box" tempo=http://t loki=http://l prom=http://p '
+        'home=/h label=.meiva id=^c0ffee$ machine="box" tempo=http://t loki=http://l prom=http://p '
         "self=8888 otlp=127.0.0.1:4318 dp=[DP]|, redis pipes=    logs/x: {} "
         "conn=connectors:\n  forward/harness: {}\n  c/x: {} x=[EXPORTERS] r=[]"
     )

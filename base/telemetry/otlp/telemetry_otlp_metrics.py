@@ -34,7 +34,7 @@ def metrics_resource_attributes(*, home: Path, instance_id: str) -> dict[str, st
     from importlib.metadata import version
 
     from base.telemetry.delivery.state import process_name
-    from base.telemetry.observability import cluster_label
+    from base.telemetry.observability import cluster_identity_attributes, cluster_label
 
     if not home.is_dir():
         raise RuntimeError(f"metrics resource home is not a directory: {home}")
@@ -45,4 +45,5 @@ def metrics_resource_attributes(*, home: Path, instance_id: str) -> dict[str, st
         "service.instance.id": instance_id,
         "service.version": version("meiva"),
         "cluster": cluster_label(home),
+        **cluster_identity_attributes(home),
     }

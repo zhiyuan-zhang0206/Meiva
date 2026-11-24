@@ -168,6 +168,7 @@ processors:
       - service.instance.id
       - deployment.environment
       - cluster
+      - meiva.cluster
       - host.name
       - meiva.machine
       - meiva.agent_id
@@ -250,16 +251,27 @@ processors:
   # The LGTM host accepts legacy records without a cluster dimension, but a
   # co-located home that reaches its local receiver must never pollute this
   # cluster's backends. Keep memory_limiter first; reject mismatches second.
+  # `meiva.cluster` is the routing identity (a digest of the cluster's telemetry
+  # token, the same for every unit of one cluster): two clusters whose homes
+  # share a directory name differ here. `cluster` is the display label (the
+  # home's directory name), kept as a second check. Records without either
+  # attribute pass, and a unit that holds no telemetry token yet renders the
+  # pattern `.*` (admit any id). Every drop is counted by
+  # `otelcol_processor_filter_*_filtered{filter="filter/cluster_allow"}`, which
+  # the `meiva-ops-otelcol-cluster-allow-drops` alert watches.
   filter/cluster_allow:
     error_mode: ignore
     traces:
       span:
+        - 'resource.attributes["meiva.cluster"] != nil and not IsMatch(resource.attributes["meiva.cluster"], "$CLUSTER_ID_PATTERN")'
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
     metrics:
       metric:
+        - 'resource.attributes["meiva.cluster"] != nil and not IsMatch(resource.attributes["meiva.cluster"], "$CLUSTER_ID_PATTERN")'
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
     logs:
       log_record:
+        - 'resource.attributes["meiva.cluster"] != nil and not IsMatch(resource.attributes["meiva.cluster"], "$CLUSTER_ID_PATTERN")'
         - 'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != "$CLUSTER_LABEL"'
   # Stamp origin identity on data collected locally. Remote pipelines preserve
   # the resource identity the sending collector already attached.

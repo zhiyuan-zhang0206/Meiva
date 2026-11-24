@@ -28,6 +28,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.log import logger
 from base.telemetry.delivery.reporting import report_no_pipeline
 from base.telemetry.observability import (
+    cluster_identity_attributes,
     cluster_label,
     endpoint_override_is_explicit,
     observability_export_allowed,
@@ -246,7 +247,12 @@ def build_process_tracer(
         return None
     provider = TracerProvider(
         resource=Resource.create(
-            {"service.name": service, "service.line": "meiva", "cluster": cluster_label(home)}
+            {
+                "service.name": service,
+                "service.line": "meiva",
+                "cluster": cluster_label(home),
+                **cluster_identity_attributes(home),
+            }
         ),
         shutdown_on_exit=False,
     )
@@ -348,6 +354,7 @@ def _arm_tracing(
                 telemetry_enabled=False,
                 resource_attributes={
                     "cluster": cluster_label(home),
+                    **cluster_identity_attributes(home),
                     "service.line": "meiva",
                     "environment": "prod" if production else "dev",
                 },

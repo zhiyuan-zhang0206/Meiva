@@ -9,6 +9,22 @@ LGTM collector drops a record only when its non-null cluster differs from its
 own home label; null Resources remain valid for the collector's filelog/infra
 pipelines.
 
+### Routing identity
+
+`cluster` is the home's basename, a display label two clusters can share. The
+isolation boundary therefore compares a second Resource attribute,
+`meiva.cluster`: the first 16 hex digits of a digest of the cluster's telemetry
+token (`base.cluster.cluster_id`), identical on the gateway and on every runner,
+derived without any stored name. Producers stamp it on logs, metrics and traces
+(`base.telemetry.observability.cluster_identity_attributes`; omitted while the
+home holds no token). The collector drops a record whose `meiva.cluster` differs
+from its own, passes records without one, and counts every drop; the
+`meiva-ops-otelcol-cluster-allow-drops` alert fires on any. The id follows the
+token, so a re-minted token changes it (bearer authentication already rejects a
+runner with the old token; on the gateway host, a producer and a collector that
+disagree show up in the drop counter). Details:
+[routing identity decision](../../../../../docs/decisions/observability/telemetry/2026-11-24-cluster-routing-identity.md).
+
 ## Lifecycle and producer gates
 
 The implicit loopback event exporter requires a registered machine identity and

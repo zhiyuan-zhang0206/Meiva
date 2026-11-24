@@ -1589,7 +1589,12 @@ groups:
       # ── R15: newly rejected telemetry (enqueue-failure delta > 0 in 5m) ──
       # These are monotonic counters. `increase` is load-bearing: comparing an
       # absolute value would create a permanent alert after the first failure
-      # until the collector restarted.
+      # until the collector restarted. One `increase` per signal: a single
+      # `__name__=~` selector makes `increase` drop the name and collide on
+      # labelset ("vector cannot contain metrics with the same labelset"),
+      # which `execErrState: OK` would turn into an alert that never fires.
+      # The collector creates a counter on its first failure, so a series
+      # that is new in the window (`unless ... offset 5m`) counts as its value.
       - uid: meiva-ops-otelcol-enqueue-failures
         title: "OTel Collector rejected telemetry"
         condition: D
@@ -1623,9 +1628,102 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine, exporter) (
-                  increase({machine!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m])
-                  or on (machine, exporter)
-                  label_join(increase({machine="", machine_name!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]), "machine", "", "machine_name")
+                  label_replace(increase(otelcol_exporter_enqueue_failed_log_records_total{machine!=""}[5m]), "signal", "log_records", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_log_records_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "log_records", "", "")
+                  or (otelcol_exporter_enqueue_failed_log_records_total{machine!=""} unless otelcol_exporter_enqueue_failed_log_records_total{machine!=""} offset 5m)
+                  or
+                  label_replace(increase(otelcol_exporter_enqueue_failed_metric_points_total{machine!=""}[5m]), "signal", "metric_points", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_metric_points_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "metric_points", "", "")
+                  or (otelcol_exporter_enqueue_failed_metric_points_total{machine!=""} unless otelcol_exporter_enqueue_failed_metric_points_total{machine!=""} offset 5m)
+                  or
+                  label_replace(increase(otelcol_exporter_enqueue_failed_spans_total{machine!=""}[5m]), "signal", "spans", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_spans_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "spans", "", "")
+                  or (otelcol_exporter_enqueue_failed_spans_total{machine!=""} unless otelcol_exporter_enqueue_failed_spans_total{machine!=""} offset 5m)
+                )
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── R15b: records the collector's cluster filter dropped (delta > 0 in 5m) ──
+      # `filter/cluster_allow` admits a record only when its `meiva.cluster`
+      # routing identity (a digest of the cluster's telemetry token) and its
+      # `cluster` display label match the collector's own. A drop means a
+      # foreign cluster reached this collector, or the token was re-minted and a
+      # producer or collector still holds the old identity: data is being lost
+      # silently without this rule. `increase` is load-bearing (monotonic
+      # counter; an absolute comparison would alert until the collector
+      # restarts).
+      - uid: meiva-ops-otelcol-cluster-allow-drops
+        title: "OTel Collector cluster filter dropped telemetry"
+        condition: D
+        for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: meiva-ops-otelcol-cluster-allow-drops
+          metric: otelcol_cluster_allow_drops
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }} collector cluster filter dropped {{ $values.C }} telemetry items in 5m"
+          description: >-
+            The OTel Collector on {{ $labels.machine }} dropped
+            {{ $values.C }} log records, metric points, or spans in the last 5
+            minutes because their cluster identity (`meiva.cluster`) or label
+            (`cluster`) differs from this collector's own. Either another
+            cluster is exporting into this collector, or the cluster's
+            telemetry token was re-minted and this collector's rendered config
+            (or a producer process) still carries the previous identity:
+            converge the collector (`meiva converge`) and restart the
+            producers on the machine.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                sum by (machine) (
+                  label_replace(increase(otelcol_processor_filter_logs_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "logs", "", "")
+                  or label_replace(increase(otelcol_processor_filter_spans_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "spans", "", "")
+                  or label_replace(increase(otelcol_processor_filter_datapoints_filtered_total{machine!="", filter="filter/cluster_allow"}[5m]), "signal", "datapoints", "", "")
                 )
               instant: true
               range: false

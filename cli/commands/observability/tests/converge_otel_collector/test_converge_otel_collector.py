@@ -17,6 +17,7 @@ from textwrap import indent
 
 import pytest
 
+from base.cluster import cluster_id
 from base.cluster.authority import MONITOR_ROLE
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.deploy.release.collector import plan as collector_plan
@@ -723,7 +724,9 @@ def test_local_otlp_pipelines_drop_resources_that_name_another_cluster(
     config = collector_unit.render(GATEWAY)
 
     expected = [
-        'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".meiva"'
+        'resource.attributes["meiva.cluster"] != nil and not IsMatch('
+        f'resource.attributes["meiva.cluster"], "^{cluster_id(TELEMETRY_TOKEN)}$")',
+        'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".meiva"',
     ]
     assert mapping_at(config, "processors", "filter/cluster_allow") == {
         "error_mode": "ignore",
