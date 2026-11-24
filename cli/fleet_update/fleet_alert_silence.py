@@ -16,10 +16,17 @@
 #
 # `cli.fleet_update` pipes this file's source to `python -` on the gateway host (the same way it
 # ships its roster program), so the first update that carries this change already has it and the
-# program needs nothing from the host's checkout but `base.config`. Opening is idempotent (a rerun
-# of `down` extends the silence it already owns instead of stacking another) and every failure is
-# reported, never raised: a window without a silence is noisy, not unsafe, so it must not strand
-# an update.
+# program needs nothing from the host's checkout but `base.config` and `base.paths`. Opening is
+# idempotent (a rerun of `down` extends the silence it already owns instead of stacking another)
+# and every failure is reported, never raised: a window without a silence is noisy, not unsafe, so
+# it must not strand an update.
+#
+# The host sentinel (`scripts/host_ops/watchdog_sentinel.py`) runs outside Grafana, and Grafana is
+# itself stopped for most of the window, so it cannot read the silence. The same two verbs also
+# keep the window's end in a marker file under the home (`WINDOW_MARKER`, one UTC ISO timestamp):
+# `open` writes the silence's end, `close` shortens it to the same settle grace, and the sentinel
+# stays quiet until that instant. The marker does not depend on Grafana: it is written before the
+# silence is attempted, so a host without a Grafana credential still holds the sentinel.
 #
 #     python - open --hours 4 --comment "..."   # prints `SILENCE opened ...`
 #     python - close                            # prints `SILENCE closed N`
@@ -38,11 +45,13 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from http.client import HTTPResponse
+from pathlib import Path
 from typing import TypeGuard
 
 CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
 SETTLE_WINDOW = timedelta(minutes=10)
+WINDOW_MARKER = Path("ops") / "alert-window-until"
 # meiva:note
 # Every alert but a full disk: the disk fills the same during an update, so the host filesystem rules
 # (`metric=host_disk`) and the health probe's disk check must still page.
@@ -181,6 +190,19 @@ def colocated_grafana() -> tuple[str, str] | None:
     return settings.observability.telemetry_grafana_url.rstrip("/"), secret.get_secret_value()
 
 
+def write_window_end(home: Path, until: datetime) -> None:
+    marker = home / WINDOW_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    staged = marker.with_suffix(".tmp")
+    staged.write_text(until.astimezone(UTC).isoformat(timespec="seconds") + "\n", encoding="utf-8")
+    staged.replace(marker)
+
+
+def settle_window_end(home: Path, *, now: datetime) -> None:
+    if (home / WINDOW_MARKER).exists():
+        write_window_end(home, now + SETTLE_WINDOW)
+
+
 # meiva:note
 # The options of `main`, as the typed namespace argparse fills in (`open` carries hours and comment).
 class _Arguments(argparse.Namespace):
@@ -197,13 +219,23 @@ def main(argv: list[str]) -> int:
     opened.add_argument("--comment", required=True)
     verbs.add_parser("close")
     args = parser.parse_args(argv, namespace=_Arguments())
+    from base.paths.home import resolve_meiva_home
+
+    home = resolve_meiva_home()
+    now = datetime.now(UTC)
+    try:
+        if args.verb == "open":
+            write_window_end(home, now + timedelta(hours=args.hours))
+        else:
+            settle_window_end(home, now=now)
+    except OSError as error:
+        print(f"SILENCE failed: sentinel window marker: {type(error).__name__}")
     grafana = colocated_grafana()
     if grafana is None:
         print("SILENCE skipped: no Grafana admin credential is configured on this host")
         return 0
     base, credential = grafana
     try:
-        now = datetime.now(UTC)
         if args.verb == "open":
             silence_id = open_window(
                 base, credential, hours=args.hours, comment=args.comment, now=now

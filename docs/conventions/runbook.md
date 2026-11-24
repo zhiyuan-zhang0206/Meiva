@@ -610,6 +610,9 @@ half, use the separate commands:
   Grafana that does not answer, prints a `WARNING: alert silence not open/close` line and
   the half goes on (a window without a silence is noisy, not unsafe). Expire a stuck silence
   by hand in Grafana (Alerting > Silences) or shorten it with `python - close` from that file.
+  The same program keeps the window's end in `ops/alert-window-until` under the home, which the
+  host sentinel reads to stay quiet while the update runs (Grafana, which owns the silence, is
+  stopped for most of the window); `close` shortens it to the same settle grace.
 - A gateway failure stops a half: fix the cause and rerun the whole half, which is
   idempotent (a failed gateway stop or switch first brings the stopped hosts back on their
   old commit; a gateway start failure leaves the cluster stopped, since the start may have
