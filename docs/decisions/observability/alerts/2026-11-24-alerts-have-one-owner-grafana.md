@@ -28,10 +28,11 @@ Grafana.
   heartbeat gauge (`alerts_last_ingest_timestamp_seconds`) and stores nothing; R28 and the host
   sentinel are unchanged. The built-in contact point and the `POST /api/alerts` route stay, so a
   site policy that still posts every alert there keeps working through the rollout and a rollback.
-- The table goes in two steps: this change stops every writer and reader (webhook ingest, the
-  reconciliation loop, the schedule hooks, the SSE channel, the list and the stats count); a later
-  migration drops `alerts`, `alert_notification_groups`, `alert_notification_members` and
-  `alert_escalations`.
+- The table went in two steps: the first change stopped every writer and reader (webhook ingest,
+  the reconciliation loop, the schedule hooks, the SSE channel, the list and the stats count); the
+  migration `20261124T171356_drop-alert-tables` then dropped `alerts`,
+  `alert_notification_groups`, `alert_notification_members` and `alert_escalations`. Grafana's
+  own history is the only record of past alerts.
 
 ## Alternatives rejected
 

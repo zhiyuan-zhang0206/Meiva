@@ -7,7 +7,6 @@ import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.incarnation.tests.test_runner_role import (
-    assert_alert_writes_denied,
     exercise_pause_grants,
     exercise_understanding_node_grants,
     exercise_understanding_queue_grants,
@@ -104,8 +103,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         exercise_understanding_node_grants(conn, agent_id)
         # the chunk-triggered understanding queue (INSERT + UPDATE + SELECT)
         exercise_understanding_queue_grants(conn, agent_id)
-        # alerts is gateway-written only: the runner reads it but cannot write it
-        assert_alert_writes_denied(conn)
         # machine_units register_self (INSERT + UPDATE + SELECT)
         conn.execute("INSERT INTO machine_units (machine_name, home) VALUES ('m1', '/h1')")
         conn.execute("UPDATE machine_units SET url = 'http://m1' WHERE machine_name = 'm1'")

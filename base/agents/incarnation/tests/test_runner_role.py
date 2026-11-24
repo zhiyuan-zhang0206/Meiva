@@ -588,22 +588,6 @@ def exercise_understanding_queue_grants(conn: psycopg.Connection, agent_id: int)
     conn.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
 
 
-def assert_alert_writes_denied(conn: psycopg.Connection) -> None:
-    """The alerts table has no writer left and is dropped by a follow-up migration: until then
-    the runner reads it and holds neither INSERT nor UPDATE (nor DELETE)."""
-    assert conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        conn.execute(
-            "INSERT INTO alerts (status, severity, alertname, labels, starts_at,"
-            " fingerprint, source) VALUES ('unresolved', 'warning', 'x', '{}'::jsonb,"
-            " now(), 'fp-runner', 'grafana')"
-        )
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        conn.execute("UPDATE alerts SET status = 'resolved' WHERE fingerprint = 'fp-runner'")
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        conn.execute("DELETE FROM alerts WHERE fingerprint = 'fp-runner'")
-
-
 def identity_url(url: str) -> str:
     """The cluster's MAIN identity — the role migrations actually run as.
     `MEIVA_DB_URL` names role and database with one identifier on a live cluster
