@@ -52,7 +52,9 @@ def test_the_switch_checks_new_out_detached_syncs_the_venv_and_requires_a_clean_
     command = command.replace(f" && {adopt_frontend_build(_NEW)}", "", 1)
     steps = command.split(" && ")
     assert steps[0].endswith(f"git checkout -q --detach {_NEW}")
-    assert adopt_frontend_build(_NEW) in switch_command(_NEW)
+    adopt = adopt_frontend_build(_NEW)
+    assert adopt in switch_command(_NEW)
+    assert adopt.startswith("(") and adopt.endswith("; true)"), "a failed checkout must still stop"
     assert steps[1].startswith("find .venv/bin .venv/lib") and "chmod u+w" in steps[1]
     assert (
         steps[2]

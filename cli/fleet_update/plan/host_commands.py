@@ -88,11 +88,11 @@ def adopt_frontend_build(new: str) -> str:
     because that would spend seconds of the outage: the next prestage removes it. Always succeeds.
     """
     return (
-        f"W={FRONTEND_STAGE}; "
+        f"(W={FRONTEND_STAGE}; "
         f'if [ "$(git -C "$W" rev-parse HEAD 2>/dev/null)" = {new} ] '
         '&& [ -f "$W/ui/web/.next/meiva-build-key" ]; then '
         'rm -rf "$S/ui/web/.next" && mv "$W/ui/web/.next" "$S/ui/web/.next" '
-        '|| echo "frontend prebuild not adopted: meiva start builds the frontend"; fi; true'
+        '|| echo "frontend prebuild not adopted: meiva start builds the frontend"; fi; true)'
     )
 
 
