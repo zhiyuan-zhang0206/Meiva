@@ -19,6 +19,7 @@ METRIC_DISPOSITION: dict[str, dict[str, Literal["counter", "histogram", "gauge"]
     "event_log_drop": {"last_dropped_at": "gauge"},
     "gateway_latency": {"count": "counter"},
     "llm_usage": {"latency_ms": "histogram"},
+    "main_red_watch_round": {"rounds": "counter"},
     "memory_search_stats": {"last_save_seconds": "gauge", "rows": "gauge"},
     "recovery_drill_status": {"last_run_ok": "gauge"},
     "root_health_expected": {"expected_since_timestamp_seconds": "gauge"},

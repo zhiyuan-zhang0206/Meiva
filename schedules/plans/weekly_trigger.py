@@ -1,7 +1,7 @@
 # meiva:note
 # Whether the weekly self-evolution trigger fires, from the agent-event volume it counted.
 #
-# The main check acts only when the past week reaches `MIN_WEEKLY_EVENTS` (about 4K events a
+# The main check acts only when the past week reaches `MIN_WEEKLY_EVENTS` (about 4K audit events a
 # day: below it the week is too quiet for meaningful analysis). A main check at or above
 # `HIGH_WEEKLY_EVENTS` also arms the mid-week follow-up, whose own bar is half that high
 # threshold, counted from the follow-up window rather than from the whole week.
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 MIN_WEEKLY_EVENTS = 30000
-HIGH_WEEKLY_EVENTS = 200000
+HIGH_WEEKLY_EVENTS = 60000
 WEEK_DAYS = 7
 FOLLOW_UP_WINDOW_DAYS = 4
 

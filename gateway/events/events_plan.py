@@ -1,10 +1,10 @@
 # meiva:note
 # What a `GET /api/events` request asks of the event stores: values in, a plan out.
 #
-# The route (`gateway.events.router`) owns the HTTP parameters, the connection and the merge of
+# The route (`gateway.events.router`) owns the HTTP parameters, the connections and the merge of
 # two stores' pages. This module owns every decision that needs none of that: which filters apply
-# (validated and normalized), which stores are read, what window and page, and how deep each
-# store is read. A test passes the request values and a `now`, and asserts the plan.
+# (validated and normalized), which stores are read, what window and page, and where the next page
+# starts. A test passes the request values and a `now`, and asserts the plan.
 
 from __future__ import annotations
 
@@ -13,14 +13,16 @@ from datetime import datetime, timedelta
 from typing import TypedDict
 
 from base.events.contract import EVENTS, EventTier
+from gateway.events.loki_query import LokiFilters
 
 __all__ = [
     "EventsFilters",
     "EventsPlan",
     "EventsRequest",
     "InvalidEventsQueryError",
-    "page_depth",
+    "next_page_to",
     "plan_events",
+    "telemetry_filters",
 ]
 
 # meiva:note
@@ -56,7 +58,6 @@ class EventsRequest:
     to: datetime | None
     hours: float | None
     limit: int | None
-    offset: int
     with_total: bool
 
 
@@ -70,7 +71,6 @@ class FilterKwargs(TypedDict):
     trace_id: str | None
     machine: str | None
     level: str | None
-    attribute_filters: dict[str, str] | None
     from_: datetime | None
     to: datetime | None
 
@@ -85,8 +85,7 @@ class EventsFilters:
     trace_id: str | None
     machine: str | None
     level: str | None
-    attribute_filters: dict[str, str] | None
-    from_: datetime | None
+    from_: datetime
     to: datetime | None
 
     def kwargs(self) -> FilterKwargs:
@@ -97,7 +96,6 @@ class EventsFilters:
             trace_id=self.trace_id,
             machine=self.machine,
             level=self.level,
-            attribute_filters=self.attribute_filters,
             from_=self.from_,
             to=self.to,
         )
@@ -112,7 +110,6 @@ class EventsPlan:
     use_telemetry: bool
     telemetry_categories: list[str]
     limit: int
-    offset: int
     with_total: bool
 
 
@@ -168,7 +165,7 @@ def _parse_tiers(tier: str | None) -> list[EventTier] | None:
 
 
 # meiva:note
-# Which tables a request reads: `(audit_events, telemetry_events)`.
+# Which stores a request reads: `(audit_events, Loki)`.
 #
 # An explicit category picks one table. Without one, a registered event name
 # picks the table(s) its declared categories live in; anything else reads both.
@@ -190,7 +187,6 @@ def _sources(category: str | None, event_name: str | None) -> tuple[bool, bool]:
 def plan_events(request: EventsRequest, *, now: datetime, default_limit: int) -> EventsPlan:
     level = _validate(request)
     tiers = _parse_tiers(request.tier)
-    attribute_filters: dict[str, str] | None = None
     window_from = request.from_
     if request.hours is not None:
         window_from = now - timedelta(hours=request.hours)
@@ -205,7 +201,6 @@ def plan_events(request: EventsRequest, *, now: datetime, default_limit: int) ->
             trace_id=request.trace_id.lower() if request.trace_id is not None else None,
             machine=request.machine,
             level=level,
-            attribute_filters=attribute_filters,
             from_=window_from,
             to=request.to,
         ),
@@ -215,17 +210,24 @@ def plan_events(request: EventsRequest, *, now: datetime, default_limit: int) ->
         if request.category is not None
         else ["telemetry", "log"],
         limit=request.limit if request.limit is not None else default_limit,
-        offset=request.offset,
         with_total=request.with_total,
     )
 
 
-# meiva:note
-# The `(limit, offset)` each store is read with.
-#
-# One store pages directly. Two stores each give their newest `offset + limit` rows, which are
-# merged and then sliced: a global page never needs a row beyond that depth from either side.
-def page_depth(plan: EventsPlan) -> tuple[int, int]:
-    if plan.use_audit and plan.use_telemetry:
-        return plan.limit + plan.offset, 0
-    return plan.limit, plan.offset
+def telemetry_filters(plan: EventsPlan) -> LokiFilters:
+    f = plan.filters
+    return LokiFilters(
+        agent_id=f.agent_id,
+        event_names=None if f.event_names is None else tuple(f.event_names),
+        tiers=None if f.tiers is None else tuple(f.tiers),
+        level=f.level,
+        categories=tuple(plan.telemetry_categories),
+        machine=f.machine,
+        trace_id=f.trace_id,
+    )
+
+
+def next_page_to(oldest_ts: datetime | None, *, has_more: bool) -> datetime | None:
+    if not has_more or oldest_ts is None:
+        return None
+    return oldest_ts - timedelta(microseconds=1)

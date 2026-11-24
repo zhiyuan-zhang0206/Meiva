@@ -876,7 +876,7 @@ answer what it cannot.
 
 | Question | Surface |
 |---|---|
-| what did the cluster do (an agent, a machine, an alert), without ssh | `meiva events ls --agent <id> --machine <m> --hours N` (the alert message carries this command; also `GET /api/cluster/admin/events` over the private network). Postgres: persisted events and warning-or-higher only |
+| what did the cluster do (an agent, a machine, an alert), without ssh | `meiva events ls --agent <id> --machine <m> --hours N` (the alert message carries this command; also `GET /api/cluster/admin/events` over the private network). Telemetry and log events are Loki's 7 days; audit events Postgres' permanent record |
 | the whole INFO stream of one agent or machine, any machine | Loki (7 days, no DEBUG): `{agent_id=..}`, `{machine=..}`, then `\| trace_id=".."`; reachable from every machine through the gateway's Grafana datasource proxy |
 | what a traced stretch did, its timing and cross-service hops | Tempo, by `trace_id` or `span.meiva.agent_id`; Claude Code / Codex native spans carry `resource.meiva.agent_id` |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki: shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 7 days; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |

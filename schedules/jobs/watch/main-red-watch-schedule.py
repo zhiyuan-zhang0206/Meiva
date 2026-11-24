@@ -15,14 +15,12 @@
 import os
 import shutil
 import subprocess
-import sys
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import meiva
 from base.clock import Deadline, SYSTEM_TIMERS
@@ -30,7 +28,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.config import settings
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone, open_schedule_entry
+from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.watch.api_read import read_api
 from schedules.jobs.watch.main_red_issues import GithubIssueTracker
 from schedules.jobs.watch.main_red_slot import slot_round
@@ -44,8 +42,6 @@ from schedules.jobs.watch.main_red_watch import (
     watch_once,
 )
 from schedules.jobs.telemetry_event import emit_system_event
-from schedules.plans.schedule_identity import parse_scheduled_for
-from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
     FAILURE_CHECK,
     FAILURE_TEST,
@@ -67,11 +63,6 @@ from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, S
 RunProcess = Callable[..., subprocess.CompletedProcess[str]]
 
 CRON = "*/30 * * * *"
-# meiva:note
-# The liveness slot sits five minutes after each round: far enough that a slow round has finished
-# and printed, close enough that a stopped watch is reported inside the hour it went quiet.
-LIVENESS_CRON = "5,35 * * * *"
-_LIVENESS_PAYLOAD = "liveness"
 _PROCESS_NAME = "main-red-watch"
 _EVENT_NAME = "main_red_watch_round"
 _RELEASE_GATE = "release-gate.yml"
@@ -606,9 +597,7 @@ def _notify_lead(text: str, report_agent: int) -> None:
     meiva.agents.send_message(report_agent, text)
 
 
-def watch_round(
-    slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
-) -> None:
+def watch_round(*, inputs: ScheduleInputs, home: Path, report_agent: int) -> None:
     state_path = _state_path(home)
     run_process = subprocess.run
     notify = partial(_notify_lead, report_agent=report_agent)
@@ -681,49 +670,11 @@ def watch_round(
     print(f"[{datetime.now(UTC).isoformat()}] {line}", flush=True)
 
 
-# meiva:note
-# The liveness trigger is five minutes past each round: far enough that a slow round has finished
-# and printed, close enough that a stopped watch is reported inside the hour it went quiet.
-def liveness_tick(
-    slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
-) -> None:
-    del home
-    tracker = GithubIssueTracker(
-        _REPO,
-        run_process=subprocess.run,
-        notify=partial(_notify_lead, report_agent=report_agent),
-    )
-    liveness_once(
-        slot,
-        database=inputs.database(),
-        open_card=tracker.open_card,
-        close_card=tracker.close_liveness_cards,
-    )
-
-
-def dispatch(
-    slot: datetime, payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
-) -> None:
-    if payload == _LIVENESS_PAYLOAD:
-        liveness_tick(slot, payload, inputs=inputs, home=home, report_agent=report_agent)
-        return
-    watch_round(slot, payload, inputs=inputs, home=home, report_agent=report_agent)
-
-
 if __name__ == "__main__":
     home = resolve_meiva_home()
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
-        round_once = partial(
-            dispatch,
+        watch_round(
             inputs=inputs,
             home=home,
             report_agent=report_agent_from_environ(os.environ),
         )
-        slot = (
-            datetime.now(UTC)
-            if "--once" in sys.argv
-            else parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
-        )
-        minute = slot.astimezone(ZoneInfo(cluster_timezone())).minute
-        payload = _LIVENESS_PAYLOAD if minute % 30 == 5 else None
-        round_once(slot, payload)

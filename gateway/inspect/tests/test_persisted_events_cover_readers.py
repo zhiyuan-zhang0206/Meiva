@@ -100,9 +100,8 @@ def _unpersisted(names: set[str]) -> list[str]:
 
 
 def test_the_source_scan_still_finds_the_readers() -> None:
-    names, _prefixes = _queried_by_sql()
-    assert {"main_red_watch_round"} <= set(names)
     assert len(_reader_sources()) >= 10
+    assert {"llm_usage", "turn_end"} <= _named_reader_names()
 
 
 def test_events_the_sql_readers_name_are_persisted() -> None:
@@ -178,8 +177,7 @@ _PERSIST_WITHOUT_READER_DEBT: dict[str, dict[str, str]] = {
 # meiva:note
 # The reader inventory as the three shapes above see it, which is also the set the reverse
 # judgment below is allowed to accept: a name in a SQL literal or in one of the name lists the
-# readers pass. `main_red_watch_round` is read through a query that
-# names it literally for this reason.
+# readers pass.
 def _named_reader_names() -> set[str]:
     names, prefixes = _queried_by_sql()
     selected = set(names)
@@ -195,7 +193,7 @@ def _named_reader_names() -> set[str]:
 # (docs/decisions/observability/telemetry/2026-10-03-telemetry-events-stores-what-is-read.md), so
 # a persisted event no reader names is a row on the hottest write path that no query answers. A
 # reader the source scan cannot name is the declaration this test must fail on, not a detail to
-# allow: the one such reader, `main_red_watch_round`'s, now spells its event into the query.
+# allow: a reader spells its event into the query literally, or the declaration drops `persist`.
 def test_persisted_events_have_a_named_reader() -> None:
     named = _named_reader_names()
     missing = sorted(

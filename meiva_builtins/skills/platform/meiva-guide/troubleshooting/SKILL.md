@@ -24,9 +24,9 @@ Take the steps in order and stop when you have the cause.
    (the exact filter that fired) and a Grafana link. Run the command as written.
 2. **Structured events.** `meiva events ls --agent <id> --hours 6` (add `--machine`,
    `--level warning`, `--name`, `--from/--to` with an offset; `meiva events count --by event_name`
-   lists what occurred). Runs on every machine, no ssh. Stored in Postgres: only events
-   declared `persist` and everything at warning or above.
-3. **Loki window query**, for everything else (the whole INFO stream, 7 days). See
+   lists what occurred). Runs on every machine, no ssh. Telemetry and log events are Loki's 7
+   days, audit events Postgres' permanent record.
+3. **Loki window query**, for what `meiva events` does not do (LogQL aggregates, `| json` fields). See
    [Query the stack from any machine](#query-the-stack-from-any-machine).
 4. **A `trace_id` opens the whole causal chain.** `meiva events ls --trace <id>` and
    `{machine="<m>"} | trace_id="<id>"` in Loki give the events; Tempo gives the span tree
@@ -42,12 +42,12 @@ Take the steps in order and stop when you have the cause.
 Zero rows from one store does not mean the thing did not happen. Before concluding
 "never ran / nothing lost":
 
-- `meiva events` is Postgres only. Non-persisted events (`node_exit`, `exec_envelope`,
-  `health_probe_ran`, plain INFO logs) are 0 there and present in Loki. Lifecycle
-  request/result events are written to Postgres by the CLI and are almost absent from Loki. Check the
-  declaration in `base/events/declarations/` to know which store has it, or ask both.
-- Loki keeps 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and never DEBUG. Older, or a line Loki
-  lacks: Postgres events, then the per-machine `$MEIVA_HOME/logs/events-*.jsonl` (also 7 days).
+- `meiva events` reads Loki for telemetry and log events and Postgres for audit events, so it
+  sees what Loki sees, never DEBUG. Lifecycle request/result events are audit events written to
+  Postgres by the CLI and are almost absent from Loki, so `--category audit` is where they are.
+  Check the declaration in `base/events/declarations/` to know the category.
+- Loki keeps 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and never DEBUG. Older: audit
+  events in Postgres, then the per-machine `$MEIVA_HOME/logs/events-*.jsonl` (also 7 days).
 - Always narrow by `machine`: one agent id's query without it can read as another host.
 - Tempo spans carry no content; messages come from the checkpoint ([find-the-run](references/find-the-run.md)).
 - `harness_exit_code` is not a failure signal (antigravity logs 1 on a normal terminate).

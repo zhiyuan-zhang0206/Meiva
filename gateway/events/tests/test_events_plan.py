@@ -2,7 +2,7 @@
 # How a `GET /api/events` request becomes a store read.
 #
 # Every case passes the request values and a `now`, and asserts the plan. The route, the stores
-# and the wire shape are exercised against real rows in `gateway/tests/events`.
+# and the wire shape are exercised against audit rows and a Loki stub in `gateway/tests/events`.
 
 from __future__ import annotations
 
@@ -14,9 +14,11 @@ import pytest
 from gateway.events.events_plan import (
     EventsRequest,
     InvalidEventsQueryError,
-    page_depth,
+    next_page_to,
     plan_events,
+    telemetry_filters,
 )
+from gateway.events.loki_query import LokiFilters
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 
@@ -32,7 +34,6 @@ BARE = EventsRequest(
     to=None,
     hours=None,
     limit=None,
-    offset=0,
     with_total=False,
 )
 
@@ -47,7 +48,7 @@ def test_a_bare_request_reads_both_stores_for_the_last_day() -> None:
     assert result.telemetry_categories == ["telemetry", "log"]
     assert result.filters.from_ == NOW - timedelta(hours=24)
     assert result.filters.to is None
-    assert (result.limit, result.offset, result.with_total) == (100, 0, False)
+    assert (result.limit, result.with_total) == (100, False)
 
 
 @pytest.mark.parametrize(
@@ -102,7 +103,7 @@ def test_hours_is_a_window_ending_now() -> None:
 
 
 def test_the_page_is_the_requested_one_or_the_configured_default() -> None:
-    assert (plan(limit=5, offset=10).limit, plan(limit=5, offset=10).offset) == (5, 10)
+    assert plan(limit=5).limit == 5
     assert plan_events(BARE, now=NOW, default_limit=7).limit == 7
 
 
@@ -133,7 +134,33 @@ def test_an_illegal_request_is_refused_with_its_reason(
         plan(**changes)
 
 
-def test_one_store_pages_directly_and_two_stores_each_give_the_newest_rows() -> None:
-    assert page_depth(plan(category="telemetry", limit=5, offset=10)) == (5, 10)
-    assert page_depth(plan(category="audit", limit=5, offset=10)) == (5, 10)
-    assert page_depth(plan(limit=5, offset=10)) == (15, 0)
+def test_the_telemetry_read_takes_the_filters_and_categories_of_the_plan() -> None:
+    result = plan(
+        event_name="llm_usage",
+        agent_id=7,
+        machine="m1",
+        level="WARNING",
+        trace_id="AB12",
+        tier="anomaly",
+    )
+    assert telemetry_filters(result) == LokiFilters(
+        agent_id=7,
+        event_names=("llm_usage",),
+        tiers=("anomaly",),
+        level="warning",
+        categories=("telemetry", "log"),
+        machine="m1",
+        trace_id="ab12",
+    )
+    assert telemetry_filters(plan(category="log")).categories == ("log",)
+
+
+def test_the_next_page_starts_one_microsecond_below_the_oldest_row() -> None:
+    oldest = datetime(2026, 10, 2, 11, 0, 0, 5, tzinfo=UTC)
+    assert next_page_to(oldest, has_more=True) == datetime(2026, 10, 2, 11, 0, 0, 4, tzinfo=UTC)
+
+
+def test_there_is_no_next_page_without_older_rows() -> None:
+    oldest = datetime(2026, 10, 2, 11, tzinfo=UTC)
+    assert next_page_to(oldest, has_more=False) is None
+    assert next_page_to(None, has_more=True) is None

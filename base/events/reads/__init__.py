@@ -25,7 +25,7 @@ _COLUMNS: LiteralString = (
 
 # meiva:note
 # One recorded event in the stream's row shape, which the audit table and the telemetry table both
-# return (`gateway.events.telemetry_rows.query_events` builds the same shape), so one merge serves
+# return (`gateway.events.loki_rows.query_events` builds the same shape), so one merge serves
 # both. `id` is the unsigned stream id and `line_sha256` the digest of the recorded row.
 class EventRecord(TypedDict):
     id: int

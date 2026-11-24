@@ -5,7 +5,7 @@ the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R2, R5-R6, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
-rule, and the root-health round freshness rule query **Prometheus** (the
+rule, the main-red watch round heartbeat rule, and the root-health round freshness rule query **Prometheus** (the
 `meiva_llm_usage_latency_milliseconds` histogram,
 `meiva_gateway_latency_count_total` heartbeat,
 `meiva_root_health_tick_last_tick_timestamp_seconds` and
@@ -174,6 +174,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
+| `meiva-ops-main-red-watch-silent` | `meiva-ops` | main-red watch round heartbeat | no `meiva_main_red_watch_round_rounds_total` sample for 1h (two missed half-hour rounds) while one was seen in the last 6d (Prometheus, absent_over_time) | 5m | error |
 | `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
 | `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |

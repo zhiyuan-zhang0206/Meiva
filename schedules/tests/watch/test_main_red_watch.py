@@ -10,10 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
-from base.db import Database
-from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.main_red_watch import (
     ATTEMPT_GREEN,
@@ -147,6 +144,7 @@ def test_a_first_red_opens_no_card_and_still_leaves_a_heartbeat(tmp_path: Path) 
 
     assert opened == []
     assert heartbeats and heartbeats[0]["confirmed"] == 0
+    assert [beat["rounds"] for beat in heartbeats] == [1]
     assert "confirmed=0" in line
     entries = load_state(tmp_path / STATE_FILE).entries
     assert len(entries) == 1
@@ -298,146 +296,6 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
 
     assert "no new run" not in line
     assert "no new run" in late
-
-
-# meiva:note
-# The watch's own liveness. A round that stops arriving is indistinguishable from a quiet `main`
-# unless something opens a card, so the effect is driven here through the same injected opener the
-# round tests use: no database, no clock, no task API.
-class _Cursor:
-    def __init__(self, value: datetime | None) -> None:
-        self._value = value
-
-    def __enter__(self) -> _Cursor:
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def execute(self, sql: str, params: object) -> None:
-        del sql, params
-
-    def fetchone(self) -> tuple[datetime | None]:
-        return (self._value,)
-
-
-class _Connection:
-    def __init__(self, value: datetime | None) -> None:
-        self._value = value
-
-    def __enter__(self) -> _Connection:
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
-
-    def cursor(self) -> _Cursor:
-        return _Cursor(self._value)
-
-
-class _Database:
-    def __init__(self, value: datetime | None) -> None:
-        self._value = value
-
-    def connect(self, *, autocommit: bool = False) -> _Connection:
-        assert autocommit, "the liveness read opens no transaction it must commit"
-        return _Connection(self._value)
-
-
-def test_a_round_that_stopped_opens_one_card() -> None:
-    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
-    opened: list[Card] = []
-
-    liveness_once(
-        now,
-        database=cast("Database", _Database(now - timedelta(minutes=61))),
-        open_card=lambda card: opened.append(card) or 900,
-        close_card=lambda: None,
-    )
-
-    assert [card.fingerprint for card in opened] == ["main-red-watch/liveness"]
-    assert "stopped" in opened[0].title.lower()
-
-
-def test_a_round_inside_the_hour_opens_nothing() -> None:
-    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
-    opened: list[Card] = []
-
-    liveness_once(
-        now,
-        database=cast("Database", _Database(now - timedelta(minutes=31))),
-        open_card=lambda card: opened.append(card) or 900,
-        close_card=lambda: None,
-    )
-
-    assert opened == []
-
-
-# meiva:note
-# The card promises "closes when a round lands again"; this is the test that keeps that sentence
-# true. Remove the `close_card()` call in `liveness_once` and it goes red.
-def test_a_round_that_lands_again_closes_the_card() -> None:
-    now = datetime(2026, 11, 3, 10, 40, tzinfo=UTC)
-    closed: list[str] = []
-
-    liveness_once(
-        now,
-        database=cast("Database", _Database(now - timedelta(minutes=2))),
-        open_card=lambda card: 900,
-        close_card=lambda: closed.append("closed"),
-    )
-
-    assert closed == ["closed"]
-
-
-def test_a_watch_still_silent_opens_without_closing() -> None:
-    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
-    closed: list[str] = []
-
-    liveness_once(
-        now,
-        database=cast("Database", _Database(now - timedelta(minutes=61))),
-        open_card=lambda card: 900,
-        close_card=lambda: closed.append("closed"),
-    )
-
-    assert closed == []
-
-
-# meiva:note
-# The same invariant on the other card the watch opens by itself: a watch that stays stopped must
-# produce one card, so the card may not report how long it has been stopped. Remove the fixed
-# `episode` and this goes red with two different requests under one key.
-def test_the_liveness_card_reads_the_same_while_the_watch_stays_stopped() -> None:
-    last = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
-    opened: list[Card] = []
-
-    for slot in (last + timedelta(minutes=61), last + timedelta(hours=5)):
-        liveness_once(
-            slot,
-            database=cast("Database", _Database(last)),
-            open_card=lambda card: opened.append(card) or 900,
-            close_card=lambda: None,
-        )
-
-    assert len(opened) == 2
-    assert opened[0] == opened[1]
-
-
-# meiva:note
-# A schedule that never ran is the manager's problem, not this card's: a fresh site must not open a
-# liveness card the first time the check runs.
-def test_a_watch_with_no_round_on_record_opens_nothing() -> None:
-    opened: list[Card] = []
-
-    liveness_once(
-        datetime(2026, 11, 3, 10, 35, tzinfo=UTC),
-        database=cast("Database", _Database(None)),
-        open_card=lambda card: opened.append(card) or 900,
-        close_card=lambda: None,
-    )
-
-    assert opened == []
 
 
 # meiva:note
@@ -625,6 +483,7 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
     assert "stream main-push.yml unreadable" in line
     assert "HTTP 502" in line
     assert heartbeats[0] | {"suspects": None, "suspects_dropped": None} == {
+        "rounds": 1,
         "fingerprints": 1,
         "confirmed": 0,
         "infra": 0,

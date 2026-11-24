@@ -48,3 +48,5 @@ untouched.
   its own expand-contract step (migration `20261003T043232_drop-dead-tables`, with `agent_archive_stats` and
   `llm_usage_hourly`, whose last readers and writers went in the same sweep).
 - The fleet graph still reads Prometheus.
+
+Superseded in part by [`2026-11-24-event-reads-from-loki.md`](../../observability/telemetry/2026-11-24-event-reads-from-loki.md): `/api/events` and the admin events read the telemetry and log events from Loki again.

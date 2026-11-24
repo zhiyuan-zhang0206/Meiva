@@ -4,9 +4,10 @@
 
 Gateway-only, for ssh-free ops on a deployed cluster.
 
-- **`GET /api/cluster/admin/events`** — query the unified `events` stream with `agent_id` /
+- **`GET /api/cluster/admin/events`** — query the telemetry and log events (Loki, the last
+  seven days) with `agent_id` /
   `service_only` (skips agent-process rows) / `level` / `since` (ISO timestamp) /
-  `event` (loguru event-name match) / `grep` (message substring) / `limit`.
+  `event` (loguru event-name match) / `grep` (substring of the recorded line) / `limit`.
   Answers "what did the labeler say in the last 10 minutes" without ssh.
 - **`DELETE /api/cluster/machines/{name}`** — drop a stale `machines` row (a
   one-off bench host that is never coming back). **Refuses to delete the
@@ -22,8 +23,9 @@ minimum. The limit defaults to display configuration; omitting `since` uses a
 24-hour floor. `gateway/cluster/admin_events_plan.py` turns the request's filters
 into the exact query (or a refusal answered as 400), a pure function whose rules
 `gateway/cluster/tests/test_admin_events_plan.py` asserts on the returned plan;
-`gateway/tests/routers/cluster_endpoints/test_admin_events.py` seeds real
-`telemetry_events` rows and checks which of them the endpoint returns.
+`gateway/tests/routers/cluster_endpoints/test_admin_events.py` stores lines in a Loki stub and
+checks the query the endpoint sends and the rows it returns; [event reads](../../events/docs/event-reads.md)
+says how each filter is written in LogQL.
 
 ## The roster: plan, then shell
 

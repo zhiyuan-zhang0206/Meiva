@@ -745,6 +745,7 @@ def watch_once(
     )
     emit(
         {
+            "rounds": 1,
             "fingerprints": len(entries),
             "confirmed": opened,
             "infra": infra,

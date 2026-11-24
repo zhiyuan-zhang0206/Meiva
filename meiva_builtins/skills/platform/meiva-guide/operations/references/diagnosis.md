@@ -11,7 +11,7 @@ agent, machine or service in the window, from any machine and without ssh:
 `meiva events ls --machine <m> --agent <id> --hours 6`, then the Loki window and the trace
 for any `trace_id` it shows ([troubleshooting](../../troubleshooting/SKILL.md)). Only then read
 `netstat`/`lsof`, `ps` and log files on the host; a check that finds nothing in one store
-(events are Postgres only; Loki has no DEBUG) does not show the thing did not happen.
+(events carry nothing below INFO; DEBUG lives in the host's log files) does not show the thing did not happen.
 
 ## Diagnosis playbooks
 

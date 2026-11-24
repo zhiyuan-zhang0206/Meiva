@@ -2,7 +2,6 @@ purity = "strict"
 exports = ["cluster_support.py"]
 
 [uses]
-"test_admin_events.py" = ["cluster_support.py"]
 "test_cluster_routes.py" = ["cluster_support.py"]
 "test_probe_agent_runner.py" = ["cluster_support.py"]
 "test_roster_identity.py" = ["cluster_support.py"]

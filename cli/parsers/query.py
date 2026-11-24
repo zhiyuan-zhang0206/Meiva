@@ -31,7 +31,6 @@ class _EventsFilterOptions:
 
 @dataclass(frozen=True)
 class _EventsLsOptions(_EventsFilterOptions):
-    offset: int | None
     total: bool
 
 
@@ -58,7 +57,6 @@ def _h_events_ls(args: argparse.Namespace) -> int:
         until=opts.until,
         hours=opts.hours,
         limit=opts.limit,
-        offset=opts.offset,
         with_total=opts.total,
     )
     return cmd_events_ls(gateway_access_from_boot(runtime_of(args).config), flt, as_json=opts.json)
@@ -121,7 +119,6 @@ def add_events_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     events_sub = events_p.add_subparsers(dest="events_cmd", required=True)
     ls_p = events_sub.add_parser("ls", help="newest events matching the filters")
     _add_event_filters(ls_p)
-    ls_p.add_argument("--offset", type=int, help="skip this many newer events")
     ls_p.add_argument(
         "--total", action="store_true", help="also count every matching event (one extra query)"
     )

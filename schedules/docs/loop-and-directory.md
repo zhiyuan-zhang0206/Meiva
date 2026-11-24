@@ -19,9 +19,8 @@ cluster-relative timezone, and timeout. When a slot is due, the manager:
 4. settles the run and advances recurring schedules from `max(slot, now)`.
 
 The durable slot, rather than an ambient clock reading, distinguishes 04:00
-from 07:00, Tuesday from Friday, or a watch round from its five-minute liveness
-check. Manual `--once` modes may use the current time because they are not
-replaying a managed slot.
+from 07:00 and Tuesday from Friday. Manual `--once` modes may use the current time because they
+are not replaying a managed slot.
 
 ## Workspace state
 

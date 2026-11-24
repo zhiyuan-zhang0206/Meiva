@@ -30,7 +30,7 @@ directory. The manifest is the single expression of the built-in policy
 |----------|---------|-------|---------|
 | `c9-daily-report` | cron `0 5 * * *` | product | **enabled** |
 | `debt-sweep-daily` | cron `30 6 * * *` | product | **enabled** |
-| `main-red-watch` | cron `0,5,30,35 * * * *` | product | **enabled** |
+| `main-red-watch` | cron `*/30 * * * *` | product | **enabled** |
 | `adversarial-eval-weekly` | cron `0 4 * * 3` | product | **enabled** |
 | `memory-arbiter` | cron `0 4,7 * * *` | product | **enabled** |
 | `self-evolution-daily` | cron `0 0 * * *` | product | **enabled** |
@@ -76,10 +76,12 @@ one card, and the step name it carries is the entry a mapping would have to gain
 Failures that happen around the suite rather than in it — a container that never
 pulled, a disk that filled — are recognised by their own markers and counted,
 never becoming a card. Each round
-emits `main_red_watch_round`, and that event is persisted rather than lived in
-the mirror alone: a second trigger five minutes after each round reads the
-newest one back and opens a card for the lead when it is more than an hour old,
-so a watch that stopped reporting is a card rather than silence. A stream the
+emits `main_red_watch_round`, whose `rounds` field is mapped to the Prometheus
+counter `meiva_main_red_watch_round_rounds_total`; the Grafana rule
+`meiva-ops-main-red-watch-silent` fires when that counter has no sample for an
+hour (two missed slots), so a watch that stopped reporting reaches the alert
+inbox rather than silence. The suspect table on the Grafana dashboard reads the
+same event from Loki. A stream the
 watch has only just started reading gets one threshold of grace before its
 silence is reported — a nightly added today has no run on record because its
 cron has not come round yet — and a stream that cannot be read at all (a

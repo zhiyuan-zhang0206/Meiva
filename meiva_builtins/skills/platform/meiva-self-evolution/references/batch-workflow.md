@@ -175,7 +175,8 @@ leave it for the user to review.
 ## Data source
 
 Events come from the gateway `/api/events` endpoint — telemetry and log rows from
-`telemetry_events` and audit rows from `audit_events`, both in Postgres and permanent;
+Loki, which holds the last seven days (a window that starts earlier has no telemetry
+before that), and audit rows from `audit_events` in Postgres, which are permanent;
 `collect.py` is the read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 A window whose judgeable share falls below `self_evolution_coverage_alert_floor`

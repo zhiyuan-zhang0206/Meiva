@@ -291,7 +291,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `claude_auth_keepalive_round` | one Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code | observation | status, reason, exit_code | — | events | — |
 | `agent_watch_round` | one agent-watch round — duties judged, silent, woken, and unreadable | observation | watched, silent, sent, blind | — | events | — |
 | `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events | — |
-| `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events | ✓ |
+| `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | rounds, fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events | — |
 | `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events | — |
 | `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds | — | events | — |
 | `label_generated` | label auto-generated | noise | — | — | events | — |
