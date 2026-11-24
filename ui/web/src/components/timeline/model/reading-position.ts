@@ -27,7 +27,6 @@ export interface ReloadReadingBookmark {
   readonly turn?: true;
   readonly viewportTop: number;
   readonly scrollTop: number;
-  readonly usedCollapseReserve?: true;
   readonly savedAt: number;
 }
 
@@ -79,9 +78,6 @@ function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark
   if (candidate.turn !== undefined && candidate.turn !== true) {
     return false;
   }
-  if (candidate.usedCollapseReserve !== undefined && candidate.usedCollapseReserve !== true) {
-    return false;
-  }
   return true;
 }
 
@@ -102,7 +98,12 @@ function readPrunedBookmarkEntries(
   for (const [agentKey, raw] of Object.entries(parsed)) {
     if (!agentKey || !isReloadReadingBookmark(raw)) continue;
     if (now - raw.savedAt > RELOAD_BOOKMARK_TTL_MS) continue;
-    valid.push([agentKey, raw]);
+    const { itemId, rank, turn, readingLocator, viewportTop, scrollTop, savedAt } = raw;
+    valid.push([agentKey, {
+      itemId, rank, viewportTop, scrollTop, savedAt,
+      ...(turn ? { turn } : {}),
+      ...(readingLocator ? { readingLocator } : {}),
+    }]);
   }
   valid.sort((a, b) => b[1].savedAt - a[1].savedAt);
   return valid.slice(0, RELOAD_BOOKMARK_MAX_AGENTS);
@@ -129,7 +130,6 @@ function sameBookmarkTarget(a: ReloadReadingBookmark, b: ReloadReadingBookmark):
     a.readingLocator === b.readingLocator &&
     Math.abs(a.viewportTop - b.viewportTop) < 0.5 &&
     Math.abs(a.scrollTop - b.scrollTop) < 0.5 &&
-    a.usedCollapseReserve === b.usedCollapseReserve &&
     Math.abs(a.savedAt - b.savedAt) < 60_000
   );
 }

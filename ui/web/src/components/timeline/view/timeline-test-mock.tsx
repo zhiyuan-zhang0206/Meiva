@@ -259,8 +259,8 @@ export function revealCollapsedCards() {
 // meiva:note
 // A layout model for the timeline viewport, since the test DOM lays nothing out. Every element
 // under the main viewport gets a height and a position derived from the DOM itself:
-// - `.timeline-item` rows are `rowHeight` tall (default 80), a turn header 40, spacers and the
-//   send reserve their inline height; any other element is as tall as its children;
+// - `.timeline-item` rows are `rowHeight` tall (default 80), a turn header 40, spacers and
+//   overlay slack their inline height. Any other element is as tall as its children;
 // - the log has the 52px bar-clear top padding and 24px bottom padding, `space-y-3` / `space-y-1`
 //   add their gaps between in-flow children;
 // - the column starts at the viewport's top edge.
@@ -302,7 +302,6 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     const custom = options.height?.(el);
     if (custom !== undefined) return custom;
     if (
-      el.hasAttribute("data-timeline-reserve") ||
       el.hasAttribute("data-timeline-overlay-slack") ||
       el.hasAttribute("data-timeline-spacer")
     ) {
@@ -501,7 +500,6 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     top: () => viewport().scrollTop,
     max: () => maxTop(viewport()),
     scrollHeight: () => scrollHeightOf(viewport()),
-    reserve: () => Number.parseFloat(viewport().querySelector<HTMLElement>("[data-timeline-reserve]")?.style.height ?? "") || 0,
     // meiva:note
     // The scroll offset at which the content's last row meets the viewport bottom.
     naturalEnd,

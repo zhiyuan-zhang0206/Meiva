@@ -18,9 +18,6 @@ import type { RowIdentity } from "./rows";
 export interface SavedPlace {
   identity: RowIdentity;
   offset: number;
-  // meiva:note
-  // Whether the saved offset stood in reserve space a header toggle created.
-  holdReserve: boolean;
 }
 
 export interface TailDeparture {
@@ -54,7 +51,6 @@ export function readSessionPlace(contentKey: string | undefined, config: ReloadR
       ...(bookmark.readingLocator ? { locator: bookmark.readingLocator } : {}),
     },
     offset: bookmark.viewportTop,
-    holdReserve: bookmark.usedCollapseReserve === true,
   };
 }
 
@@ -73,7 +69,6 @@ export function writeSessionPlace(contentKey: string | undefined, config: Reload
     ...(row.turn ? { turn: true as const } : {}),
     viewportTop: place.offset,
     scrollTop: Math.max(0, scrollTop),
-    ...(place.holdReserve ? { usedCollapseReserve: true as const } : {}),
     savedAt: now,
   }, now);
 }

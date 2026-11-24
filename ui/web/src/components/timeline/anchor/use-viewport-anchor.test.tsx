@@ -15,7 +15,7 @@ import { useViewportAnchor, type AnchorChangeCause, type ViewportAnchor } from "
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 const ids = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => String(from + i));
-const rowAt = (itemId: string, offset: number): ViewAnchor => ({ kind: "row", row: { itemId, rank: 0 }, offset });
+const rowAt = (itemId: string, offset: number): Extract<ViewAnchor, { kind: "row" }> => ({ kind: "row", row: { itemId, rank: 0 }, offset });
 
 function harness(
   initial: string[],
@@ -34,9 +34,8 @@ function harness(
     const wrapperRef = useRef<HTMLDivElement>(null);
     const viewportRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
-    const reserveRef = useRef<HTMLDivElement>(null);
     const anchor = useViewportAnchor({
-      wrapperRef, viewportRef, contentRef, reserveRef, thresholds,
+      wrapperRef, viewportRef, contentRef, thresholds,
       onChange, onUnresolved: () => undefined,
     }).controls;
     controls = anchor;
@@ -50,7 +49,6 @@ function harness(
             <div ref={contentRef} role="log" className="space-y-3">
               {rows.map((id) => <div key={id} className="timeline-item" data-item-id={id} data-display-rank="0" />)}
             </div>
-            <div ref={reserveRef} data-timeline-reserve />
           </div>
         </div>
       </div>
@@ -62,7 +60,6 @@ function harness(
     changes,
     rows: (rows: string[]) => view.rerender(<Harness rows={rows} />),
     place: (anchor: ViewAnchor) => act(() => controls!.place(anchor)),
-    placeHeld: (anchor: ViewAnchor) => act(() => controls!.place(anchor, { hold: true })),
     current: () => controls!.current(),
     heights,
   };
@@ -346,41 +343,30 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(1500);
   });
 
-  it("adds reserve space below the content only while a header toggle holds it", () => {
+  it("turns a collapse placement within a pixel of the natural end into a tail anchor", () => {
     const view = harness(ids(1, 20));
-    view.place(rowAt("20", 56));
-    expect(view.reserve()).toBe(0);
-    expect(view.top()).toBe(1704);
+    view.place({ ...rowAt("20", 477), clampToTail: true });
+    expect(view.current()).toEqual(TAIL);
+    expect(view.top()).toBe(view.naturalEnd());
 
-    view.placeHeld(rowAt("20", 56));
-    // meiva:note
-    // Row 20 sits at 2180 in a 2304px log: 2180 - 56 + 600 - 2304 of space below the content.
-    expect(view.reserve()).toBe(420);
-    expect(view.top()).toBe(2124);
-    expect(view.rowTop("20")).toBe(56);
+    view.rows(ids(1, 21));
+    expect(view.top()).toBe(view.naturalEnd());
   });
 
-  it("releases the reserve when the reader scrolls upward to or past the natural end", () => {
+  it("consumes the collapse placement before a later viewport resize clamps the row", () => {
     const view = harness(ids(1, 20));
-    view.placeHeld(rowAt("20", 56));
-    expect(view.reserve()).toBe(420);
+    const row = rowAt("12", 44);
+    view.place({ ...row, clampToTail: true });
+    expect(view.current()).toEqual(row);
+    expect(view.rowTop("12")).toBe(44);
 
-    // meiva:note
-    // Inside the reserve the reader's own row keeps what it needs: row 18 read at 56 needs 196.
-    view.scrollTo(1900);
-    expect(view.top()).toBe(1900);
-    expect(view.rowTop("18")).toBe(56);
-    expect(view.reserve()).toBe(196);
+    view.setViewportHeight(1200);
     view.resize();
-    expect(view.top()).toBe(1900);
-    expect(view.reserve()).toBe(196);
-    view.scrollTo(1705);
-    expect(view.reserve()).toBeGreaterThan(0);
+    expect(view.top()).toBe(view.naturalEnd());
+    expect(view.current()).toEqual(row);
 
-    view.scrollTo(1704);
-    expect(view.reserve()).toBe(0);
-    expect(view.top()).toBe(1704);
-    view.resize();
-    expect(view.reserve()).toBe(0);
+    view.rows(ids(1, 22));
+    expect(view.rowTop("12")).toBe(44);
+    expect(view.top()).toBeLessThan(view.naturalEnd());
   });
 });

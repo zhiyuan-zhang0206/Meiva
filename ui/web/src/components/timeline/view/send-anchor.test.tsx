@@ -45,7 +45,7 @@ describe("a send", () => {
     view.rerender(<TimelineView items={[earlier, sent, reply]} />);
     model.grow("3.0", 1200);
     expect(model.top()).toBe(model.naturalEnd());
-    expect(model.reserve()).toBe(0);
+    expect(model.max()).toBe(model.naturalEnd());
     expect(arrow()).toBeNull();
   });
 
@@ -56,7 +56,7 @@ describe("a send", () => {
     view.rerender(<TimelineView items={[earlier, sent, reply]} />);
     model.grow("3.0", 800);
     expect(model.top()).toBe(100);
-    expect(model.reserve()).toBe(0);
+    expect(model.max()).toBe(model.naturalEnd());
     act(() => { screen.getByRole("button", { name: "Scroll down" }).click(); });
     expect(model.smoothTarget()).toBe(model.naturalEnd());
     model.finishSmooth();
@@ -225,7 +225,7 @@ describe("bottom overlay slack (grown composer and pending strip)", () => {
     view.unmount();
   });
 
-  it("subtracts overlay slack from toggle reserve so closing a turn block does not double-pad the bottom", () => {
+  it("collapses a turn to the natural end of the log with a grown overlay", () => {
     const workItems = [
       earlier,
       makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "step 1" }),
@@ -235,19 +235,19 @@ describe("bottom overlay slack (grown composer and pending strip)", () => {
     ];
     const heights: Record<string, number> = { "1.0": 1000, "2.0": 200, "2.1": 200, "2.2": 200, "2.3": 80 };
     const model = timelineLayout({ viewportHeight: 600, rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 80 });
-    const view = render(<TimelineView items={workItems} bottomOverlayHeight={0} />);
+    const view = render(<TimelineView items={workItems} bottomOverlayHeight={100} />);
     const toggle = screen.getByTestId("turn-toggle");
     act(() => { toggle.click(); });
     model.scrollTo(model.naturalEnd() - 200);
     act(() => { toggle.click(); });
-    const reserveWithoutOverlay = model.reserve();
-    expect(reserveWithoutOverlay).toBeGreaterThan(100);
-
-    view.rerender(<TimelineView items={workItems} bottomOverlayHeight={100} />);
-    expect(model.reserve()).toBe(Math.max(0, reserveWithoutOverlay - 100));
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(model.max()).toBe(model.naturalEnd() + 100);
+    expect(arrow()).toBeNull();
 
     view.rerender(<TimelineView items={workItems} bottomOverlayHeight={0} />);
-    expect(model.reserve()).toBe(reserveWithoutOverlay);
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(model.max()).toBe(model.naturalEnd());
     view.unmount();
   });
 });
