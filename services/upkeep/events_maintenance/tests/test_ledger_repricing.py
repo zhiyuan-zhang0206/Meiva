@@ -106,6 +106,21 @@ def test_the_pass_prices_what_it_can_once_and_never_touches_a_priced_row(
     assert rows["already-priced"] == (Decimal("9.5"), "live", None)
 
 
+def test_a_daily_summary_of_the_imported_history_is_never_repriced(
+    db_conn: psycopg.Connection,
+) -> None:
+    _insert(db_conn, "per-call")
+    _insert(db_conn, "legacy-daily:2026-09-20:1:gpt-6.1-sol", usage_kind="legacy_daily")
+    db_conn.commit()
+
+    counts = reprice_unpriced_ledger(db_conn, prices=load_price_book())
+
+    assert (counts.scanned, counts.priced) == (1, 1)
+    rows = dict(db_conn.execute("SELECT call_id, cost_usd FROM llm_usage_ledger").fetchall())
+    assert rows["per-call"] == Decimal("0.0187")
+    assert rows["legacy-daily:2026-09-20:1:gpt-6.1-sol"] is None
+
+
 def test_the_table_lets_a_row_change_only_from_unpriced_to_priced(
     db_conn: psycopg.Connection,
 ) -> None:

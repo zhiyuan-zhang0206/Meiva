@@ -66,7 +66,21 @@ The ledger started from the retained `llm_usage` telemetry: the one-time import
 of 2026-09-26 through 2026-11-24 (1,177,185 reports; `historical_catalog` marks
 the prices reconstructed from the versioned archive) was reconciled by UTC day,
 reported model and billing before the readers moved to the ledger, with no
-differences. Its commands are retired. Reports have no retention expiry; the
+differences. Its commands are retired. Usage from before the ledger began (the first per-call report, 2026-09-26) is imported once from
+the retired day tables by `meiva metrics import-legacy-usage --cluster <label>`
+(`services/upkeep/events_maintenance/legacy_usage_import.py`), which is a dry run until `--apply`.
+Each (UTC day, agent, model) row becomes one report at the start of the day:
+`call_id` `legacy-daily:<day>:<agent>:<model>` (re-running skips what exists), `usage_kind`
+`legacy_daily` (a reader that needs per-call detail excludes it), `calls` the day's `llm_calls`, and
+the stored cost snapshot kept as it was (`price_source` `legacy`; the hourly repricing pass skips `legacy_daily` rows, because a day's tokens summed together cannot be priced by a per-call tier, and a day with no stored price stays unpriced). Only days before
+the first per-call report are imported. A day row does not record which calls were API, so the
+billing comes from its subscription columns: none means `api`; all of the cost and of the unpriced
+calls means `subscription`; anything between is `mixed`, which is listed by the dry run and blocks
+`--apply` until a rule is confirmed. A row with some unpriced calls is imported with its stored cost
+sum (a lower bound) and `complete = false`, so readers count it among the incomplete reports; the
+dry run counts them as `partly_priced` and the rows with no stored price at all as `unpriced_rows`. The dry run also compares the day table with the
+per-call ledger from the cutoff on and checks the folded totals against the days they folded.
+Reports have no retention expiry; the
 Loki `llm_usage` stream is the operational copy and keeps seven days.
 
 ## Unpriced calls

@@ -141,6 +141,13 @@ class _MetricsAgentsOptions:
 
 
 @dataclass(frozen=True)
+class _ImportLegacyUsageOptions:
+    cluster: str
+    apply: bool
+    batch_size: int
+
+
+@dataclass(frozen=True)
 class _StatsOptions:
     hours: int | None
     json: bool
@@ -170,6 +177,19 @@ def _h_stats(args: argparse.Namespace) -> int:
     )
 
 
+def _h_import_legacy_usage(args: argparse.Namespace) -> int:
+    from cli.commands.management.metrics_legacy_usage import cmd_import_legacy_usage
+    from cli.database import database_factory_of
+
+    opts = options(args, _ImportLegacyUsageOptions)
+    return cmd_import_legacy_usage(
+        database_factory_of(args),
+        cluster=opts.cluster,
+        apply=opts.apply,
+        batch_size=opts.batch_size,
+    )
+
+
 def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # meiva:note
     # `meiva metrics agents` reads the per-agent cost and token breakdown.
@@ -181,6 +201,21 @@ def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     agents_p.add_argument("--days", type=int, help="window in days, 1..30; default: the gateway's")
     agents_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
     agents_p.set_defaults(func=_h_metrics_agents)
+
+    legacy_p = metrics_sub.add_parser(
+        "import-legacy-usage",
+        help="import the day tables before the usage ledger began as daily ledger reports",
+    )
+    legacy_p.add_argument("--cluster", required=True, help="cluster label stored on the reports")
+    legacy_p.add_argument(
+        "--apply",
+        action="store_true",
+        help="write the reports; without it the command only reports what it would import",
+    )
+    legacy_p.add_argument(
+        "--batch-size", default=1000, type=int, help="maximum daily rows per transaction"
+    )
+    legacy_p.set_defaults(func=_h_import_legacy_usage)
 
 
 def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

@@ -24,7 +24,7 @@ _SELECT = """
     SELECT call_id, occurred_at, model, tokens_in, tokens_out, cache_read,
            cache_write_5m, cache_write_1h, cache_write_30m
     FROM llm_usage_ledger
-    WHERE cost_usd IS NULL
+    WHERE cost_usd IS NULL AND usage_kind <> 'legacy_daily'
       AND (%(after_at)s::timestamptz IS NULL OR (occurred_at, call_id) > (%(after_at)s, %(after_id)s))
     ORDER BY occurred_at, call_id
     LIMIT %(batch_size)s
