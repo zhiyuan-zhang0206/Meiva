@@ -230,6 +230,27 @@ describe("ChatMarkdown", () => {
     expect(pre?.textContent).toContain("\n");
   });
 
+  it("scrolls a fenced block sideways inside a horizontal-only ScrollArea frame, copy control outside it", () => {
+    renderMarkdown(<ChatMarkdown content={"```bash\necho hi\n```"} />);
+    const pre = document.querySelector("pre") as HTMLElement;
+    const frame = pre.closest('[data-slot="scroll-area"]')!;
+    expect(frame.classList.contains("md-scroll-code")).toBe(true);
+    expect(pre.classList.contains("md-scroll-pre")).toBe(true);
+    expect(frame.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]')).not.toBeNull();
+    expect(frame.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]')).toBeNull();
+    expect(frame.contains(screen.getByRole("button", { name: /copy bash code/i }))).toBe(false);
+  });
+
+  it("wraps a GFM table in a horizontal-only ScrollArea", () => {
+    renderMarkdown(<ChatMarkdown content={"| a | b |\n| - | - |\n| 1 | 2 |"} />);
+    const table = document.querySelector("table") as HTMLElement;
+    const frame = table.closest('[data-slot="scroll-area"]')!;
+    expect(frame.classList.contains("md-scroll-table")).toBe(true);
+    expect(frame.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]')).not.toBeNull();
+    expect(frame.querySelector('[data-slot="scroll-area-scrollbar"][data-orientation="vertical"]')).toBeNull();
+    expect(table.textContent).toContain("1");
+  });
+
   it("inline `code` with no newline still renders inline (not a <pre>)", () => {
     renderMarkdown(<ChatMarkdown content="some `inline` code" />);
     const inlineCode = screen.getByText("inline");
@@ -486,6 +507,7 @@ describe("math through the lazy KaTeX surface", () => {
 
     await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2), { timeout: 5000 });
     expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-display")?.closest(".md-scroll-math")).not.toBeNull();
     expect(container.querySelector(".katex-error")).toBeNull();
     expect(screen.getByRole("link", { name: "wiki" }).getAttribute("href")).toBe(
       "https://en.wikipedia.org/wiki/Foo_(bar)",

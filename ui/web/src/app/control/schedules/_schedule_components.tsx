@@ -23,6 +23,7 @@ import { errMsg } from "@/lib/contracts/errors";
 import type { ScheduleCreate, ScheduleSummary, ScheduleUpdate } from "@/lib/contracts/types";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 import { useStore } from "@/lib/state/store";
@@ -253,7 +254,7 @@ function ScheduleDetail({
               data-form-type="other"
               data-1p-ignore=""
               data-lpignore="true"
-              className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
+              className="meiva-thin-scrollbar mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
               rows={12}
               value={editForm.script ?? ""}
               onChange={(e) => setEdit({ ...editForm, script: e.target.value })}
@@ -279,24 +280,30 @@ function ScheduleDetail({
           {s.last_error && (
             <div>
               <div className="font-medium text-destructive">{t("lastError")}</div>
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 font-mono text-[11px] text-destructive">
-                {s.last_error}
-              </pre>
+              <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-40" showHorizontalScrollbar>
+                <pre className="w-max min-w-full p-2 font-mono text-[11px] text-destructive">
+                  {s.last_error}
+                </pre>
+              </ScrollArea>
             </div>
           )}
           <div>
             <div className="font-medium text-muted-foreground">{t("script")}</div>
-            <div className="mt-1 max-h-64 overflow-auto rounded bg-background p-2">
-              <PythonCode code={s.script} />
-            </div>
+            <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-64">
+              <div className="p-2">
+                <PythonCode code={s.script} />
+              </div>
+            </ScrollArea>
           </div>
           <div>
             <div className="font-medium text-muted-foreground">
               Logs {logs.data ? `(${logs.data.source})` : ""}
             </div>
-            <pre className="mt-1 max-h-48 overflow-auto rounded bg-background p-2 font-mono text-[11px] text-muted-foreground">
-              {logs.data && logs.data.lines.length > 0 ? logs.data.lines.join("\n") : "—"}
-            </pre>
+            <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-48" showHorizontalScrollbar>
+              <pre className="w-max min-w-full p-2 font-mono text-[11px] text-muted-foreground">
+                {logs.data && logs.data.lines.length > 0 ? logs.data.lines.join("\n") : "—"}
+              </pre>
+            </ScrollArea>
           </div>
           <div>
             <div className="font-medium text-muted-foreground">
@@ -416,7 +423,7 @@ export function ScheduleForm({
             data-form-type="other"
             data-1p-ignore=""
             data-lpignore="true"
-            className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
+            className="meiva-thin-scrollbar mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
             rows={12}
             placeholder={"import meiva\nmeiva.agents.send_message(123, content='wake', source='schedule:1')"}
             value={value.script ?? ""}

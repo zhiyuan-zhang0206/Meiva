@@ -12,6 +12,7 @@
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
 import { useNonce } from "@/lib/auth/nonce-context";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { CopyButton } from "./copy-button";
 import { createLazyChunk, type LazyChunk } from "./lazy-chunk";
 
@@ -58,6 +59,16 @@ export function useMermaidRenderer() {
   return useContext(RendererContext);
 }
 
+export function ScrollCodeBlock({ code, className }: { code: string; className?: string }) {
+  return (
+    <ScrollArea className="md-scroll-code" showVerticalScrollbar={false} showHorizontalScrollbar>
+      <pre className="md-scroll-pre">
+        <code className={className}>{code}</code>
+      </pre>
+    </ScrollArea>
+  );
+}
+
 export function MermaidCode({ code, className }: { code: string; className?: string }) {
   const renderer = useMermaidRenderer();
   const nonce = useNonce();
@@ -79,9 +90,11 @@ export function MermaidCode({ code, className }: { code: string; className?: str
     <div className="group relative">
       <CopyButton text={code} label="mermaid code" />
       {output?.code === code && output.dark === dark && output.nonce === nonce ? (
-        <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: output.svg }} />
+        <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar>
+          <div data-testid="mermaid-svg" dangerouslySetInnerHTML={{ __html: output.svg }} />
+        </ScrollArea>
       ) : (
-        <pre><code className={className}>{code}</code></pre>
+        <ScrollCodeBlock code={code} className={className} />
       )}
     </div>
   );

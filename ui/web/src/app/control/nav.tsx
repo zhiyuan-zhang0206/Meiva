@@ -15,6 +15,7 @@ import { useBreakpoint } from "@/lib/layout/breakpoint";
 
 import { controlAnchorIds, type ControlSectionDef, type SectionLabelKey } from "./sections";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 
 // meiva:note
@@ -194,13 +195,15 @@ export function ControlNav({
         // a flex sibling of the content scroller, already bounded to the row's
         // height (min-h-0 on <nav> lets it shrink to that instead of growing to
         // its content and pushing a document-level scrollbar). h-full + own
-        // overflow-y-auto keeps the long two-level list inside the rail — no
+        // ScrollArea keeps the long two-level list inside the rail — no
         // max-h-screen (which overshoots by the page header and spills below the
         // viewport) and no sticky (the rail is its own column, not scrolling with
         // the content).
-        <div className={cn("h-full overflow-y-auto px-3 py-4 gap-3", FLEX, FLEX_COL, MIN_H_0)}>
-          {links}
-        </div>
+        <ScrollArea className={cn("h-full", MIN_H_0)}>
+          <div className={cn("px-3 py-4 gap-3", FLEX, FLEX_COL)}>
+            {links}
+          </div>
+        </ScrollArea>
       ) : (
         // meiva:note
         // Mobile: a "Jump to…" disclosure so the nav folds to one row.

@@ -32,6 +32,7 @@ import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useBrowser } from "@/lib/browser/browser-provider";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 
 type StatusSlot = ComponentType<ComponentProps<typeof StatusPage>>;
@@ -97,9 +98,10 @@ export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
           scrollId={INSIGHTS_SCROLL_ID}
           ariaLabel={t("sections")}
         />
-        <div
-          id={INSIGHTS_SCROLL_ID}
-          className={cn("overflow-y-auto overflow-x-hidden [overflow-anchor:none]", FLEX_1)}
+        <ScrollArea
+          viewportId={INSIGHTS_SCROLL_ID}
+          className={cn(FLEX_1, MIN_H_0, MIN_W_0)}
+          viewportClassName="overflow-x-hidden [overflow-anchor:none]"
         >
           <div className={cn("mx-auto max-w-4xl space-y-12 px-6 pt-6 pb-[45vh] font-mono text-sm", MIN_W_0)}>
             <ControlSection
@@ -135,7 +137,7 @@ export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
             </ControlSection>
 
           </div>
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

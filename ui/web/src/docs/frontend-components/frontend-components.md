@@ -35,6 +35,10 @@ and update-age tooltips remain.
 The three columns' title bars, bottom rules, and edge-pinned controls:
 [Home shell chrome](home-shell-chrome/home-shell-chrome.md).
 
+## Scrolling
+
+Every scrollable region renders through `components/ui/scroll-area.tsx` (`ScrollArea`): the native OS scrollbar is hidden and a thin overlay thumb fades in on hover or scroll and out after 800 ms, without taking layout width. No component writes `overflow-y-auto` / `overflow-auto` by hand; a capped list or popover sets `viewportClassName="max-h-..."` on the `ScrollArea` instead and the surrounding box clips (`OVERFLOW_HIDDEN`), so it hugs short content and scrolls past the cap. `viewportId` stamps an `id` on the real scroller (the Control and Insights pages' `useSettledAnchorScroll` and scroll-spy look it up), `viewportRef` and `viewportTestId` reach it too, and `showHorizontalScrollbar` adds a horizontal thumb for code or log boxes, and `showVerticalScrollbar={false}` with it makes a horizontal-only region (Markdown code blocks, tables, display formulas, Mermaid SVG, the file viewer, `Table`, the file-tab strip): Radix then clips the vertical axis, so wheel and touch gestures pass through to the enclosing `ScrollArea`, which still wakes its own thumb because the input handlers only count viewports that carry `data-scroll-y`. A horizontal region also observes its content wrapper's child, because globals.css pins the wrapper to the viewport width and only that inner element widens as a line streams in; give the child `w-max min-w-full` so its padding survives the scroll. Radix's content wrapper is forced to `display: block`, so children cannot size themselves with `h-full` against it: give a fixed-height child an explicit height, or stretch the wrapper from `viewportClassName` (`flex [&>div]:m-auto` centres the login card). Native `<textarea>` fields cannot sit inside a `ScrollArea`; `Textarea` carries `.meiva-thin-scrollbar` (`globals.css`), the same thin rail.
+
 ## Code blocks
 
 `PythonCode`'s highlighter loading — the lazy import, its proactive warm-up

@@ -68,7 +68,7 @@ Verbatim monospace `pre` stays for content that is not Markdown prose: command o
 Mermaid fences load a shared diagram renderer only when mounted. Strict security
 and disabled automatic startup apply to every render; diagrams follow the resolved
 light/dark theme. Loading and invalid or incomplete streaming diagrams show copyable
-source. Completed diagrams show horizontally scrollable SVG with source-copy controls.
+source. Completed diagrams show SVG inside a horizontal-only `ScrollArea`, with source-copy controls. Fenced code, GFM tables and display formulas scroll the same way (`.md-scroll-code`, `.md-scroll-table`, `.md-scroll-math` in globals.css); the code frame carries the card chrome so the border stays put while long lines scroll.
 Inline code remains literal. Tests inject a lazy renderer through
 `MermaidRendererProvider` without requiring SVG layout in happy-dom.
 

@@ -273,20 +273,14 @@ describe("ContextButton", () => {
     expect(screen.getByRole("img").getAttribute("aria-label")).toContain("Context");
   });
 
-  it("the panel clips horizontal overflow instead of scrolling — overflow-x-hidden paired with overflow-y-auto", async () => {
+  it("the panel scrolls vertically in the shared ScrollArea and clips horizontal overflow", async () => {
     getContextBreakdown.mockResolvedValue(breakdown);
     wrap(<Harness agentId={7} {...meterProps} />);
     fireEvent.click(screen.getByTestId("context-meter-button"));
     const panel = await screen.findByTestId("context-breakdown-panel");
-    // Per the CSS overflow spec, an element with overflow-y other than
-    // "visible" forces its overflow-x's *computed* value from "visible" to
-    // "auto" too (the two axes aren't independent that way) — so
-    // overflow-y-auto alone silently made this panel horizontally scrollable
-    // once content ran past the max-width ceiling. overflow-x-hidden pins
-    // the other axis explicitly so content clips / truncates in place
-    // instead of demanding a horizontal scroll.
-    expect(panel.className).toContain("overflow-x-hidden");
-    expect(panel.className).toContain("overflow-y-auto");
+    const viewport = panel.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport?.className).toContain("overflow-x-hidden");
+    expect(viewport?.className).toContain("max-h-[min(50dvh,calc(100dvh-8rem))]");
   });
 
   it("legend percentages carry 2 decimal places so small categories stay readable (no all-zero legend)", async () => {

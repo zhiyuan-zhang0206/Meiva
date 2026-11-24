@@ -18,7 +18,8 @@ import { CopyButton } from "@/components/content/copy-button";
 import { isFilePath } from "@/components/content/file-path-utils";
 import { markdownImageUrl } from "./markdown-image-url";
 import { API_BASE } from "@/lib/transport/api-base";
-import { MermaidCode } from "./mermaid-code";
+import { MermaidCode, ScrollCodeBlock } from "./mermaid-code";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { PythonCode } from "@/components/content/python-code";
 import { MarkdownZoomableImage } from "./zoomable-image";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
@@ -185,12 +186,23 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
     return (
       <div className="group relative">
         <CopyButton text={codeStr} label={lang ? `${lang} code` : "code"} />
-        <pre>
-          <code className={className}>{codeStr}</code>
-        </pre>
+        <ScrollCodeBlock code={codeStr} className={className} />
       </div>
     );
   },
+  table: ({ node: _node, ...props }) => (
+    <ScrollArea className="md-scroll-table" showVerticalScrollbar={false} showHorizontalScrollbar>
+      <table {...props} />
+    </ScrollArea>
+  ),
+  span: ({ node: _node, className, ...props }) =>
+    /\bkatex-display\b/.test(className ?? "") ? (
+      <ScrollArea className="md-scroll-math" showVerticalScrollbar={false} showHorizontalScrollbar>
+        <span className={className} {...props} />
+      </ScrollArea>
+    ) : (
+      <span className={className} {...props} />
+    ),
 });
 
 const inlineComponents: Components = {
