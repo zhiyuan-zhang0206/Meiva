@@ -446,3 +446,64 @@ def test_delegated_reporting_uses_peer_routing_and_hidden_summaries(
                 "Exceptions: answering the human directly or an attention exception below"
                 in visibility
             )
+
+
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+def test_prefix_visibility_states_interruption_cost_and_default_hide(
+    fast_acknowledgement: bool,
+) -> None:
+    slices = _slices(
+        agent__user_delivery_mode="prefix", agent__fast_acknowledgement=fast_acknowledgement
+    )
+    for text in (user_reply_section(_inputs(slices)), harness_user_reply_section(_inputs(slices))):
+        visibility = text.split("## Output visibility\n\n", 1)[1].split("\n\n## User attention", 1)[
+            0
+        ]
+        assert (
+            f"{DISPLAY_TO_USER} is not a log and not a courtesy summary: it lights an unread "
+            "marker in the user's sidebar and interrupts a human"
+        ) in visibility
+        assert (
+            f"When unsure whether a human needs to see something, default to {HIDE_FROM_USER} "
+            "and coordinate with other agents first"
+        ) in visibility
+        assert "progress updates, handoff receipts and the last sentence before" in visibility
+        assert f"never follow a `send_message` handoff with a {DISPLAY_TO_USER}" in visibility
+        assert "when your brief says a human will work with you directly" in visibility
+        assert "a real human decision your coordinator cannot make for them" in visibility
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_attention_rule_separates_direct_engagement_from_background_handoff(mode: str) -> None:
+    slices = _slices(agent__user_delivery_mode=mode)
+    for text in (user_reply_section(_inputs(slices)), harness_user_reply_section(_inputs(slices))):
+        attention = text.split("## User attention\n\n", 1)[1].split("\n\n#", 1)[0]
+        assert "It is not a log and not a courtesy wrap-up" in attention
+        assert "When you are unsure whether a human needs to see something" in attention
+        assert "A human is directly engaged with you when they messaged you" in attention
+        assert (
+            "A background worker dispatched by another agent is not directly engaged" in attention
+        )
+        assert "Anti-pattern: after handing a PR or result to the coordinator" in attention
+        assert DISPLAY_TO_USER not in attention and HIDE_FROM_USER not in attention
+
+
+def test_sdk_delivery_mechanics_state_publication_cost_without_prefix_labels() -> None:
+    slices = _slices(agent__user_delivery_mode="sdk")
+    for text in (user_reply_section(_inputs(slices)), harness_user_reply_section(_inputs(slices))):
+        mechanics = text.split("## Delivery mechanics\n\n", 1)[1].split("\n\n##", 1)[0]
+        assert "A publication lights an unread marker and interrupts a human" in mechanics
+        assert "When unsure whether a human needs it, do not publish" in mechanics
+        assert "publishes no progress, handoff receipt or closing line" in mechanics
+        assert DISPLAY_TO_USER not in text and HIDE_FROM_USER not in text
+
+
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+def test_naive_prompt_never_receives_prefix_or_publication_rules(
+    fast_acknowledgement: bool,
+) -> None:
+    for key, text in _rendered("naive", fast_acknowledgement=fast_acknowledgement).items():
+        assert DISPLAY_TO_USER not in text, key
+        assert HIDE_FROM_USER not in text, key
+        assert "meiva.ui.publish" not in text, key
+        assert "sidebar" not in text, key
