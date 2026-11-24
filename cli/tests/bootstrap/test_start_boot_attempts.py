@@ -84,7 +84,6 @@ def _run_start(
     *flags: str,
 ) -> int:
     producer = operator_event_pipeline(
-        operator_database,
         machine=command_runtime.machine,
         home=site.home,
         now=system_clock().now,

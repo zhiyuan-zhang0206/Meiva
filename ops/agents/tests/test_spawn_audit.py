@@ -6,18 +6,13 @@ with the agent row or neither does.
 
 from __future__ import annotations
 
-import random
-from collections.abc import Generator
-from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
-from base import telemetry
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
-from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -27,6 +22,8 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from ops.agents.tests.birth_faults import reject_audit_event
 from ops.agents.tests.test_agents_internals import insert_checkpoint, spawn_agent
 
@@ -170,29 +167,17 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
 
 
 @pytest.fixture
-def fork_events(
-    database_gate: ProcessDbGate, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Generator[telemetry.EventPipeline]:
-    """Retain the actual writer only for fork event delivery contracts."""
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: Database.from_settings(gate=database_gate),
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
-    try:
-        telemetry.init_telemetry(
-            home=meiva_home(),
-            process="fork-tests",
-            pipeline=pipeline,
-            machine_reader=machine_identity.name,
-        )
-        yield pipeline
-    finally:
-        assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
+def fork_events(emitted_events: EmittedEvents) -> EmittedEvents:
+    """The events the fork/spawn contracts read, captured through the real emitter."""
+    return emitted_events
+
+
+def _rows(events: EmittedEvents, event_name: str, agent_id: int) -> list[dict[str, Any]]:
+    return [
+        {"source": e.source, "target_agent_id": e.target_agent_id, "attributes": e.attributes}
+        for e in events.named(event_name)
+        if e.agent_id == agent_id
+    ]
 
 
 class TestSpawnFork:
@@ -204,7 +189,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        fork_events: telemetry.EventPipeline,
+        fork_events: EmittedEvents,
         machine_identity: MachineIdentityReader,
     ) -> None:
         """User ruling 2026-08-28 (task #1879): the fork event's
@@ -212,11 +197,6 @@ class TestSpawnFork:
         executor who triggered the fork; the executor stays in `source`. The
         agents_meta spawner column records the fork source the same way (it
         is the frontend tree's parent fallback)."""
-        import json
-        from datetime import UTC, datetime
-
-        from base.paths import logs_dir
-
         source = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -241,19 +221,7 @@ class TestSpawnFork:
             local_machine=machine_identity,
         )
 
-        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-        fork_rows: list[dict[str, Any]] = []
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                if obj.get("event_name") != "fork" or obj.get("agent_id") != new_id:
-                    continue
-                fork_rows.append(obj)
+        fork_rows = _rows(fork_events, "fork", new_id)
         assert len(fork_rows) == 1
         assert fork_rows[0]["source"] == f"agent:{executor}"
         assert fork_rows[0]["target_agent_id"] == source
@@ -273,17 +241,12 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        fork_events: telemetry.EventPipeline,
+        fork_events: EmittedEvents,
         machine_identity: MachineIdentityReader,
     ) -> None:
         """A plain spawn keeps the old direction: target_agent_id = the
         spawner (its lineage parent), and the spawner column records it
         verbatim — the fork-source override must not leak into spawns."""
-        import json
-        from datetime import UTC, datetime
-
-        from base.paths import logs_dir
-
         parent = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -298,19 +261,7 @@ class TestSpawnFork:
             local_machine=machine_identity,
         )
 
-        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-        spawn_rows: list[dict[str, Any]] = []
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                if obj.get("event_name") != "spawn" or obj.get("agent_id") != new_id:
-                    continue
-                spawn_rows.append(obj)
+        spawn_rows = _rows(fork_events, "spawn", new_id)
         assert len(spawn_rows) == 1
         assert spawn_rows[0]["source"] == f"agent:{parent}"
         assert spawn_rows[0]["target_agent_id"] == parent
@@ -330,7 +281,7 @@ class TestSpawnFork:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        fork_events: telemetry.EventPipeline,
+        fork_events: EmittedEvents,
         machine_identity: MachineIdentityReader,
     ) -> None:
         """The unified inbound writer's kind='fork' mapping (currently
@@ -338,11 +289,6 @@ class TestSpawnFork:
         create_agent_row) must emit the same direction: target = the fork
         source parsed from the "agent:{fork_source}" identity marker, never
         None — a latent wrong-target path for the same ruling."""
-        import json
-        from datetime import UTC, datetime
-
-        from base.paths import logs_dir
-
         source = spawn_agent(
             config_authority=config_authority,
             model_catalog=model_catalog,
@@ -365,19 +311,7 @@ class TestSpawnFork:
             database=database,
         )
 
-        assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-        fork_rows: list[dict[str, Any]] = []
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                if obj.get("event_name") != "fork" or obj.get("agent_id") != new_id:
-                    continue
-                fork_rows.append(obj)
+        fork_rows = _rows(fork_events, "fork", new_id)
         # The event carries the inbound id in its payload — the raw-SQL fork
         # path emits no such event, so exactly this one row is expected.
         assert len(fork_rows) == 1

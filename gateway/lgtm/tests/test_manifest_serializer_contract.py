@@ -1,4 +1,4 @@
-"""Canonical event bytes shared by JSONL and OTLP."""
+"""Canonical event bytes shared by `event_line` and OTLP."""
 
 from __future__ import annotations
 
@@ -33,7 +33,6 @@ def otlp_backend(
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -41,10 +40,10 @@ def otlp_backend(
     backend.shutdown()
 
 
-def test_jsonl_and_otlp_use_one_byte_identity(
+def test_event_line_and_otlp_body_use_one_byte_identity(
     otlp_backend: tuple[telemetry_otlp.OtlpBackend, InMemoryLogRecordExporter],
 ) -> None:
-    """The JSONL mirror line and the OTLP log body are the exact same bytes."""
+    """`event_line` and the OTLP log body are the exact same bytes."""
     backend, log_exporter = otlp_backend
     event = Event(
         ts=datetime(2026, 8, 11, 12, 0, 0, tzinfo=UTC),
@@ -64,5 +63,4 @@ def test_jsonl_and_otlp_use_one_byte_identity(
     backend.export_batch([event])
     backend.flush()
     record = log_exporter.get_finished_logs()[0]
-    jsonl = telemetry.event_line(event)
-    assert record.log_record.body == jsonl
+    assert record.log_record.body == telemetry.event_line(event)

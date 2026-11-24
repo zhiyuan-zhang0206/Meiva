@@ -227,7 +227,7 @@ def test_the_guard_sets_up_before_every_other_function_scoped_autouse_fixture(
         "_restore_plugin_registrations",
         "suite_is_not_inside_an_exec_domain",
         "_otlp_export_off",
-        "_telemetry_event_store_off",
+        "_telemetry_drained",
         "_restore_metering",
         "_guard_process_exec",
         "_no_stdlib_telemetry_bridge",

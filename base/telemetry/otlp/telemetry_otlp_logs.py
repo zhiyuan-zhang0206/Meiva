@@ -5,8 +5,8 @@
 the earlier metric-side split (`telemetry_otlp_metrics`). One `Event` becomes
 one OTLP LogRecord:
 
-- body = the full event as JSON (the id-free mirror shape; the mirror row
-  itself also carries the surrogate `id`, which the body deliberately does not);
+- body = the full event as JSON (`event_line`, id-free: a reader derives the surrogate `id`
+  from the line and the timestamp with `event_id`);
 - attributes = the indexed dimensions (event_name / category / level /
   machine / cluster / process / source / agent ids);
 - trace_id / span_id fill the LogRecord fields so Loki rows correlate with

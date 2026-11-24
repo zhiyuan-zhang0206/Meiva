@@ -244,14 +244,13 @@ specialist's explicit list deliberately instead of silently uninstalling or
 hiding its capabilities. Do not treat stale installed skills as current built-ins;
 reconcile package provenance separately from prompt rendering.
 
-For SDK exposure, run `scripts/audit/sdk_usage.py` over copied JSONL event mirrors
-from representative runners, with an explicit `--start`, `--end` and
-`--coverage 70`. It ranks real outermost calls, weights sampled events, reports
-observed-agent reach, and recommends whole modules covering at least 70% of
-eligible call volume. Top-level functions are already in the overview; skills
-and MCPs belong in the capability index. Review workload mix and missing mirrors
-before applying its suggested `MEIVA_SDK_EXPAND` list. Plugin-declared expansions
-still apply. The report never changes configuration, and an empty sample yields
+For SDK exposure, rank the `sdk_call` events in Loki (seven days of every runner): each carries
+`fn` (the outermost SDK call) and `sample_rate` (one event stands for that many calls), and the agent
+dimension is the `agent_id` label. Weight each event by its `sample_rate`, group by the first
+segment of `fn` (the module), and count the distinct agents per module. Choose whole modules that
+cover at least 70% of the eligible call volume. Top-level functions are already in the overview;
+skills and MCPs belong in the capability index. Review the workload mix before applying a suggested
+`MEIVA_SDK_EXPAND` list. Plugin-declared expansions still apply. A sample that is empty yields
 no recommendation. The shipped SDK default is `shell,files,agents`:
 these whole modules cover 95.410% of 134,744 eligible agent-attributed calls in the production
 database queried on 2026-10-06. The query used a 30-day window, but available

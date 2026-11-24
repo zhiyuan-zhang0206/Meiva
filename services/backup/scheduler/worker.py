@@ -326,7 +326,6 @@ def main() -> None:
         return worker_database(config, machine, gate, home=process_home, url=url)
 
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,

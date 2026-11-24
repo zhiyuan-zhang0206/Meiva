@@ -133,7 +133,7 @@ def test_strip_content_removes_event_attributes_too():
 
 def test_exporter_posts_stripped_line(collector_up: CollectorStubServer) -> None:
     """OtlpJsonHttpSpanExporter strips content attributes before the POST —
-    stripped here, content never reaches the sidecar, the mirror or Tempo
+    stripped here, content never reaches the sidecar or Tempo
     (defensive layer 2)."""
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor

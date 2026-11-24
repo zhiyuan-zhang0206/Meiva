@@ -13,7 +13,7 @@ from base.clock.tests.fakes import system_clock
 from base.cluster import ensure_pgvector_extension
 from base.log import prepare_process_logging
 from cli import init_intent
-from cli.database import open_operator_database, operator_database_factory, operator_event_pipeline
+from cli.database import operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
 from cli.start_intent import admitted_home
@@ -43,11 +43,7 @@ caller = CallerHost(
 assert init_intent.run_init(init_args, site, caller) == 0
 
 command = CommandRuntime.create(home.resolve())
-database_factory = operator_database_factory(
-    local_host=command.machine.host, home=command.home, open_database=open_operator_database
-)
 producer = operator_event_pipeline(
-    database_factory,
     machine=command.machine,
     home=home,
     now=system_clock().now,

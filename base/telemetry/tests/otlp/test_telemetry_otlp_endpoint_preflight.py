@@ -94,7 +94,6 @@ def test_production_otlp_provider_construction_contract(
 
     logs, metrics = telemetry_otlp_sdk.build_providers(
         f"http://127.0.0.1:{probe_server.server_port}",
-        mirror_dir=tmp_path,
         home=tmp_path,
         instance_id="test-instance",
     )
@@ -133,7 +132,6 @@ def test_building_providers_twice_in_one_process_preserves_service_instance_id(
             export_allowed=lambda: True,
             enabled=lambda: True,
             endpoint=lambda: "file:///collector",
-            mirror_dir=tmp_path,
             home=tmp_path,
             now=system_clock().now,
         )
@@ -141,7 +139,6 @@ def test_building_providers_twice_in_one_process_preserves_service_instance_id(
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
     pipeline = telemetry.build_pipeline(
-        database=object,
         machine=MachineFacts.of(name="test-runner", role=frozenset({"agent-runner"})),
         home=tmp_path,
         now=system_clock().now,

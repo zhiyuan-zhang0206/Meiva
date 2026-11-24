@@ -53,14 +53,11 @@ from urllib.parse import urlsplit
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
-from base.db import Database
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -483,29 +480,6 @@ def stop_pipeline(
 
 
 # meiva:note
-# The database factory of the gate's event writer: every open shares one admission gate, whose
-# application name carries this process's code version, and reads its connection settings from
-# the process's own configuration.
-def gate_database(
-    *, image: LoadedCommit, machine: MachineIdentityReader, config: ConfigBoot, home: Path
-) -> Callable[[], Database]:
-    from base.db.code_version_gate import ProcessDbGate
-    from base.db.config import db_config_from_boot
-    from base.native_process.code_version import CodeVersion
-
-    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get, end_process=hard_exit)
-
-    def database() -> Database:
-        return Database(
-            db_config_from_boot(config),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host, home=home),
-        )
-
-    return database
-
-
-# meiva:note
 # Read the facts the launch plan needs from the process's configuration. This is the only place
 # the gate reads its settings.
 def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
@@ -565,9 +539,6 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
         now=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: process_config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: process_config.view.observability.telemetry_otlp_endpoint,
-        database=gate_database(
-            image=image, machine=machine, config=process_config, home=home.resolve()
-        ),
         machine=machine,
         home=home.resolve(),
         rng=_new_rng(),

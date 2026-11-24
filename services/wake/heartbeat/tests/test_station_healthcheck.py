@@ -284,7 +284,6 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
 
     pipeline = build_pipeline(
         now=system_clock().now,
-        database=database,
         machine=machine_identity,
         home=unit_home,
         otlp_enabled=lambda: False,

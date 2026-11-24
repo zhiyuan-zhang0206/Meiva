@@ -182,7 +182,6 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         )
 
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS).now,

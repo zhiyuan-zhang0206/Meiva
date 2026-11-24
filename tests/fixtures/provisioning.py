@@ -270,29 +270,14 @@ def _db_stall_guard(provisioned_db: str, postgres_access: None) -> Iterator[None
 
 
 # meiva:note
-# Quiesce the telemetry this process has already loaded: drain the emitter, close the
-# observed-metrics projection and the event-store pool. A process that never imported
-# telemetry has nothing running to quiesce, and importing it here would put the whole
-# telemetry package into every test's dependency set (the rule `_telemetry_event_store_off`
-# in `guards.py` follows too).
+# Quiesce the telemetry this process has already loaded: drain the emitter. A process that never
+# imported telemetry has nothing running to quiesce, and importing it here would put the whole
+# telemetry package into every test's dependency set (the rule `_telemetry_drained` in
+# `guards.py` follows too).
 def quiesce_loaded_telemetry() -> None:
     sync = loaded_attribute("base.telemetry.emitter", "sync")
     if sync is not None:
         sync()
-    close_projection = loaded_attribute(
-        "base.telemetry.metrics.observed_metrics", "close_projection"
-    )
-    if close_projection is not None:
-        close_projection()
-    close_store = loaded_attribute("base.telemetry.event_store", "close_store")
-    if close_store is not None:
-        close_store()
-
-
-def disable_loaded_event_store() -> None:
-    set_enabled = loaded_attribute("base.telemetry.event_store", "set_enabled")
-    if set_enabled is not None:
-        set_enabled(enabled=False)
 
 
 # meiva:note
@@ -340,8 +325,6 @@ def _clean_db(
     from base.config import settings
 
     _open_service_window(request, field="db_url", env_name="MEIVA_DB_URL", url=provisioned_db)
-    disable_loaded_event_store()
-
     quiesce_loaded_telemetry()
     with psycopg.connect(settings.data_plane.db_url) as conn:
         for attempt in range(3):
@@ -359,7 +342,6 @@ def _clean_db(
         yield
     finally:
         quiesce_loaded_telemetry()
-        disable_loaded_event_store()
 
 
 @pytest.fixture

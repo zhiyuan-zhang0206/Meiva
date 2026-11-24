@@ -46,8 +46,8 @@ Zero rows from one store does not mean the thing did not happen. Before concludi
   sees what Loki sees, never DEBUG. Lifecycle request/result events are audit events written to
   Postgres by the CLI and are almost absent from Loki, so `--category audit` is where they are.
   Check the declaration in `base/events/declarations/` to know the category.
-- Loki keeps 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and never DEBUG. Older: audit
-  events in Postgres, then the per-machine `$MEIVA_HOME/logs/events-*.jsonl` (also 7 days).
+- Loki keeps 7 days (168h, `deploy/lgtm/native/config/loki.yaml`) and never DEBUG. Older: only audit
+  events in Postgres (telemetry and log events are stored nowhere else).
 - Always narrow by `machine`: one agent id's query without it can read as another host.
 - Tempo spans carry no content; messages come from the checkpoint ([find-the-run](references/find-the-run.md)).
 - `harness_exit_code` is not a failure signal (antigravity logs 1 on a normal terminate).

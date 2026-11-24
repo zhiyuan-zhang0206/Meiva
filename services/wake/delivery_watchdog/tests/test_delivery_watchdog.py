@@ -7,13 +7,10 @@ alert semantics (a row that flips pending -> claimed -> pending re-alerts).
 
 from __future__ import annotations
 
-import time
-
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.agents.inbox.insert import insert_inbound_message
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -25,7 +22,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_stale_pending,
@@ -572,7 +569,6 @@ class TestScanOnce:
         newly, _ = scan_once(pool, _THRESHOLD_S, alerted2)
         assert newly == 1
 
-    @pytest.mark.usefixtures("event_pipeline")
     def test_alert_writes_unified_event(
         self,
         redis_url: str,
@@ -583,10 +579,10 @@ class TestScanOnce:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         """The alert emits through the unified emitter: the canonical
-        `events` row (telemetry/delivery_stalled). The legacy agent_events
-        mirror is gone (tracker #898 term-alignment)."""
+        telemetry/delivery_stalled event."""
         aid = idling_agent(
             db_conn,
             model_catalog=model_catalog,
@@ -596,49 +592,13 @@ class TestScanOnce:
         )
         iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
         scan_once(pool, _THRESHOLD_S, set())
-        # The emitter drains asynchronously (0.5s cadence) — flush() can race
-        # the drain thread for the queue, so poll briefly for the line. The
-        # event lives in the JSONL mirror (the PG events copy was retired at
-        # the LGTM cutover, task #1197 close-C, and dropped with the archive
-        # cleanup, task #1281/#1823).
-        import json as _json
-        from datetime import UTC as _UTC
-        from datetime import datetime as _dt
-
-        from base.paths import logs_dir
-
-        def _stalled() -> dict[str, object] | None:
-            telemetry.flush()
-            day = _dt.now(_UTC).strftime("%Y%m%d")
-            path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-            if not path.exists():
-                return None
-            for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-                try:
-                    obj = _json.loads(line)
-                except ValueError:
-                    continue
-                if (
-                    obj.get("event_name") == "delivery_stalled"
-                    and obj.get("agent_id") == aid
-                    and obj.get("category") == "telemetry"
-                ):
-                    return obj
-            return None
-
-        ev = None
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            ev = _stalled()
-            if ev is not None:
-                break
-            time.sleep(0.05)
-        assert ev is not None
-        assert ev["category"] == "telemetry"
-        assert ev["event_name"] == "delivery_stalled"
-        assert ev["level"] == "warning"
-        attributes = ev["attributes"]
-        assert isinstance(attributes, dict)
+        (ev,) = [
+            event for event in emitted_events.named("delivery_stalled") if event.agent_id == aid
+        ]
+        assert ev.category == "telemetry"
+        assert ev.event_name == "delivery_stalled"
+        assert ev.level == "warning"
+        attributes = ev.attributes
         assert attributes["inbound_id"] == iid
 
 

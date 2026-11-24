@@ -11,58 +11,26 @@ not swallowed by `except Exception`; the difference is what kind is written to t
 
 from __future__ import annotations
 
-import random
-from collections.abc import Iterator
 from dataclasses import replace
-from pathlib import Path
 
 import psycopg
 import pytest
 
 import meiva
 from agent.graph.claim.tests.claim_support import scalar
-from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of, object_sequence
+from base.host.boundary.untyped import object_sequence
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
-
-
-# meiva:note
-# Own the process writer used by the operation and its mirror barrier. It is built over the test's
-# own home (`unit_home`, which points `MEIVA_HOME` there first), so the mirror it writes is the one
-# the test reads back through `logs_dir()`.
-@pytest.fixture
-def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[telemetry.EventPipeline]:
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
-    try:
-        telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)
-        yield pipeline
-    finally:
-        pipeline.stop(timeout=2)
 
 
 def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -421,7 +389,6 @@ class TestRestart:
 
 @pytest.mark.usefixtures("sdk_model_owner")
 class TestPauseHeartbeat:
-    @pytest.mark.usefixtures("event_pipeline")
     def test_pause_heartbeat_sets_window_records_trail_and_emits_event(
         self,
         redis_url: str,
@@ -431,6 +398,7 @@ class TestPauseHeartbeat:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         """pause_heartbeat updates the window, records the pause trail, and
         emits the heartbeat_paused event used by the inspector's Last Pause."""
@@ -443,7 +411,6 @@ class TestPauseHeartbeat:
             )
         )  # self identity
         meiva.self.pause_heartbeat(1800)
-        telemetry.sync()  # the event lands via the unified emitter's drain
         db_conn.rollback()  # fresh snapshot — the emitter wrote on its own connection
         with db_conn.cursor() as cur:
             cur.execute(
@@ -459,33 +426,9 @@ class TestPauseHeartbeat:
             trail_rows = cur.fetchall()
         assert scalar(window_row) == pytest.approx(1800, abs=5)
         assert [scalar(row) for row in trail_rows] == [1800]
-        # The event row lives in the JSONL mirror (the PG events copy was retired at
-        # the LGTM cutover, task #1197 close-C, and dropped with the archive
-        # cleanup, task #1281/#1823).
-        import json as _json
-        from datetime import UTC as _UTC
-        from datetime import datetime as _dt
-
-        from base.paths import logs_dir
-
-        day = _dt.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir(home=config_authority.env_path.parent) / f"events-{day}.jsonl"
-        assert path.exists(), "mirror file missing"
-        event_row: dict[str, object] | None = None
-        for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-            obj = object_of(_json.loads, line)
-            if (
-                is_object_dict(obj)
-                and obj.get("event_name") == "heartbeat_paused"
-                and obj.get("agent_id") == meiva.self.AGENT_ID
-                and obj.get("category") == "telemetry"
-            ):
-                event_row = obj
-                break
-        assert event_row is not None
-        attributes = event_row["attributes"]
-        assert is_object_dict(attributes)
-        duration_s = attributes["duration_s"]
+        (paused,) = emitted_events.named("heartbeat_paused")
+        assert paused.agent_id == meiva.self.AGENT_ID
+        duration_s = paused.attributes["duration_s"]
         # int since the emit cast (task #4011): the metric kind rides the runtime type.
         assert duration_s == 1800 and isinstance(duration_s, int)
 

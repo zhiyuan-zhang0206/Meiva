@@ -4,9 +4,8 @@ Fields keep their flat registry names. `services/upkeep/events_maintenance/daemo
 composition root) builds
 this slice from the supplied ConfigBoot and hands it to the loops and passes. See `future/infra/security/dependency-injection.md`.
 
-The module also owns the two facts the daemon and the operator commands both need and neither
-may import from the other: the database handle built from a boot owner, and the recompute horizon
-of the closed-day ledger.
+The module also owns the fact the daemon and the operator commands both need and neither may
+import from the other: the database handle built from a boot owner.
 """
 
 from __future__ import annotations
@@ -21,20 +20,12 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 
-# Closed UTC days stay open to recomputation this long (late writes, a backfill); a day older than
-# this can no longer change, so the token totals fold it. Late writes arrive up to the mirror's
-# seven-day retention after the event; one more day of margin covers a replay that straddles midnight.
-RECOMPUTE_DAYS = 8
-
 
 @dataclass(frozen=True)
 class EventsMaintenanceConfig:
     events_maintenance_interval_seconds: float
     events_maintenance_pass_deadline_s: float
     timezone: str
-    # meiva:note
-    # The directory holding the telemetry JSONL mirror files the hourly pass replays.
-    mirror_dir: Path
 
 
 def events_maintenance_db(

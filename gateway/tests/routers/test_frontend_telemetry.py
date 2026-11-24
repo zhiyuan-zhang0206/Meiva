@@ -6,25 +6,26 @@ unified stream; malformed batches fail fast (422), oversized bodies 413, and
 the per-session rate limit backstop drops excess events (204 + warning log)
 instead of letting a misbehaving tab blow up the table.
 
-Runs on meiva_test: POST a batch through TestClient, then assert the JSONL
-mirror lines (telemetry.sync() before reading — the emitter's drain thread
-writes asynchronously). The PG `events` copy was retired at the LGTM cutover
-(task #1197 close-C) and dropped with the archive cleanup (task #1281/#1823).
+Runs on meiva_test: POST a batch through TestClient while a capturing event
+pipeline is bound, then assert the events it received (the capture settles
+the emitter's drain thread before it is read).
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from base import telemetry
+from base.telemetry import Event
+from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.routers import frontend_telemetry as ft_router
 from gateway.schemas import FrontendTelemetryBatch
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 # One valid interaction as the browser sends it.
 PAGE = "fleet"
@@ -40,44 +41,31 @@ def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict[str, st
     return {"page": page, "element": element, **extra}
 
 
-type _MirrorRow = tuple[str, str, str, str, dict[str, object]]
+type _Row = tuple[str, str, str, str, dict[str, object]]
 
 
-def _rows(home: Path, session: str) -> list[_MirrorRow]:  # type: ignore[no-untyped-def]
-    """This session's `frontend_interaction` mirror lines, oldest first,
-    after a sync barrier. Each test uses a fresh session id (the mirror is
-    cumulative within a worker — the PG TRUNCATE barrier is gone with the
-    events write), so the filter is exact.
-    """
-    import json
-    from datetime import UTC, datetime
-
-    from base.paths import logs_dir
-
-    telemetry.sync()
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=home) / f"events-{day}.jsonl"
-    if not path.exists():
-        return []
-    out: list[_MirrorRow] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+# meiva:note
+# A gateway test client with a capturing event pipeline bound after the app started. The yielded
+# list is filled when the block ends, once the capture has settled, so a test reads it after the
+# `with`.
+@contextmanager
+def _ingest() -> Generator[tuple[GatewayTestClient, list[Event]]]:
+    with gateway_test_client() as client, capturing_events() as events:
+        seen: list[Event] = []
         try:
-            obj = json.loads(line)
-        except ValueError:
+            yield client, seen
+        finally:
+            seen.extend(events)
+
+
+def _rows(seen: list[Event], session: str) -> list[_Row]:
+    """This session's `frontend_interaction` events, oldest first."""
+    out: list[_Row] = []
+    for event in seen:
+        attributes: dict[str, object] = dict(event.attributes)
+        if event.event_name != "frontend_interaction" or attributes.get("session_id") != session:
             continue
-        if obj.get("event_name") != "frontend_interaction":
-            continue
-        if obj.get("attributes", {}).get("session_id") != session:
-            continue
-        out.append(
-            (
-                obj["event_name"],
-                obj["category"],
-                obj["level"],
-                obj["source"],
-                obj["attributes"],
-            )
-        )
+        out.append((event.event_name, event.category, event.level, event.source, attributes))
     return out
 
 
@@ -88,9 +76,9 @@ def _session() -> str:
 
 
 class TestFrontendTelemetryIngest:
-    def test_valid_batch_lands_events(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
+    def test_valid_batch_lands_events(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             r = client.post(
                 "/api/frontend-telemetry",
                 json=_payload(
@@ -108,7 +96,7 @@ class TestFrontendTelemetryIngest:
                 ),
             )
         assert r.status_code == 204
-        rows = _rows(unit_home, session)
+        rows = _rows(seen, session)
         assert len(rows) == 3
         for row in rows:
             assert row[0] == "frontend_interaction"
@@ -130,20 +118,20 @@ class TestFrontendTelemetryIngest:
             "value": "false",
         }
 
-    def test_missing_key_value_omitted_not_null(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
+    def test_missing_key_value_omitted_not_null(self) -> None:  # type: ignore[no-untyped-def]
         """Non-setting events must not carry key/value at all."""
         session = _session()
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             r = client.post(
                 "/api/frontend-telemetry",
                 json=_payload([_one(element="composer-send")], session=session),
             )
         assert r.status_code == 204
-        attrs = _rows(unit_home, session)[0][4]
+        attrs = _rows(seen, session)[0][4]
         assert "key" not in attrs
         assert "value" not in attrs
 
-    def test_malformed_batch_422(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
+    def test_malformed_batch_422(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         cases = [
             # empty events list
@@ -159,17 +147,17 @@ class TestFrontendTelemetryIngest:
             # value too long (free text smuggled as a value)
             _payload([_one(element="setting-change", value="v" * 200)]),
         ]
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             for body in cases:
                 r = client.post("/api/frontend-telemetry", json=body)
                 assert r.status_code == 422, body
                 assert r.json()["code"] == "invalid_telemetry_batch"
         # nothing landed
-        assert _rows(unit_home, session) == []
+        assert _rows(seen, session) == []
 
-    def test_oversized_body_413(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
+    def test_oversized_body_413(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             r = client.post(
                 "/api/frontend-telemetry",
                 content=b"x" * (ft_router.MAX_BODY_BYTES + 1),
@@ -177,27 +165,26 @@ class TestFrontendTelemetryIngest:
             )
         assert r.status_code == 413
         assert r.json()["code"] == "telemetry_batch_too_large"
-        assert _rows(unit_home, session) == []
+        assert _rows(seen, session) == []
 
     def test_rate_limit_backstop_drops_excess(
         self,
-        unit_home: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """Over the per-session budget: accepted up to the cap, the rest
         dropped — the event stream cannot be flooded by one tab."""
         session = _session()
         events = [_one(element=f"e{i}") for i in range(ft_router.MAX_EVENTS_PER_MINUTE + 10)]
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
-        rows = _rows(unit_home, session)
+        rows = _rows(seen, session)
         assert len(rows) == ft_router.MAX_EVENTS_PER_MINUTE
 
-    def test_second_session_gets_own_budget(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
+    def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         other = _session()
-        with gateway_test_client() as client:
+        with _ingest() as (client, seen):
             r1 = client.post(
                 "/api/frontend-telemetry",
                 json=_payload([_one()] * (ft_router.MAX_EVENTS_PER_MINUTE + 5), session=session),
@@ -208,8 +195,8 @@ class TestFrontendTelemetryIngest:
             )
         assert r1.status_code == 204
         assert r2.status_code == 204
-        assert len(_rows(unit_home, session)) == ft_router.MAX_EVENTS_PER_MINUTE
-        assert len(_rows(unit_home, other)) == 3
+        assert len(_rows(seen, session)) == ft_router.MAX_EVENTS_PER_MINUTE
+        assert len(_rows(seen, other)) == 3
 
 
 def _viewport_wire_batch() -> dict[str, Any]:
@@ -262,14 +249,14 @@ def _viewport_wire_batch() -> dict[str, Any]:
 }""")
 
 
-def test_browser_batch_lands_complete_geometry(unit_home: Path) -> None:
+def test_browser_batch_lands_complete_geometry() -> None:
     batch = _viewport_wire_batch()
     session = _session()
     batch["session_id"] = session
-    with gateway_test_client() as client:
+    with _ingest() as (client, seen):
         response = client.post("/api/frontend-telemetry", json=batch)
     assert response.status_code == 204
-    rows = _rows(unit_home, session)
+    rows = _rows(seen, session)
     assert len(rows) == 2
     for row, event in zip(rows, batch["events"], strict=True):
         assert row[4] == {

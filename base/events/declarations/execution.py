@@ -81,13 +81,12 @@ class ExecMemoryGuardSkipped(TypedDict):
 
 EVENTS: dict[str, EventSpec] = {
     # exec lifecycle
-    "exec": telemetry_event("exec", "execute_code succeeded", payload=ExecPayload, persist=True),
+    "exec": telemetry_event("exec", "execute_code succeeded", payload=ExecPayload),
     "exec_failed": telemetry_event(
         "exec_failed",
         "execute_code failed",
         payload=ExecFailed,
         tier="anomaly",
-        persist=True,
     ),
     "exec_envelope": telemetry_event(
         "exec_envelope",
@@ -106,21 +105,14 @@ EVENTS: dict[str, EventSpec] = {
         payload=ExecChildBootFailed,
         tier="anomaly",
     ),
-    "exec_cancelled": telemetry_event(
-        "exec_cancelled", "execute_code cancelled", tier="anomaly", persist=True
-    ),
-    "exec_timeout": telemetry_event(
-        "exec_timeout", "execute_code timed out", tier="anomaly", persist=True
-    ),
-    "exec_node_timeout": telemetry_event(
-        "exec_node_timeout", "node-level timeout", tier="anomaly", persist=True
-    ),
+    "exec_cancelled": telemetry_event("exec_cancelled", "execute_code cancelled", tier="anomaly"),
+    "exec_timeout": telemetry_event("exec_timeout", "execute_code timed out", tier="anomaly"),
+    "exec_node_timeout": telemetry_event("exec_node_timeout", "node-level timeout", tier="anomaly"),
     "exec_subprocess_killed": telemetry_event(
         "exec_subprocess_killed",
         "exec child survived the signal grace period and was SIGKILLed",
         payload=ExecSubprocessKilled,
         tier="anomaly",
-        persist=True,
     ),
     "exec_memory_guard_killed": telemetry_event(
         "exec_memory_guard_killed",
@@ -135,8 +127,6 @@ EVENTS: dict[str, EventSpec] = {
         "below the relief floor, so it killed nothing",
         payload=ExecMemoryGuardSkipped,
     ),
-    "code": telemetry_event(
-        "code", "LLM generated code block", payload=ExecPayload, tier="noise", persist=True
-    ),
+    "code": telemetry_event("code", "LLM generated code block", payload=ExecPayload, tier="noise"),
     "text": telemetry_event("text", "LLM text output", tier="noise"),
 }

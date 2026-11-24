@@ -321,7 +321,6 @@ EVENTS: dict[str, EventSpec] = {
             "event=PLUGIN_ACTIVATION_EVENT (a module constant, like sdk_call), so "
             "the literal scan cannot see it."
         ),
-        persist=True,
     ),
     "heartbeat_paused": telemetry_event(
         "heartbeat_paused",
@@ -379,7 +378,6 @@ EVENTS: dict[str, EventSpec] = {
         "passive memory recall",
         payload=PassiveRecall,
         tier="noise",
-        persist=True,
     ),
     "skill_recall": telemetry_event(
         "skill_recall",

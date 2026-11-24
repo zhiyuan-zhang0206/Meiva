@@ -146,7 +146,7 @@ def test_the_logs_provider_resource_carries_the_routing_identity(tmp_path: Path)
     home.mkdir()
     ensure_telemetry_token(home.resolve(), "fixture-token-a")
     logs, metrics = telemetry_otlp_sdk.build_providers(
-        "http://127.0.0.1:9", mirror_dir=tmp_path, home=home, instance_id="i"
+        "http://127.0.0.1:9", home=home, instance_id="i"
     )
     try:
         assert logs.resource.attributes["meiva.cluster"] == observability.cluster_identity(home)

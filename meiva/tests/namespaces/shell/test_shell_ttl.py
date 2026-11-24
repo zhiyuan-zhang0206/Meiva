@@ -1,49 +1,19 @@
 """Explicit TTL tracking for persistent shell sessions."""
 
 import contextlib
-import random
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import psycopg
 import pytest
 
 import meiva
-from base import telemetry
-from base.clock.tests.fakes import system_clock
-from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.db import Database
-from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
-
-
-# meiva:note
-# Own the process writer used by the operation and its mirror barrier. It is built over the test's
-# own home (`unit_home`, which points `MEIVA_HOME` there first), so the mirror it writes is the one
-# the test reads back through `logs_dir()`.
-@pytest.fixture
-def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[telemetry.EventPipeline]:
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
-    try:
-        telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)
-        yield pipeline
-    finally:
-        pipeline.stop(timeout=2)
 
 
 def _deadline(conn: psycopg.Connection, agent_id: int, session_id: int) -> datetime | None:
@@ -171,33 +141,21 @@ def test_renew_extends_deadline_from_now(db_conn: psycopg.Connection, _agent_row
             meiva.shell.sessions.kill(session_id)
 
 
-@pytest.mark.usefixtures("event_pipeline")
-def test_renew_event_carries_int_ttl(db_conn: psycopg.Connection, _agent_row: int) -> None:
+def test_renew_event_carries_int_ttl(
+    db_conn: psycopg.Connection, _agent_row: int, emitted_events: EmittedEvents
+) -> None:
     """The emitted `ttl_s` is cast to int (task #4011): the metric kind rides
     the runtime value type, so a float ttl from a caller would mint a
     histogram family beside the counter one."""
-    import json
-
-    from base.paths import logs_dir
-
     session_id = meiva.shell.sessions.new("test-renew-cast", ttl=120)
     try:
         meiva.shell.sessions.renew(session_id, ttl=120.0)  # a float caller
-        telemetry.sync()  # the event lands via the unified emitter's drain
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-        assert path.exists(), "mirror file missing"
-        event_row = None
-        for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-            obj = json.loads(line)
-            if (
-                obj.get("event_name") == "shell_ttl_renewed"
-                and obj.get("attributes", {}).get("session_id") == session_id
-            ):
-                event_row = obj
-                break
-        assert event_row is not None
-        ttl_s = event_row["attributes"]["ttl_s"]
+        (attributes,) = [
+            attrs
+            for attrs in emitted_events.attributes("shell_ttl_renewed")
+            if attrs.get("session_id") == session_id
+        ]
+        ttl_s = attributes["ttl_s"]
         assert ttl_s == 120 and isinstance(ttl_s, int)
     finally:
         with contextlib.suppress(ValueError, RuntimeError):

@@ -40,7 +40,6 @@ from base.config import ConfigBoot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.host.net.url_secret import url_with_userinfo
 from base.paths import meiva_home
-from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
 _RUNNER_PW = "runner-pw-fixture"
 _RUNNER_LOGIN = "meiva_g0_runner"
@@ -112,21 +111,18 @@ def test_runner_group_is_a_nologin_capability_and_the_refresh_is_idempotent(
     assert attrs == (False, False, False, False), "meiva_runner is a NOLOGIN capability group"
 
 
-def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: str) -> None:
+def test_runner_inserts_observations_and_records_actual_lifecycle(runner_db: str) -> None:
     grant_runner(runner_db)
     with psycopg.connect(runner_db, autocommit=True) as conn:
         conn.execute("INSERT INTO agents (id) VALUES (712345)")
         conn.execute("INSERT INTO agents_meta (id,status) VALUES (712345,'running')")
     with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        fact = MetricObservation(
-            event_id=1,
-            agent_id=712345,
-            occurred_at=datetime.now(UTC),
-            kind="usage",
-            usage_calls=1,
+        insert = (
+            "INSERT INTO agent_metric_observations (event_id, agent_id, occurred_at, kind, "
+            "usage_calls) VALUES (1, 712345, %s, 'usage', 1) ON CONFLICT DO NOTHING"
         )
-        assert write_observations([fact], db=conn) == 1
-        assert write_observations([fact], db=conn) == 0
+        assert conn.execute(insert, (datetime.now(UTC),)).rowcount == 1
+        assert conn.execute(insert, (datetime.now(UTC),)).rowcount == 0
         conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=712345")
         conn.execute("UPDATE agents_meta SET status='idling' WHERE id=712345")
         assert conn.execute(

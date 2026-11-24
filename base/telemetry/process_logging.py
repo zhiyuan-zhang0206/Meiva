@@ -207,7 +207,7 @@ def event_pipeline_filter(record: loguru.Record) -> bool:
     These records stay in the stderr and JSONL file sinks:
 
       - the emitter's own failure reports (records carrying the `_no_emitter`
-        marker, see `base/telemetry/emitter.py`): a mirror-down process would
+        marker, see `base/telemetry/emitter.py`): a process whose sink is down would
         otherwise loop failure → warning → emit → failure forever;
       - `node_enter` (agent/graph/node_log.py): a pure write-amplification
         event — zero consumers in the event stream (agent_inspect reads
@@ -301,7 +301,7 @@ def release_event_sink() -> None:
 
 # Process-level singleton: exec_child calls this from two paths (env
 # MEIVA_AGENT_ID + request), and a second registration double-emits every
-# loguru record (byte-identical mirror rows, task #1638). The stored id is
+# loguru record (byte-identical event rows, task #1638). The stored id is
 # re-verified against live handlers so a removed sink re-registers.
 _event_sink_id: int | None = None
 

@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
 from opentelemetry.metrics import Observation
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
@@ -18,7 +17,8 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from base import telemetry
 from base.clock.tests.fakes import system_clock
 from base.config import settings
-from base.db import Database
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import meiva_home
 from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
 from base.telemetry.delivery.loss import report_loss
@@ -86,7 +86,6 @@ def otlp_backend(
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -488,7 +487,6 @@ def test_flush_without_init_is_noop(tmp_path: Path) -> None:
     backend = telemetry_otlp.OtlpBackend(
         now=system_clock().now,
         export_allowed=lambda: True,
-        mirror_dir=tmp_path,
         home=tmp_path,
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
@@ -514,7 +512,6 @@ def test_flag_off_disables_export(emitted_events: EmittedEvents, tmp_path: Path)
         export_allowed=lambda: True,
         enabled=lambda: False,
         providers=(logger_provider, metric_provider),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -534,12 +531,9 @@ def test_flag_defaults_on_with_standard_endpoint() -> None:
 
 
 @pytest.fixture(autouse=True)
-def bind_telemetry(
-    db_conn: psycopg.Connection, database: Database, tmp_path: Path
-) -> Iterator[None]:
+def bind_telemetry(tmp_path: Path) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
         now=system_clock().now,
-        database=lambda: database,
         machine=machine_identity(),
         home=tmp_path,
         otlp_enabled=lambda: False,
@@ -548,32 +542,26 @@ def bind_telemetry(
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
-        with db_conn.cursor() as cur:
-            cur.execute("INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (AGENT,))
-            cur.execute(
-                "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running') "
-                "ON CONFLICT DO NOTHING",
-                (AGENT,),
-            )
-        db_conn.commit()
         yield
     finally:
         pipeline.stop(timeout=2)
 
 
 # meiva:note
-# The providers are built for the home and mirror directory the exporter was constructed with. Both
-# are directories under `tmp_path`, so neither equals the process's own home: an exporter that read
-# the environment, or dropped one of the two, fails here. The endpoint is a non-HTTP URL, which the
-# reachability probe accepts without dialing, so the real SDK providers are built and shut down. The
-# mirror shows up by behaviour: the SDK's queue-overflow warning is recorded under it.
-def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path: Path) -> None:
+# The providers are built for the home the exporter was constructed with. It is a directory under
+# `tmp_path`, so it does not equal the process's own home: an exporter that read the environment
+# instead fails here. The endpoint is a non-HTTP URL, which the reachability probe accepts without
+# dialing, so the real SDK providers are built and shut down. The SDK's queue-overflow warning is
+# reported to the process log once the providers are up.
+def test_the_providers_are_built_for_the_exporters_own_home(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
     import logging
     from types import SimpleNamespace
 
     from base.telemetry.observability import cluster_label
 
-    home, mirror = tmp_path / "exporter-home", tmp_path / "exporter-mirror"
+    home = tmp_path / "exporter-home"
     home.mkdir()
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
@@ -581,7 +569,6 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
         now=system_clock().now,
         export_allowed=lambda: True,
         endpoint=lambda: "file:///collector",
-        mirror_dir=mirror,
         home=home,
         enabled=lambda: True,
         instance_id="test-instance",
@@ -594,12 +581,8 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
         assert worker.metrics._sdk_config.resource.attributes["cluster"] == cluster_label(home)
         sdk_logger.warning("Queue full, dropping %s.", "Log")
         worker.logs.shutdown()
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        rows = [
-            json.loads(line)
-            for line in (mirror / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
-        ]
-        assert [row["event_name"] for row in rows] == ["event_log_drop"]
+        reports = loguru_records.extras(level="ERROR", message="Telemetry queue")
+        assert [(r["queue"], r["n"]) for r in reports] == [("otel-sdk", 1)]
     finally:
         sdk_logger.filters[:] = old_filters
         worker.metrics.shutdown()

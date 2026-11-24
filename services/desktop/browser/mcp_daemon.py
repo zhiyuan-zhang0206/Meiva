@@ -720,7 +720,6 @@ def main() -> None:
         now=wiring.clock.now,
         otlp_enabled=lambda: wiring.config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: wiring.config.view.observability.telemetry_otlp_endpoint,
-        database=None,
         machine=wiring.machine,
         home=wiring.process_home,
         rng=random.SystemRandom(),

@@ -14,8 +14,7 @@
 #   bound for a low-traffic long child (default 60 s).
 #
 # Record values, attributes, and timestamps are unchanged by the delay
-# (timestamps come from the Event, not the export moment); the JSONL mirror is
-# unaffected, so a child's live local channel stays live. Completion order:
+# (timestamps come from the Event, not the export moment). Completion order:
 # snapshot the hold BEFORE bring-up, replay metrics for exactly that snapshot
 # BEFORE the events become visible to the worker — and only after a successful
 # bring-up, so a failed attempt (which keeps the hold untouched under the

@@ -105,7 +105,7 @@ host: [reading a past window](reading-a-past-window.md).
 `MEIVA_TELEMETRY_OTLP_ENABLED` is producer-scoped (the event dual-write, trace
 recording, ship) and does not gate a sidecar that its role/home allows. These
 scrapes are the collector's own, so a marked gateway or pure runner reports
-host health even with the event stream reduced to its JSONL mirror only. An
+host health even with the event stream not exported. An
 unmarked gateway has no collector. Silencing an allowed collector means
 stopping the sidecar
 (`meiva start --disable-service otel-collector`) or the backend (`meiva observability off`);

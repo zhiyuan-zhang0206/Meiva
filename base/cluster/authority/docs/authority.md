@@ -17,7 +17,7 @@ without `SET ROLE`. Custody of that connection belongs to the opener.
 | Role | Shape |
 |---|---|
 | owner | `NOLOGIN`, no password, not a superuser, owns the database and schema objects, no memberships |
-| `meiva_gateway` | `NOLOGIN` group: DML on every table (SELECT/INSERT only on the append-only `audit_events` and `telemetry_events`), `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every routine, `MAINTAIN` on the checkpoint tables; no TRUNCATE/REFERENCES/TRIGGER |
+| `meiva_gateway` | `NOLOGIN` group: DML on every table (SELECT/INSERT only on the append-only `audit_events` and `telemetry_events`; the latter is no longer written and awaits its drop), `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every routine, `MAINTAIN` on the checkpoint tables; no TRUNCATE/REFERENCES/TRIGGER |
 | `meiva_runner` | `NOLOGIN` group: the audited runner matrix |
 | `meiva_g0_<class>` | `LOGIN NOSUPERUSER INHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, stored SCRAM verifier, owns nothing, no direct grant or setting, member of exactly its group with `INHERIT TRUE, SET FALSE, ADMIN FALSE` |
 | `meiva_monitor` | stable, not a generation: `LOGIN INHERIT`, nothing elevated, **no password** (pg_hba admits it only by `peer` from the home's OS user over the owner-only socket), member of exactly `pg_read_all_stats` (`INHERIT TRUE, SET FALSE`), only direct grant `CONNECT` on the cluster database, owns nothing; the OTel collector's PostgreSQL receiver (`monitor.ensure_monitor`) |

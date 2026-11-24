@@ -1,7 +1,7 @@
 """OTLP export backend — the write side of the OTel + Tempo/Loki/Prometheus stack.
 
-Exports unified emitter batches when the startup OTLP flag is enabled. The
-JSONL mirror precedes this ordinary observation sink; OTLP does not replace it.
+Exports unified emitter batches when the startup OTLP flag is enabled. This is the pipeline's
+only sink: Loki and Prometheus, behind the collector, are the only stores of an event.
 
 The endpoint (``MEIVA_TELEMETRY_OTLP_ENDPOINT``, default 127.0.0.1:4318) is the LOCAL OTel
 Collector sidecar on every machine (task #1266, 2026-08-14): agents never dial a backend
@@ -11,8 +11,8 @@ private-address OTLP receiver. A remote agent keeps the localhost producer endpo
 first hop is still its own sidecar. Three signals:
 
 - **logs** — every ``Event`` becomes one OTLP LogRecord (Loki). The body is the
-  full event as JSON (the same shape the JSONL mirror stores, so the mirror and
-  Loki hold the same content class); the indexed dimensions
+  full event as JSON (`event_line`; a reader derives the surrogate id from it with
+  `event_id`); the indexed dimensions
   (event_name / category / level / machine / process / source / agent ids) ride
   as attributes; event_name and agent_id also select each record's resource so
   Loki can index them without mixing event types in one resource batch;
@@ -31,7 +31,8 @@ finite observations report unfinished work without claiming SDK termination.
 
 Export defaults require a registered production machine; explicit endpoints
 allow other homes. Startup-frozen settings control enablement. First construction
-is refused during interpreter finalization; disabled export keeps the JSONL mirror.
+is refused during interpreter finalization; disabled export drops the event from the stream
+(the process log still holds its loguru line).
 
 Child deferral (task #3816 M4b): an exec child arms `defer_until_exit()` before
 its first record; batches are held in the bounded queue — OTel stack, settings
@@ -55,7 +56,6 @@ from pathlib import Path
 
 from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.loss import report_loss
-from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.delivery.reporting import (
     failure_isolated,
@@ -182,8 +182,8 @@ def endpoint_reachable(endpoint: str) -> bool:
 
 # meiva:note
 # Emit init status into the unified stream; never affect backend setup. When the collector is
-# unavailable, the event reaches the JSONL mirror even though its OTLP copy cannot leave the
-# process. Processes with no bound event pipeline have no global stream to receive this event.
+# unavailable, the event cannot leave the process. Processes with no bound event pipeline have no
+# global stream to receive this event.
 # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def _emit_backend_event(event_name: str, **attributes: object) -> None:
     if not pipeline_bound():
@@ -219,7 +219,6 @@ class OtlpBackend:
         enabled: Callable[[], bool],
         endpoint: Callable[[], str],
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
-        mirror_dir: Path,
         home: Path,
         now: Callable[[], datetime],
         instance_id: str | None = None,
@@ -228,7 +227,6 @@ class OtlpBackend:
         self._enabled_flag = enabled
         self._endpoint = endpoint
         self._retry_interval_s = retry_interval_s
-        self._mirror_dir = mirror_dir
         self._home = home
         self._now = now
         self._log_deadline = LogExportDeadline(time.monotonic)
@@ -343,10 +341,9 @@ class OtlpBackend:
             # this exporter: a full exporter queue is observed here, and the alarm says when that
             # was rather than borrowing the timestamp of the row it could not admit.
             now = self._now()
-            report = report_loss(example, lost, "otlp", now=now, record_metric=self.record_loss)
-            # The alarm itself bypasses both queues. Metrics can still export
-            # while the log lane is full; the local mirror retains the evidence.
-            append_jsonl([report], target_dir=self._mirror_dir, now=now)
+            # The alarm itself bypasses both queues: it goes to the process log and stderr, and
+            # its metric can still export while the log lane is full.
+            report_loss(example, lost, "otlp", now=now, record_metric=self.record_loss)
         for event in events:
             with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
@@ -556,7 +553,6 @@ class OtlpBackend:
                     keep_logs=keep_logs,
                     keep_reader=keep_reader,
                     keep_metrics=keep_metrics,
-                    mirror_dir=self._mirror_dir,
                     home=self._home,
                     instance_id=self._instance_id,
                     log_deadline=self._log_deadline,
@@ -742,7 +738,6 @@ def default_exporter(
     export_allowed: Callable[[], bool],
     enabled: Callable[[], bool],
     endpoint: Callable[[], str],
-    mirror_dir: Path,
     home: Path,
     now: Callable[[], datetime],
     instance_id: str,
@@ -754,7 +749,6 @@ def default_exporter(
         export_allowed=export_allowed,
         enabled=enabled,
         endpoint=endpoint,
-        mirror_dir=mirror_dir,
         home=home,
         now=now,
         instance_id=instance_id,

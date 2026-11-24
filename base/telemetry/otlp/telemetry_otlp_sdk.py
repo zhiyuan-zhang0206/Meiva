@@ -82,12 +82,11 @@ def build_providers(
     keep_logs: Callable[[LoggerProvider], None] | None = None,
     keep_reader: Callable[[PeriodicExportingMetricReader], None] | None = None,
     keep_metrics: Callable[[MeterProvider], None] | None = None,
-    mirror_dir: Path,
     home: Path,
     instance_id: str,
     log_deadline: LogExportDeadline | None = None,
 ) -> tuple[LoggerProvider, MeterProvider]:
-    queue_losses = install_exporter_drop_observer(mirror_dir=mirror_dir)
+    queue_losses = install_exporter_drop_observer()
     os.environ.setdefault(OTEL_PYTHON_SDK_INTERNAL_METRICS_ENABLED, "true")
     plan = provider_build_plan(
         endpoint,
@@ -101,7 +100,7 @@ def build_providers(
     # order and therefore fires FIRST. The emitter's exit flush then lands on a
     # shut-down processor (`force_flush` returns False) and a record emitted
     # inside the drain thread's final batch window — every short-lived
-    # process's tail record — stays mirror-only (task #4314 triage / #4320).
+    # process's tail record — is never exported (task #4314 triage / #4320).
     # `_drain_on_exit` is the single ordered exit seam: it flushes the emitter
     # and this queue, then force-flushes these still-live providers.
     reader = PeriodicExportingMetricReader(

@@ -47,7 +47,6 @@ from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
     open_operator_database,
-    operator_database_factory,
     operator_event_pipeline,
 )
 from cli.database.runtime import CommandRuntime, UserSession
@@ -127,8 +126,7 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
             argv,
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
-                db,
+            producer_factory=lambda machine, home, command: OperatorEventPipeline.recording(
                 machine=machine,
                 home=home,
                 now=system_clock().now,
@@ -163,8 +161,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
             ["restart"],
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=lambda db, machine, home, command: OperatorEventPipeline.recording(
-                db,
+            producer_factory=lambda machine, home, command: OperatorEventPipeline.recording(
                 machine=machine,
                 home=home,
                 now=system_clock().now,
@@ -252,29 +249,23 @@ def test_inspection_parser_cannot_launch_without_a_child_owner(verb: list[str]) 
         args.func(args)
 
 
-def test_logging_and_dispatch_borrow_the_same_operator_factory(
+def test_logging_and_dispatch_borrow_the_same_producer(
     tmp_path: Path, cli_log_sinks: list[str]
 ) -> None:
-    factories: list[OperatorDatabaseFactory] = []
     machines: list[MachineIdentityReader] = []
     homes: list[Path] = []
     pipelines: list[EventPipeline] = []
     inputs: list[EventPipeline] = []
 
     def producer_factory(
-        database_factory: OperatorDatabaseFactory,
-        machine: MachineIdentityReader,
-        home: Path,
-        command: CommandRuntime,
+        machine: MachineIdentityReader, home: Path, command: CommandRuntime
     ) -> OperatorEventPipeline:
-        factories.append(database_factory)
         machines.append(machine)
         homes.append(home)
         pipeline = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
         pipelines.append(pipeline)
         owner = OperatorEventPipeline.wrapping(
             pipeline,
-            database_factory=database_factory,
             machine=machine,
             home=home,
             now=system_clock().now,
@@ -286,7 +277,6 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
         return owner
 
     def dispatch(args: argparse.Namespace) -> int:
-        assert args.database_factory is factories[-1]
         assert args.runtime.machine is machines[-1]
         assert args.runtime.home == homes[-1], "the producer and the runtime name one home"
         inputs.append(args.producer())
@@ -310,7 +300,6 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
     assert cli_log_sinks == ["cli-restart", "cli-restart"]
     assert homes == [tmp_path.resolve(), tmp_path.resolve()]
     assert machines[0] is not machines[1]
-    assert factories[0] is not factories[1]
     assert inputs == pipelines
     assert all(p.stopped for p in pipelines)
 
@@ -394,9 +383,8 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
     events: list[telemetry.Event] = []
     gates: list[ProcessDbGate] = []
     pipelines: list[telemetry.EventPipeline] = []
-    factories: list[OperatorDatabaseFactory] = []
 
-    # Handles are never dialed; the same real operator gate reaches work and writer.
+    # Handles are never dialed; the command's work opens its handles through one real operator gate.
     def open_database(
         config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
     ) -> Database:
@@ -404,22 +392,12 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
         return open_operator_database(config, gate, direct_url)
 
     def producer_factory(
-        database_factory: OperatorDatabaseFactory,
-        machine: MachineIdentityReader,
-        home: Path,
-        command: CommandRuntime,
+        machine: MachineIdentityReader, home: Path, command: CommandRuntime
     ) -> OperatorEventPipeline:
-        factories.append(database_factory)
-
-        def write(batch: list[telemetry.Event]) -> None:
-            database_factory()
-            events.extend(batch)
-
-        pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write)
+        pipeline = telemetry.EventPipeline(now=system_clock().now, writer=events.extend)
         pipelines.append(pipeline)
         return OperatorEventPipeline.wrapping(
             pipeline,
-            database_factory=database_factory,
             machine=machine,
             home=home,
             now=system_clock().now,
@@ -453,21 +431,15 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
             _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
         )
         assert destination.read_text() == reference.read_text()
-    assert factories == [args.database_factory]
     assert len(pipelines) == 1 and pipelines[0].stopped
     assert [record.event_name for record in events] == [event]
-    assert len(gates) >= 2 and all(gate is gates[0] for gate in gates)
+    assert gates and all(gate is gates[0] for gate in gates)
 
 
 def test_quiet_command_does_not_construct_pipeline(
     command_runtime: CommandRuntime, tmp_path: Path
 ) -> None:
     owner = operator_event_pipeline(
-        operator_database_factory(
-            local_host=command_runtime.machine.host,
-            home=command_runtime.home,
-            open_database=open_operator_database,
-        ),
         machine=command_runtime.machine,
         home=tmp_path,
         now=system_clock().now,
@@ -514,11 +486,6 @@ def test_unfinished_command_writer_remains_owned_until_join(
     pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write, batch_size=1)
     owner = OperatorEventPipeline.wrapping(
         pipeline,
-        database_factory=operator_database_factory(
-            local_host=command_runtime.machine.host,
-            home=command_runtime.home,
-            open_database=open_operator_database,
-        ),
         machine=command_runtime.machine,
         home=tmp_path,
         now=system_clock().now,
@@ -554,14 +521,10 @@ def test_command_close_preserves_original_writer_error_and_primary(
     pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write)
 
     def producer_factory(
-        database_factory: OperatorDatabaseFactory,
-        machine: MachineIdentityReader,
-        home: Path,
-        command: CommandRuntime,
+        machine: MachineIdentityReader, home: Path, command: CommandRuntime
     ) -> OperatorEventPipeline:
         return OperatorEventPipeline.wrapping(
             pipeline,
-            database_factory=database_factory,
             machine=machine,
             home=home,
             now=system_clock().now,
@@ -642,11 +605,6 @@ def test_embedded_command_releases_sinks_before_its_stderr_closes(
             owner = OperatorEventPipeline.wrapping(
                 EventPipeline(now=system_clock().now, writer=lambda _rows: None),
                 attach_process_logging=True,
-                database_factory=operator_database_factory(
-                    local_host=command_runtime.machine.host,
-                    home=command_runtime.home,
-                    open_database=open_operator_database,
-                ),
                 machine=command_runtime.machine,
                 home=tmp_path,
                 now=system_clock().now,

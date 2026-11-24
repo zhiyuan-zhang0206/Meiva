@@ -1,7 +1,7 @@
 # Signal state
 
 On 2026-10-29 the cluster wrote **1,877 OTLP export refusals in a day**. Each was a true
-statement, each became a row in `telemetry_events`, and none of them could be retracted:
+statement, each became an event, and none of them could be retracted:
 an append-only event can say that a condition happened, never that it stopped. Reading the
 river, nobody could answer "is the collector still refusing right now" without counting
 recent rows and guessing a window.
@@ -9,7 +9,7 @@ recent rows and guessing a window.
 `signal_state` is the place that answers it. One row per open episode of
 `(source, subject, condition)`: a detector that sees the same thing again **touches** the
 row (newest reading, one more count) instead of appending another event, and a reconciler
-**resolves** the row when the condition is gone. `telemetry_events` stays the evidence; this
+**resolves** the row when the condition is gone. The events stay in Loki as the evidence (seven days); this
 table only carries state.
 
 `base/events/signals` owns the two writes. Reads stay in SQL: nothing else writes these
@@ -25,7 +25,7 @@ rows, and there is no second way to change a state.
 | `severity` | `info` / `warning` / `error`, repeated as a CHECK in the database |
 | `opened_at` / `last_seen` | when the episode started, when it was last reported |
 | `count` | how many reports this episode absorbed |
-| `first_event_id` / `last_event_id` | the reports, as `telemetry_events` ids, no foreign key |
+| `first_event_id` / `last_event_id` | the reports, as event stream ids (Loki rows expire after seven days, so they dangle), no foreign key |
 | `resolved_at` / `resolve_reason` / `evidence_ref` | how and why it closed, and what convinced the closer |
 | `acked_by` / `acked_at` | a human read it — **not** a close |
 

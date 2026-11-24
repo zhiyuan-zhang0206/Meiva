@@ -3,8 +3,7 @@
 Every agent operation (spawn, send_message, terminate, compact, status_change,
 skill_invoked, ...) is an audit event, and Postgres is its system of record: the
 ``audit_events`` table is append-only and permanent
-(docs/decisions/data/database/2026-10-02-audit-events-in-postgres.md). Loki and the day-stamped
-JSONL mirror receive the same event through the unified emitter
+(docs/decisions/data/database/2026-10-02-audit-events-in-postgres.md). Loki receives the same event through the unified emitter
 (`base.telemetry`) as a projection that sheds under overload, truncates long
 lines and expires after Loki's 7-day retention; losing the projection loses no record.
 
@@ -131,7 +130,7 @@ _INSERT_AUDIT_EVENT = (
 def audit_event_uid(event: telemetry.Event, *, stream_id: int | None = None) -> int:
     """The event's stream surrogate id as the signed 64-bit `audit_events.event_uid`.
 
-    The id is the one the JSONL mirror and Loki already carry for the same
+    The id is the one Loki already carries for the same
     event (`telemetry.event_id`, an unsigned blake2b-64 over the serialized
     line and its nanosecond timestamp). Postgres has no unsigned bigint, so
     values from 2**63 up wrap to the negative half; the mapping is a bijection.

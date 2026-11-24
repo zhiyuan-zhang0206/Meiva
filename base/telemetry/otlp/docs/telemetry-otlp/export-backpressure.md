@@ -2,10 +2,9 @@
 
 ## Contract
 
-OTLP failure cannot block or break the event drain after its JSONL mirror write,
-and a collector outage cannot add an unbounded wait to an agent turn. Loss is an
+OTLP failure cannot block or break the event drain, and a collector outage cannot add an unbounded wait to an agent turn. Loss is an
 explicit bounded-degradation policy: producers count and report shedding while
-the collector sidecar owns durable mirroring after acceptance.
+the collector sidecar owns delivery after acceptance. An event the exporter sheds is stored nowhere.
 
 ## Signal paths
 
@@ -53,7 +52,7 @@ Parent node: [OTLP export backend](telemetry-otlp.md).
 The emitter, OTLP log queue, and OTel SDK batch queue report actual loss as `event_log_drop`, with
 `n`, `queue`, and `last_dropped_at`. Local error diagnostics bypass the saturated
 queue and always write stderr, including standalone scripts before logging setup.
-Delayed summaries preserve the actual loss time. OTLP loss reports go straight to the JSONL mirror and metric instruments;
+Delayed summaries preserve the actual loss time. OTLP loss reports go straight to the process log (loguru and stderr) and metric instruments;
 `meiva_event_log_drop_last_dropped_at_ratio` drives the immediate error-level
 `meiva-ops-telemetry-queue-loss` Grafana alert, resolving after five loss-free minutes.
 The metrics lane can report even while log delivery is saturated. A collector or

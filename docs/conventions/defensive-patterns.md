@@ -367,8 +367,8 @@ pgbouncer `userlist` — report coordinates and shape, not bytes:
   that needs context. `line[:120]` is not a redaction; it is a bet on where the value sits.
 
 Why: the leak is the record, not the reader's context window. Output written while investigating
-lands in `agent_host.log`, `events-<date>.jsonl` and the unit's `output.log`, so one `cat` makes
-three copies that rotation keeps for a week — and the search that reports a leak becomes a second
+lands in `agent_host.log` and the unit's `output.log`, so one `cat` makes
+two copies that rotation keeps for a week — and the search that reports a leak becomes a second
 occurrence of it. On 2026-11-06 a 401-byte fragment of a `unit.json`-shaped object sat in a unit's
 `output.log`, key order alphabetical, surrounded by one-byte lines: a pretty-printed read, not a
 model dump (those fields are pydantic `Secret` and render masked).

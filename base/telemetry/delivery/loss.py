@@ -7,11 +7,9 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from threading import Lock
 
 from base.log import logger
-from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.state import process_name, process_state, resolve_machine
 
@@ -63,7 +61,7 @@ def report_loss(
     now: datetime,
     record_metric: Callable[[Event], None] | None = None,
 ) -> Event:
-    """File/stderr diagnostic plus an independent metric; neither uses a log queue."""
+    """Process-log/stderr diagnostic plus an independent metric; neither uses a log queue."""
     report = loss_event(event, count, queue_name, now=now)
     # Always available, even before logging/provider initialization in bare scripts.
     # This exceptional data-loss diagnostic must not depend on any configured sink.
@@ -87,9 +85,8 @@ def report_loss(
 class ExporterDropObserver(logging.Filter):
     """Count SDK log evictions on admission and publish one report per export."""
 
-    def __init__(self, *, mirror_dir: Path) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._mirror_dir = mirror_dir
         self._lock = Lock()
         self._pending = 0
         self._last_dropped_at = 0.0
@@ -125,25 +122,23 @@ class ExporterDropObserver(logging.Filter):
                 target_agent_id=None,
             )
             pipeline = state["pipeline"]
-            report = report_loss(
+            report_loss(
                 event,
                 count,
                 "otel-sdk",
                 now=now,
                 record_metric=pipeline.record_export_loss if pipeline is not None else None,
             )
-            append_jsonl([report], target_dir=self._mirror_dir, now=now)
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
 
 
-def install_exporter_drop_observer(*, mirror_dir: Path) -> ExporterDropObserver:
+def install_exporter_drop_observer() -> ExporterDropObserver:
     """Attach once before the SDK's duplicate log filter, so every eviction counts."""
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     for item in sdk_logger.filters:
         if isinstance(item, ExporterDropObserver):
-            item._mirror_dir = mirror_dir
             return item
-    observer = ExporterDropObserver(mirror_dir=mirror_dir)
+    observer = ExporterDropObserver()
     sdk_logger.filters.insert(0, observer)
     return observer

@@ -4,7 +4,7 @@ Meiva's **cross-cutting concerns**—shared mechanisms that span all subsystems.
 
 ## Sub-concepts
 
-- **Logging** — Structured logging system: event-driven logfmt format, unified event pipeline (emitter → JSONL mirror + OTLP), node_enter/node_exit lifecycle events
+- **Logging** — Structured logging system: event-driven logfmt format, unified event pipeline (emitter → OTLP), node_enter/node_exit lifecycle events
 - **Sessions** — session lifecycle: naming conventions, environment variable forwarding, records + logs
 - **Startup Sequence** — agent process startup sequence: schema gate → 'running' claim → heavy imports → run loop
 - **Environment Variables** — Key environment variables and their propagation chain: MEIVA_AGENT_ID, MEIVA_CLUSTER_SECRET, MEIVA_HOME, etc.

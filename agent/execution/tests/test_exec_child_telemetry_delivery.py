@@ -129,30 +129,12 @@ def _spawn(
     return proc, result_path
 
 
-def _mirror_records(tmp_path: Path) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    for path in sorted((tmp_path / "home" / "logs").glob("events-*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            record = object_of(json.loads, line)
-            assert is_object_dict(record), record
-            records.append(record)
-    return records
-
-
 def _attributes_of(record: dict[str, object]) -> dict[str, object]:
     attributes = record.get("attributes")
     if attributes is None:
         return {}
     assert is_object_dict(attributes), attributes
     return attributes
-
-
-def _mirror_keys(tmp_path: Path) -> set[tuple[str, object, object]]:
-    keys: set[tuple[str, object, object]] = set()
-    for record in _mirror_records(tmp_path):
-        attributes = _attributes_of(record)
-        keys.add((str(record.get("event_name")), attributes.get("envelope"), attributes.get("op")))
-    return keys
 
 
 def _children(node: object, key: str) -> list[object]:
@@ -263,32 +245,48 @@ assert trace.get_tracer_provider().force_flush()
     assert ("exec_envelope", "request", "read") in keys, f"receiver saw: {sorted(keys)}"
     assert ("exec_envelope", "result", "write") in keys, f"receiver saw: {sorted(keys)}"
 
-    mirror_keys = _mirror_keys(tmp_path)
-    assert ("exec_envelope", "result", "write") in mirror_keys, f"mirror saw: {sorted(mirror_keys)}"
-    _assert_child_correlation(tmp_path, trace_id)
+    _assert_child_correlation(trace_id)
 
 
-def _assert_child_correlation(tmp_path: Path, trace_id: str) -> None:
+def _posted_spans() -> list[tuple[str, str, str]]:
     from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
 
-    received = [
-        span
-        for path, raw in _POSTS
+    with _POSTS_LOCK:
+        posts = list(_POSTS)
+    return [
+        (span.name, span.trace_id.hex(), span.parent_span_id.hex())
+        for path, raw in posts
         if path == "/v1/traces"
         for resource in trace_service_pb2.ExportTraceServiceRequest.FromString(raw).resource_spans
         for scope in resource.scope_spans
         for span in scope.spans
     ]
-    [probe] = [span for span in received if span.name == "correlation-probe"]
-    assert probe.trace_id.hex() == trace_id
-    records = [
-        row
-        for row in _mirror_records(tmp_path)
-        if row.get("event_name") in {"exec_child_boot", "exec_envelope"}
-    ]
-    assert {(row.get("trace_id"), row.get("span_id")) for row in records} == {
-        (trace_id, probe.parent_span_id.hex())
+
+
+def _posted_correlations() -> set[tuple[str, str]]:
+    from google.protobuf.json_format import MessageToDict
+    from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
+
+    with _POSTS_LOCK:
+        posts = list(_POSTS)
+    return {
+        (record.trace_id.hex(), record.span_id.hex())
+        for path, raw in posts
+        if path.endswith("/v1/logs") and len(raw) >= 4
+        for resource in logs_service_pb2.ExportLogsServiceRequest.FromString(raw).resource_logs
+        for scope in resource.scope_logs
+        for record in scope.log_records
+        if _record_key(MessageToDict(record, preserving_proto_field_name=True))[0]
+        in {"exec_child_boot", "exec_envelope"}
     }
+
+
+def _assert_child_correlation(trace_id: str) -> None:
+    [(_, probe_trace_id, probe_parent)] = [
+        span for span in _posted_spans() if span[0] == "correlation-probe"
+    ]
+    assert probe_trace_id == trace_id
+    assert _posted_correlations() == {(trace_id, probe_parent)}
 
 
 def test_exec_trace_drain_exits_while_collector_response_is_blocked(

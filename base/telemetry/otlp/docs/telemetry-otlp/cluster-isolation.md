@@ -30,7 +30,7 @@ disagree show up in the drop counter). Details:
 The implicit loopback event exporter requires a registered machine identity and
 the production cluster label `.meiva`. Tests, ad-hoc processes with hostname
 fallback, and non-production homes do not export by default; their unified
-events continue into the local JSONL mirror. An explicit
+events are not exported and, with no local copy, are not stored (log lines stay in the process log). An explicit
 `MEIVA_TELEMETRY_OTLP_ENDPOINT` is the operator escape hatch and opts any process
 into a caller-managed collector before the production-identity check.
 

@@ -108,8 +108,7 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
   `GET /api/events?trace_id=<hex>&from=<ISO>` (`events`, with `events_total`): every telemetry
   and log event of the turn within Loki's 7-day window (the gateway reads them from Loki) and
   its audit events, which Postgres keeps permanently. A trace older than seven days has only its
-  audit events; the per-machine JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`, also 7
-  days) covers what Loki missed.
+  audit events; nothing else covers what Loki missed.
 - Gateway auth: bearer `MEIVA_API_TOKEN` (a launched process's machine token),
   else `MEIVA_CLUSTER_SECRET` from the environment or the gateway's
   `$MEIVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).

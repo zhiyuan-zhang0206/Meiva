@@ -1,4 +1,3 @@
-from base.telemetry.delivery.mirror import append_jsonl, event_id, event_row, prune_jsonl_mirror
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Category, DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.delivery.reporting import (
@@ -7,7 +6,12 @@ from base.telemetry.delivery.reporting import (
     report_no_pipeline,
     report_sink_failure,
 )
-from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
+from base.telemetry.delivery.serialization import (
+    event_id,
+    event_line,
+    event_line_digest,
+    event_payload,
+)
 from base.telemetry.delivery.state import (
     ambient_agent_id,
     machine_hostname,
@@ -32,7 +36,7 @@ from base.telemetry.emitter import (
     stop,
     sync,
 )
-from base.telemetry.pipeline_build import build_pipeline, drain_on_exit, write_batch
+from base.telemetry.pipeline_build import build_pipeline, drain_on_exit
 
 __all__ = [
     "NO_EMITTER",
@@ -45,7 +49,6 @@ __all__ = [
     "EventPipeline",
     "NoPipelineFactoryError",
     "ambient_agent_id",
-    "append_jsonl",
     "bind_identity",
     "bind_identity_if_unbound",
     "bind_process_clock",
@@ -59,7 +62,6 @@ __all__ = [
     "event_line",
     "event_line_digest",
     "event_payload",
-    "event_row",
     "failure_isolated",
     "flush",
     "init_telemetry",
@@ -68,11 +70,9 @@ __all__ = [
     "process_name",
     "process_now",
     "process_state",
-    "prune_jsonl_mirror",
     "report_no_pipeline",
     "report_sink_failure",
     "resolve_machine",
     "stop",
     "sync",
-    "write_batch",
 ]

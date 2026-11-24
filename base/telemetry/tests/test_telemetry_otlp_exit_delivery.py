@@ -6,15 +6,13 @@ atexit shutdown at bring-up — mid-life, so later than
 `base.telemetry.drain_on_exit` (registered at import) — and atexit runs
 LIFO: the provider shut down FIRST, and a record emitted inside the drain
 thread's final batch window was flushed by the exit drain into a shut-down
-processor (`force_flush` returns False) and stayed mirror-only (task #4314
-triage: exec-child `result/write` = 0 fleet-wide in Loki while the mirror held
-every line; hierarchy-job tail lines 166 → 0 mirror→Loki). The providers are
+processor (`force_flush` returns False) and was never exported (task #4314
+triage: exec-child `result/write` = 0 fleet-wide in Loki). The providers are
 now built with `shutdown_on_exit=False` and `_drain_on_exit` is the single
 ordered exit seam.
 
 This test runs a real short-lived child against a minimal OTLP/HTTP receiver
-recording every POST body, and reads both channels: the receiver's exported
-batches and the child's JSONL mirror.
+recording every POST body, and reads the receiver's exported batches.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ import time
 import uuid
 from collections.abc import Generator, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceResponse
@@ -125,7 +123,7 @@ def _sent_pairs() -> set[tuple[object, object]]:
     """Decode the receiver's OTLP/HTTP log batches into (marker, seq) pairs.
 
     The record carries both as OTLP attributes and the event body is the
-    mirror-shape JSON, so either channel identifies the record."""
+    event JSON, so either identifies the record."""
     with _POSTS_LOCK:
         posts = list(_POSTS)
     return {_marker_seq_of(record) for record in _received_log_records(posts)}
@@ -187,21 +185,8 @@ def test_tail_record_of_a_short_lived_process_reaches_the_receiver(
     # The pre-tail record proves the receiver decoded real traffic.
     assert (marker, "early") in pairs, f"receiver saw: {sorted(pairs)!r}"
     # Red before the fix (task #4320): the exit flush landed on a shut-down
-    # processor and only the JSONL mirror kept this record.
+    # processor and this record was never exported.
     assert (marker, "tail") in pairs, f"receiver saw: {sorted(pairs)!r}"
-
-    # The mirror carries the same record — the local channel never lost it.
-    rows = [
-        json.loads(line)
-        for path in sorted((home / "logs").glob("events-*.jsonl"))
-        for line in path.read_text(encoding="utf-8").splitlines()
-    ]
-    mirror_tail: list[Any] = []
-    for row in rows:
-        attributes = cast("dict[str, Any]", row.get("attributes") or {})
-        if attributes.get("marker") == marker and attributes.get("seq") == "tail":
-            mirror_tail.append(row)
-    assert mirror_tail, "the JSONL mirror must hold the tail record"
 
 
 @pytest.mark.parametrize("header_delay", [0.0, 2.8])

@@ -113,13 +113,10 @@ default `"log"`**. Payload = logger extra fields + `msg`
 write SQL directly — annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
-**Stored in `telemetry_events`**: the `stored` column is `EventSpec.persist` — a Postgres
-reader queries the event by name. An event without it is stored only at warning level or
-above (or when its name is unregistered); otherwise it stays in the JSONL mirror and Loki
-(`base/telemetry/event_store.py: is_persisted`).
+A telemetry or log event is stored in Loki (seven days) only; no event is kept in Postgres.
 
-| event_name | meaning | tier | key payload fields | family | destination | stored |
-|------|------|------|-----------------|----|------|----|
+| event_name | meaning | tier | key payload fields | family | destination |
+|------|------|------|-----------------|----|------|
 """
 
 _LOG_INTRO = """
@@ -212,8 +209,7 @@ def _row_telemetry(name: str) -> str:
     keys = ", ".join(payload_keys(name)) if payload_keys(name) else "—"
     dest = "file" if spec.destination == "file" else "events"
     fam = spec.family or "—"
-    stored = "✓" if spec.persist else "—"
-    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {fam} | {dest} | {stored} |"
+    return f"| `{name}` | {spec.doc} | {spec.tier} | {keys} | {fam} | {dest} |"
 
 
 def render() -> str:

@@ -69,7 +69,6 @@ def test_a_boots_the_exec_child_logging_and_never_closes_it(tmp_path):
 
     pipeline = telemetry.build_pipeline(
         now=system_clock().now,
-        database=lambda: None,
         machine=None,
         home=tmp_path,
         otlp_enabled=lambda: False,

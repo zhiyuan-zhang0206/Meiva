@@ -113,7 +113,6 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         now=system_clock().now,
         export_allowed=read,
         enabled=lambda: True,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
         instance_id="test-instance",
@@ -125,7 +124,6 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         now=system_clock().now,
         export_allowed=read,
         enabled=lambda: True,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
         instance_id="test-instance",
@@ -146,7 +144,6 @@ def test_backend_does_not_cache_identity_defects_as_disabled(
         now=system_clock().now,
         export_allowed=invalid,
         enabled=lambda: True,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
         instance_id="test-instance",
@@ -166,7 +163,6 @@ def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
             now=system_clock().now,
             export_allowed=reject,
             enabled=lambda: False,
-            mirror_dir=tmp_path,
             home=tmp_path,
             endpoint=lambda: "http://127.0.0.1:4318",
             instance_id="test-instance",
@@ -195,7 +191,6 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
         exporter=default_exporter(
             now=system_clock().now,
             export_allowed=lambda: True,
-            mirror_dir=tmp_path,
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
@@ -258,7 +253,6 @@ def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_statu
         providers=(_NoopLoggerProvider(), _ShutdownMeterProvider()),
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
-        mirror_dir=tmp_path,
         home=tmp_path,
     )
     unreachable_backend = telemetry_otlp.OtlpBackend(
@@ -267,7 +261,6 @@ def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_statu
         providers=None,
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:1",
-        mirror_dir=tmp_path,
         home=tmp_path,
         instance_id="test-instance",
     )

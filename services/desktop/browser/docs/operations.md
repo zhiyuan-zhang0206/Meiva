@@ -166,7 +166,7 @@ The MCP daemon discovers peer endpoints from the gateway's registered runner
 endpoints using the launcher-provided machine API token. The directory read
 excludes administratively paused and intentionally stopped runners and
 does not probe any machine. The browser executor
-writes telemetry to its local JSONL mirror and configured OTLP exporter.
+exports telemetry through its configured OTLP exporter.
 
 Remote uploads stay staged while Chrome can still read the selected file.
 The runner gives an upload a ten-minute retention window and retains up to

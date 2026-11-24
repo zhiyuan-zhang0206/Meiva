@@ -113,7 +113,6 @@ async def test_codex_stderr_credentials_are_removed_from_otlp_payload(tmp_path: 
             enabled=lambda: True,
             export_allowed=lambda: True,
             home=tmp_path,
-            mirror_dir=tmp_path,
             instance_id="stderr-probe",
             now=now,
         )

@@ -65,8 +65,8 @@ from residue:
 
 - `design/runtime-partition` — an extra table named `<declared table>_<six
   digits>` or `<declared table>_default`, a partition created at runtime by
-  `base/telemetry/event_store.py::ensure_partitions` under a table the baseline
-  does declare.
+  the telemetry event writer (retired in 2026-11, stage 4 of the telemetry store removal) under a
+  table the baseline does declare.
 - `design/runtime-ddl` — an extra table whose name starts with a registered
   runtime DDL prefix (`checkpoint` today: the four checkpointer tables the
   checkpointer creates itself).

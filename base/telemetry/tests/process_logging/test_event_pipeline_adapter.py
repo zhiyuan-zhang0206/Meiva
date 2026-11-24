@@ -2,39 +2,30 @@
 
 from __future__ import annotations
 
-import json
-import random
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import pytest
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
-from base.cluster.machine import MachineIdentityReader
-from base.db import Database
-from base.paths import logs_dir, meiva_home
+from base.paths import meiva_home
 from base.telemetry import process_logging as slog
 
 _AGENT = 8901
 
 
+_WRITTEN: list[telemetry.Event] = []
+
+
 @pytest.fixture
-def logging_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[None]:
-    """The adapter test explicitly owns its native writer for its whole record."""
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
+def logging_pipeline() -> Iterator[None]:
+    """The adapter test explicitly owns its event pipeline, whose writer is a list."""
+    _WRITTEN.clear()
+    pipeline = telemetry.EventPipeline(
+        now=system_clock().now, writer=_WRITTEN.extend, flush_interval_s=0.01
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -45,8 +36,8 @@ def logging_pipeline(
 
 # meiva:note
 # `telemetry.flush()` is `Pipeline.sync(timeout=5.0)`: when the drain misses its deadline it
-# returns `DrainStatus.UNFINISHED` and reports it, rather than raising. A mirror read that follows
-# a bare flush therefore cannot tell "the row is not written yet" from "the sink never saw the
+# returns `DrainStatus.UNFINISHED` and reports it, rather than raising. A read that follows a bare
+# flush therefore cannot tell "the writer has not seen the event yet" from "the sink never saw the
 # record" — the two read as the same zero rows (2026-11-07, #8601: one shard failed this way).
 # Every read below proves the drain finished before it counts anything.
 def _drained() -> None:
@@ -54,16 +45,14 @@ def _drained() -> None:
     assert result.status is telemetry.DrainStatus.COMPLETED, result
 
 
-def _mirror_last(event_name: str, agent: int) -> dict[str, Any]:
+def _emitted_last(event_name: str, agent: int) -> dict[str, Any]:
     _drained()
-    day = datetime.now(UTC).strftime("%Y%m%d")
     rows = [
-        row
-        for line in (logs_dir(home=meiva_home()) / f"events-{day}.jsonl").read_text().splitlines()
-        if (row := json.loads(line)).get("event_name") == event_name
-        and row.get("agent_id") == agent
+        telemetry.event_payload(event)
+        for event in list(_WRITTEN)
+        if event.event_name == event_name and event.agent_id == agent
     ]
-    assert rows, f"expected a mirror line for {event_name}/{agent}, got none"
+    assert rows, f"expected an event for {event_name}/{agent}, got none"
     return rows[-1]
 
 
@@ -86,26 +75,17 @@ def _rec(extra: dict[str, Any]) -> Any:
     return {"extra": extra}
 
 
-def test_add_event_sink_registers_at_most_once(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> None:
+def test_add_event_sink_registers_at_most_once() -> None:
     """Two `add_event_sink` calls (exec_child's env + request init paths)
-    must not double-register the adapter: one loguru record lands exactly one
-    mirror row. The 2026-08-24 double registration wrote every post-init
-    record twice — byte-identical rows, same surrogate id — into the JSONL
-    mirror (task #1638)."""
-    from datetime import UTC as _UTC
-
+    must not double-register the adapter: one loguru record reaches the
+    writer exactly once. The 2026-08-24 double registration wrote every
+    post-init record twice — byte-identical rows, same surrogate id (task
+    #1638)."""
     from base.log import logger as _g
 
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
+    written: list[telemetry.Event] = []
+    pipeline = telemetry.EventPipeline(
+        now=system_clock().now, writer=written.extend, flush_interval_s=0.01
     )
     first = slog.add_event_sink(
         home=meiva_home(),
@@ -130,25 +110,16 @@ def test_add_event_sink_registers_at_most_once(
         _g.debug("local debug {}", marker)
         _drained()
 
-        from base.paths import logs_dir
-
-        day = datetime.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir(home=unit_home) / f"events-{day}.jsonl"
-        rows: list[dict[str, Any]] = []
+        rows: list[telemetry.Event] = []
         bare: list[str] = []
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                msg = obj.get("attributes", {}).get("msg", "")
-                if obj.get("event_name") == "label_change" and marker in msg:
-                    rows.append(obj)
-                if obj.get("event_name") == "log" and marker in msg:
-                    bare.append(msg)
+        for event in list(written):
+            msg = str(event.attributes.get("msg", ""))
+            if event.event_name == "label_change" and marker in msg:
+                rows.append(event)
+            if event.event_name == "log" and marker in msg:
+                bare.append(msg)
         assert bare == [f"bare info {marker} {index}" for index in range(20)]
-        assert len(rows) == 1, f"expected 1 mirror row, got {len(rows)}"
+        assert len(rows) == 1, f"expected 1 event, got {len(rows)}"
     finally:
         pipeline.stop(timeout=2)
         _g.remove(first)
@@ -156,7 +127,7 @@ def test_add_event_sink_registers_at_most_once(
 
 def test_event_pipeline_filter_drops_no_emitter_and_node_enter() -> None:
     """The pipeline filter admits ordinary records but drops two families:
-    the emitter's own failure reports (`_no_emitter` marker — a mirror-down
+    the emitter's own failure reports (`_no_emitter` marker — a failing-sink
     process must not loop failure → warning → emit) and `node_enter` (zero
     event-stream consumers; the row would be pure write amplification — the
     log-file line is the death-analysis source). Anything else — including
@@ -195,9 +166,9 @@ def test_loguru_adapter_sets_source_from_extra() -> None:
         _g.info("a line from the user path", event="label_change", source="user")
     finally:
         _g.remove(sink_id)
-    obj = _mirror_last("label_change", _AGENT)
+    obj = _emitted_last("label_change", _AGENT)
     assert obj["source"] == "user"
     assert obj["attributes"] == {"msg": "a line from the user path"}
     # loguru stamps record time in the machine's local zone; the emitter must
-    # normalize it to UTC so the mirror carries one offset (task #1638).
+    # normalize it to UTC so the stream carries one offset (task #1638).
     assert datetime.fromisoformat(obj["ts"]).utcoffset() == timedelta(0)

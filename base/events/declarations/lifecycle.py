@@ -128,22 +128,19 @@ EVENTS: dict[str, EventSpec] = {
         "gateway/daemon started",
         payload=ServiceStarted,
         tier="noise",
-        persist=True,
     ),
     "halt": telemetry_event(
         "halt",
         "turn stopped (idle/compact/system)",
         payload=Halt,
         tier="noise",
-        persist=True,
     ),
     "agent_spawned": telemetry_event(
         "agent_spawned",
         "agent process started",
         payload=AgentSpawned,
-        persist=True,
     ),
-    "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected", persist=True),
+    "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected"),
     "auto_resurrect_failed": telemetry_event(
         "auto_resurrect_failed",
         "an automatic resurrect failed for a possibly transient reason; the "

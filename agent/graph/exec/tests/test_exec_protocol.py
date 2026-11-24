@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import stat
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeGuard
@@ -41,13 +39,13 @@ from agent.execution.protocol import (
     write_request,
     write_result,
 )
-from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.db import Database
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.paths import meiva_home, resolve_meiva_home
+from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
@@ -61,26 +59,6 @@ def _load_json(text: str) -> dict[str, object]:
     value = object_of(json.loads, text)
     assert is_object_dict(value)
     return value
-
-
-# meiva:note
-# The attributes of the durable telemetry mirror's exec-envelope rows.
-def _exec_envelope_attributes() -> list[dict[str, object]]:
-    from base.paths import logs_dir
-
-    path = logs_dir(home=resolve_meiva_home()) / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
-    if not path.exists():
-        return []
-    events: list[dict[str, object]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = _load_json(line)
-        except (ValueError, AssertionError):
-            continue
-        attributes = row.get("attributes")
-        if row.get("event_name") == "exec_envelope" and is_object_dict(attributes):
-            events.append(attributes)
-    return events
 
 
 # ── typed blob: exact round-trip (the reason this codec was chosen) ──────
@@ -177,28 +155,17 @@ def test_request_envelope_round_trip(tmp_path: Path) -> None:
 
 
 def test_request_envelope_transfers_emit_size_and_serialize_time(
-    tmp_path: Path, database: Database, machine_identity: MachineIdentityReader
+    tmp_path: Path, machine_identity: MachineIdentityReader, emitted_events: EmittedEvents
 ) -> None:
     """Request writes and reads record the final envelope size and their own
-    serialization cost in the durable event stream."""
-    from base import telemetry
+    serialization cost in the event stream."""
     from base.log import logger
     from base.telemetry.process_logging import add_event_sink
 
-    events_before = len(_exec_envelope_attributes())
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=meiva_home(),
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
     sink_id = add_event_sink(
         home=meiva_home(),
         process="test-exec-envelope",
-        producer=lambda: pipeline,
+        producer=emitted_events.producer,
         machine_reader=machine_identity.name,
     )
     try:
@@ -213,18 +180,10 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
                 incarnation=None,
             )
             read_request(path)
-
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                telemetry.flush()
-                if len(_exec_envelope_attributes()) >= events_before + 2:
-                    break
-                time.sleep(0.05)
     finally:
         logger.remove(sink_id)
-        pipeline.stop(timeout=2)
 
-    events = _exec_envelope_attributes()[events_before:]
+    events = [event.attributes for event in emitted_events.named("exec_envelope")]
     assert len(events) >= 2
     request_events = [event for event in events if event["envelope"] == "request"]
     by_op = {str(event["op"]): event for event in request_events}

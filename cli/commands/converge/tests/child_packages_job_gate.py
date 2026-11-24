@@ -39,7 +39,6 @@ def main() -> None:
         local_host=machine.host, home=home, open_database=open_operator_database
     )
     pipeline = operator_event_pipeline(
-        database,
         machine=machine,
         home=home,
         now=system_clock().now,

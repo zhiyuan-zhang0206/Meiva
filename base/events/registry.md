@@ -96,267 +96,263 @@ default `"log"`**. Payload = logger extra fields + `msg`
 write SQL directly — annotated in the registry doc field. Emit sites and
 consumers: see the comments at each emit point.
 
-**Stored in `telemetry_events`**: the `stored` column is `EventSpec.persist` — a Postgres
-reader queries the event by name. An event without it is stored only at warning level or
-above (or when its name is unregistered); otherwise it stays in the JSONL mirror and Loki
-(`base/telemetry/event_store.py: is_persisted`).
+A telemetry or log event is stored in Loki (seven days) only; no event is kept in Postgres.
 
-| event_name | meaning | tier | key payload fields | family | destination | stored |
-|------|------|------|-----------------|----|------|----|
-| `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events | — |
-| `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | events | — |
-| `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events | — |
-| `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events | — |
-| `machine_probe_failed` | agent-runner machine unreachable — one event per failed liveness probe | anomaly | machine, consecutive_failures, agent_count, carries_service | — | events | — |
-| `machine_agent_host_down` | machine answers its status probe but its agent host is not running — one event per liveness pass | anomaly | machine, agent_count, carries_service | — | events | — |
-| `machine_stopped_too_long` | host stopped longer than its maintenance window — one event per liveness pass | anomaly | machine, stopped_for_s | — | events | — |
-| `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events | — |
-| `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events | — |
-| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events | — |
-| `sdk_sampling_refresh_unfinished` | SDK sampling refresh worker retained after the finite shutdown wait | anomaly | — | — | events | — |
-| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events | ✓ |
-| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events | — |
-| `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events | — |
-| `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events | — |
-| `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events | — |
-| `db_pool_acquire_timeout` | db pool acquire timeout; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | — | — | events | — |
-| `db_pool_acquire_slow` | db pool acquire slow; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events | — |
-| `db_pool_restore_timeout` | db pool restore timeout; host-level, no agent_id: the restore runs on a pooled connection shared by every agent the process hosts, so it is attributed by machine | anomaly | name, budget_ms, elapsed_ms, ended_by | — | events | — |
-| `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
-| `trace` | otel span export | noise | — | — | events | — |
-| `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
-| `passive_recall` | passive memory recall | noise | body, search_ms, injected | — | events | ✓ |
-| `skill_recall` | skill recall | noise | candidates, offered, stage, outcome, latency_ms, work, reason | — | events | — |
-| `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
-| `last_msg` | last-message check | noise | — | — | events | — |
-| `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |
-| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to, unapplied_handoff_receipt, reason | — | events | — |
-| `turn_fault_lost_inbound` | a harness turn faulted before producing any text; the inbounds that started it were consumed and are never redelivered | anomaly | harness, turn_key, inbound_ids, reason | — | events | — |
-| `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | — |
-| `delivery_stranded_wake` | a message reached a terminated owner with no live consumer and the delivery fallback woke it: the delivery-time auto-resurrect did not run because the message committed while the owner still read running | anomaly | inbound_id, kind | — | events | — |
-| `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
-| `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
-| `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |
-| `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events | — |
-| `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events | — |
-| `exec_child_boot_failed` | exec child crashed before running the agent's code (bootstrap-class failure) | anomaly | exc_type, exc_msg | — | events | — |
-| `exec_cancelled` | execute_code cancelled | anomaly | — | — | events | ✓ |
-| `exec_timeout` | execute_code timed out | anomaly | — | — | events | ✓ |
-| `exec_node_timeout` | node-level timeout | anomaly | — | — | events | ✓ |
-| `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events | ✓ |
-| `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events | — |
-| `exec_memory_guard_skipped` | the host memory guard found critical pressure but the largest exec sat at or below the relief floor, so it killed nothing | observation | agent_id, pid, footprint_bytes, floor_bytes, running, pressure, free_swap_bytes | — | events | — |
-| `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events | ✓ |
-| `text` | LLM text output | noise | — | — | events | — |
-| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value, geometry_incident, geometry_phase, geometry_reason, geometry_elapsed_ms, geometry_layout_height, geometry_visual_height, geometry_visual_scale, geometry_html_inline_height, geometry_html_height, geometry_body_height, geometry_shell_height, geometry_shell_bottom, geometry_composer_height, geometry_composer_bottom | — | events | — |
-| `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
-| `alerts` | alert webhook heartbeat — epoch seconds of the last watchdog alert the webhook accepted | noise | last_ingest_timestamp_seconds | — | events | — |
-| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events | ✓ |
-| `staged_upload_received` | one staged-upload request finished: body bytes, body receive time, entry path (Cloudflare colo or direct), status | noise | route, status, body_bytes, content_length, receive_ms, after_ms, total_ms, via_cloudflare, cf_colo, cf_connecting_ip, host | — | events | — |
-| `workspace_file_served` | one workspace file raw read finished: status, range, bytes, time to headers and to the last body byte, forwarded or local, entry path | noise | status, range, conditional, remote, body_bytes, content_length, completed, ttfb_ms, upstream_ms, body_ms, total_ms, via_cloudflare, cf_colo, host | — | events | — |
-| `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events | — |
-| `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events | — |
-| `gateway_event_loop` | gateway event-loop maximum callback lag and slow ticks (60s window) | noise | lag_ms, slow_ticks | — | events | — |
-| `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events | — |
-| `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events | — |
-| `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events | — |
-| `memory_index_patrol` | memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag | noise | pending_paths, consecutive_failures, over_limit, last_success_at | — | events | — |
-| `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
-| `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
-| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, target_id, ttl_s, new_expires_at | observation | — | — | events | — |
-| `browser_mcp_exit` | a browser-mcp daemon generation ended; attributes carry reason (stopped | upstream_exited | probes_unanswered | call_timeout_unanswered | call_timeouts_repeated); stopped is a service stop or update, every other reason is an upstream death the root restarts | observation | — | — | events | — |
-| `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
-| `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
-| `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
-| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are not replayed; the periodic pending scan finds them); host-level, no agent_id: one subscription serves every hosted agent | noise | — | — | events | — |
-| `host_dispatcher_reconnect_exhausted` | hosted dispatcher's wake subscription failed repeatedly without completing a read — exiting for supervisor recovery; carries the consecutive failure count and the last exception type; host-level, no agent_id: one subscription serves every hosted agent | anomaly | — | — | events | — |
-| `host_dispatcher_scan_failed` | hosted dispatcher's durable pending scan failed; the wake subscription remains open and attributes carry the next scan backoff_s; host-level, no agent_id: the scan covers every hosted agent | anomaly | backoff_s | — | events | — |
-| `host_dispatcher_restart_required` | a hosted turn refused its bounded cancellation after a stall — the dispatcher is exiting for supervisor recovery | anomaly | — | — | events | — |
-| `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | events | — |
-| `host_config_rejected` | a hosted wake was consumed without a turn because the agent's stored model config cannot build (unknown model or missing provider key) — logged once per stored config state (fingerprint); the pending inbound is kept until the overlay is fixed | anomaly | — | — | events | — |
-| `host_config_normalized` | a hosted wake bound a stored llm_model pin as its registered fallback because the registry has withdrawn the pinned model — the turn and its usage attribution run on the fallback; logged once per stored config state (fingerprint) | anomaly | — | — | events | — |
-| `spawn_config_normalized` | a spawn request's config_overlay carried a withdrawn llm_model — the gateway settled it to the registered fallback before the row was created, and the response carries the receipt (requested, resolved) | anomaly | — | — | events | — |
-| `spawn_overlay_model_normalized` | the spawn row INSERT settled a withdrawn llm_model in the overlay to its registered fallback — the last-mile guard for client paths that compose the map outside the gateway preflight | anomaly | — | — | events | — |
-| `restart_config_normalized` | a restart config_overlay carried a withdrawn llm_model — it was settled to the registered fallback before the overlay update and the restart payload | anomaly | — | — | events | — |
-| `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected. Carries exception_type, plus config_fingerprint when the stored config was read before the failure | anomaly | — | — | events | — |
-| `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | noise | — | — | events | — |
-| `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | noise | — | — | events | — |
-| `host_exit_draining` | a SIGTERMed agent-host closed admission and gave every running turn a lifecycle command: a system:restart inbound it wrote, or the unfinished restart/terminate the agent already had; carries both counts, the drain budget and how many turns it now waits for | observation | — | — | events | — |
-| `host_exit_drained` | every turn a SIGTERMed agent-host waited for ended within the drain budget — at its restart, or before reaching it, in which case the restart stays pending for the next host | noise | — | — | events | — |
-| `host_exit_drain_timeout` | a running turn did not settle within the SIGTERMed agent-host's drain budget and is cancelled; carries the agent, its last turn activity and the restart inbound through which the next host wakes it | anomaly | — | — | events | — |
-| `host_exit_restart_failed` | a SIGTERMed agent-host wrote no restart for a running turn: the write failed, or the drain deadline passed first; the turn is still waited for, and without the restart a turn cut short is not woken again until new input arrives | anomaly | — | — | events | — |
-| `host_exit_idle_notes_failed` | a SIGTERMed agent-host wrote no passive lifecycle notes for the idle agents whose turns it owed: the write failed, or the drain deadline passed first; their turns are still waited for, but a turn cut short is not woken again until new input | anomaly | reason | — | events | — |
-| `host_exit_repeated` | a further SIGTERM reached an agent-host already draining; it is ignored | noise | — | — | events | — |
-| `host_stdout_log_rotated` | the hosted daemon rotated its raw stdout transcript at the size ceiling (task #2356) — carries size and ceiling; a crash storm shows up as repeated rotation events instead of an unbounded file | noise | — | — | events | — |
-| `host_turn_uncancellable` | a hosted turn did not unwind after being cancelled — it is blocked where asyncio cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the agent, how long the cancel was pending (waited_s), and the agent's real activity clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the same name, which is MAX(inbound_messages.created_at) and goes stale during long turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The turn resumes from its checkpoint on restart. Process mode had no equivalent because SIGKILL always lands | anomaly | — | — | events | — |
-| `host_turn_stall_timeout` | the hosted stall guard aborted a graph.ainvoke whose turn clock (base/agents/observation/turn_progress.py: node enters + completed LLM steps) was silent past MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = node enter, completed LLM step, streamed chunk) — the turn-level injection guard of task #2417. The invocation was cancelled and unwound; the row settles to idling; the next wake resumes from the checkpoint | anomaly | — | — | events | — |
-| `host_turn_stall_uncancellable` | a stalled invocation that had been cancelled for the bounded unwind window REFUSED to unwind (blocked where asyncio cannot interrupt it — a C call). The host cannot fix this in-process: it signals a daemon restart so the supervisor recovers the turn from its checkpoint | anomaly | — | — | events | — |
-| `host_turn_corpse_marked` | a hosted turn crashed and the row was stamped with the corpse marker (last_turn_fatal_at) — the reaper terminates it once the grace window elapses unless a completed turn clears the mark first | anomaly | — | — | events | — |
-| `corpse_stamp_failed` | the corpse marker stamp failed after a hosted turn crash — the row keeps looking alive until a later stamp or a completed turn; the reaper cannot see this death | anomaly | — | — | events | — |
-| `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events | — |
-| `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events | — |
-| `host_database_beat_failed` | the agent host's database beat failed — the reaper leg timed out or the pool was unreachable; carries the consecutive failure count, the limit and whether this failure ends the host. One event per failure, and only from the beat: a log line that merely mentions the words is not this event; host-level, no agent_id: the beat belongs to the host process | anomaly | machine, pool, failures, limit, will_exit, error | — | events | — |
-| `host_database_beat_recovered` | the agent host's database beat succeeded again after failing; carries how many consecutive failures it cleared, so the retry result is on the record and not only implied by the absence of further failures; host-level, no agent_id: the beat belongs to the host process | noise | machine, pool, failures_cleared | — | events | — |
-| `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events | — |
-| `corpse_reaper_browser_release_failed` | a reaped corpse's browser-page release failed after its durable terminal transition; later lifecycle cleanup can retry it | anomaly | — | — | events | — |
-| `corpse_reaper_shell_cleanup_failed` | a reaped corpse's persistent-shell cleanup failed after its durable terminal transition; the TTL reaper retains and retries its rows | anomaly | — | — | events | — |
-| `host_turn_stall_aborted` | a hosted turn task ended after its no-progress abort: the invocation unwound and was dropped; the runtime was discarded by run_turn, so the next wake re-runs the startup reconcile before resuming from the checkpoint | anomaly | — | — | events | — |
-| `host_abort_reconcile_skipped` | the settled hosted turn abort skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events | — |
-| `host_abort_reconcile_failed` | the immediate inbound reconcile at a settled hosted turn abort raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
-| `host_turn_reconcile_skipped` | the finished hosted turn skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events | — |
-| `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
-| `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events | — |
-| `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events | — |
-| `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
-| `workspace_hygiene_reminded` | agent-host scanned an agent's local workspace after a normal turn settled to idle, found one or more non-excluded directories above workspace_hygiene_max_items_per_dir past cooldown, and enqueued a workspace_hygiene system_note; carries overflow_dirs, top_dir and top_count | observation | — | — | events | — |
-| `workspace_hygiene_check_failed` | the best-effort post-turn workspace hygiene check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events | — |
-| `personal_dream_reminded` | agent-host inspected an agent's local `<workspace>/memory/` after a normal turn settled to idle, matched Personal Self-Dream capacity or active-change criteria past cooldown, and enqueued a personal_dream system_note; carries reason, index_lines and file_count | observation | — | — | events | — |
-| `personal_dream_check_failed` | the best-effort post-turn personal Self-Dream check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events | — |
-| `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
-| `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
-| `service_started` | gateway/daemon started | noise | name, pid | — | events | ✓ |
-| `halt` | turn stopped (idle/compact/system) | noise | body | — | events | ✓ |
-| `agent_spawned` | agent process started | observation | spawner, forked_from | — | events | ✓ |
-| `agent_resurrected` | agent resurrected | observation | — | — | events | ✓ |
-| `auto_resurrect_failed` | an automatic resurrect failed for a possibly transient reason; the triggering inbound stays queued for a later or manual resurrect | observation | — | — | events | — |
-| `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events | — |
-| `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
-| `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
-| `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events | — |
-| `harness_interrupt_failed` | interrupting an external harness turn raised; the durable interrupt row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
-| `harness_delivery_pool_timeout` | delivering the inbox to an external harness could not borrow a database connection; nothing was reserved and the same attempt is made again after a short wait | anomaly | — | — | events | — |
-| `harness_unsettled_outcome_failed` | an invocation failed and the outcome of the inputs it had handed to the harness could not be recorded; they stay claimed and the next harness turn reconciles them against the harness's record | anomaly | — | — | events | — |
-| `harness_input_reconciled` | an input handed to an external harness and never acknowledged was judged against the harness's own durable record: in_context settles it, not_found returns it to the queue to be delivered again, persisted_undelivered leaves it claimed for the harness to deliver | noise | — | — | events | — |
-| `harness_reconcile_failed` | the harness has no durable record to ask about inputs handed to it (no session record or file), or its session could not be retired first, or a record that exists could not be read; nothing is guessed: the inputs are consumed with the uncertainty marker, or, when an existing record could not be read, left claimed for the next wake | anomaly | — | — | events | — |
-| `harness_event_stale` | a frame of an earlier harness process arrived after a later generation began and was dropped before it could settle an input or end a turn | noise | — | — | events | — |
-| `agy_acp_attribution_degraded` | an Antigravity ACP prompt reached its attribution deadline after completion and settled with only attributed output | anomaly | turn_id, unresolved_rows, pending_frames | — | events | — |
-| `agy_acp_timer_reply_expired` | Antigravity detached timers reached their reply deadlines and released process keepalive | anomaly | timer_count, foreground_active | — | events | — |
-| `harness_input_requeued` | an external harness refused an input or declared it lost; the inbound went back to the queue at its original position and is delivered again | noise | — | — | events | — |
-| `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events | — |
-| `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |
-| `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events | — |
-| `harness_close_residue_gone` | every process a failed harness close left running has exited, so the agent's next session is admitted | noise | — | — | events | — |
-| `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
-| `harness_close_failures` | external harness session closes raised while the agent host was running; host-level, no agent_id: one count over every hosted agent's closes | anomaly | — | — | events | — |
-| `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
-| `harness_usage_uncertain` | an external harness reported incomplete or ambiguous usage, so the turn carries observed counters without an exact accounting row | anomaly | — | — | events | — |
-| `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events | — |
-| `harness_control_not_shown` | a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place on that timeline and is logged instead | anomaly | — | — | events | — |
-| `harness_live_timeline_failed` | the live read of a harness's CLI record for the running turn failed; the next read tries again | anomaly | — | — | events | — |
-| `harness_record_not_found` | a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet | anomaly | — | — | events | — |
-| `harness_record_unreadable` | a harness session's record file is there but in a form the reader does not read, so the timeline is empty | anomaly | — | — | events | — |
-| `harness_record_row_unread` | a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind per process; host-level, no agent_id: the report is deduplicated across every agent the process reads records for | anomaly | — | — | events | — |
-| `harness_timing_ambiguous` | native reasoning timing has ambiguous record identities; those measurements remain unknown | anomaly | count | — | events | — |
-| `harness_timing_collection_failed` | native reasoning timing could not be collected; provider execution and the original record remain available | anomaly | — | — | events | — |
-| `harness_timing_record_unavailable` | the native timing record could not be located; provider execution is unchanged | anomaly | — | — | events | — |
-| `harness_timing_unreadable` | the native timing sidecar is unreadable; the original record remains readable with unknown timing | anomaly | — | — | events | — |
-| `harness_reply_key_conflict` | a reply's publication key already names other content; the publication is left as it was | anomaly | — | — | events | — |
-| `harness_timeline_inputs_unmatched` | inputs in a harness's CLI record match no inbox row within the row cap the read scans; they are not shown | anomaly | — | — | events | — |
-| `harness_registration_renewal_failed` | an external harness session could not renew its registration | anomaly | — | — | events | — |
-| `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events | — |
-| `handoff_instructions_file_failed` | the handoff instructions could not be saved to the agent's workspace; the first message carries no pointer to the file, so the agent cannot re-read its instructions after a compaction | anomaly | — | — | events | — |
-| `harness_notice_failed` | an unsolicited provider report could not be written as an inbound; the report is lost and the agent that was waiting on it is never told | anomaly | — | — | events | — |
-| `harness_background_work_lost` | an external harness CLI process was replaced while it held background work (a command, a sub-agent, a timer); the agent's next input carries a note naming what was lost | observation | — | — | events | — |
-| `harness_background_work_evicted` | the host evicted a hosted runtime whose external CLI still held background work, because the cache was over its size bound with nothing idle left to evict; its next input carries a note naming what was lost | anomaly | — | — | events | — |
-| `agy_subagent_descriptor_unreadable` | an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's text and tool calls are not shown on the timeline; the turn is unaffected | observation | — | — | events | — |
-| `harness_quota_exhausted` | an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; triggering inbox messages were returned to pending and the agent halted until a new message | anomaly | harness, model, requeued_inbound_ids, requeued_count, reason | — | events | — |
-| `harness_turn_stalled` | an external harness sent no event past the stall threshold while an input or a turn was unsettled; the session was retired, unanswered inbox messages were returned to pending and the agent halted until a new message | anomaly | harness, model, silent_seconds, stall_seconds, requeued_inbound_ids, requeued_count, reason | — | events | — |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, cache_write_30m, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, price_write_30m, unpriced, usage_kind, attribution, source, parent_call_id, call_id, occurred_at, provider_request_id, cost_usd_exact, complete | — | events | ✓ |
-| `turn_end` | one turn finished | observation | ok, duration_seconds, ended_with, ended_with_reason | — | events | ✓ |
-| `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events | — |
-| `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |
-| `llm_usage_ledger_write_failed` | synchronous LLM usage commit failed | anomaly | call_id, reason, error_type, failures | — | events | — |
-| `llm_usage_unpriced` | a completed LLM call had no price in the catalog (unknown model or a missing cache-write rate) | anomaly | model, cause, missing_classes | — | events | — |
-| `llm_turn_aborted` | turn aborted after retries | anomaly | error_class, provider, status, context_overflow, cause | LLM_ERROR | events | ✓ |
-| `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
-| `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events | — |
-| `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events | ✓ |
-| `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events | — |
-| `llm_cancelled` | LLM call cancelled | anomaly | — | — | events | — |
-| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, reminder_shown, compactions, history_chars, summary_chars, summary_history_ratio | — | events | — |
-| `compact_request` | compact requested | noise | — | — | events | — |
-| `auto_compact` | auto-compact | noise | — | — | events | — |
-| `compact_reminder` | compact reminder | noise | — | — | events | — |
-| `circuit_breaker_open` | heartbeat circuit breaker opened | noise | — | — | events | — |
-| `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | events | — |
-| `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events | — |
-| `compact_boundary_stamp` | compact boundary stamp failed (segment anchor not recorded) | noise | — | — | events | — |
-| `open_questions_unavailable` | an agent's open questions could not be read; the list was left out of its context | noise | — | — | events | — |
-| `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events | — |
-| `reply_suggestion_gate` | reply suggestion gate probability | noise | — | — | events | — |
-| `reply_suggestion_gate_failed` | reply suggestion gate call failed | anomaly | — | — | events | — |
-| `reply_suggestion_model_key_missing` | reply suggestion model has no provider key, suggestions degrade to none | anomaly | — | — | events | — |
-| `reply_suggestion_draft_failed` | reply suggestion draft call failed | anomaly | — | — | events | — |
-| `reply_suggestion_draft_rejected` | reply suggestion draft empty or too long | noise | — | — | events | — |
-| `harness_cli_update_round` | one external harness CLI update round — status, updated/failed counts, and outcome details | observation | status, updated_count, failed_count, reason, outcomes | — | events | — |
-| `claude_auth_keepalive_round` | one Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code | observation | status, reason, exit_code | — | events | — |
-| `agent_watch_round` | one agent-watch round — duties judged, silent, woken, and unreadable | observation | watched, silent, sent, blind | — | events | — |
-| `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events | — |
-| `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | rounds, fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events | — |
-| `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events | — |
-| `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds | — | events | — |
-| `label_generated` | label auto-generated | noise | — | — | events | — |
-| `label_generate_failed` | label generation failed | anomaly | — | — | events | — |
-| `label_generate_skipped` | label generation skipped | noise | — | — | events | — |
-| `label_generate_empty` | label generation empty | noise | — | — | events | — |
-| `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events | — |
-| `understanding_enqueue_failed` | a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch) | anomaly | agent_id, compact_version, error | — | events | — |
-| `understanding_chunk_failed` | a queued understanding chunk failed (attempted once, never retried) and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events | — |
-| `understanding_chunk_skipped` | a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk) | anomaly | agent_id, job_id, reason | — | events | — |
-| `understanding_chunk_gap` | a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node | anomaly | agent_id, job_id, gaps | — | events | — |
-| `understanding_snapshot_lag` | a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out) | anomaly | agent_id, waited_seconds | — | events | — |
-| `understanding_group_failed` | an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives | anomaly | agent_id, level, open_nodes, error | — | events | — |
-| `understanding_call_record_failed` | the audit rows of an understanding call could not be written; the node or group is kept and only the call record is lost | anomaly | agent_id, job_id, error | — | events | — |
-| `understanding_rebuild_failed` | an understanding rebuild failed on its last allowed attempt and was closed as failed | anomaly | agent_id, rebuild_id, attempts, error | — | events | — |
-| `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build | anomaly | agent_id, job_id, span_end | — | events | — |
-| `plugin_collector_cycle` | one interval collector finished a refresh cycle, in both outcomes — the only record that says the loop ran at all; three intervals without one is a collector that is alive but producing nothing | observation | collector, outcome, reason, cycle, schedule_id | — | events | — |
-| `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
-| `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |
-| `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events | ✓ |
-| `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events | — |
-| `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | events | — |
-| `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
-| `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
-| `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
-| `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them); host-level, no agent_id: one batch mixes every agent's events | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
-| `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
-| `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
-| `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |
-| `converge_sealed_input_changed` | a render wrote a file a live root has sealed as a unit input, so that unit can no longer be spawned until a new generation or an explicit re-admission (task #6403) | anomaly | writer, units, paths, liveness | — | events | — |
-| `converge_file_overwritten` | converge restored a repo-owned destination from its source — the current content no longer matched the recorded render, and this surface follows the checkout | anomaly | path, key, surface | — | events | — |
-| `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor has a finite automatic restart budget (task #4872) | anomaly | unit, stage, detail | — | events | — |
-| `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events | — |
-| `root_unit_stopped` | root unit generation exited inside its stop window — one INFO event per successful stop, carrying the measured graceful duration (task #5318) | noise | unit, generation, stopped_in_s | — | events | — |
-| `root_unit_stop_escalated` | root unit outlived its declared stop window and root killed its captured leader group with one SIGKILL (task #5318) | anomaly | unit, generation, pid, starttime, graceful_waited_s, reason | — | events | — |
-| `root_unit_stop_aborted` | root unit outlived its declared stop window and root refused to kill it because the leader identity was never captured or no longer matched (task #5318) | anomaly | unit, generation, pid, starttime, graceful_waited_s, reason | — | events | — |
-| `root_unit_failure_state` | root unit sits in an explicit failure state (intent running, and restart_failed, restart attempts exhausted) — emitted every health round while it holds (task #4872) | anomaly | unit, kind, detail, attempts, last_error | — | events | — |
-| `root_unit_breaker_open` | root unit spent its automatic restart budget on one continuous outage — the circuit breaker is open, so only the backoff ladder's capped cadence or a recovered database replaces it (task #5315) | anomaly | unit, attempts, detail | — | events | — |
-| `root_unit_operator_stop_unattended` | an explicit operator stop left a unit down past the alarm age — the stop is policy, but no owner came back for it (task #5611) | anomaly | unit, held_h, caller, stopped_at | — | events | — |
-| `root_unit_breaker_closed` | root unit's open circuit breaker closed again — a fresh ALIVE observation or an observed operator stop ended the outage (task #5315) | noise | unit, open_for_s, detail | — | events | — |
-| `root_unit_left_behind_reclaimed` | a unit's recorded previous process outlived the root that spawned it — this root stopped it before spawning its own replacement | anomaly | unit, pid | — | events | — |
-| `root_unit_not_revivable` | root health round observed a terminal probe verdict the unit cannot revive (unknown identity, inspection error, foreign listener) — emitted every round it is observed, WARNING | anomaly | unit, detail | — | events | — |
-| `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events | — |
-| `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events | — |
-| `root_diagnostic` | root diagnostic sampled a failing verdict (every sample while it persists, WARNING), reached no verdict -- ran out of its observation deadline or could not inspect at all (inconclusive / unavailable, INFO) -- or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events | — |
-| `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events | — |
-| `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events | — |
-| `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events | — |
-| `backup_dump_status` | latest scheduled logical dump outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | last_run_ok | — | events | — |
-| `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events | — |
-| `recovery_drill_status` | latest scheduled recovery drill outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | drill, last_run_ok | — | events | — |
-| `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events | — |
-| `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events | — |
-| `service_start_unready` | a non-critical service missed its readiness window at meiva start | anomaly | service | — | events | — |
-| `boot_retries_exhausted` | the boot-time meiva start failed through its whole attempt budget and is no longer retried | anomaly | attempts, exit_code | — | events | — |
-| `throwaway_pg_reap` | pg_ctl stop failed for an orphaned throwaway Postgres whose data directory is deleted next; a surviving postmaster would keep writing into the removed directory | anomaly | — | — | events | — |
-| `schedule_recovery_gated` | the serving-receipt gate has refused schedule relaunches for longer than the configured window — the published receipt does not name the live root (a helper-reseeded root publishes none) and `meiva start` is needed; one event per episode | anomaly | held_for_s | — | events | — |
-| `schedule_launch_refused` | a schedule needed a (re)launch and was refused or did not take — once per schedule per gate episode, carrying the reason | anomaly | schedule_id, reason | — | events | — |
-| `schedule_process_lost` | a schedule's session disappeared, or its session is a shell whose runner process is gone, and the manager recorded the schedule as an error — the detection itself, emitted once per loss at the moment it is seen; if nothing restarts the schedule, `schedule_stalled` follows two hours later as the second stage of the same outage | anomaly | schedule_id, status | — | events | — |
-| `schedule_not_progressing` | a resident schedule's own next-round deadline passed while its session stayed live | anomaly | schedule_id, status, overdue_seconds, alive_by | — | events | ✓ |
-| `schedule_stalled` | enabled non-completed schedule has had nothing running it for more than two hours — no session, or a session whose runner process is gone | anomaly | schedule_id, status, silent_seconds, session_missing_seconds, evidence, runner_detail, beat_written_at | — | events | — |
-| `schedule_convergence_abandoned` | the schedule manager stopped retrying a schedule whose session survives its reap or whose live session's launch provenance is unreadable, and recorded the schedule as an error; an explicit new revision lifts the stop | anomaly | schedule_id, reason, blocked_seconds | — | events | — |
-| `schedule_verify_failed` | meiva schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events | — |
-| `schedule_manager_state` | current per-machine counts of stalled, process-lost, and custody-blocked schedules | noise | stalled, process_lost, convergence_abandoned | — | events | — |
+| event_name | meaning | tier | key payload fields | family | destination |
+|------|------|------|-----------------|----|------|
+| `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events |
+| `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | events |
+| `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events |
+| `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events |
+| `machine_probe_failed` | agent-runner machine unreachable — one event per failed liveness probe | anomaly | machine, consecutive_failures, agent_count, carries_service | — | events |
+| `machine_agent_host_down` | machine answers its status probe but its agent host is not running — one event per liveness pass | anomaly | machine, agent_count, carries_service | — | events |
+| `machine_stopped_too_long` | host stopped longer than its maintenance window — one event per liveness pass | anomaly | machine, stopped_for_s | — | events |
+| `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
+| `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events |
+| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events |
+| `sdk_sampling_refresh_unfinished` | SDK sampling refresh worker retained after the finite shutdown wait | anomaly | — | — | events |
+| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events |
+| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events |
+| `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events |
+| `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events |
+| `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events |
+| `db_pool_acquire_timeout` | db pool acquire timeout; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | — | — | events |
+| `db_pool_acquire_slow` | db pool acquire slow; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events |
+| `db_pool_restore_timeout` | db pool restore timeout; host-level, no agent_id: the restore runs on a pooled connection shared by every agent the process hosts, so it is attributed by machine | anomaly | name, budget_ms, elapsed_ms, ended_by | — | events |
+| `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events |
+| `trace` | otel span export | noise | — | — | events |
+| `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
+| `passive_recall` | passive memory recall | noise | body, search_ms, injected | — | events |
+| `skill_recall` | skill recall | noise | candidates, offered, stage, outcome, latency_ms, work, reason | — | events |
+| `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events |
+| `last_msg` | last-message check | noise | — | — | events |
+| `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events |
+| `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to, unapplied_handoff_receipt, reason | — | events |
+| `turn_fault_lost_inbound` | a harness turn faulted before producing any text; the inbounds that started it were consumed and are never redelivered | anomaly | harness, turn_key, inbound_ids, reason | — | events |
+| `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events |
+| `delivery_stranded_wake` | a message reached a terminated owner with no live consumer and the delivery fallback woke it: the delivery-time auto-resurrect did not run because the message committed while the owner still read running | anomaly | inbound_id, kind | — | events |
+| `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
+| `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events |
+| `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events |
+| `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events |
+| `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events |
+| `exec_child_boot_failed` | exec child crashed before running the agent's code (bootstrap-class failure) | anomaly | exc_type, exc_msg | — | events |
+| `exec_cancelled` | execute_code cancelled | anomaly | — | — | events |
+| `exec_timeout` | execute_code timed out | anomaly | — | — | events |
+| `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
+| `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
+| `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events |
+| `exec_memory_guard_skipped` | the host memory guard found critical pressure but the largest exec sat at or below the relief floor, so it killed nothing | observation | agent_id, pid, footprint_bytes, floor_bytes, running, pressure, free_swap_bytes | — | events |
+| `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events |
+| `text` | LLM text output | noise | — | — | events |
+| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value, geometry_incident, geometry_phase, geometry_reason, geometry_elapsed_ms, geometry_layout_height, geometry_visual_height, geometry_visual_scale, geometry_html_inline_height, geometry_html_height, geometry_body_height, geometry_shell_height, geometry_shell_bottom, geometry_composer_height, geometry_composer_bottom | — | events |
+| `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
+| `alerts` | alert webhook heartbeat — epoch seconds of the last watchdog alert the webhook accepted | noise | last_ingest_timestamp_seconds | — | events |
+| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events |
+| `staged_upload_received` | one staged-upload request finished: body bytes, body receive time, entry path (Cloudflare colo or direct), status | noise | route, status, body_bytes, content_length, receive_ms, after_ms, total_ms, via_cloudflare, cf_colo, cf_connecting_ip, host | — | events |
+| `workspace_file_served` | one workspace file raw read finished: status, range, bytes, time to headers and to the last body byte, forwarded or local, entry path | noise | status, range, conditional, remote, body_bytes, content_length, completed, ttfb_ms, upstream_ms, body_ms, total_ms, via_cloudflare, cf_colo, host | — | events |
+| `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events |
+| `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events |
+| `gateway_event_loop` | gateway event-loop maximum callback lag and slow ticks (60s window) | noise | lag_ms, slow_ticks | — | events |
+| `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events |
+| `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
+| `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
+| `memory_index_patrol` | memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag | noise | pending_paths, consecutive_failures, over_limit, last_success_at | — | events |
+| `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events |
+| `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events |
+| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, target_id, ttl_s, new_expires_at | observation | — | — | events |
+| `browser_mcp_exit` | a browser-mcp daemon generation ended; attributes carry reason (stopped | upstream_exited | probes_unanswered | call_timeout_unanswered | call_timeouts_repeated); stopped is a service stop or update, every other reason is an upstream death the root restarts | observation | — | — | events |
+| `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events |
+| `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
+| `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
+| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are not replayed; the periodic pending scan finds them); host-level, no agent_id: one subscription serves every hosted agent | noise | — | — | events |
+| `host_dispatcher_reconnect_exhausted` | hosted dispatcher's wake subscription failed repeatedly without completing a read — exiting for supervisor recovery; carries the consecutive failure count and the last exception type; host-level, no agent_id: one subscription serves every hosted agent | anomaly | — | — | events |
+| `host_dispatcher_scan_failed` | hosted dispatcher's durable pending scan failed; the wake subscription remains open and attributes carry the next scan backoff_s; host-level, no agent_id: the scan covers every hosted agent | anomaly | backoff_s | — | events |
+| `host_dispatcher_restart_required` | a hosted turn refused its bounded cancellation after a stall — the dispatcher is exiting for supervisor recovery | anomaly | — | — | events |
+| `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | events |
+| `host_config_rejected` | a hosted wake was consumed without a turn because the agent's stored model config cannot build (unknown model or missing provider key) — logged once per stored config state (fingerprint); the pending inbound is kept until the overlay is fixed | anomaly | — | — | events |
+| `host_config_normalized` | a hosted wake bound a stored llm_model pin as its registered fallback because the registry has withdrawn the pinned model — the turn and its usage attribution run on the fallback; logged once per stored config state (fingerprint) | anomaly | — | — | events |
+| `spawn_config_normalized` | a spawn request's config_overlay carried a withdrawn llm_model — the gateway settled it to the registered fallback before the row was created, and the response carries the receipt (requested, resolved) | anomaly | — | — | events |
+| `spawn_overlay_model_normalized` | the spawn row INSERT settled a withdrawn llm_model in the overlay to its registered fallback — the last-mile guard for client paths that compose the map outside the gateway preflight | anomaly | — | — | events |
+| `restart_config_normalized` | a restart config_overlay carried a withdrawn llm_model — it was settled to the registered fallback before the overlay update and the restart payload | anomaly | — | — | events |
+| `host_turn_crashed` | a hosted turn task raised — the task is dropped and the next wake retries from the checkpoint; neighbours are unaffected. Carries exception_type, plus config_fingerprint when the stored config was read before the failure | anomaly | — | — | events |
+| `host_agent_prepared` | the host built an agent's per-agent runtime (chat model + startup reconcile) on a cold path — carries duration_ms and a reason of cold / config_changed / evicted, so a wake that pays the cold cost is distinguishable from one that does not, and a cache thrashing on config churn is visible as reason mix | noise | — | — | events |
+| `host_started` | the hosted agent-runner finished process-scope boot and its dispatcher is live | noise | — | — | events |
+| `host_exit_draining` | a SIGTERMed agent-host closed admission and gave every running turn a lifecycle command: a system:restart inbound it wrote, or the unfinished restart/terminate the agent already had; carries both counts, the drain budget and how many turns it now waits for | observation | — | — | events |
+| `host_exit_drained` | every turn a SIGTERMed agent-host waited for ended within the drain budget — at its restart, or before reaching it, in which case the restart stays pending for the next host | noise | — | — | events |
+| `host_exit_drain_timeout` | a running turn did not settle within the SIGTERMed agent-host's drain budget and is cancelled; carries the agent, its last turn activity and the restart inbound through which the next host wakes it | anomaly | — | — | events |
+| `host_exit_restart_failed` | a SIGTERMed agent-host wrote no restart for a running turn: the write failed, or the drain deadline passed first; the turn is still waited for, and without the restart a turn cut short is not woken again until new input arrives | anomaly | — | — | events |
+| `host_exit_idle_notes_failed` | a SIGTERMed agent-host wrote no passive lifecycle notes for the idle agents whose turns it owed: the write failed, or the drain deadline passed first; their turns are still waited for, but a turn cut short is not woken again until new input | anomaly | reason | — | events |
+| `host_exit_repeated` | a further SIGTERM reached an agent-host already draining; it is ignored | noise | — | — | events |
+| `host_stdout_log_rotated` | the hosted daemon rotated its raw stdout transcript at the size ceiling (task #2356) — carries size and ceiling; a crash storm shows up as repeated rotation events instead of an unbounded file | noise | — | — | events |
+| `host_turn_uncancellable` | a hosted turn did not unwind after being cancelled — it is blocked where asyncio cannot interrupt it (a C call), so the host stopped waiting and exited. Carries the agent, how long the cancel was pending (waited_s), and the agent's real activity clock (last_active_at / idle_s from agents_meta, NOT the /api/agents field of the same name, which is MAX(inbound_messages.created_at) and goes stale during long turns — issue #183) so a slow shutdown is distinguishable from a genuine wedge. The turn resumes from its checkpoint on restart. Process mode had no equivalent because SIGKILL always lands | anomaly | — | — | events |
+| `host_turn_stall_timeout` | the hosted stall guard aborted a graph.ainvoke whose turn clock (base/agents/observation/turn_progress.py: node enters + completed LLM steps) was silent past MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS (turn activity = node enter, completed LLM step, streamed chunk) — the turn-level injection guard of task #2417. The invocation was cancelled and unwound; the row settles to idling; the next wake resumes from the checkpoint | anomaly | — | — | events |
+| `host_turn_stall_uncancellable` | a stalled invocation that had been cancelled for the bounded unwind window REFUSED to unwind (blocked where asyncio cannot interrupt it — a C call). The host cannot fix this in-process: it signals a daemon restart so the supervisor recovers the turn from its checkpoint | anomaly | — | — | events |
+| `host_turn_corpse_marked` | a hosted turn crashed and the row was stamped with the corpse marker (last_turn_fatal_at) — the reaper terminates it once the grace window elapses unless a completed turn clears the mark first | anomaly | — | — | events |
+| `corpse_stamp_failed` | the corpse marker stamp failed after a hosted turn crash — the row keeps looking alive until a later stamp or a completed turn; the reaper cannot see this death | anomaly | — | — | events |
+| `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events |
+| `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events |
+| `host_database_beat_failed` | the agent host's database beat failed — the reaper leg timed out or the pool was unreachable; carries the consecutive failure count, the limit and whether this failure ends the host. One event per failure, and only from the beat: a log line that merely mentions the words is not this event; host-level, no agent_id: the beat belongs to the host process | anomaly | machine, pool, failures, limit, will_exit, error | — | events |
+| `host_database_beat_recovered` | the agent host's database beat succeeded again after failing; carries how many consecutive failures it cleared, so the retry result is on the record and not only implied by the absence of further failures; host-level, no agent_id: the beat belongs to the host process | noise | machine, pool, failures_cleared | — | events |
+| `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events |
+| `corpse_reaper_browser_release_failed` | a reaped corpse's browser-page release failed after its durable terminal transition; later lifecycle cleanup can retry it | anomaly | — | — | events |
+| `corpse_reaper_shell_cleanup_failed` | a reaped corpse's persistent-shell cleanup failed after its durable terminal transition; the TTL reaper retains and retries its rows | anomaly | — | — | events |
+| `host_turn_stall_aborted` | a hosted turn task ended after its no-progress abort: the invocation unwound and was dropped; the runtime was discarded by run_turn, so the next wake re-runs the startup reconcile before resuming from the checkpoint | anomaly | — | — | events |
+| `host_abort_reconcile_skipped` | the settled hosted turn abort skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events |
+| `host_abort_reconcile_failed` | the immediate inbound reconcile at a settled hosted turn abort raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events |
+| `host_turn_reconcile_skipped` | the finished hosted turn skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events |
+| `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events |
+| `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events |
+| `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events |
+| `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events |
+| `workspace_hygiene_reminded` | agent-host scanned an agent's local workspace after a normal turn settled to idle, found one or more non-excluded directories above workspace_hygiene_max_items_per_dir past cooldown, and enqueued a workspace_hygiene system_note; carries overflow_dirs, top_dir and top_count | observation | — | — | events |
+| `workspace_hygiene_check_failed` | the best-effort post-turn workspace hygiene check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events |
+| `personal_dream_reminded` | agent-host inspected an agent's local `<workspace>/memory/` after a normal turn settled to idle, matched Personal Self-Dream capacity or active-change criteria past cooldown, and enqueued a personal_dream system_note; carries reason, index_lines and file_count | observation | — | — | events |
+| `personal_dream_check_failed` | the best-effort post-turn personal Self-Dream check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events |
+| `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file |
+| `node_exit` | LangGraph node exited | noise | count, nodes | — | events |
+| `service_started` | gateway/daemon started | noise | name, pid | — | events |
+| `halt` | turn stopped (idle/compact/system) | noise | body | — | events |
+| `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
+| `agent_resurrected` | agent resurrected | observation | — | — | events |
+| `auto_resurrect_failed` | an automatic resurrect failed for a possibly transient reason; the triggering inbound stays queued for a later or manual resurrect | observation | — | — | events |
+| `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events |
+| `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events |
+| `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events |
+| `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events |
+| `harness_interrupt_failed` | interrupting an external harness turn raised; the durable interrupt row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events |
+| `harness_delivery_pool_timeout` | delivering the inbox to an external harness could not borrow a database connection; nothing was reserved and the same attempt is made again after a short wait | anomaly | — | — | events |
+| `harness_unsettled_outcome_failed` | an invocation failed and the outcome of the inputs it had handed to the harness could not be recorded; they stay claimed and the next harness turn reconciles them against the harness's record | anomaly | — | — | events |
+| `harness_input_reconciled` | an input handed to an external harness and never acknowledged was judged against the harness's own durable record: in_context settles it, not_found returns it to the queue to be delivered again, persisted_undelivered leaves it claimed for the harness to deliver | noise | — | — | events |
+| `harness_reconcile_failed` | the harness has no durable record to ask about inputs handed to it (no session record or file), or its session could not be retired first, or a record that exists could not be read; nothing is guessed: the inputs are consumed with the uncertainty marker, or, when an existing record could not be read, left claimed for the next wake | anomaly | — | — | events |
+| `harness_event_stale` | a frame of an earlier harness process arrived after a later generation began and was dropped before it could settle an input or end a turn | noise | — | — | events |
+| `agy_acp_attribution_degraded` | an Antigravity ACP prompt reached its attribution deadline after completion and settled with only attributed output | anomaly | turn_id, unresolved_rows, pending_frames | — | events |
+| `agy_acp_timer_reply_expired` | Antigravity detached timers reached their reply deadlines and released process keepalive | anomaly | timer_count, foreground_active | — | events |
+| `harness_input_requeued` | an external harness refused an input or declared it lost; the inbound went back to the queue at its original position and is delivered again | noise | — | — | events |
+| `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events |
+| `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events |
+| `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events |
+| `harness_close_residue_gone` | every process a failed harness close left running has exited, so the agent's next session is admitted | noise | — | — | events |
+| `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events |
+| `harness_close_failures` | external harness session closes raised while the agent host was running; host-level, no agent_id: one count over every hosted agent's closes | anomaly | — | — | events |
+| `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events |
+| `harness_usage_uncertain` | an external harness reported incomplete or ambiguous usage, so the turn carries observed counters without an exact accounting row | anomaly | — | — | events |
+| `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events |
+| `harness_control_not_shown` | a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place on that timeline and is logged instead | anomaly | — | — | events |
+| `harness_live_timeline_failed` | the live read of a harness's CLI record for the running turn failed; the next read tries again | anomaly | — | — | events |
+| `harness_record_not_found` | a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet | anomaly | — | — | events |
+| `harness_record_unreadable` | a harness session's record file is there but in a form the reader does not read, so the timeline is empty | anomaly | — | — | events |
+| `harness_record_row_unread` | a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind per process; host-level, no agent_id: the report is deduplicated across every agent the process reads records for | anomaly | — | — | events |
+| `harness_timing_ambiguous` | native reasoning timing has ambiguous record identities; those measurements remain unknown | anomaly | count | — | events |
+| `harness_timing_collection_failed` | native reasoning timing could not be collected; provider execution and the original record remain available | anomaly | — | — | events |
+| `harness_timing_record_unavailable` | the native timing record could not be located; provider execution is unchanged | anomaly | — | — | events |
+| `harness_timing_unreadable` | the native timing sidecar is unreadable; the original record remains readable with unknown timing | anomaly | — | — | events |
+| `harness_reply_key_conflict` | a reply's publication key already names other content; the publication is left as it was | anomaly | — | — | events |
+| `harness_timeline_inputs_unmatched` | inputs in a harness's CLI record match no inbox row within the row cap the read scans; they are not shown | anomaly | — | — | events |
+| `harness_registration_renewal_failed` | an external harness session could not renew its registration | anomaly | — | — | events |
+| `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events |
+| `handoff_instructions_file_failed` | the handoff instructions could not be saved to the agent's workspace; the first message carries no pointer to the file, so the agent cannot re-read its instructions after a compaction | anomaly | — | — | events |
+| `harness_notice_failed` | an unsolicited provider report could not be written as an inbound; the report is lost and the agent that was waiting on it is never told | anomaly | — | — | events |
+| `harness_background_work_lost` | an external harness CLI process was replaced while it held background work (a command, a sub-agent, a timer); the agent's next input carries a note naming what was lost | observation | — | — | events |
+| `harness_background_work_evicted` | the host evicted a hosted runtime whose external CLI still held background work, because the cache was over its size bound with nothing idle left to evict; its next input carries a note naming what was lost | anomaly | — | — | events |
+| `agy_subagent_descriptor_unreadable` | an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's text and tool calls are not shown on the timeline; the turn is unaffected | observation | — | — | events |
+| `harness_quota_exhausted` | an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; triggering inbox messages were returned to pending and the agent halted until a new message | anomaly | harness, model, requeued_inbound_ids, requeued_count, reason | — | events |
+| `harness_turn_stalled` | an external harness sent no event past the stall threshold while an input or a turn was unsettled; the session was retired, unanswered inbox messages were returned to pending and the agent halted until a new message | anomaly | harness, model, silent_seconds, stall_seconds, requeued_inbound_ids, requeued_count, reason | — | events |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, cache_write_30m, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, price_write_30m, unpriced, usage_kind, attribution, source, parent_call_id, call_id, occurred_at, provider_request_id, cost_usd_exact, complete | — | events |
+| `turn_end` | one turn finished | observation | ok, duration_seconds, ended_with, ended_with_reason | — | events |
+| `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events |
+| `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events |
+| `llm_usage_ledger_write_failed` | synchronous LLM usage commit failed | anomaly | call_id, reason, error_type, failures | — | events |
+| `llm_usage_unpriced` | a completed LLM call had no price in the catalog (unknown model or a missing cache-write rate) | anomaly | model, cause, missing_classes | — | events |
+| `llm_turn_aborted` | turn aborted after retries | anomaly | error_class, provider, status, context_overflow, cause | LLM_ERROR | events |
+| `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events |
+| `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
+| `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events |
+| `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events |
+| `llm_cancelled` | LLM call cancelled | anomaly | — | — | events |
+| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, reminder_shown, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
+| `compact_request` | compact requested | noise | — | — | events |
+| `auto_compact` | auto-compact | noise | — | — | events |
+| `compact_reminder` | compact reminder | noise | — | — | events |
+| `circuit_breaker_open` | heartbeat circuit breaker opened | noise | — | — | events |
+| `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | events |
+| `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events |
+| `compact_boundary_stamp` | compact boundary stamp failed (segment anchor not recorded) | noise | — | — | events |
+| `open_questions_unavailable` | an agent's open questions could not be read; the list was left out of its context | noise | — | — | events |
+| `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events |
+| `reply_suggestion_gate` | reply suggestion gate probability | noise | — | — | events |
+| `reply_suggestion_gate_failed` | reply suggestion gate call failed | anomaly | — | — | events |
+| `reply_suggestion_model_key_missing` | reply suggestion model has no provider key, suggestions degrade to none | anomaly | — | — | events |
+| `reply_suggestion_draft_failed` | reply suggestion draft call failed | anomaly | — | — | events |
+| `reply_suggestion_draft_rejected` | reply suggestion draft empty or too long | noise | — | — | events |
+| `harness_cli_update_round` | one external harness CLI update round — status, updated/failed counts, and outcome details | observation | status, updated_count, failed_count, reason, outcomes | — | events |
+| `claude_auth_keepalive_round` | one Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code | observation | status, reason, exit_code | — | events |
+| `agent_watch_round` | one agent-watch round — duties judged, silent, woken, and unreadable | observation | watched, silent, sent, blind | — | events |
+| `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events |
+| `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | rounds, fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events |
+| `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events |
+| `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds | — | events |
+| `label_generated` | label auto-generated | noise | — | — | events |
+| `label_generate_failed` | label generation failed | anomaly | — | — | events |
+| `label_generate_skipped` | label generation skipped | noise | — | — | events |
+| `label_generate_empty` | label generation empty | noise | — | — | events |
+| `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events |
+| `understanding_enqueue_failed` | a chunk-triggered understanding job could not be enqueued (best-effort; the next trigger covers the same stretch) | anomaly | agent_id, compact_version, error | — | events |
+| `understanding_chunk_failed` | a queued understanding chunk failed (attempted once, never retried) and stays undescribed | anomaly | agent_id, job_id, attempts, error | — | events |
+| `understanding_chunk_skipped` | a queued understanding chunk was closed without a node (unsupported provider path or an empty chunk) | anomaly | agent_id, job_id, reason | — | events |
+| `understanding_chunk_gap` | a chunk was described only in part: the listed stretches (overlap leftovers, turns missing from a closing snapshot) have no node | anomaly | agent_id, job_id, gaps | — | events |
+| `understanding_snapshot_lag` | a compaction stamped its boundary before the checkpoint held the last message (the bounded wait timed out) | anomaly | agent_id, waited_seconds | — | events |
+| `understanding_group_failed` | an upper-level understanding grouping check failed; the level's open nodes stay ungrouped until its next check threshold of new nodes arrives | anomaly | agent_id, level, open_nodes, error | — | events |
+| `understanding_call_record_failed` | the audit rows of an understanding call could not be written; the node or group is kept and only the call record is lost | anomaly | agent_id, job_id, error | — | events |
+| `understanding_rebuild_failed` | an understanding rebuild failed on its last allowed attempt and was closed as failed | anomaly | agent_id, rebuild_id, attempts, error | — | events |
+| `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build | anomaly | agent_id, job_id, span_end | — | events |
+| `plugin_collector_cycle` | one interval collector finished a refresh cycle, in both outcomes — the only record that says the loop ran at all; three intervals without one is a collector that is alive but producing nothing | observation | collector, outcome, reason, cycle, schedule_id | — | events |
+| `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
+| `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events |
+| `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events |
+| `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events |
+| `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | events |
+| `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events |
+| `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events |
+| `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events |
+| `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events |
+| `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events |
+| `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events |
+| `converge_sealed_input_changed` | a render wrote a file a live root has sealed as a unit input, so that unit can no longer be spawned until a new generation or an explicit re-admission (task #6403) | anomaly | writer, units, paths, liveness | — | events |
+| `converge_file_overwritten` | converge restored a repo-owned destination from its source — the current content no longer matched the recorded render, and this surface follows the checkout | anomaly | path, key, surface | — | events |
+| `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor has a finite automatic restart budget (task #4872) | anomaly | unit, stage, detail | — | events |
+| `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events |
+| `root_unit_stopped` | root unit generation exited inside its stop window — one INFO event per successful stop, carrying the measured graceful duration (task #5318) | noise | unit, generation, stopped_in_s | — | events |
+| `root_unit_stop_escalated` | root unit outlived its declared stop window and root killed its captured leader group with one SIGKILL (task #5318) | anomaly | unit, generation, pid, starttime, graceful_waited_s, reason | — | events |
+| `root_unit_stop_aborted` | root unit outlived its declared stop window and root refused to kill it because the leader identity was never captured or no longer matched (task #5318) | anomaly | unit, generation, pid, starttime, graceful_waited_s, reason | — | events |
+| `root_unit_failure_state` | root unit sits in an explicit failure state (intent running, and restart_failed, restart attempts exhausted) — emitted every health round while it holds (task #4872) | anomaly | unit, kind, detail, attempts, last_error | — | events |
+| `root_unit_breaker_open` | root unit spent its automatic restart budget on one continuous outage — the circuit breaker is open, so only the backoff ladder's capped cadence or a recovered database replaces it (task #5315) | anomaly | unit, attempts, detail | — | events |
+| `root_unit_operator_stop_unattended` | an explicit operator stop left a unit down past the alarm age — the stop is policy, but no owner came back for it (task #5611) | anomaly | unit, held_h, caller, stopped_at | — | events |
+| `root_unit_breaker_closed` | root unit's open circuit breaker closed again — a fresh ALIVE observation or an observed operator stop ended the outage (task #5315) | noise | unit, open_for_s, detail | — | events |
+| `root_unit_left_behind_reclaimed` | a unit's recorded previous process outlived the root that spawned it — this root stopped it before spawning its own replacement | anomaly | unit, pid | — | events |
+| `root_unit_not_revivable` | root health round observed a terminal probe verdict the unit cannot revive (unknown identity, inspection error, foreign listener) — emitted every round it is observed, WARNING | anomaly | unit, detail | — | events |
+| `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |
+| `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events |
+| `root_diagnostic` | root diagnostic sampled a failing verdict (every sample while it persists, WARNING), reached no verdict -- ran out of its observation deadline or could not inspect at all (inconclusive / unavailable, INFO) -- or recovered (once, INFO); observation only, no recovery authority | anomaly | diagnostic, verdict, detail, consecutive_failures | — | events |
+| `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events |
+| `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events |
+| `backup_dump_failed` | the scheduled daily logical dump failed; it is not attempted again before the next backup hour | anomaly | detail | — | events |
+| `backup_dump_status` | latest scheduled logical dump outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | last_run_ok | — | events |
+| `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events |
+| `recovery_drill_status` | latest scheduled recovery drill outcome gauge (last_run_ok=1 healthy, 0 failed) | noise | drill, last_run_ok | — | events |
+| `health_probe_failing` | the cluster health probe found a failing check; repeated on every unhealthy run | anomaly | check, failure_class, message | — | events |
+| `health_probe_ran` | the cluster health probe completed a run, healthy or not (its own heartbeat) | observation | unhealthy_checks | — | events |
+| `service_start_unready` | a non-critical service missed its readiness window at meiva start | anomaly | service | — | events |
+| `boot_retries_exhausted` | the boot-time meiva start failed through its whole attempt budget and is no longer retried | anomaly | attempts, exit_code | — | events |
+| `throwaway_pg_reap` | pg_ctl stop failed for an orphaned throwaway Postgres whose data directory is deleted next; a surviving postmaster would keep writing into the removed directory | anomaly | — | — | events |
+| `schedule_recovery_gated` | the serving-receipt gate has refused schedule relaunches for longer than the configured window — the published receipt does not name the live root (a helper-reseeded root publishes none) and `meiva start` is needed; one event per episode | anomaly | held_for_s | — | events |
+| `schedule_launch_refused` | a schedule needed a (re)launch and was refused or did not take — once per schedule per gate episode, carrying the reason | anomaly | schedule_id, reason | — | events |
+| `schedule_process_lost` | a schedule's session disappeared, or its session is a shell whose runner process is gone, and the manager recorded the schedule as an error — the detection itself, emitted once per loss at the moment it is seen; if nothing restarts the schedule, `schedule_stalled` follows two hours later as the second stage of the same outage | anomaly | schedule_id, status | — | events |
+| `schedule_not_progressing` | a resident schedule's own next-round deadline passed while its session stayed live | anomaly | schedule_id, status, overdue_seconds, alive_by | — | events |
+| `schedule_stalled` | enabled non-completed schedule has had nothing running it for more than two hours — no session, or a session whose runner process is gone | anomaly | schedule_id, status, silent_seconds, session_missing_seconds, evidence, runner_detail, beat_written_at | — | events |
+| `schedule_convergence_abandoned` | the schedule manager stopped retrying a schedule whose session survives its reap or whose live session's launch provenance is unreadable, and recorded the schedule as an error; an explicit new revision lifts the stop | anomaly | schedule_id, reason, blocked_seconds | — | events |
+| `schedule_verify_failed` | meiva schedules verify found in-store schedule scripts that fail dry-import, an undefined-name read or call-signature binding, or the sweep itself failed | anomaly | checked, red, tool_error, detail | — | events |
+| `schedule_manager_state` | current per-machine counts of stalled, process-lost, and custody-blocked schedules | noise | stalled, process_lost, convergence_abandoned | — | events |
 
 ## 4. Log (bare logs, category=log)
 

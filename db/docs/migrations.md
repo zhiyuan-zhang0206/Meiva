@@ -152,7 +152,7 @@ caught only by real cross-machine force-terminate in prod).
 
 `scripts/audit/schema_drift.py` compares a live database's public columns with
 `db/schema.sql` and reports every extra or missing table and column with a class
-— a designed runtime object (checkpoint tables, `telemetry_events` partitions)
+— a designed runtime object (checkpoint tables; the unwritten `telemetry_events` partitions until the table is dropped)
 or unexplained residue. Run it before writing a migration for an object you
 cannot find in the baseline, and after an upgrade:
 [schema drift audit](../../scripts/audit/docs/schema-drift.md).

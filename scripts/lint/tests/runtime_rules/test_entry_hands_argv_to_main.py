@@ -29,7 +29,6 @@ _ENTRIES = [
     ("scripts/audit/ensure_plugins_loaded_context_census.py", None),
     ("scripts/audit/impact_census.py", None),
     ("scripts/audit/schema_drift.py", None),
-    ("scripts/audit/sdk_usage.py", None),
     ("scripts/audit/where_used.py", None),
     (
         "scripts/ci/cli.py",

@@ -178,9 +178,9 @@ class CommandRuntime:
     # read (the process `settings`), so the command's writer takes the two answers as callables
     # instead of reaching for the process singleton itself. When the command itself tears down the
     # local `otel-collector` sidecar (`suppress_local_otlp`), loopback OTLP HTTP export is skipped
-    # so exit drain does not block retrying a collector the command just stopped; JSONL mirror,
-    # `telemetry_events` and `observed_metrics` still record every event, and an explicit external
-    # `MEIVA_TELEMETRY_OTLP_ENDPOINT` still exports.
+    # so exit drain does not block retrying a collector the command just stopped; the events the
+    # command emits after that point are not stored anywhere (the collector is their only path to
+    # Loki), and an explicit external `MEIVA_TELEMETRY_OTLP_ENDPOINT` still exports.
     def otlp_enabled(self) -> bool:
         from base.config import settings
 

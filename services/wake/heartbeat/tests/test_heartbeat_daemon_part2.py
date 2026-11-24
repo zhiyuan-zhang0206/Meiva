@@ -12,59 +12,28 @@ starts the normal idle clock, so after the window expires the agent still waits
 
 from __future__ import annotations
 
-import random
 import time
-from collections.abc import Iterator
-from pathlib import Path
 from typing import cast
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.agents.tests.units import spawn_agent
-from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.paths import meiva_home
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.wake.heartbeat.daemon import reconcile_checkin_outcomes, sweep_backoff_resets
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 from services.wake.heartbeat.tests.heartbeat_support import BACKOFF_MAX_INTERVAL_S
 
 # Explicit threshold so the assertions do not ride on the configured default.
 _THRESHOLD_S = 300.0
-
-
-@pytest.fixture
-def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[telemetry.EventPipeline]:
-    """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(
-        now=system_clock().now,
-        database=lambda: database,
-        machine=machine_identity,
-        home=unit_home,
-        otlp_enabled=lambda: False,
-        otlp_endpoint=lambda: "http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
-    try:
-        telemetry.init_telemetry(
-            home=meiva_home(),
-            process="test-wake-service",
-            pipeline=pipeline,
-            machine_reader=machine_identity.name,
-        )
-        yield pipeline
-    finally:
-        pipeline.stop(timeout=2)
 
 
 @pytest.fixture
@@ -140,69 +109,15 @@ def _selected(pool: ConnectionPool) -> dict[int, float]:
     }
 
 
-def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
-    """The latest heartbeat_nudged mirror line for `agent_id` — (event_name,
-    level, idle_minutes), or None while the drain thread has not landed it."""
-    import json
-    from datetime import UTC, datetime
-
-    from base.paths import logs_dir, meiva_home
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
-        return None
-    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if obj.get("event_name") == "heartbeat_nudged" and obj.get("agent_id") == agent_id:
-            return obj["event_name"], obj["level"], int(obj["attributes"]["idle_minutes"])
-    return None
-
-
 # ───────────── consecutive-failure backoff (Task #1928) ─────────────
 
 
-def _mirror_event(agent_id: int, event_name: str) -> dict[str, object] | None:
-    """The latest mirror line for (agent, event), or None while the drain
-    thread has not landed it."""
-    import json
-    from datetime import UTC, datetime
-
-    from base.paths import logs_dir, meiva_home
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
-    if not path.exists():
-        return None
-    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if obj.get("event_name") == event_name and obj.get("agent_id") == agent_id:
-            return obj
-    return None
-
-
-def _poll_mirror(
-    agent_id: int, event_name: str, timeout_s: float = 2.0
+def _latest_event(
+    events: EmittedEvents, agent_id: int, event_name: str
 ) -> dict[str, object] | None:
-    deadline = time.monotonic() + timeout_s
-    ev = None
-    while time.monotonic() < deadline:
-        telemetry.flush()
-        ev = _mirror_event(agent_id, event_name)
-        if ev is not None:
-            break
-        time.sleep(0.05)
-    return ev
+    """The latest emitted event for (agent, event) as `{"attributes": ...}`, or None."""
+    matching = [event for event in events.named(event_name) if event.agent_id == agent_id]
+    return {"attributes": matching[-1].attributes} if matching else None
 
 
 class TestNudgeBackoffB7:
@@ -249,7 +164,6 @@ class TestNudgeBackoffB7:
         self._set_level(db_conn, aid, 2)
         assert aid not in _selected(pool)
 
-    @pytest.mark.usefixtures("event_pipeline")
     def test_reconcile_raises_level_after_n_consecutive_noops(
         self,
         redis_url: str,
@@ -260,6 +174,7 @@ class TestNudgeBackoffB7:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -287,7 +202,7 @@ class TestNudgeBackoffB7:
             row = cur.fetchone()
             assert row is not None
             assert row[0] == 1
-        ev = _poll_mirror(aid, "heartbeat_backoff_raised")
+        ev = _latest_event(emitted_events, aid, "heartbeat_backoff_raised")
         assert ev is not None
         attributes = cast("dict[str, object]", ev["attributes"])
         assert attributes["level"] == 1
@@ -413,7 +328,6 @@ class TestNudgeBackoffB7:
             assert row is not None
             assert row[0] == max_level
 
-    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_resets_level_on_real_inbound(
         self,
         redis_url: str,
@@ -424,6 +338,7 @@ class TestNudgeBackoffB7:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -453,13 +368,12 @@ class TestNudgeBackoffB7:
             row = cur.fetchone()
             assert row is not None
             assert row[0] == 0
-        ev = _poll_mirror(aid, "heartbeat_backoff_reset")
+        ev = _latest_event(emitted_events, aid, "heartbeat_backoff_reset")
         assert ev is not None
         attributes = cast("dict[str, object]", ev["attributes"])
         assert attributes["previous_level"] == 2
         assert attributes["reason"] == "real_inbound"
 
-    @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_leaves_level_without_engagement(
         self,
         redis_url: str,
@@ -470,6 +384,7 @@ class TestNudgeBackoffB7:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -494,9 +409,8 @@ class TestNudgeBackoffB7:
             row = cur.fetchone()
             assert row is not None
             assert row[0] == 2
-        assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None
+        assert _latest_event(emitted_events, aid, "heartbeat_backoff_reset") is None
 
-    @pytest.mark.usefixtures("event_pipeline")
     def test_passive_lifecycle_note_neither_blocks_checkin_nor_resets_backoff(
         self,
         redis_url: str,
@@ -507,6 +421,7 @@ class TestNudgeBackoffB7:
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
+        emitted_events: EmittedEvents,
     ) -> None:
         aid = _make_idle(
             db_conn,
@@ -549,12 +464,11 @@ class TestNudgeBackoffB7:
             cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
             row = cur.fetchone()
             assert row == (2,)
-        assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None
+        assert _latest_event(emitted_events, aid, "heartbeat_backoff_reset") is None
 
     # meiva:note
     # An interrupted agent has a pending note and message, so it is woken by them and no
     #         heartbeat is selected for it; the stop button's passive note holds nothing back.
-    @pytest.mark.usefixtures("event_pipeline")
     def test_an_interrupts_note_and_message_come_before_any_heartbeat(
         self,
         redis_url: str,

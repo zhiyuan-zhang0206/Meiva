@@ -1,11 +1,14 @@
-"""Canonical id-free unified-event bytes shared by every sink."""
+"""Canonical id-free unified-event bytes shared by every sink, and the surrogate id read from them.
+
+`event_id` hashes the Loki line and its nanosecond timestamp, so the emitter and a Loki reader derive
+the same id for one event."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
 from datetime import datetime
-from hashlib import sha256
+from hashlib import blake2b, sha256
 from typing import Protocol
 
 
@@ -76,10 +79,14 @@ def event_payload(event: _SerializableEvent) -> dict[str, object]:
 
 
 def event_line(event: _SerializableEvent) -> str:
-    """Serialize the one byte representation used by JSONL, OTLP, and Loki."""
+    """Serialize the one byte representation used by OTLP and Loki."""
     return json.dumps(event_payload(event), default=str, separators=(",", ":"), ensure_ascii=False)
 
 
 def event_line_digest(event: _SerializableEvent) -> str:
     """Return the full byte digest retained by producer receipts."""
     return sha256(event_line(event).encode()).hexdigest()
+
+
+def event_id(line: str, ts_ns: int) -> int:
+    return int.from_bytes(blake2b(f"{ts_ns}:{line}".encode(), digest_size=8).digest(), "big")

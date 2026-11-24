@@ -1,7 +1,7 @@
 # meiva:note
 # `services.upkeep.events_maintenance.daemon` against the throwaway Postgres.
 #
-# The hourly pass replays the JSONL mirror, audits unknown writers, samples the checkpoint tables
+# The hourly pass audits unknown writers, samples the checkpoint tables
 # and vacuums inside the quiet window; the service runs it beside the resolution and
 # registry-gauge loops under one TaskGroup, so a loop that raises ends the process while a pass that
 # overruns its deadline only fails health. Each of those is observed here on real rows, a real health
@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -34,7 +33,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.tests.pool_probe import PoolProbe
 from base.db.tests.pool_probe import pool_probe as pool_probe
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry.delivery.mirror import event_id
 from services.upkeep.events_maintenance import daemon
 from services.upkeep.events_maintenance.tests.db_faults import table_locked, table_missing
 from services.upkeep.events_maintenance.tests.service_probe import (
@@ -49,7 +47,7 @@ from services.upkeep.events_maintenance.tests.slices import events_maintenance_c
 # meiva:note
 # 13:00 in America/Los_Angeles: outside the vacuum window, so a pass never dials a direct connection.
 _NOW = datetime(2026, 10, 3, 20, 0, tzinfo=UTC)
-_MIRRORED_AT = "2026-10-02T12:00:00+00:00"
+_LEDGER_AT = "2026-10-02T12:00:00+00:00"
 
 
 @pytest.fixture
@@ -61,116 +59,25 @@ def pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[ConnectionPoo
         p.close()
 
 
-def _agent(db: psycopg.Connection) -> int:
-    row = db.execute("INSERT INTO agents (label) VALUES ('rolled') RETURNING id").fetchone()
-    assert row is not None
-    db.commit()
-    return int(row[0])
-
-
-def _mirror_line(agent_id: int, marker: str) -> bytes:
-    body: dict[str, Any] = {
-        "ts": _MIRRORED_AT,
-        "trace_id": None,
-        "span_id": None,
-        "agent_id": agent_id,
-        "machine": marker,
-        "cluster": "c",
-        "process": "p",
-        "category": "telemetry",
-        "event_name": "llm_usage",
-        "level": "info",
-        "source": "system",
-        "target_agent_id": None,
-        "attributes": {"in_total": 5, "out_total": 2, "model": "m"},
-    }
-    text = json.dumps(body, separators=(",", ":"))
-    body["id"] = event_id(text, int(1_790_000_000 * 1e9))
-    return (json.dumps(body, separators=(",", ":")) + "\n").encode()
-
-
 def _pass(
     pool: ConnectionPool,
     database: Database,
     process_config: ConfigBoot,
-    mirror_dir: Path,
     progress: LoopProgress,
 ) -> None:
     daemon.run_maintenance(
-        pool,
-        progress,
-        events_maintenance_config(process_config, mirror_dir=mirror_dir),
-        database,
-        now=_NOW,
-        host="local",
+        pool, progress, events_maintenance_config(process_config), database, now=_NOW
     )
 
 
-def test_the_pass_replays_the_mirror_and_marks_success(
-    db_conn: psycopg.Connection,
-    database: Database,
-    pool: ConnectionPool,
-    process_config: ConfigBoot,
-    tmp_path: Path,
+def test_the_pass_marks_success(
+    database: Database, pool: ConnectionPool, process_config: ConfigBoot
 ) -> None:
-    agent = _agent(db_conn)
-    (tmp_path / "events-20261002.jsonl").write_bytes(_mirror_line(agent, "mirrored"))
     progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
 
-    _pass(pool, database, process_config, tmp_path, progress)
+    _pass(pool, database, process_config, progress)
 
-    stored = db_conn.execute(
-        "SELECT event_name FROM telemetry_events WHERE machine = 'mirrored'"
-    ).fetchall()
-    assert stored == [("llm_usage",)]
     assert progress.snapshot()["last_success_at"] is not None
-
-
-def test_a_failing_replay_does_not_stop_the_rest_of_the_pass(
-    database: Database,
-    pool: ConnectionPool,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    (tmp_path / "events-20261002.jsonl").write_bytes(b"this is not an event\n")
-    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
-
-    _pass(pool, database, process_config, tmp_path, progress)
-
-    assert "telemetry events replay incomplete" in caplog.text
-    assert progress.snapshot()["last_success_at"] is not None
-
-
-# meiva:note
-# An event the live projection missed stays absent from `agent_metric_observations` however
-# many maintenance passes run: nothing re-derives observations from `telemetry_events`.
-def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
-    db_conn: psycopg.Connection,
-    database: Database,
-    pool: ConnectionPool,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-) -> None:
-    agent = _agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-        "category, event_name, level, source, attributes) VALUES (1, now(), %s, 'm', 'c', 'p', "
-        "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
-        (agent, json.dumps({"in_total": 5, "out_total": 2, "cost_usd": 0.25})),
-    )
-    db_conn.commit()
-
-    for _ in range(2):
-        _pass(
-            pool,
-            database,
-            process_config,
-            tmp_path,
-            LoopProgress("dispatch", timeout_s=60.0, clock=system_clock()),
-        )
-
-    assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
 
 
 def test_the_pass_prices_an_unpriced_ledger_row_at_its_own_time_and_leaves_priced_rows(
@@ -178,7 +85,6 @@ def test_the_pass_prices_an_unpriced_ledger_row_at_its_own_time_and_leaves_price
     database: Database,
     pool: ConnectionPool,
     process_config: ConfigBoot,
-    tmp_path: Path,
 ) -> None:
     columns = (
         "call_id, occurred_at, machine, cluster, billing, usage_kind, model, provider, calls, "
@@ -189,7 +95,7 @@ def test_the_pass_prices_an_unpriced_ledger_row_at_its_own_time_and_leaves_price
             f"INSERT INTO llm_usage_ledger ({columns}) VALUES "  # noqa: S608
             "(%s, %s, 'm', 'c', 'api', 'agent', 'gpt-6.1-sol', 'openai', 1, true, 10000, 100, "
             "3000, %s, '{}'::jsonb, %s)",
-            (call_id, _MIRRORED_AT, cost, source),
+            (call_id, _LEDGER_AT, cost, source),
         )
     db_conn.commit()
 
@@ -197,7 +103,6 @@ def test_the_pass_prices_an_unpriced_ledger_row_at_its_own_time_and_leaves_price
         pool,
         database,
         process_config,
-        tmp_path,
         LoopProgress("dispatch", timeout_s=60.0, clock=system_clock()),
     )
 

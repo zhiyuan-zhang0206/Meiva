@@ -194,7 +194,6 @@ def process_clients(
         from base.telemetry import build_pipeline
 
         return build_pipeline(
-            database=database,
             machine=machine,
             home=home if home is not None else resolve_meiva_home(),
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import random
 import socket
 import threading
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +24,9 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
 from base.clock.tests.fakes import system_clock
-from base.db import Database
-from base.paths import logs_path, meiva_home
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
+from base.paths import meiva_home
 from base.telemetry.delivery import loss
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -96,7 +95,6 @@ def test_backend_init_failure_isolated_and_waits_before_retry(tmp_path: Path) ->
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
         providers=(logs, metrics),
-        mirror_dir=tmp_path,
         home=tmp_path,
     )
     try:
@@ -113,7 +111,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     emitted_events: EmittedEvents,
     tmp_path: Path,
 ) -> None:
-    """A failed init reports into the surviving mirror, then a later retry
+    """A failed init reports into the event stream, then a later retry
     initializes the backend and reports recovery."""
     attempts: list[int] = []
     logs = _NoopProvider()
@@ -125,7 +123,6 @@ def test_backend_retry_recovers_and_emits_real_status_events(
         endpoint=lambda: "http://127.0.0.1:4318",
         retry_interval_s=0.05,
         providers=(logs, metrics),
-        mirror_dir=tmp_path,
         home=tmp_path,
     )
     try:
@@ -167,7 +164,6 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         export_allowed=lambda: True,
         enabled=lambda: True,
         endpoint=lambda: endpoint,
-        mirror_dir=tmp_path,
         home=tmp_path,
         instance_id="test-instance",
     )
@@ -198,7 +194,6 @@ def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=1,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -216,8 +211,7 @@ def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
 
 def test_pipeline_exports_to_otlp(otlp_backend: Any) -> None:
     """One emit lands the OTLP copies (log record + metric) through the real
-    drain thread. The Postgres copy was retired with the LGTM cutover (task
-    #1197) — OTLP + the JSONL mirror are the sinks."""
+    drain thread. OTLP is the pipeline's only sink."""
     _backend, log_exporter, metric_reader = otlp_backend
     telemetry.emit(
         "telemetry",
@@ -243,9 +237,9 @@ def test_pipeline_exports_to_otlp(otlp_backend: Any) -> None:
     assert metrics["meiva_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
-def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Path) -> None:
-    """A broken OTLP backend never blocks the drain — the JSONL mirror still
-    holds the batch (the PG copy is gone, task #1197)."""
+def test_pipeline_drain_survives_otlp_failure(tmp_path: Path) -> None:
+    """A broken OTLP backend never blocks or fails the drain: the batch is
+    completed and the pipeline stops cleanly."""
     attempts: list[int] = []
     backend = telemetry_otlp.OtlpBackend(
         now=system_clock().now,
@@ -255,7 +249,6 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             _NoopProvider(),
             _FailingMetricsProvider(attempts, message="collector unreachable"),
         ),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -265,7 +258,6 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
     with telemetry_otlp.bind_exporter(backend):
         pipeline = telemetry.build_pipeline(
             now=system_clock().now,
-            database=lambda: database,
             machine=machine_identity(),
             home=tmp_path,
             otlp_enabled=lambda: False,
@@ -275,17 +267,10 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
         telemetry.emit("log", "log", agent_id=AGENT, attributes={"msg": "boom"})
-        telemetry.sync()
+        assert telemetry.sync().status is telemetry.DrainStatus.COMPLETED
+        assert attempts
     finally:
-        pipeline.stop(timeout=2)
-
-    day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_path(tmp_path) / f"events-{day}.jsonl"
-    assert path.exists()
-    assert any(
-        '"event_name":"log"' in line and '"msg":"boom"' in line
-        for line in path.read_text(encoding="utf-8").splitlines()
-    )
+        assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
 
 
 def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
@@ -296,7 +281,6 @@ def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
             now=system_clock().now,
             export_allowed=lambda: True,
             enabled=lambda: True,
-            mirror_dir=tmp_path,
             home=tmp_path,
             endpoint=lambda: "http://127.0.0.1:4318",
             instance_id="test-instance",
@@ -318,7 +302,6 @@ def test_flush_force_flushes_sdk_batch_records(tmp_path: Path) -> None:
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -347,7 +330,6 @@ def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
             logger_provider,
             MeterProvider(metric_readers=[InMemoryMetricReader()]),
         ),
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -359,7 +341,9 @@ def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
         backend.shutdown()
 
 
-def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
+def test_queue_loss_metric_survives_full_log_lane(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
     entered, release = threading.Event(), threading.Event()
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(
@@ -373,7 +357,6 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=1,
-        mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
@@ -382,13 +365,10 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
         assert entered.wait(2)
         backend.export_batch([otlp_test_event()])
         backend.export_batch([otlp_test_event(), otlp_test_event()])
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        mirror_path = tmp_path / f"events-{day}.jsonl"
-        assert mirror_path.exists()
-        rows = [json.loads(line) for line in mirror_path.read_text(encoding="utf-8").splitlines()]
-        drop_rows = [row for row in rows if row["event_name"] == "event_log_drop"]
-        assert len(drop_rows) == 1
-        assert drop_rows[0]["attributes"]["n"] == 2
+        drops = loguru_records.extras(level="ERROR", message="Telemetry queue")
+        assert len(drops) == 1
+        assert drops[0]["queue"] == "otlp"
+        assert drops[0]["n"] == 2
         metrics = collected_metrics(reader)
         assert "meiva_event_log_drop_n" not in metrics
         drop = metrics["meiva_event_log_drop_last_dropped_at"].data.data_points[0]
@@ -400,13 +380,13 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
 
 
 def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
-    tmp_path: Path,
+    loguru_records: LogRecords,
 ) -> None:
     entered, release = threading.Event(), threading.Event()
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
     sdk_logger.filters[:] = []
-    observer = loss.install_exporter_drop_observer(mirror_dir=tmp_path)
+    observer = loss.install_exporter_drop_observer()
     provider = LoggerProvider()
     provider.add_log_record_processor(
         BatchLogRecordProcessor(
@@ -422,19 +402,13 @@ def test_real_otel_sdk_queue_overflow_is_observed_without_log_recursion(
         assert entered.wait(2)
         for _ in range(3000):
             emitter.emit(LogRecord(body="more"))
-        assert list(tmp_path.glob("*.jsonl")) == []
+        assert not loguru_records.extras(message="Telemetry queue")
         observer.flush()
         observer.flush()
-        day = datetime.now(UTC).strftime("%Y%m%d")
-        mirror_path = tmp_path / f"events-{day}.jsonl"
-        assert mirror_path.exists()
-        reports = [
-            json.loads(line) for line in mirror_path.read_text(encoding="utf-8").splitlines()
-        ]
+        reports = loguru_records.extras(level="ERROR", message="Telemetry queue")
         assert len(reports) == 1
-        assert reports[0]["attributes"]["queue"] == "otel-sdk"
-        assert reports[0]["attributes"]["n"] == 2999
-        assert reports[0]["level"] == "error"
+        assert reports[0]["queue"] == "otel-sdk"
+        assert reports[0]["n"] == 2999
     finally:
         release.set()
         provider.shutdown()

@@ -103,7 +103,6 @@ def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_buil
 
     pipeline = build_pipeline(
         now=system_clock().now,
-        database=database,
         machine=machine_identity,
         home=tmp_path,
         otlp_enabled=lambda: False,

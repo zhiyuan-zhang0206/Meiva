@@ -11,7 +11,7 @@ and one Postgres read, the per-agent rollups behind `GET /api/metrics/agents` an
 
 `aggregate.fetch_agent_rollups` reads the usage ledger (`llm_usage_ledger`) in one statement and
 returns one headline row per agent with usage in the window. Turn counts, exec outcomes and event
-counts are not served: they came from `telemetry_events`, which has no consumer left. The
+counts are not served: they came from the `telemetry_events` table, which has no consumer and no writer left. The
 whole-fleet digest (`/api/metrics`), the per-agent `/api/agents/{id}/inspect/metrics` surface and the
 `--since-compact` window were removed with those readers.
 

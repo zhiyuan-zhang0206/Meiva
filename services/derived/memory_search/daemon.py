@@ -11,16 +11,10 @@ import uvicorn
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
-from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
-from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
@@ -110,18 +104,8 @@ def main() -> None:
     ):
         sys.exit(1)
     image = LoadedCommit.capture()
-    version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="memory_search", end_process=hard_exit)
-
-    def database() -> Database:
-        return Database(
-            db_config_from_boot(boot),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host, home=process_home),
-        )
 
     pipeline = build_pipeline(
-        database=database,
         machine=machine,
         home=process_home,
         now=Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS).now,

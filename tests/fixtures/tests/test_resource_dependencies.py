@@ -6,7 +6,6 @@ def test_failed_setup_and_late_effects_preserve_resource_windows(pytester: pytes
         """
 import os
 import pytest
-import random
 
 pytest_plugins = [
     "tests.fixtures.env_bootstrap",
@@ -32,33 +31,20 @@ def failed_redis(redis_url):
         client.set("failed-setup", "retained")
     raise RuntimeError("redis-setup-failed")
 
+TAIL_EVENTS = []
+
 @pytest.fixture(scope="session")
-def drained_tail(provisioned_db):
+def drained_tail():
     yield
-    import psycopg
-    # Session ownership outlives the function's driver and URL windows. A real
-    # producer's queued tail must have reached Postgres before that window shut.
-    with psycopg.connect(provisioned_db) as conn:
-        assert conn.execute(
-            "SELECT count(*) FROM telemetry_events WHERE machine = 'resource-tail'"
-        ).fetchone() == (1,)
+    # Session ownership outlives the function's windows. A real producer's queued tail must have
+    # reached its writer before the test's fixtures shut down.
+    assert [event.machine for event in TAIL_EVENTS] == ["resource-tail"]
 
 @pytest.fixture
-def tail_pipeline(database, process_config):
-    from pathlib import Path
-    from base import telemetry
+def tail_pipeline():
     from base.clock.tests.fakes import system_clock
-    from base.cluster.machine.configured import ConfiguredMachineIdentity
-    machine = ConfiguredMachineIdentity(process_config)
-    pipeline = telemetry.build_pipeline(
-        database=lambda: database,
-        machine=machine,
-        home=Path(os.environ["MEIVA_HOME"]),
-        now=system_clock().now,
-        otlp_enabled=lambda: False,
-        otlp_endpoint="http://127.0.0.1:4318",
-        rng=random.SystemRandom(),
-    )
+    from base.telemetry import EventPipeline
+    pipeline = EventPipeline(writer=TAIL_EVENTS.extend, now=system_clock().now)
     try:
         yield pipeline
     finally:
@@ -137,16 +123,14 @@ def test_21_clean_redis(redis_url):
     with pytest.raises(pytest.fail.Exception, match="Unrequested Postgres"):
         psycopg.connect("postgresql://127.0.0.1:1/unused")
 
-def test_30_queued_telemetry(db_url, drained_tail, tail_pipeline):
+def test_30_queued_telemetry(drained_tail, tail_pipeline):
     from base import telemetry
     from base.paths import meiva_home
-    from base.telemetry import event_store
-    event_store.set_enabled(enabled=True)
     telemetry.init_telemetry(
         home=meiva_home(), pipeline=tail_pipeline, machine_reader=lambda: "resource-tail"
     )
     telemetry.emit("log", "log", level="error", attributes={"tail": "must-drain"})
-    # Do not sync here: the resource owner must drain before revoking access.
+    # Do not sync here: the fixtures must drain the pipeline before the session fixture checks it.
 
 def test_31_refusal_after_telemetry(process_config):
     test_12_no_data_plane(process_config)
