@@ -139,8 +139,9 @@ before they reach Loki, Prometheus, or Tempo.
 ## Resource and retention posture
 
 Loki, Prometheus, and Tempo use a seven-day troubleshooting window. Loki
-enforces 168 hours for current telemetry and preserves the historical archive
-stream at its configured retention. Prometheus expires the oldest blocks
+enforces 168 hours for every stream; the former `{stream="archive"}` retention
+exception was removed once that stream held no readable data (its chunks were
+gone and only index entries remained). Prometheus expires the oldest blocks
 when it reaches either seven days or the 8 GB disk cap. Tempo's
 `MEIVA_LGTM_TEMPO_RETENTION_HOURS` defaults to 168 hours. Loki, Prometheus,
 and Tempo use explicit Go memory limits, and Loki bounds query splitting,

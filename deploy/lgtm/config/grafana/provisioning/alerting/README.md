@@ -435,8 +435,9 @@ rule. The watchdog sends a heartbeat to make failures visible on a quiet night.
 - `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
   accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
-  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path and treats a
-  previously observed heartbeat series disappearing as silence.
+  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path and judges the
+  age of the newest heartbeat over the last hour (`max_over_time(...[1h])`), so a gateway restart that
+  replaces the series is not silence; it fires when that age passes 1800 s.
 
 The judgment is on the *age of the last accepted ingest*, not on how many alerts fired: a quiet night
 cannot trip it and a broken token cannot hide behind one. The period (5 m) and the threshold (3 × 5 m)

@@ -7,10 +7,12 @@
 # question from the outside -- how old is the newest accepted alert ingest -- straight against
 # Prometheus, and submits a message through the installed Meiva CLI. It does not require Grafana.
 # meiva:note
-# Two rules it obeys. Absence is the failure, but a metric that has never existed is unarmed
-# rather than broken: the first sighting of a sample is recorded and the sentinel stays quiet
-# until then. And one incident is one message: the state file also holds the last send, so a
-# fifteen-minute tick does not turn one outage into a stream.
+# Two rules it obeys. One judgement: the age of the newest heartbeat in the last hour, so a gateway
+# restart, which replaces the series, does not read as silence; an hour without any sample is an
+# age beyond the budget. Only a heartbeat that has never been seen is unarmed rather than broken:
+# the first sighting of a sample is recorded and the sentinel stays quiet until then. And one
+# incident is one message: the state file also holds the last send, so a fifteen-minute tick does
+# not turn one outage into a stream.
 # meiva:link scripts/host_ops/docs/watchdog-sentinel.md
 from __future__ import annotations
 
@@ -33,9 +35,11 @@ from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
 # meiva:note
-# How old the newest accepted ingest may be before the path counts as silent. Grafana's own
-# watchdog repeats every five minutes and its rule allows three periods, so thirty minutes is the
-# same judgement made from outside with room for one missed tick.
+# How old the newest accepted ingest may be before the path counts as silent: the longest gap a
+# healthy path produces, plus margin. The watchdog route delivers every five minutes, and after a
+# gateway restart the new process has no sample until the next delivery, up to ten minutes later;
+# the longest age measured across the 21:00 and 21:38 rolling releases of 2026-11-24 was 945 s.
+# Thirty minutes is that gap with a margin of nearly 2x, and room for one missed sentinel tick.
 DEFAULT_SILENCE_SECONDS = 1800.0
 
 # meiva:note
@@ -52,7 +56,7 @@ DEFAULT_ESCALATE_AGENT = 405
 ESCALATION_SOURCE = "external_agent:watchdog-sentinel"
 
 DEFAULT_PROM_URL = "http://127.0.0.1:59090/api/v1/query"
-DEFAULT_QUERY = "time() - max(meiva_alerts_last_ingest_timestamp_seconds)"
+DEFAULT_QUERY = "time() - max(max_over_time(meiva_alerts_last_ingest_timestamp_seconds[1h]))"
 
 
 def as_object[**P](call: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs) -> object:
@@ -93,8 +97,8 @@ def http_json(
 
 def age_from_payload(payload: object) -> float | None:
     # meiva:note
-    # An empty Prometheus vector carries no age. The persisted first sighting tells
-    # the sentinel whether a missing series was ever established.
+    # An empty Prometheus vector carries no age: no heartbeat sample in the query's lookback. The
+    # persisted first sighting tells the sentinel whether a heartbeat was ever established.
     if not is_json_object(payload) or payload.get("status") != "success":
         raise ValueError("expected a successful Prometheus response")
     data = payload.get("data")
@@ -293,7 +297,7 @@ class Sentinel:
             self.write_state(state)
             return 0
         reason = (
-            "the previously observed heartbeat series disappeared"
+            "no heartbeat sample in the last hour"
             if age is None
             else f"the newest ingest sample is {int(age)}s old"
         )

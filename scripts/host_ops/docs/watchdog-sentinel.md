@@ -1,8 +1,18 @@
 # Alert-pipeline host sentinel
 
-The sentinel queries Prometheus for the age of the newest accepted alert ingest.
-It remains unarmed until it sees its first sample. After that, a stale or absent
-heartbeat triggers a silent-pipeline notification through `meiva agents send`.
+The sentinel queries Prometheus for the age of the newest accepted alert ingest:
+`time() - max(max_over_time(meiva_alerts_last_ingest_timestamp_seconds[1h]))`. The
+range selector is what makes the age continuous across a gateway restart, which
+replaces the series and leaves the new process without a sample until the next
+watchdog delivery (up to about ten minutes later); an instant selector reads that
+gap as an absent series. The one judgement is that age against a budget of 1800 s:
+the watchdog route delivers every five minutes, a restart adds up to ten, the
+longest age measured across two rolling releases on 2026-11-24 was 945 s, and
+thirty minutes keeps a margin of nearly 2x and one missed 15-minute tick. No sample
+at all in the hour is an age beyond the budget. Before the first heartbeat has ever
+been seen there is nothing to age, so the sentinel stays unarmed until it sees its
+first sample. After that, an age beyond the budget triggers a silent-pipeline
+notification through `meiva agents send`.
 An unavailable endpoint or invalid response triggers a separate query-failure
 notification and returns nonzero. The two conditions have independent persisted
 repeat windows. Failed submissions stay retryable. A lock covers the read,
