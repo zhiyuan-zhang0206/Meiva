@@ -11,8 +11,8 @@ start time remain skipped. This owner acquires fingerprint gates before row
 locks; there is no reverse lock path or lock across provider calls.
 
 `alerts.notification_revision` identifies notification transitions, while
-`alert_notification_groups` freezes the existing group renderer, display language,
-text and member order. Each `(alert_id, notification_revision)` belongs to one
+`alert_notification_groups` freezes the existing group renderer, text and member order
+(`language` is always `en`; the column is retained, not read). Each `(alert_id, notification_revision)` belongs to one
 group. Repeated still-firing observations whose legacy delivery is unconfirmed
 reuse that revision even if severity or annotations change. The live alert row
 still updates. Those

@@ -1,4 +1,4 @@
-exports = ["en", "zh"]
+exports = ["en"]
 
 [purity]
 "." = "strict"

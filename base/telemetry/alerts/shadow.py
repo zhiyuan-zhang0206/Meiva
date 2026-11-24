@@ -104,12 +104,10 @@ class AlertShadowBatch:
         self,
         conn: psycopg.Connection,
         alerts: list[AlertPayload],
-        language: str,
         *,
         style: AlertMessageStyle,
     ) -> None:
         self.conn = conn
-        self.language = language
         self.style = style
         self.members: dict[tuple[str, str, AlertGroupOrigin], list[ShadowMember]] = defaultdict(
             list
@@ -189,15 +187,13 @@ class AlertShadowBatch:
     def freeze(self) -> None:
         """Freeze newly minted groups using the existing renderer and member order."""
         for (status, alertname, origin), members in self.members.items():
-            text = notify_group_text(
-                [member.alert for member in members], self.language, style=self.style
-            )
+            text = notify_group_text([member.alert for member in members], style=self.style)
             group = query_one(
                 self.conn,
                 IdRow,
                 "INSERT INTO alert_notification_groups(status,alertname,language,render_version,text,origin) "
-                "VALUES (%s,%s,%s,'alert-group-v1',%s,%s) RETURNING id",
-                (status, alertname, self.language, text, origin.value),
+                "VALUES (%s,%s,'en','alert-group-v1',%s,%s) RETURNING id",
+                (status, alertname, text, origin.value),
             )
             assert group is not None  # noqa: S101 — INSERT RETURNING always yields one row
             for ordinal, member in enumerate(members):

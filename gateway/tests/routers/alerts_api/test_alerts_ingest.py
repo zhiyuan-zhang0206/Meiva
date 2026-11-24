@@ -163,13 +163,16 @@ def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
 
 
 # meiva:note
-# The rendered notification text follows the display language. Nothing delivers it any more, so
-# the frozen group row is what an assertion can read.
-def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> None:
+# The rendered notification text is always English: a legacy ``display.language`` row (the retired
+# UI language setting) is ignored. Nothing delivers it any more, so the frozen group row is what
+# an assertion can read.
+def test_ingest_renders_english_text_and_ignores_legacy_language_setting(
+    db_conn: psycopg.Connection,
+) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
-            (Jsonb("en"),),
+            (Jsonb("zh"),),
         )
     db_conn.commit()
 

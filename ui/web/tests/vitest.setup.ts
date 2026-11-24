@@ -177,7 +177,7 @@ globalThis.EventSource = GuardedEventSource as unknown as typeof EventSource;
 // Interpolation ({name}) is substituted so t("key", {n: 2}) behaves like the
 // real ICU path for the simple cases this suite exercises. The real
 // NextIntlClientProvider / useLocale / etc. are preserved; tests that need the
-// real bridge (language-provider.test.tsx) re-mock next-intl to the original.
+// real bridge (messages-provider.test.tsx) re-mock next-intl to the original.
 vi.mock("next-intl", async (importOriginal) => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- test double
   const actual = await importOriginal<typeof import("next-intl")>();

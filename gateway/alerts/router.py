@@ -22,7 +22,6 @@ from base.db.transaction import write_transaction
 from base.host.boundary.json_values import is_object_dict
 from base.telemetry.alerts import (
     AlertMessageStyle,
-    display_language,
     upsert_alert,
 )
 from base.telemetry.alerts.shadow import AlertShadowBatch
@@ -100,9 +99,8 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         zone=gateway_clock(request).zone(), base_url=alert_settings.frontend_base_url
     )
     with write_transaction(gateway_state(request).db_pool) as conn:
-        lang = display_language(conn)
         alerts = body.flattened()
-        shadow = AlertShadowBatch(conn, alerts, lang, style=style)
+        shadow = AlertShadowBatch(conn, alerts, style=style)
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
             if instance_key is None:

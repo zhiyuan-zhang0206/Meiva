@@ -1,6 +1,6 @@
 # Provider composition
 
-`<html lang="zh-CN">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `EventStreamProvider` → [fold owner] → `AlertsProvider` → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
+`<html lang="en">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `EventStreamProvider` → [fold owner] → `AlertsProvider` → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).

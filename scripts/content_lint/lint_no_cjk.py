@@ -14,9 +14,9 @@
 # User ruling 2026-08-27 (tightening the 2026-08-06 English-primary rule): the
 # repo must not contain Chinese characters at all — not "English primary", not
 # "Chinese only in skill descriptions". A raw CJK character anywhere in a
-# tracked file fails, with ONE exemption class: frontend i18n / locale copy —
-# the message catalogs and locale modules whose whole purpose is rendering
-# another language to the user.
+# tracked file fails, with ONE exemption class: locale copy trees whose whole
+# purpose is rendering another language to the user (the Android app UI's
+# `locales/` directory).
 #
 # ## What is scanned
 #
@@ -29,16 +29,10 @@
 # previous SKILL.md description gate used, plus the punctuation that real CJK
 # text always carries.
 #
-# ## Exemption — i18n / locale copy only
+# ## Exemption — locale copy only
 #
-# - `**/messages/**` — next-intl message catalogs (frontend locale data,
-# e.g. `ui/web/messages/{en,zh}/<namespace>.json`).
 # - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
 # ever appear.
-# - `base/telemetry/alerts/copy.py` — the Python locale module: alert notification
-# copy in zh/en variants selected by `user_settings.display.language`, the
-# same language-switching mechanism as the frontend catalogs (documented as a
-# locale module in its own docstring).
 #
 # Nothing else is exempt — skill bodies, code comments, docs, tests, fixtures,
 # generated files (the codegen sources are what must be clean), demo apps all
@@ -85,10 +79,9 @@ _CJK_RE = re.compile(
     "\uac00-\ud7a3\u3000-\u303f\uff00-\uffef]"
 )
 
-# Repo-relative path prefixes that are i18n / locale copy and never scanned.
+# Repo-relative path prefixes that are locale copy and never scanned.
 # A path under these is locale DATA — the exact exemption the ruling grants.
 _LOCALE_PATH_MARKERS = (
-    "/messages/",  # next-intl catalogs: <dir>/messages/<lang>/<namespace>.json
     "/locales/",  # gettext-style locale trees
 )
 _LOCALE_SUFFIXES = (".po",)
@@ -100,16 +93,9 @@ def _is_locale_path(rel_path: str) -> bool:
     )
 
 
-# meiva:note
-# The Python locale module (zh/en by user_settings display.language, the
-# same language-switching mechanism as the frontend catalogs): the alert
-# notification copy.
-_LOCALE_PY_FILES = frozenset({"base/telemetry/alerts/copy.py"})
-
-
 def _scan_file(tree: SourceTree, rel_path: str) -> list[tuple[int, str, str]]:
     """Return violations [(lineno, char, line_stripped), ...]."""
-    if _is_locale_path(rel_path) or rel_path in _LOCALE_PY_FILES:
+    if _is_locale_path(rel_path):
         return []
     text = lint_common.read_utf8_text(tree, tree.root / rel_path)
     if text is None:
@@ -152,8 +138,8 @@ def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
             "\nRaw CJK found in the repo. The tree is read in one language by every "
             "contributor and agent, so a passage a reader cannot read is a passage nobody "
             "maintains. Translate prose/copy to English, or escape functional CJK data as "
-            "\\uXXXX (runtime-identical); the only exemption is i18n / locale copy — "
-            "<dir>/messages/*.json, */locales/*, *.po, and the base/*_copy.py locale modules. "
+            "\\uXXXX (runtime-identical); the only exemption is locale copy — "
+            "*/locales/* and *.po. "
             "See AGENTS.md (project invariants: English source) and the docstring at the top of "
             "scripts/content_lint/lint_no_cjk.py.",
             file=sys.stderr,

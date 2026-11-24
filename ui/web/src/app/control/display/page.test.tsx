@@ -5,9 +5,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { NextIntlClientProvider } from "next-intl";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-import zh from "../../../../messages/zh";
 import DisplaySettingsPage from "./page";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -56,7 +54,7 @@ async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
 describe("DisplaySettingsPage", () => {
   it("puts everyday preferences in General and leaves clock details in Advanced", async () => {
     renderPage("general");
-    expect(await screen.findByLabelText("English")).toBeTruthy();
+    expect(await screen.findByText("Reply suggestions")).toBeTruthy();
     expect(screen.queryByText("Features")).toBeNull();
     expect(screen.queryByText("Restore reading position on reload")).toBeNull();
     expect(screen.queryByText("Clock format")).toBeNull();
@@ -69,7 +67,7 @@ describe("DisplaySettingsPage", () => {
     renderPage("advanced");
     fireEvent.click(await screen.findByLabelText("12-hour"));
     await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
-    expect(screen.queryByLabelText("English")).toBeNull();
+    expect(screen.queryByText("Reply suggestions")).toBeNull();
   });
 
   it("renders the default when a stored value has the wrong type", async () => {
@@ -80,15 +78,12 @@ describe("DisplaySettingsPage", () => {
     // before the first load, instead of handing the control a value it cannot render.
     transport.getSettings.mockResolvedValue({
       settings: [
-        { key: "display.language", value: null, updated_at: "2026-09-24T00:00:00Z" },
         { key: "display.show_agent_status", value: "yes", updated_at: "2026-09-24T00:00:00Z" },
         { key: "models.hidden", value: "not-a-list", updated_at: "2026-09-24T00:00:00Z" },
       ],
     });
     renderPage();
 
-    const english = await screen.findByLabelText<HTMLInputElement>("English");
-    expect(english.checked).toBe(true);
     const statusSwitch = await screen.findByRole("switch", { name: "Show agent status dot" });
     expect(statusSwitch.getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Timeline max width")).toBeTruthy();
@@ -280,20 +275,5 @@ describe("DisplaySettingsPage", () => {
     renderPage("advanced");
     const fallbackToggle = await screen.findByRole("switch", { name: "Restore reading position on reload" });
     expect(fallbackToggle.getAttribute("aria-checked")).toBe("true");
-  });
-
-  it("renders localized Chinese copy for the Features section when locale is zh", async () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderWithBrowser(
-      <NextIntlClientProvider locale="zh" messages={zh}>
-        <QueryClientProvider client={qc}>
-          <DisplaySettingsPage mode="advanced" />
-        </QueryClientProvider>
-      </NextIntlClientProvider>,
-    );
-
-    expect(await screen.findByText("\u529f\u80fd")).toBeTruthy();
-    expect(screen.queryByRole("switch", { name: /\u5f15\u7528|\u653e\u5927/ })).toBeNull();
-    expect(screen.getByRole("switch", { name: "\u5237\u65b0\u540e\u6062\u590d\u9605\u8bfb\u4f4d\u7f6e" })).toBeTruthy();
   });
 });

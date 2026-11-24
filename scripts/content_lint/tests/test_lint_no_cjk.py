@@ -56,10 +56,8 @@ def test_clean_or_binary_file_passes(
 @pytest.mark.parametrize(
     "rel",
     [
-        "ui/web/messages/zh/interface/common.json",
         "frontend/locales/zh/app.json",
         "frontend/zh.po",
-        "base/telemetry/alerts/copy.py",
     ],
 )
 def test_documented_locale_copy_is_exempt(
@@ -74,7 +72,8 @@ def test_documented_locale_copy_is_exempt(
     "rel",
     [
         "meiva_builtins/skills/pkg/SKILL.md",
-        "base/other/copy.py",
+        "base/telemetry/alerts/copy.py",
+        "ui/web/messages/zh/interface/common.json",
         "docs/messages.md",
         "docs/decisions/history.md",
     ],

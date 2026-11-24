@@ -1,6 +1,4 @@
 {
-  "language": "Language",
-  "languageDescription": "UI language for this interface. Agent content and data stay untranslated.",
   "agentListDisplay": "Agent list display",
   "showStatusDot": "Show agent status dot",
   "showStatusDotDesc": "Show extra sidebar markers for spawn placeholders, taken-over agents, and terminated agents",
@@ -28,8 +26,6 @@
   "replySuggestions": "Reply suggestions",
   "replySuggestionsDesc": "After an agent finishes a turn, suggest replies when they would help you respond. The model chooses how many suggestions to provide. They appear as grey text in the empty input. Use Up/Down to choose, Tab or Right to fill the input, then Enter to send. Typing hides the suggestions.",
   "modelPicker": "Model picker",
-  "english": "English",
-  "chinese": "中文",
   "theme": "Theme",
   "appearance": "Appearance",
   "appearanceDescription": "Follow the system color scheme or force light or dark mode.",

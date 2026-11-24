@@ -31,5 +31,5 @@ def test_invalid_selection_is_rejected(text: str) -> None:
 
 
 def test_quote_limit_preserves_whitespace_and_unicode() -> None:
-    text = " 文\n" + "\U0001f9ed" * 3997
+    text = " \u6587\n" + "\U0001f9ed" * 3997
     assert snapshot(text).text == text

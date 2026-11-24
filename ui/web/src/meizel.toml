@@ -3,7 +3,6 @@ exports = ["proxy.ts"]
 [uses]
 "app" = ["components", "lib", "test-support"]
 "components" = ["i18n", "lib", "test-support"]
-"i18n" = ["lib"]
 "proxy.ts" = ["lib"]
 "test-support" = ["lib"]
 

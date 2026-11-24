@@ -72,8 +72,6 @@ export default async function RootLayout({
     // Note: suppressHydrationWarning only silences the element it's on,
     // not its descendants; Kapture / other devtools class injection on
     // <body> still needs its own suppression on <body>.
-    // lang is corrected client-side by LanguageProvider once the
-    // display.language setting loads (the shell can't read it during SSR).
     <html
       lang="en"
       suppressHydrationWarning

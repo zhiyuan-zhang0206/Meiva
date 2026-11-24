@@ -36,7 +36,7 @@ def ingest(
     fail: str = "",
 ) -> None:
     with conn.transaction():
-        batch = AlertShadowBatch(conn, alerts, "en", style=STYLE)
+        batch = AlertShadowBatch(conn, alerts, style=STYLE)
         keys: list[AlertKey] = []
         for item in batch.items:
             key, previous = batch.observe(item)
@@ -83,11 +83,11 @@ def test_repeat_lost_response_and_changed_members_preserve_frozen_group(
     assert current[:2] == original
     assert current[2]["group_id"] != current[0]["group_id"]
     assert [row["fingerprint"] for row in current] == ["a", "b", "c"]
-    assert current[0]["text"] == notify_group_text([a, b], "en", style=STYLE)
+    assert current[0]["text"] == notify_group_text([a, b], style=STYLE)
     assert db_conn.execute("SELECT severity FROM alerts WHERE fingerprint='a'").fetchone() == (
         "critical",
     )
-    assert current[2]["text"] == notify_group_text([c], "en", style=STYLE)
+    assert current[2]["text"] == notify_group_text([c], style=STYLE)
     assert all(row["origin"] == "shadow" for row in current)
     assert db_conn.execute(
         "SELECT count(*) FROM alerts WHERE notified_at IS NOT NULL"
@@ -217,7 +217,7 @@ def test_missing_start_lookup_waits_for_concurrent_latest_instance(
 
     with psycopg.connect(dsn) as first, ThreadPoolExecutor(max_workers=1) as executor:
         with first.transaction():
-            batch = AlertShadowBatch(first, [latest], "en", style=STYLE)
+            batch = AlertShadowBatch(first, [latest], style=STYLE)
             key, old = batch.observe(latest)
             assert key is not None
             _, _, notify, row = upsert_alert(first, latest, instance_key=key)
@@ -293,7 +293,7 @@ def test_a_frozen_group_renders_the_style_it_was_given(db_conn: psycopg.Connecti
 
     other = AlertMessageStyle(zone=ZoneInfo("Europe/Berlin"), base_url="http://other.example:8081")
     with db_conn.transaction():
-        batch = AlertShadowBatch(db_conn, [alert("style")], "en", style=other)
+        batch = AlertShadowBatch(db_conn, [alert("style")], style=other)
         for item in batch.items:
             key, previous = batch.observe(item)
             assert key is not None

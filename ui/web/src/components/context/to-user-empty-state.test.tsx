@@ -5,7 +5,6 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import en from "../../../messages/en";
-import zh from "../../../messages/zh";
 import { ToUserDocumentView } from "./to-user-document";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 
@@ -31,13 +30,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderEmpty(messages: typeof en, locale: "en" | "zh") {
+function renderEmpty() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   return renderWithBrowser(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>
-        <NextIntlClientProvider locale={locale} messages={{ toUser: messages.toUser }}>
+        <NextIntlClientProvider locale="en" messages={{ toUser: en.toUser }}>
           <ToUserDocumentView
             agentId={7}
             document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
@@ -52,15 +51,14 @@ function renderEmpty(messages: typeof en, locale: "en" | "zh") {
 
 describe("To user empty state", () => {
   it("renders exactly `No content` — no sentence, no period", () => {
-    renderEmpty(en, "en");
+    renderEmpty();
     const empty = screen.getByText("No content");
     expect(empty.textContent).toBe("No content");
   });
 
-  it("keeps one literal for both locales instead of a per-locale branch", () => {
+  it("renders the empty state without fetching or traversing", () => {
     expect(en.toUser.empty).toBe("No content");
-    expect(zh.toUser.empty).toBe("No content");
-    const view = renderEmpty(zh, "zh");
+    const view = renderEmpty();
     expect(screen.getByText("No content")).toBeTruthy();
     expect(transport.getToUser).not.toHaveBeenCalled();
     const { browser } = view;

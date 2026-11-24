@@ -15,8 +15,8 @@ Follow the user's authorized scope.
   an explicit project decision. No beta/nightly dependencies. The OpenTelemetry
   Python contrib `0.xbN` release line is its regular release channel. Pin new
   contrib instrumentation to the same release as the existing locked components.
-- Source, comments, documentation, prompts and errors are English. Frontend
-  i18n locale files are the only raw-CJK exception.
+- Source, comments, documentation, prompts and errors are English. Locale copy
+  trees (`locales/`, `*.po`) are the only raw-CJK exception.
 - Keep one owner for shared facts and vocabulary. Respect the enforced import
   contracts and generate derived schema/types/constants from their owners.
 - A public SDK entry must guard an invariant or make a frequent operation

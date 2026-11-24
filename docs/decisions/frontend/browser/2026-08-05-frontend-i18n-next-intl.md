@@ -30,4 +30,6 @@ The frontend needs a multi-language UI (Settings page Language row, en/zh). Cons
 - Existing component tests assert English copy; translation changes must update the tests in the same change (test copy follows en).
 - Backend error messages pass through in English — a known MVP boundary.
 
-<!-- Not overturned. -->
+## Superseded in part (2026-11-24, user ruling)
+
+The multi-language UI was removed: Meiva's web UI is English only. There is no `display.language` setting, Settings Language row, `LanguageProvider` locale switching or `messages/zh/` catalog; `<html lang>` is a static `en`. A leftover `display.language` row in `user_settings` is ignored (no migration). `next-intl` stays as the typed string-catalog layer over `messages/en/` (one fixed locale via `i18n/messages-provider.tsx`), which keeps the `no-untranslated-ui-copy` lint meaningful and leaves every component untouched. The Android app UI (`ui/app/app-ui/locales/`) is a separate device-locale mechanism and was not changed. Alert IM copy (`base/telemetry/alerts/copy.py`) is English only too; the `alert_notification_groups.language` column is retained and always written as `en`. The agent's reply language is unaffected: it follows the language the user writes in.
