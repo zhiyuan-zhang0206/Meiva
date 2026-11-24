@@ -18,7 +18,12 @@ def materialize(conn: psycopg.Connection, *, home: Path) -> None:
         enable_config.write_cluster_policy(policy(conn), home=home)
 
 
+def retire_builtin_rows(conn: psycopg.Connection) -> list[str]:
+    return registry.delete_repo_rows(conn, enable_config.RETIRED_BUILTIN_PLUGINS, kind="plugin")
+
+
 def initialize(conn: psycopg.Connection, *, home: Path) -> None:
+    retire_builtin_rows(conn)
     discovered = enable_config.discover_plugins(home=home)
     local = enable_config.load_for_runtime(set(discovered), home=home)
     for name in sorted(discovered):
