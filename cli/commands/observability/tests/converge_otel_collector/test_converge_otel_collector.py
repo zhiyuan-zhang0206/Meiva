@@ -57,8 +57,8 @@ POSTGRES_PORT = 5433
 DELIVERED_LOGIN = "postgresql://meiva_g3_gateway:generation-login-password@127.0.0.1:1/meiva"
 
 
-def _rotation(config: ConfigMapping) -> ConfigMapping:
-    return mapping_at(config, "exporters", "file/traces", "rotation")
+def _tempo_endpoint(config: ConfigMapping) -> object:
+    return value_at(config, "exporters", "otlphttp/tempo", "endpoint")
 
 
 def _infra_receivers(config: ConfigMapping) -> list[object]:
@@ -139,10 +139,14 @@ def test_harness_port_conflict_preserves_local_edits_in_the_launch_copy(
         occupant.bind(("127.0.0.1", 0))
         occupant.listen()
         port = occupant.getsockname()[1]
-        settings = observability(harness_otlp_port=port, trace_retention_days=3)
+        settings = observability(
+            harness_otlp_port=port, telemetry_tempo_endpoint="http://10.0.0.3:14318"
+        )
         rendered = collector_unit.text(GATEWAY, observability=settings)
         assert oc.write_config(path, rendered)
-        edited = rendered.replace("max_days: 3", "max_days: 19") + "\n# local edit\n"
+        edited = (
+            rendered.replace("http://10.0.0.3:14318", "http://10.0.0.19:14318") + "\n# local edit\n"
+        )
         if merge != "direct":
             block = re.search(r"^  otlp/harness:\n(?:^ {4}[^\n]*\n)+", edited, flags=re.M)
             assert block is not None
@@ -159,7 +163,7 @@ def test_harness_port_conflict_preserves_local_edits_in_the_launch_copy(
         assert path.read_text() == edited
         launch = config_of(active.read_text())
         assert active.stat().st_mode & 0o777 == 0o600
-        assert _rotation(launch)["max_days"] == 19
+        assert _tempo_endpoint(launch) == "http://10.0.0.19:14318"
         assert mapping_at(launch, "receivers", "otlp") == mapping_at(
             config_of(rendered), "receivers", "otlp"
         )
@@ -255,13 +259,19 @@ def test_changed_settings_reach_the_config_on_the_next_converge_but_a_hand_edit_
     collector_unit.install_pinned_binary()
     config = otel_collector_config(collector_unit.home)
 
-    collector_unit.ensure(None, observability=observability(trace_retention_days=3))
-    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 3
-    collector_unit.ensure(None, observability=observability(trace_retention_days=9))
-    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 9
+    collector_unit.ensure(
+        None, observability=observability(telemetry_tempo_endpoint="http://10.0.0.3:14318")
+    )
+    assert _tempo_endpoint(config_of(config.read_text(encoding="utf-8"))) == "http://10.0.0.3:14318"
+    collector_unit.ensure(
+        None, observability=observability(telemetry_tempo_endpoint="http://10.0.0.9:14318")
+    )
+    assert _tempo_endpoint(config_of(config.read_text(encoding="utf-8"))) == "http://10.0.0.9:14318"
 
     config.write_text("user: edit\n", encoding="utf-8")
-    collector_unit.ensure(None, observability=observability(trace_retention_days=12))
+    collector_unit.ensure(
+        None, observability=observability(telemetry_tempo_endpoint="http://10.0.0.12:14318")
+    )
 
     assert config.read_text(encoding="utf-8") == "user: edit\n"
     assert "modified locally" in capsys.readouterr().err
@@ -360,7 +370,7 @@ def test_the_station_gateway_home_renders_its_collector_from_the_converge_contex
     collector_unit.machine.set(role=GATEWAY)
     (collector_unit.home / "lgtm-host").write_text("", encoding="utf-8")
     collector_unit.runtime.config.set_field("db_url", PLACEHOLDER_DB_URL)
-    collector_unit.runtime.config.set_field("trace_retention_days", 5)
+    collector_unit.runtime.config.set_field("telemetry_tempo_endpoint", "http://10.0.0.5:14318")
     binary = collector_unit.install_pinned_binary()
 
     oc.ensure_otel_collector_step(collector_unit.converge_ctx(GATEWAY))
@@ -368,7 +378,7 @@ def test_the_station_gateway_home_renders_its_collector_from_the_converge_contex
     assert binary.read_bytes() == b"bin"
     config = otel_collector_config(collector_unit.home)
     assert config.stat().st_mode & 0o777 == 0o600
-    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 5
+    assert _tempo_endpoint(config_of(config.read_text(encoding="utf-8"))) == "http://10.0.0.5:14318"
     assert "collector skipped" not in capsys.readouterr().err
 
 
@@ -416,7 +426,7 @@ def test_harness_redaction_precedes_every_export(
     assert "redaction/harness" not in sequence_at(pipelines, signal, "processors")
 
 
-def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
+def test_the_observability_values_are_baked_into_the_fan_out(
     collector_unit: CollectorUnit,
 ) -> None:
     config = collector_unit.render(
@@ -425,7 +435,6 @@ def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
             telemetry_tempo_endpoint="http://10.0.0.2:14318",
             telemetry_loki_url="http://10.0.0.2:3100",
             telemetry_prometheus_url="http://10.0.0.2:9090",
-            trace_retention_days=7,
         ),
     )
 
@@ -439,18 +448,7 @@ def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
         "otlphttp/loki": "http://10.0.0.2:3100/otlp",
         "otlphttp/prometheus": "http://10.0.0.2:9090/api/v1/otlp",
     }
-    assert _rotation(config)["max_days"] == 7
-    assert value_at(config, "exporters", "file/traces", "path") == (
-        f"{collector_unit.home}/traces/spans.jsonl"
-    )
-
-
-def test_the_trace_mirror_rotates_by_size_with_bounded_backups(
-    collector_unit: CollectorUnit,
-) -> None:
-    config = collector_unit.render(HYBRID)
-
-    assert _rotation(config) == {"max_megabytes": 64, "max_backups": 24, "max_days": 3}
+    assert "file/traces" not in mapping_at(config, "exporters")
 
 
 @pytest.mark.parametrize(
@@ -491,10 +489,7 @@ def test_every_hop_drops_the_newest_batch_after_a_bounded_retry_and_queues_in_me
     assert "file_storage" not in mapping_at(config, "extensions")
     assert "file_storage" not in sequence_at(config, "service", "extensions")
     assert "file_storage/logoffsets" in mapping_at(config, "extensions")
-    assert sequence_at(config, "service", "pipelines", "traces", "exporters") == [
-        "otlphttp/tempo",
-        "file/traces",
-    ]
+    assert sequence_at(config, "service", "pipelines", "traces", "exporters") == ["otlphttp/tempo"]
 
 
 def test_a_gateway_scrapes_its_own_data_plane_without_the_write_generations_login(

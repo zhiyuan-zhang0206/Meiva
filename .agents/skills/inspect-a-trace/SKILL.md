@@ -20,7 +20,7 @@ The evidence is queried live, against the version that is actually running.
 |---|---|---|
 | **Postgres checkpoints** | the conversation itself — prompts, tool calls, results, system prompt | SQL + `base.agents.history.checkpoint` ([find-the-run](references/find-the-run.md)) |
 | **Loki** | the unified event river — every event, within its 84-hour window | LogQL ([event-stream](references/event-stream.md)); `GET /api/events` answers from Postgres, which stores only the events a reader queries and warning-or-higher ones |
-| **Tempo** | the span tree of one traced stretch — durations, langgraph node path, LLM call shape | TraceQL + the local JSONL mirror ([spans](references/spans.md)) |
+| **Tempo** | the span tree of one traced stretch — durations, langgraph node path, LLM call shape (7-day retention; telemetry, so a span the collector could not deliver is not recorded anywhere) | TraceQL + `fetch_trace.py` ([spans](references/spans.md)) |
 | **Grafana** | the human-browsable view of both | a constructed URL (below) |
 
 **Loki is the primary surface.** An agent is long-running and unbounded; its
@@ -75,7 +75,7 @@ symptom ──▶ Loki: one agent's event river ──▶ a trace_id ──▶ T
 2. **Read the event stream.** The `{service_name="unknown_service"} | json`
    dialect, exec outcomes, `llm_usage`, halt reasons.
    → [references/event-stream.md](references/event-stream.md)
-3. **Read the spans.** TraceQL to locate, the mirror to fetch whole, the
+3. **Read the spans.** TraceQL to locate, Tempo's trace API to fetch whole, the
    toolchain scripts to read and render. → [references/spans.md](references/spans.md)
 4. **Hand the user a link** (below).
 

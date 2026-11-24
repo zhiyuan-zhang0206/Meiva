@@ -36,10 +36,6 @@ _REMOTE_OTLP_PIPELINES = """
       receivers: [otlp/remote]
       processors: [memory_limiter, filter/cluster_allow, batch]
       exporters: [otlphttp/prometheus]
-    # A remote peer already writes its own durable trace mirror. The remote
-    # pipeline therefore fans out only to Tempo; adding file/traces here
-    # duplicates every remote span in the local mirror and makes replay
-    # provenance ambiguous.
     traces/remote:
       receivers: [otlp/remote]
       processors: [memory_limiter, batch]

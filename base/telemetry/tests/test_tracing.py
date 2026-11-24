@@ -95,23 +95,15 @@ def trace_config(
     enabled: bool = True,
     strip_content: bool = True,
     endpoint: str | None = None,
-    retention_days: int = 3,
-    max_dir_mb: int = 2048,
-    disk_watermark: float = 1.0,
     endpoint_explicit: bool = False,
     retry_interval_s: float = 300.0,
-    gzip_grace_seconds: int = 60,
 ) -> TraceConfig:
     return TraceConfig(
         enabled=enabled,
         strip_content=strip_content,
         endpoint=_active_collector_endpoint if endpoint is None else endpoint,
-        retention_days=retention_days,
-        max_dir_mb=max_dir_mb,
-        disk_watermark=disk_watermark,
         endpoint_explicit=endpoint_explicit,
         retry_interval_s=retry_interval_s,
-        gzip_grace_s=gzip_grace_seconds,
     )
 
 

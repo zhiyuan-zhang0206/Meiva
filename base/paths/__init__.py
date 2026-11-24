@@ -121,18 +121,6 @@ def permissions_helper_app_dir(*, home: Path) -> Path:
     return _root(home) / "helper"
 
 
-def traces_dir(home: Path) -> Path:
-    """The trace mirror directory under a unit home (`<home>/traces`). Pure: reads no
-    environment and creates nothing; the caller owns the home and ensures the directory.
-
-    Holds the local OTLP-JSON span mirror written by the OTel Collector
-    sidecar's file exporter (task #1266): the active `spans.jsonl` plus
-    rotated `spans-<ISO-timestamp>.jsonl` backups, each line one
-    `ExportTraceServiceRequest`. `meiva trace ship` replays a window of it
-    straight to Tempo when the live fan-out missed data."""
-    return home / "traces"
-
-
 def otel_collector_dir(home: Path) -> Path:
     """Per-unit OTel Collector sidecar root (`<home>/otel-collector`).
 

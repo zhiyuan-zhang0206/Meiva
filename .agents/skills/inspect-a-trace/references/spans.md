@@ -1,4 +1,4 @@
-# Read the spans — Tempo, the mirror, and the toolchain
+# Read the spans — Tempo and the toolchain
 
 Spans give you what the event stream cannot — the tree, the durations, the
 langgraph node path, and the shape of each LLM call. Come here once you already
@@ -15,13 +15,17 @@ could include an inbound idle wait, sometimes recorded as a `claim idle-wait`
 child span. Runs before 2026-08-20 could have a session-scoped root spanning
 many turns. Read their span boundaries before interpreting wall-clock duration.
 
-Three sources, in the order you should reach for them:
+Two sources, in the order you should reach for them:
 
 | Source | Where | Good for |
 |---|---|---|
-| **Tempo** | the cluster's Tempo query URL — `MEIVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) |
-| **Local mirror** | `$MEIVA_HOME/traces/spans*.jsonl` | fetching one whole trace (complete, no size cap, no network) |
+| **Tempo** | the cluster's Tempo query URL — `MEIVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) and fetching one |
 | **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
+
+Traces are telemetry: Tempo keeps them for 7 days and there is no other copy. A span
+the collector could not deliver (its queue is bounded and in memory) is lost, and a
+trace older than the retention is gone; the checkpoint and the event river
+([find-the-run](find-the-run.md), [event-stream](event-stream.md)) are what outlive it.
 
 Spans are **metadata-only**. Prompts, completions, tool arguments and results
 are stripped at record time (`base/telemetry/tracing.py`) — nothing you do to Tempo will
@@ -73,26 +77,13 @@ can rename them.
 # find first — search returns trace ids
 .venv/bin/python <scripts>/fetch_trace.py --search '{ resource.service.name = "meiva" && span.traceloop.association.properties.agent_id = "3048" }'
 
-# then pull the one trace. Mirror is primary: complete, no cap, no network.
-.venv/bin/python <scripts>/fetch_trace.py --trace-id <hex-32> --source mirror --out trace_raw.json
-# Tempo's full-trace API is the off-box fallback, and it fails above 5 MB.
-.venv/bin/python <scripts>/fetch_trace.py --trace-id <hex-32> --source tempo --out trace_raw.json
+# then pull the one trace from Tempo's full-trace API; it fails above 5 MB.
+.venv/bin/python <scripts>/fetch_trace.py --trace-id <hex-32> --out trace_raw.json
 ```
 
-`--source mirror` needs filesystem access to `$MEIVA_HOME` (default `~/.meiva`); on
-another machine, query Tempo over the network or through the Grafana datasource
-proxy (`/api/datasources/proxy/uid/tempo/...`).
-
-The mirror is written by the OTel Collector sidecar's file exporter — one
-OTLP/JSON request per line, active `spans.jsonl` plus rotated
-`spans-<ISO>-(size|time).jsonl` (64 MiB size rotation; timberjack appends
-the trigger reason). Old segments are gzipped to `.jsonl.gz` by the
-agent-side compression pass and retention-pruned by day; `fetch_trace.py`
-and `meiva trace ship` read them transparently. `meiva trace ship` replays a
-shed window into Tempo when the sidecar's live fan-out missed it. At peak
-volume (~2.9 GB/day) the collector's 24-backup cap truncates the mirror to
-roughly the last half day of segments — grep/replay windows older than that
-need Tempo, not the mirror.
+`fetch_trace.py` needs only network access to the Tempo query URL; from another
+machine, point `--tempo-url` at it or at the Grafana datasource proxy
+(`/api/datasources/proxy/uid/tempo/...`).
 
 ## Read
 
@@ -141,20 +132,17 @@ link unless the annotation is the point.
 - **5 MB full-trace cap** — `/api/traces/{id}` refuses larger traces outright.
 - **`spss` caps at 100, and time-window paging is unreliable** — a window can
   come back empty while the trace exists outside it. "Reassemble a whole trace
-  from search" is not a thing; use the mirror.
+  from search" is not a thing; fetch by trace id.
 - **Regex `=~` on the `name` intrinsic misbehaves** — anchored patterns
   (`"^goto"`) match nothing, and `name =~ ... && <anything>` returns empty.
   Use exact `=` on names; `=~` on span attributes is fine.
-- **Ids are hex everywhere in this stack** — the mirror (collector file
-  exporter) and Tempo both carry 32/16-char hex. The base64 form only appears
-  in legacy pre-#1266 agent-side mirror files; the scripts handle both, by
-  hand it is `bytes.fromhex(s)` (or `base64.b64decode(s).hex()` for a legacy
-  line). Never paste one form into the other.
+- **Ids are hex in Tempo** — 32/16-char hex. The base64 form is the OTLP/JSON
+  spec's and appears only in legacy envelopes; the scripts handle both, by
+  hand it is `bytes.fromhex(s)` (or `base64.b64decode(s).hex()` for a base64
+  id). Never paste one form into the other.
 - **`/api/v2/search/tag/*` only enumerates intrinsics** (name/kind/status), not
   attributes — it is not a schema explorer.
 - **`search` returns only the attributes you queried** on its spans; the full
-  set comes from the mirror or the full-trace endpoint.
+  set comes from the full-trace endpoint (`fetch_trace.py --trace-id`).
 
-Ingest is the sidecar fan-out only. Never point a write path at Tempo directly,
-and never write into `$MEIVA_HOME/traces/` from a script — `meiva trace ship` owns
-the replay watermark and a hand-written line corrupts it.
+Ingest is the sidecar relay only. Never point a write path at Tempo directly.

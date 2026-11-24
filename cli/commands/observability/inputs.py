@@ -71,7 +71,6 @@ def observability_config_from_boot(boot: ConfigBoot) -> ObservabilityConfig:
         lgtm_loki_port=domain.lgtm_loki_port,
         lgtm_loki_grpc_port=domain.lgtm_loki_grpc_port,
         lgtm_grafana_port=domain.lgtm_grafana_port,
-        trace_retention_days=domain.trace_retention_days,
         otel_collector_metrics_port=domain.otel_collector_metrics_port,
         lgtm_tempo_grpc_port=domain.lgtm_tempo_grpc_port,
         lgtm_tempo_retention_hours=domain.lgtm_tempo_retention_hours,

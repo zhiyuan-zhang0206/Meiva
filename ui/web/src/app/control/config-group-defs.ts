@@ -140,7 +140,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
   ],
   "config-observability": [
     "MEIVA_TRACE_ENABLED",
-    "MEIVA_TRACE_RETENTION_DAYS",
     "MEIVA_TELEMETRY_OTLP_ENABLED",
     "MEIVA_TELEMETRY_OTLP_ENDPOINT",
     "MEIVA_TELEMETRY_OTLP_PORT",

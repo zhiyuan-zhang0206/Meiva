@@ -28,4 +28,4 @@ isolation.
 `llm_usage`, `node_exit`, and `log`, then asserts the resource event name equals
 every record event name in every generated OTLP resource group.
 
-Parent node: [OTLP export backend & trace ship to Tempo](telemetry-otlp.md).
+Parent node: [OTLP export backend](telemetry-otlp.md).

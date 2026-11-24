@@ -6,7 +6,7 @@ Its component nodes describe the current contracts and implementation.
 ## Documented components
 
 - [Metrics](metrics/docs/metrics.md) — Metrics.
-- [OTLP export backend & trace ship to Tempo](otlp/docs/telemetry-otlp/telemetry-otlp.md) — OTLP export backend & trace ship to Tempo.
+- [OTLP export backend](otlp/docs/telemetry-otlp/telemetry-otlp.md) — OTLP export backend.
 
 ## Ordinary event delivery lifecycle
 

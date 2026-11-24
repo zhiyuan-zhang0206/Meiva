@@ -4,4 +4,3 @@ exports = ["observability_inputs.py", "postgres_receiver.py", "scripted_http.py"
 "test_settings_values.py" = ["import_probe_child.py"]
 "converge_otel_collector" = ["observability_inputs.py", "scripted_http.py"]
 "lgtm" = ["observability_inputs.py", "scripted_http.py"]
-"trace_ship" = ["observability_inputs.py", "scripted_http.py"]

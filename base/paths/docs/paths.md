@@ -11,7 +11,7 @@ calls instead. Only
 helpers below create an explicit one. The composition root of a process calls it once and
 passes the result down.
 
-A helper takes one of two forms. The **pure form** `H(home)` (`traces_dir`, `skills_dir`,
+A helper takes one of two forms. The **pure form** `H(home)` (`skills_dir`,
 `mcps_dir`, `logs_path`, `install_registry_path`, `running_sha_path`, `launch_failures_path`, the run
 tree — `run_dir`, `exec_run_dir`, `root_run_dir`, `root_manifests_path`, the chrome, computer,
 permissions-helper, insights and MCP-daemon sockets, `insights_pidfile`
@@ -49,7 +49,6 @@ $MEIVA_HOME/
 ├── pg/  redis/                 # this cluster's own data-plane instances
 ├── run/                        # pidfiles, unix sockets, sessions/ (native-supervisor records)
 ├── logs/                       # <daemon>.log, agent-{N}.out.log / .stderr.log, rollout-<ts>.log
-├── traces/                     # spans.jsonl + rotated spans-<ISO>.jsonl (collector mirror) + .ship-watermark.json
 ├── otel-collector/             # otelcol-contrib binary + config.yaml + queue/ (sidecar, task #1266)
 ├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write

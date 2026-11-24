@@ -143,7 +143,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields(
         "browser_enabled": "agent-runner",
         "timezone": "common",  # cluster-wide policy
         "machine_host": "common",  # shared host identity
-        "trace_retention_days": "common",  # observability domain default
+        "trace_strip_content": "common",  # observability domain default
     }
     for name, want in expected.items():
         assert cap[name] == want, f"{name}: capability drifted to {cap[name]!r} (want {want!r})"

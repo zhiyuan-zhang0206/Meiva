@@ -197,7 +197,7 @@ class TraceCheckpointMessagesResponse(BaseModel):
     back. `pruned` distinguishes the two absence shapes:
     - pruned=true, checkpoint_id=None — no checkpoint carries this trace id
       (the link predates the feature, or the turn committed no checkpoint), so
-      there is no content to return; the span metadata in the mirror still
+      there is no content to return; the span metadata in Tempo still
       exists. Checkpoints are never deleted. Callers render this as absent
       content rather than an error.
     - pruned=false — the checkpoint exists; messages is its `messages` channel

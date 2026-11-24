@@ -37,7 +37,6 @@ class ObservabilityConfig:
     lgtm_loki_port: int
     lgtm_loki_grpc_port: int
     lgtm_grafana_port: int
-    trace_retention_days: int
     otel_collector_metrics_port: int
     lgtm_tempo_grpc_port: int
     lgtm_tempo_retention_hours: int

@@ -23,9 +23,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import traces_dir
 from base.telemetry.delivery.pipeline import EventPipeline
-from base.telemetry.trace_mirror import disk_watermark_exceeded
 from services.supervision.meiva_root.probes import ProbeRunner
 
 _log = logging.getLogger(__name__)
@@ -266,8 +264,6 @@ class RoundsInputs:
     machine: MachineIdentityReader
     clock: Clock
     home: Path
-    trace_enabled: bool = False
-    trace_disk_watermark: float = 0.9
 
 
 class RootHealthRounds:
@@ -286,9 +282,6 @@ class RootHealthRounds:
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
         telemetry: ProcessTelemetry = SYSTEM_PROCESS_TELEMETRY,
-        trace_enabled: bool = False,
-        trace_disk_watermark: float = 0.9,
-        trace_disk_usage: Callable[[Path], tuple[float, int] | None] | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
@@ -305,9 +298,6 @@ class RootHealthRounds:
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
         self._telemetry = telemetry
-        self._trace_enabled = trace_enabled
-        self._trace_disk_watermark = trace_disk_watermark
-        self._trace_disk_usage = trace_disk_usage
         self._expected_since: float | None = None
         self._last_completed: float | None = None
 
@@ -325,7 +315,6 @@ class RootHealthRounds:
 
     async def run_round(self) -> None:
         await asyncio.gather(self._health.run_round(), self._diagnostics.run_round())
-        self._emit_trace_recording_state()
         from base.log import logger
 
         self._last_completed = self._clock.now().timestamp()
@@ -335,26 +324,6 @@ class RootHealthRounds:
             home=self._home,
             home_id=self._home_id,
             last_tick_timestamp_seconds=self._last_completed,
-        )
-
-    def _emit_trace_recording_state(self) -> None:
-        if not self._trace_enabled:
-            disabled = False
-        else:
-            target = traces_dir(self._home_dir)
-            probe_dir = target if target.exists() else self._home_dir
-            usage = None if self._trace_disk_usage is None else self._trace_disk_usage(probe_dir)
-            disabled = disk_watermark_exceeded(
-                self._trace_disk_watermark,
-                traces_dir=probe_dir,
-                usage=usage,
-            )
-        from base import telemetry
-
-        telemetry.emit(
-            "telemetry",
-            "trace_recording",
-            attributes={"disabled": 1 if disabled else 0},
         )
 
     async def start(self) -> None:

@@ -73,7 +73,7 @@ through this ordered seam.
   Held metrics are replayed once before their logs become visible to the writer.
   See [OTLP export backpressure](export-backpressure.md).
 
-Parent node: [OTLP export backend & trace ship to Tempo](telemetry-otlp.md).
+Parent node: [OTLP export backend](telemetry-otlp.md).
 
 An unfinished emitter stop reports degraded ordinary delivery and returns without
 closing sinks still used by that writer. Queued or held ordinary records can be

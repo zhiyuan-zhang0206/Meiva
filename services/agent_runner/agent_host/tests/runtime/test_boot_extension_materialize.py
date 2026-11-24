@@ -15,6 +15,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
+from base.telemetry import tracing
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import TraceReadiness
 from base.telemetry.tests.capture.trace_state import reset_tracing_state
@@ -122,24 +123,25 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         enabled=True,
         strip_content=True,
         endpoint="http://127.0.0.1:4318",
-        retention_days=14,
-        max_dir_mb=2048,
-        disk_watermark=0.0,
         endpoint_explicit=True,
     )
     reset_tracing_state()
     environ: dict[str, str] = {}
-    init_process_scope(
-        now=system_clock().now,
-        machine=machine,
-        home=unit_home,
-        trace=trace,
-        environ=environ,
-        readiness=TraceReadiness(),
-    )
+    readiness = TraceReadiness()
+    try:
+        init_process_scope(
+            now=system_clock().now,
+            machine=machine,
+            home=unit_home,
+            trace=trace,
+            environ=environ,
+            readiness=readiness,
+        )
+    finally:
+        tracing.shutdown(readiness=readiness)
+        reset_tracing_state()
     assert environ == {"TRACELOOP_TRACE_CONTENT": "false"}
     assert not config.prepared
-    assert (unit_home / "traces").is_dir()
     with pytest.raises(UnicodeDecodeError):
         machine.name()
 

@@ -22,9 +22,8 @@ first hop is still its own sidecar. Three signals:
   through the explicit mapping in `plans.py`. The source collector stamps the
   machine dimension. The event stream still carries the full payload.
 - **traces** — NOT exported here. ``base/telemetry/tracing.py`` exports them to the same
-  local collector, whose file exporter writes the standard OTLP/JSON mirror.
-  ``meiva trace ship`` is the separate recovery replay: gateway units dial Tempo
-  directly; pure runners use the authenticated gateway collector ingress.
+  local collector, which relays them to Tempo (directly on a gateway unit, through the
+  authenticated gateway collector ingress on a pure runner).
 
 Exporter log mapping and SDK failures retain their named isolation scopes.
 The owned writer keeps provider creation, flush and teardown off exit callers;

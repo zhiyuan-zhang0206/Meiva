@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
-"""Fetch one OTel trace as normalized JSON — from the local mirror or Tempo.
+"""Fetch one OTel trace as normalized JSON from Tempo.
 
 Two modes:
 
 - **Find** (`--search <traceql>`): query Tempo's search API and list matching
   traces (id, duration, matched span count). Run this first to get trace ids.
-- **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set and write
-  `trace_raw.json` for `read_trace.py`. Sources:
-    - `mirror` (default): scan `$MEIVA_HOME/traces/spans*.jsonl*` (active `spans.jsonl` + rotated `spans-<ISO>-(size|time).jsonl`, gzipped old segments read transparently) — the durable
-      record, complete, no size cap, no network. Needs filesystem access to
-      the machine that recorded the trace. Every file in range is scanned
-      and spans are merged (a trace can straddle the sidecar's rotation
-      boundary). Ids are hex in the mirror (the collector's file exporter
-      writes 32/16-char hex, not OTLP-JSON base64); legacy pre-#1266
-      agent-side mirror files carry base64 and are handled too.
-    - `tempo`: `GET /api/traces/{id}` — refused above Tempo's 5 MB cap
-      ("trace exceeds max size"); the error message points back to `mirror`.
+- **Fetch** (`--trace-id <hex-32>`): pull one trace's full span set from
+  `GET /api/traces/{id}` and write `trace_raw.json` for `read_trace.py`. Tempo
+  refuses a trace above its 5 MB cap ("trace exceeds max size"); there is no
+  local copy of spans to fall back on, so narrow with `--search` instead.
 
 Output `trace_raw.json` (contract for read_trace.py):
 
     {
       "trace_id": "<hex-32>",
-      "source": "mirror" | "tempo",
+      "source": "tempo",
       "fetched_at": "<ISO-8601>",
       "spans": [
         {
@@ -36,30 +29,18 @@ Output `trace_raw.json` (contract for read_trace.py):
       ]
     }
 
-Otherwise stdlib only. Needs the repo's `base` package on the path (see
-`_common.source_root`) to resolve `$MEIVA_HOME` the way every other Meiva process
-does (the variable, else `~/.meiva`); runs inside the repo venv (`.venv/bin/python`) or any Python 3.12 with `base`'s deps
-installed.
+Stdlib only; runs under any Python 3.12.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
-import gzip
 import json
 import os
 import re
-import sys
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import source_root
-
-sys.path.insert(0, str(source_root()))
-
-from base.paths.home import resolve_meiva_home
 
 _KIND_STRIP = "SPAN_KIND_"
 _STATUS_OK = "STATUS_CODE_OK"
@@ -85,9 +66,8 @@ def _anyvalue(value: dict) -> object:
 def _id_to_hex(value: str) -> str:
     """Normalize a trace/span id field to lowercase hex.
 
-    The mirror (collector file exporter, task #1266) and Tempo both carry ids
-    as hex strings today; legacy OTLP/JSON envelopes (pre-#1266 agent-side
-    mirror) carry base64 per the OTLP JSON spec. Detect by shape: hex ids are
+    Tempo carries ids as hex strings today; OTLP/JSON envelopes may carry
+    base64 per the OTLP JSON spec. Detect by shape: hex ids are
     32 (trace) or 16 (span) chars; base64 ids are 24 or 12. Anything else is
     malformed and refused rather than decoded into garbage.
     """
@@ -137,8 +117,8 @@ def _normalize_span(sp: dict) -> dict:
 
 
 def _spans_from_envelope(data: dict, hex_trace_id: str | None) -> list[dict]:
-    """Walk an OTLP JSON envelope (mirror line or Tempo batches) for spans."""
-    # Mirror line: {"resourceSpans": [...]} — Tempo full trace: {"batches": [...]}.
+    """Walk an OTLP JSON envelope (Tempo `batches` or `resourceSpans`) for spans."""
+    # Tempo full trace: {"batches": [...]}; plain OTLP/JSON: {"resourceSpans": [...]}.
     groups = data.get("resourceSpans") or data.get("batches") or []
     out: list[dict] = []
     for group in groups:
@@ -166,8 +146,7 @@ def _http_get_json(url: str) -> dict:
         raise ValueError(f"refusing non-http(s) URL: {url[:60]!r}")
     # Bypass the system HTTP proxy: cluster endpoints are loopback or on the
     # private cluster network, and the macOS system proxy (Clash/VPN on
-    # 127.0.0.1:7897) answers 502 for them. Same rationale as the
-    # `trust_env=False` in cli/commands/observability/trace.py's ship path.
+    # 127.0.0.1:7897) answers 502 for them.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(url, timeout=60) as resp:
         return json.loads(resp.read().decode())
@@ -201,86 +180,6 @@ def cmd_search(args) -> int:
 # ── fetch mode ────────────────────────────────────────────────────────────────
 
 
-def _mirror_dir(args) -> Path:
-    if args.mirror_dir:
-        return Path(args.mirror_dir)
-    return resolve_meiva_home() / "traces"
-
-
-def _trace_id_b64(hex_trace_id: str) -> str:
-    return base64.b64encode(bytes.fromhex(hex_trace_id)).decode()
-
-
-def _mirror_day(fp: Path) -> datetime.date | None:
-    """Day stamp from a mirror filename (the sidecar's rotated
-    `spans-<ISO-timestamp>-(size|time).jsonl`); None for the unstamped ACTIVE
-    `spans.jsonl`."""
-    m = re.match(r"spans-(\d{4})-(\d{2})-(\d{2})T", fp.name)
-    if m:
-        try:
-            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            return None
-    return None
-
-
-def _mirror_files(directory: Path, days: int) -> list[Path]:
-    """Mirror files within the last `days` days, newest first: the active
-    `spans.jsonl` (day = mtime) plus rotated `spans-*.jsonl` and
-    gzipped old segments (`*.jsonl.gz`)."""
-    cutoff = datetime.now(UTC).date() - timedelta(days=days - 1)
-    files = sorted(directory.glob("spans*.jsonl*"), reverse=True)
-    kept = []
-    for fp in files:
-        day = _mirror_day(fp)
-        if day is None:
-            day = datetime.fromtimestamp(fp.stat().st_mtime, tz=UTC).date()
-        if day >= cutoff:
-            kept.append(fp)
-        elif kept:
-            break  # files are newest-first; the rest are older
-    return kept
-
-
-def fetch_from_mirror(args, hex_trace_id: str) -> list[dict]:
-    directory = _mirror_dir(args)
-    # Current mirror lines carry hex ids; legacy pre-#1266 lines carry
-    # base64 (protojson, padded, but unpadded writers exist) — include the
-    # unpadded form too, or the prefilter would drop those lines before
-    # `_id_to_hex`'s padding fallback ever runs.
-    b64_id = _trace_id_b64(hex_trace_id)
-    needles = {hex_trace_id, b64_id, b64_id.rstrip("=")}
-    files = _mirror_files(directory, args.days)
-    print(f"scanning {len(files)} mirror file(s) in {directory} (days={args.days})")
-    # A trace can straddle a rotation boundary (the sidecar rotates on size),
-    # so scan every file in range and merge — never stop at the first hit.
-    by_span: dict[str, dict] = {}
-    for fp in files:
-        found = 0
-        # Old segments are gzipped by the agent-side compression pass; read
-        # them transparently. `fp.open` is a bound method and must NOT be
-        # called with the path as its first argument (gzip.open does take
-        # it) — passing it crashed every non-gzipped mirror scan.
-        with (
-            gzip.open(fp, "rt", encoding="utf-8")
-            if fp.name.endswith(".gz")
-            else fp.open("rt", encoding="utf-8")
-        ) as f:
-            for line in f:
-                if not any(needle in line for needle in needles):
-                    continue
-                try:
-                    req = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                for span in _spans_from_envelope(req, hex_trace_id):
-                    by_span[span["span_id"]] = span
-                    found += 1
-        if found:
-            print(f"found {found} span(s) in {fp.name}")
-    return list(by_span.values())
-
-
 def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
     import urllib.error
 
@@ -291,8 +190,8 @@ def fetch_from_tempo(args, hex_trace_id: str) -> list[dict]:
         body = exc.read().decode(errors="replace")
         if "exceeds max size" in body:
             print(
-                "tempo: trace exceeds the 5 MB full-trace cap. Use "
-                "`--source mirror` on the recording machine, or narrow with --search."
+                "tempo: trace exceeds the 5 MB full-trace cap. "
+                "Narrow with --search (spans per span set, a time window)."
             )
             return []
         raise
@@ -309,22 +208,17 @@ def cmd_fetch(args) -> int:
         print("--trace-id must be a 31- or 32-char hex id")
         return 2
     trace_id = args.trace_id.zfill(32)
-    spans = (
-        fetch_from_mirror(args, trace_id)
-        if args.source == "mirror"
-        else fetch_from_tempo(args, trace_id)
-    )
+    spans = fetch_from_tempo(args, trace_id)
     if not spans:
         print(
-            "no spans found. Is the trace id right? Old mirror files are "
-            "retention-pruned — widen --days. In Tempo, traces arrive via "
-            "`meiva trace ship` (gap-replay; the sidecar fans out live)."
+            "no spans found. Is the trace id right? Tempo keeps traces for 7 days, "
+            "and a span the collector could not deliver in time is not recorded anywhere else."
         )
         return 1
     spans.sort(key=lambda s: s["start_ns"])
     out = {
         "trace_id": trace_id,
-        "source": args.source,
+        "source": "tempo",
         "fetched_at": datetime.now(UTC).isoformat(),
         "spans": spans,
     }
@@ -354,23 +248,6 @@ def main() -> int:
     mode.add_argument("--trace-id", metavar="HEX32", help="fetch one full trace")
     ap.add_argument("--limit", type=int, default=10, help="search mode: max traces")
     ap.add_argument("--spss", type=int, default=3, help="search mode: spans per span set")
-    ap.add_argument(
-        "--source",
-        choices=("mirror", "tempo"),
-        default="mirror",
-        help="fetch mode: mirror = $MEIVA_HOME/traces JSONL (default); tempo = /api/traces/{id}",
-    )
-    ap.add_argument(
-        "--days",
-        type=int,
-        default=2,
-        help="fetch mode (mirror): scan files from the last N days, newest first",
-    )
-    ap.add_argument(
-        "--mirror-dir",
-        default=None,
-        help="fetch mode (mirror): override $MEIVA_HOME/traces",
-    )
     args = ap.parse_args()
     return cmd_search(args) if args.search else cmd_fetch(args)
 

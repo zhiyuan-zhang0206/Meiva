@@ -545,9 +545,9 @@ async def run(
 
     rng = _new_rng()
     # meiva:note
-    # The process's clock, built before the first thing that stamps with it: the trace mirror's
-    # retention and gzip passes run inside `init_process_scope`, and the same clock then stamps the
-    # messages this host hands off, so one construction answers both.
+    # The process's clock, built before the first thing that stamps with it: `init_process_scope`
+    # takes it, and the same clock then stamps the messages this host hands off, so one
+    # construction answers both.
     stamping = handoff_source(config)
     workload_pool, control_pool, bus, db = boot_handles(
         database(), config, rng, timers=SYSTEM_TIMERS

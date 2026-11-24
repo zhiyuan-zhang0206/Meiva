@@ -13,7 +13,7 @@
 #
 # - ``host`` — init/start/stop/restart/status/converge/firewall
 # - ``update`` — whole-cluster source-mode rollout over SSH (run/down/up)
-# - ``observability`` (alias ``obs``) and trace
+# - ``observability`` (alias ``obs``)
 # - ``query`` — the read-only cluster queries (events, metrics, stats, tasks)
 # - ``cluster`` — the whole-cluster verbs
 # - ``auth`` — the web login password
@@ -53,7 +53,7 @@ from cli.parsers.management import (
     add_config_parser,
     add_schedules_parser,
 )
-from cli.parsers.observability import add_observability_parser, add_trace_parser
+from cli.parsers.observability import add_observability_parser
 from cli.parsers.permissions import add_permissions_parser
 from cli.parsers.pty import add_pty_parser
 from cli.parsers.query import (
@@ -94,7 +94,6 @@ def build_parser(
     add_observability_parser(sub, retained_children=retained_children)
     add_cluster_parser(sub)
     add_computer_parser(sub)
-    add_trace_parser(sub)
     add_events_parser(sub)
     add_metrics_parser(sub)
     add_stats_parser(sub)

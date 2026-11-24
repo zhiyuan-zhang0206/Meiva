@@ -1,2 +1,0 @@
-[uses]
-"test_trace_ship.py" = ["_ship_proxy_child.py"]

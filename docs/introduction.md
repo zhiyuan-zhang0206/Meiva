@@ -248,7 +248,7 @@ for the full surface.
 | `meiva skill install <src>` | install Agent Skills from a git URL or local path |
 | `meiva plugins` / `meiva mcp` | manage plugins and MCP servers |
 | `meiva memory` | shared memory pool operations |
-| `meiva config` / `meiva questions` / `meiva trace` | config get/set, the question queue, the trace mirror |
+| `meiva config` / `meiva questions` | config get/set, the question queue |
 
 ---
 
@@ -328,15 +328,14 @@ cluster; that has to come from outside Meiva today. Full policy and reporting:
 
 ### Observability (OTel + LGTM)
 
-Every agent turn records an OTel trace to a local OTLP/JSON mirror
-(`$MEIVA_HOME/traces/` — metadata-only by default; LLM content is stripped at the
-source), replayed to Tempo by `meiva trace ship`; the unified event stream
+Every agent turn records an OTel trace (metadata-only by default; LLM content is
+stripped at the source) that the local collector relays to Tempo; the unified event stream
 exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). The
 LGTM backend (remote Tempo plus native Loki, Prometheus, and Grafana) serves
 Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
 backs the gateway's /ops + inspect endpoints:
 [`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See the
-[trace mirror and delivery topology](../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.md)
+[trace delivery topology](../base/telemetry/otlp/docs/telemetry-otlp/delivery-topology.md)
 node for the full design.
 
 ## Key docs — read on demand

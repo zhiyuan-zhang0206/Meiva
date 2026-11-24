@@ -38,11 +38,9 @@ from cli.database.runtime import CommandRuntime
 
 # meiva:note
 # Data-volume used fraction at which the probe fails (alert-only). One line shared across the
-# statvfs family: the trace auto-degrade watermark (`MEIVA_TRACE_DISK_WATERMARK=0.9`), the 312
-# resource watcher's CRITICAL threshold, and the 2026-08-08 incident level. The disk the
-# checkpoint/trace mirrors grow on filling is the gateway-can't-start outage class, so the
-# owner should hear as the trace auto-degrade line is reached, not after (metric canon:
-# `disk_usage_fraction`).
+# statvfs family: the 312 resource watcher's CRITICAL threshold and the 2026-08-08 incident level.
+# A filling data disk is the gateway-can't-start outage class, so the owner should hear as that
+# line is reached, not after (metric canon: `disk_usage_fraction`).
 DEFAULT_DISK_USAGE_WATERMARK = 0.90
 
 _MACOS_DATA_VOLUME = Path("/System/Volumes/Data")

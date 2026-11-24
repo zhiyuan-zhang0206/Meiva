@@ -119,7 +119,7 @@ def test_bootstrap_still_skips_none(
     recipient falls back to the field default. Distinct from set-to-empty."""
     serve_generation(tmp_path)
     runtime: Any = bootstrap_authority.runtime
-    runtime.observability.trace_retention_days = None
+    runtime.observability.trace_strip_content = None
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
@@ -128,7 +128,7 @@ def test_bootstrap_still_skips_none(
         ),
         plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
-    assert "MEIVA_TRACE_RETENTION_DAYS" not in vals
+    assert "MEIVA_TRACE_STRIP_CONTENT" not in vals
 
 
 def test_bootstrap_fields_are_valid_field_names() -> None:

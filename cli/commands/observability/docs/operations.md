@@ -5,7 +5,7 @@ Current delivery, retention and failure contracts belong to their component owne
 - [Native LGTM lifecycle](lgtm/lgtm.md)
   and [backend configuration](../../../../deploy/lgtm/README.md).
 - [OTLP producer export](../../../../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.md),
-  [delivery topology and recovery mirror](../../../../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.md),
+  [trace delivery topology](../../../../base/telemetry/otlp/docs/telemetry-otlp/delivery-topology.md),
   [bounded queues and loss](../../../../base/telemetry/otlp/docs/telemetry-otlp/export-backpressure.md).
 - [Infrastructure metrics](../../../../base/telemetry/otlp/docs/telemetry-otlp/infra-metrics/infra-metrics.md)
   and [event labels](../../../../base/telemetry/otlp/docs/telemetry-otlp/event-resource-labels.md).
@@ -21,7 +21,7 @@ Inspect the rendered configuration and pinned versions through the backend owner
 above. Disabling the backend also removes the live data source for its consumers;
 check those consumers before choosing an outage window.
 
-`MEIVA_TELEMETRY_OTLP_ENABLED=false` disables producer export and trace shipping;
+`MEIVA_TELEMETRY_OTLP_ENABLED=false` disables producer export;
 changing this startup-applied setting requires restarting the affected processes.
 The collector's own infrastructure scrapes have an independent role gate. To
 stop that service, use `meiva start --disable-service otel-collector` through normal
@@ -69,27 +69,5 @@ PY
 An empty sample cannot certify labels and fails the canary. An absent
 `event_name` label or any mismatch also fails; run it only over
 newly emitted rows, since indexed-era data from before the rollout is immutable.
-
-## Replay a trace mirror
-
-**Ship** — `meiva trace ship` (`cli/commands/observability/trace.py`). Recovery replay reads
-the mirror and bypasses the LOCAL sidecar, because replaying through it would
-write the replayed lines back into the mirror (watermark loop). A gateway or
-single-box unit POSTs straight to loopback
-`{MEIVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
-to the gateway collector's configured private OTLP port with its telemetry token. The
-remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
-a second copy and replay ambiguity. Needed only for gaps the in-memory queue
-could not hold (backend down longer than the queue, a collector restart, offline
-machines, past windows). It is run by an operator; no schedule ships it.
-Gated by `MEIVA_TELEMETRY_OTLP_ENABLED` (refuses while off — one kill switch
-for the whole OTLP surface).
-- **incremental** (no args): a per-file byte-offset watermark
-  (`traces/.ship-watermark.json`) advances per POSTed line, so re-running ships
-  only new lines and an interrupted ship resumes exactly where it stopped.
-- **windowed** (`--since` / `--until`, `YYYY-MM-DD`): ships matching files whole,
-  ignoring the watermark — the "shipping was off, import a past range" path. Span
-  ingestion is idempotent by span id, so re-shipping is safe.
-
 
 For bounded trace investigation, use [inspect-a-trace](../../../../.agents/skills/inspect-a-trace/SKILL.md).

@@ -1,4 +1,4 @@
-exports = ["authority.py", "collector", "lgtm", "observability_config.py", "trace_ship", "url_parts.py"]
+exports = ["authority.py", "collector", "lgtm", "observability_config.py", "url_parts.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -10,4 +10,3 @@ exports = ["authority.py", "collector", "lgtm", "observability_config.py", "trac
 "authority.py" = ["url_parts.py"]
 "collector" = ["authority.py", "url_parts.py"]
 "lgtm" = ["authority.py", "url_parts.py"]
-"trace_ship" = ["collector", "url_parts.py"]

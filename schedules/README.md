@@ -36,7 +36,6 @@ directory. The manifest is the single expression of the built-in policy
 | `self-evolution-daily` | cron `0 0 * * *` | product | **enabled** |
 | `self-evolution-weekly` | cron `0 0 * * 2,5` | product | **enabled** |
 | `model-update-tracker` | cron `0 6 * * *` | product | **enabled** |
-| `trace-ship-tempo` | cron `*/5 * * * *` | product | **enabled** |
 | `harness-cli-update` | cron `30 4 * * *` per machine | product | **enabled** |
 | `claude-auth-keepalive` | cron `10 0,6,12,18 * * *` per machine | product | **enabled** |
 | `db-write-stall-watch` | every 60 s | operator | disabled |
@@ -132,7 +131,7 @@ card rather than silence. `audit-branch-protection.yml` keeps opening its own Gi
 no router sends an unlabeled issue anywhere, so the card is the signal that reaches the lead.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
-  tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own
+  tracking, debt clearing, CI observability, harness CLI convergence) are Meiva's own
   improvement loops — they ship and start by default.
 - `harness-cli-update` runs at 04:30 cluster time with `placement: "per_machine"`. It provisions
   a schedule row (`harness-cli-update:<machine>`) on every registered runner host (`role @> '{agent-runner}'`).

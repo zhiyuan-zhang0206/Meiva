@@ -12,15 +12,12 @@
 # component IDs and queues but points them at the gateway collector's separate,
 # authenticated remote receiver; the gateway then fans those batches into its
 # loopback backends. Backend ports never need an off-box bind.
-# Every collector also mirrors locally produced traces to JSONL
-# ($MEIVA_HOME/traces/spans.jsonl, rotated), so agents can grep spans without a
-# backend. Every exporter uses a bounded in-memory sending queue (a collector
+# Every exporter uses a bounded in-memory sending queue (a collector
 # restart drops what was queued) and rejects the newest batch immediately when
 # its queue is full, bounds each send attempt to 5s, and retries for at
 # most 15m before dropping with collector failure metrics. Cumulative metrics
-# repair on a later successful sample. The independent file/traces exporter is
-# not queued behind remote delivery and remains the local durable trace sink.
-# `meiva trace ship` replays a mirrored gap without re-entering the local mirror.
+# repair on a later successful sample. Traces are telemetry: they are lossy by
+# design and have no local copy or replay path; Tempo is their only store.
 #
 # The sidecar also scrapes the traditional SRE layer (issue #46) into the same
 # metrics fan-out: `host_metrics` on every machine, plus `postgresql` + `redis`
@@ -245,8 +242,7 @@ processors:
           - set(datapoint.exemplars, nil) where metric.type != METRIC_DATA_TYPE_SUMMARY
   # memory_limiter runs FIRST in every pipeline: under memory pressure it
   # returns retryable backpressure and bounds shedding instead of letting the
-  # collector balloon on a 16GB shared box. Because it precedes file/traces,
-  # data rejected here is not promised to reach the JSONL mirror.
+  # collector balloon on a 16GB shared box.
   memory_limiter:
     check_interval: 1s
     limit_mib: 512
@@ -349,38 +345,6 @@ $CLUSTER_AUTH_EXTENSION
 
 exporters:
 $OTLP_EXPORTERS
-  # Local JSONL mirror — the grep surface (user ruling: "grep is the most
-  # convenient way to debug"). One line per export batch, each line a standard OTLP/JSON
-  # ExportTraceServiceRequest. Rotation (timberjack) gives append semantics
-  # across collector restarts: the ACTIVE file is never truncated, and
-  # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
-  # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.7 in
-  # otelcol-contrib 0.162.0 appends the trigger reason to the backup name;
-  # `base/telemetry/trace_mirror.py` parses these names).
-  #
-  # Segment size is the structural bound on the ACTIVE file (the file
-  # exporter exposes no time-based rotation, so size is the only trigger):
-  # at 64 MiB the mirror rotates roughly every half hour at peak volume.
-  # max_backups counts BOTH plain and gzipped backups (timberjack parses the
-  # `.gz` name), so it is the de-facto retention at peak volume: ~24 segments
-  # = the last ~12h of a 2.9 GB/day mirror. The agent-side day retention
-  # (`trace_retention_days`, `base/telemetry/trace_mirror.py`'s `_prune_old_mirror` on every
-  # agent start) binds at low volume, when 24 segments span more days than
-  # the setting; `_gzip_old_mirror` shrinks each kept segment ~5-10x, keeping
-  # the whole mirror around a few hundred MiB at peak.
-  #
-  # No `localtime` key below — timberjack's default (false) stamps the
-  # rotated filename's timestamp in UTC. `base/telemetry/trace_mirror.py`'s `_prune_old_mirror`
-  # parses that embedded timestamp and treats it as UTC explicitly
-  # (`tzinfo=UTC`); setting `localtime: true` here would silently break that
-  # parse (retention would prune the wrong files, or none) without either
-  # side signaling the mismatch (tz audit, 2026-08, PR-6).
-  file/traces:
-    path: $MEIVA_HOME/traces/spans.jsonl
-    rotation:
-      max_megabytes: 64
-      max_days: $RETENTION_DAYS
-      max_backups: 24
 
 service:
   telemetry:
@@ -399,7 +363,7 @@ $HARNESS_OTLP_PIPELINES
     traces:
       receivers: [otlp$HARNESS_OTLP_FORWARD]
       processors: [memory_limiter, filter/cluster_allow, resource/meiva_machine, batch]
-      exporters: [otlphttp/tempo, file/traces]
+      exporters: [otlphttp/tempo]
     logs:
       receivers: [otlp$HARNESS_OTLP_FORWARD, filelog/sessions, filelog/services]
       processors:

@@ -26,7 +26,6 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 from base.cluster.machine import MachineIdentityReader
 from base.log import logger
-from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
 from base.telemetry.observability import (
     cluster_label,
@@ -41,26 +40,12 @@ from base.telemetry.otlp.trace_config import TraceConfig, TraceSettings
 from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S, TraceReadiness
 from base.telemetry.otlp.trace_strip import strip_content_attributes
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
-from base.telemetry.trace_mirror import (
-    disk_usage,
-    disk_watermark_exceeded,
-    enforce_dir_cap,
-    gzip_old_mirror,
-    mirror_size,
-    prune_old_mirror,
-)
 
 __all__ = [
     "OtlpJsonHttpSpanExporter",
     "arm_tracing",
     "claim_idle_wait_span",
-    "disk_usage",
-    "disk_watermark_exceeded",
-    "enforce_dir_cap",
-    "gzip_old_mirror",
     "initialize_tracing",
-    "mirror_size",
-    "prune_old_mirror",
     "state",
     "turn_span",
 ]
@@ -116,9 +101,8 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     Each `export()` batch is encoded to the OTLP dict, content-stripped
     (defensive layer 2 — content never leaves the process), re-serialized to
     the OTLP `ExportTraceServiceRequest` protobuf and POSTed to
-    `{endpoint}/v1/traces` with `Content-Type: application/x-protobuf` — the
-    same wire path `meiva trace ship` uses. Protobuf, not OTLP/JSON, on the
-    wire: the collector's JSON receiver rejects the SDK's padded-base64 ids
+    `{endpoint}/v1/traces` with `Content-Type: application/x-protobuf`.
+    Protobuf, not OTLP/JSON, on the wire: the collector's JSON receiver rejects the SDK's padded-base64 ids
     (verified 2026-08-14 against otelcol-contrib 0.155.0). The endpoint is
     the LOCAL sidecar (``MEIVA_TELEMETRY_OTLP_ENDPOINT``, default
     127.0.0.1:4318); agents never dial a backend directly.
@@ -127,7 +111,7 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
     and lets the SDK's batch processor drop the batch. Three consecutive failed
     batches open a 30-second circuit: exports during cooldown are counted and
     shed without a POST, then one half-open probe decides whether to recover.
-    The mirror is the collector's job now; this exporter's only duties are
+    This exporter's only duties are
     stripping (defensive layer 2) and the bounded POST itself.
     """
 
@@ -374,7 +358,6 @@ def _arm_tracing(
                 "trace recording enabled",
                 event="trace",
                 endpoint=endpoint,
-                mirror_dir=str(traces_dir(home)),
             )
             state["collector_offline_reported"] = False
             recording = True
@@ -510,7 +493,7 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 # Initialize OTel span recording to the local collector. Idempotent.
 #
 # No-op when `config.enabled` is False. When on, this call
-# runs only the cheap decisions — disk guards + collector preflight — and
+# runs only the cheap decision — the collector preflight — and
 # hands the heavy part (traceloop import + Traceloop.init, ~2.5-3 s) to one
 # daemon thread (_arm_tracing), one attempt per process. The boot path is
 # therefore sub-second; the ordering contract "instrumentors installed
@@ -521,26 +504,16 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 # instrumenting Anthropic + OpenAI + LangChain + Google GenAI (LangGraph
 # via the LangChain callback handler).
 #
-# Recording is one OTLP/HTTP hop to the LOCAL sidecar; the sidecar writes the
-# JSONL mirror and either fans out locally or relays to the gateway. If the
+# Recording is one OTLP/HTTP hop to the LOCAL sidecar, which relays to Tempo (directly or through
+# the gateway). Traces are telemetry: lossy by design, with no local copy and no replay. If the
 # sidecar itself is not answering at init, recording stays off temporarily:
 # the episode is logged once and one daemon loop re-checks every five
 # minutes until init succeeds or the single arm attempt fails
 # permanently (one arm attempt per process).
 #
-# Guards (each independently configurable):
-# - compression (`gzip_old_mirror`): rotated (non-active) mirror segments
-#   gzipped first, so retention and the cap see the compressed footprint.
-# - retention (`trace_retention_days`): day-stamped mirror files older than
-#   N days pruned first (the collector's rotation also bounds them).
-# - directory cap (`trace_max_dir_mb`): oldest mirror files deleted until
-#   the directory fits under the cap. These three run BEFORE the watermark
-#   guard, so an over-watermark disk still gets its relief pass.
-# - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
-#   recording skipped, warning event emitted (auto-degrade).
-# - content stripping (`trace_strip_content`): the root sets TRACELOOP_TRACE_CONTENT=false
-#   (`TraceConfig.traceloop_environment`) + exporter-side re-strip, so the mirror holds
-#   metadata only.
+# Content stripping (`trace_strip_content`): the root sets TRACELOOP_TRACE_CONTENT=false
+# (`TraceConfig.traceloop_environment`) + exporter-side re-strip, so recorded spans hold
+# metadata only.
 @_serialized_initialize
 def initialize_tracing(
     *,
@@ -549,7 +522,6 @@ def initialize_tracing(
     config: TraceConfig,
     readiness: TraceReadiness,
     now: Callable[[], datetime],
-    disk_stats: tuple[float, int] | None = None,
 ) -> None:
     if state.get("closed") or readiness.resolved:
         return
@@ -558,46 +530,8 @@ def initialize_tracing(
     ):
         return
 
-    # Bounded disk FIRST — before the watermark guard, so the relief valves
-    # still run when recording is auto-degraded: compress old segments (so
-    # the cap and the day retention see the post-compression footprint),
-    # then retention (days), then the hard directory cap. When the disk is
-    # already over the watermark this is exactly the pass that frees space —
-    # skipping it there would let an over-watermark disk stay full.
-    mirror_dir = traces_dir(home)
-    mirror_dir.mkdir(parents=True, exist_ok=True)
-    instant = now()
-    if config.gzip_grace_s is None:
-        gzip_old_mirror(traces_dir=mirror_dir, now=instant)
-    else:
-        gzip_old_mirror(grace_seconds=config.gzip_grace_s, traces_dir=mirror_dir, now=instant)
-    prune_old_mirror(config.retention_days, traces_dir=mirror_dir, now=instant)
-    enforce_dir_cap(config.max_dir_mb, traces_dir=mirror_dir)
-
-    # Disk-watermark guard: if the data disk is over its watermark, skip
-    # recording entirely (auto-degrade) instead of letting the mirror grow
-    # the disk toward full. Logged as a warning event so the degradation is
-    # visible; a later agent start re-checks.
-    usage = disk_usage(traces_dir=mirror_dir) if disk_stats is None else disk_stats
-    if usage is not None and usage[0] > config.disk_watermark:
-        # Auto-degrade: skip recording so the mirror can never fill the disk.
-        # The loguru events sink lands this in the unified event stream
-        # (event_name='trace', action='recording_disabled_disk_watermark') —
-        # visible to ops, never crashes. The warning carries the measured
-        # numbers so triage does not need a second command.
-        logger.warning(
-            "trace recording disabled — data disk over watermark",
-            event="trace",
-            action="recording_disabled_disk_watermark",
-            watermark=config.disk_watermark,
-            usage_fraction=round(usage[0], 3),
-            free_gb=round(usage[1] / (1024**3), 1),
-        )
-        return
-
-    # Local-collector preflight: recording IS an OTLP export now, so a missing
-    # sidecar means no recording (and no mirror — the mirror is written by the
-    # collector). Skip with a warning event instead of arming an exporter that
+    # Local-collector preflight: recording IS an OTLP export, so a missing
+    # sidecar means no recording. Skip with a warning event instead of arming an exporter that
     # fails every batch. One daemon retry loop re-checks at the exporter retry
     # cadence, while repeated callers in the same episode stay quiet.
     endpoint = config.endpoint

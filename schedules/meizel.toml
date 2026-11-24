@@ -10,7 +10,6 @@
 "qa-keepalive-schedule.py" = ["jobs"]
 "self-evolution-daily-schedule.py" = ["jobs", "plans"]
 "self-evolution-weekly-schedule.py" = ["jobs", "plans"]
-"trace-ship-tempo-schedule.py" = ["jobs", "plans"]
 "sched-dry-import-weekly-schedule.py" = ["jobs", "plans"]
 "log-cred-mask-monthly-schedule.py" = ["jobs", "plans"]
 "tests" = ["debt-sweep-daily-schedule.py", "jobs", "log-cred-mask-monthly-schedule.py", "plans"]
@@ -27,7 +26,6 @@
 "qa-keepalive-schedule.py" = { kinds = ["environ", "clock", "home"], why = "Schedule process entry reads the home it runs under, the site values (health URL, probed host, owner) and supplies the keeper with a clock, so every round is a function of one instant" }
 "self-evolution-daily-schedule.py" = { kinds = ["environ", "home", "pid"], why = "Schedule process entry reads the home it runs under, its report recipient and scheduler identity before constructing one DailyScan run; it also names its own interpreter (sys.executable) for the command it builds" }
 "self-evolution-weekly-schedule.py" = { kinds = ["environ", "home"], why = "Schedule process entry reads the home it runs under, its event API environment and scheduler identity before composing one weekly run" }
-"trace-ship-tempo-schedule.py" = { kinds = ["environ", "home"], why = "Schedule process entry reads the home it runs under and its scheduler identity before shipping one trace slot" }
 "sched-dry-import-weekly-schedule.py" = { kinds = ["clock", "environ", "home", "argv", "pid"], why = "Schedule process entry reads the home it runs under, its scheduler identity and start instant before composing the weekly dry-import sweep; it also reads its command line (argv) in its `__main__` guard (`--check-file`, `--once`, `--no-notify`), as the process entry, and names its own interpreter (sys.executable) for the command it builds" }
 "log-cred-mask-monthly-schedule.py" = { kinds = ["clock", "environ", "home", "argv", "pid"], why = "Schedule process entry reads the home it runs under, its scheduler identity and start instant before composing the monthly credential sweep; it also reads its command line (argv) in its `__main__` guard (`--once`, `--no-notify`), as the process entry, and names its own interpreter (sys.executable) for the command it builds" }
 # meiva:note

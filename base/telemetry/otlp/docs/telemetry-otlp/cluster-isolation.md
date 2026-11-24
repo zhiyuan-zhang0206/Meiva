@@ -46,4 +46,4 @@ hatch. Dashboard and fleet callers pass their current cluster label, and the
 production alert rules filter `cluster=".meiva"` after JSON parsing.
 That strict filter excludes preview-cluster pollution.
 
-Parent node: [OTLP export backend & trace ship to Tempo](telemetry-otlp.md).
+Parent node: [OTLP export backend](telemetry-otlp.md).

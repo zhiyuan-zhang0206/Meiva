@@ -4,13 +4,12 @@
 # One collector per machine: every agent on the host sends OTLP to its local receiver (127.0.0.1,
 # on MEIVA_TELEMETRY_OTLP_PORT, default the standard 4318). A gateway collector fans out to its
 # loopback Tempo/Loki/Prometheus backends; a pure runner collector relays each signal to the
-# gateway collector's authenticated private-address receiver. Every machine mirrors its local
-# traces to JSONL. This module is the converge step's shell, idempotent: an already-installed,
-# version-matching binary is a no-op, and the config is regenerated on every converge so fan-out
-# and retention setting changes propagate on the next `meiva start`.
+# gateway collector's authenticated private-address receiver. This module is the converge step's
+# shell, idempotent: an already-installed, version-matching binary is a no-op, and the config is
+# regenerated on every converge so fan-out setting changes propagate on the next `meiva start`.
 #
-# The CONTRIB distribution is required, not core: the file exporter (JSONL mirror) and the
-# file_storage extension (filelog read offsets) live in contrib. The version is pinned to the
+# The CONTRIB distribution is required, not core: the filelog receiver and the file_storage
+# extension (filelog read offsets) live in contrib. The version is pinned to the
 # collector release the LGTM stack (deploy/lgtm) was validated with, and each platform's release
 # tarball is SHA256-pinned.
 #
@@ -280,7 +279,6 @@ def generate_config(
         tempo_endpoint=obs.telemetry_tempo_endpoint.rstrip("/"),
         loki_base=bases[0],
         prom_base=bases[1],
-        retention_days=obs.trace_retention_days,
         self_metrics_port=obs.otel_collector_metrics_port,
         local_ingress_endpoint=host_port(LOCAL_INGRESS_HOST, obs.telemetry_otlp_port),
         harness_ingress_endpoint=host_port("127.0.0.1", obs.harness_otlp_port),
