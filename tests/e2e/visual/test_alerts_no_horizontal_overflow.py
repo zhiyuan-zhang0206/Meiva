@@ -98,10 +98,13 @@ def _fits_container(page: Page) -> bool:
     render tables on the same page."""
     return page.evaluate(
         """() => {
-          const container = document.querySelector(
+          const root = document.querySelector(
             '[data-testid="alerts-section"] [data-slot="table-container"]',
           );
-          if (!container) return true;
+          if (!root) return true;
+          // The container is a ScrollArea root (overflow-hidden); the element
+          // that actually scrolls is its viewport.
+          const container = root.querySelector('[data-slot="scroll-area-viewport"]') ?? root;
           return container.scrollWidth <= container.clientWidth + 1;
         }"""
     )
