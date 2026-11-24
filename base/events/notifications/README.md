@@ -59,8 +59,9 @@ Re-announcing after a lost mark is at-least-once on purpose: clients deduplicate
 
 `catalog.CORE_CATEGORIES` holds the two categories (an id and an importance). Both are always on:
 there is no user setting and no policy that suppresses an alert, a replace or a retract. The
-retired `notifications.categories` key in `user_settings` is deleted by migration and nothing reads
-it, so a `false` stored before the switches were removed has no effect. See
+retired `notifications.categories` key may still sit in `user_settings` as an inert row (no
+migration removes it); nothing reads it, so a `false` stored before the switches were removed has
+no effect. See
 [the two system notifications are always on](../../../docs/decisions/engineering/notifications/2026-11-24-notifications-always-on.md).
 
 ## Transports

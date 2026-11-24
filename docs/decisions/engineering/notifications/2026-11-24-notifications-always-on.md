@@ -14,9 +14,10 @@ sees or output they never learn about.
 
 Neither push can be switched off. The settings rows, `GET /api/notifications/categories`, the
 `notifications.policy` module and the category label, description and default-on fields are gone;
-every plan the producers make is staged. The retired `notifications.categories` key is deleted from
-`user_settings` by migration and nothing reads it: a stored `false` from before this decision has
-no effect, so no one stays locked into a switched-off state.
+every plan the producers make is staged. Nothing reads the retired `notifications.categories` key any more: a stored
+`false` from before this decision has no effect, so no one stays locked into a switched-off state.
+The inert row is left in the generic `user_settings` key-value table on purpose; deleting one
+harmless row would cost a schema migration and its rollout gate.
 
 The app's own consent (the operating-system permission prompt and the app's notifications opt-in,
 `ui/app/docs/notifications.md`) is a platform boundary, not a category switch, and stays.
