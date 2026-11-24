@@ -91,7 +91,7 @@ def home_is_observability_station(
     of the host's native LGTM backends.
 
     Two equivalent forms: the legacy ``$MEIVA_HOME/lgtm-host`` marker (operator
-    designation via ``meiva lgtm on``) and the declarative ``observability-station``
+    designation via ``meiva observability on``) and the declarative ``observability-station``
     unit capability. The capability form resolves through the process's own
     machine identity and only counts when the resolved home IS this ``home`` —
     a dev worktree home never inherits the prod station's capability. Role

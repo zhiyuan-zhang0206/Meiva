@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva` host-level observability verbs — `lgtm` and `trace`.
+# `meiva` host-level observability verbs — `observability` (alias `obs`) and `trace`.
 #
 # Handlers stay thin and lazy-import their `cmd_*` implementations so building
 # the parser never loads Settings.
@@ -17,12 +17,12 @@ from cli.parsers.host import ServiceSelection, add_service_selection, refuse_usa
 
 
 @dataclass(frozen=True)
-class _LgtmVerb:
-    lgtm_cmd: Literal["on", "off", "status", "render"]
+class _ObservabilityVerb:
+    observability_cmd: Literal["on", "off", "status", "render"]
 
 
 @dataclass(frozen=True)
-class _LgtmRenderOptions:
+class _RenderOptions:
     force: bool
     repo_only: bool
 
@@ -34,7 +34,7 @@ class _TraceShipOptions:
     dry_run: bool
 
 
-def _h_lgtm(
+def _h_observability(
     args: argparse.Namespace,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -47,7 +47,7 @@ def _h_lgtm(
     from cli.database.runtime import delivered_config, runtime_of
     from cli.start_runtime import StartRuntime
 
-    verb = options(args, _LgtmVerb).lgtm_cmd
+    verb = options(args, _ObservabilityVerb).observability_cmd
     if verb in ("on", "off"):
         if retained_children is None:
             raise ValueError("PostgreSQL launch requires its caller-owned child retention")
@@ -57,7 +57,7 @@ def _h_lgtm(
         enabled = verb == "on"
         problem = selection_problem(enabled=enabled, only_services=only, disabled_services=disabled)
         if problem is not None:
-            return refuse_usage(f"lgtm {verb}", [problem])
+            return refuse_usage(f"observability {verb}", [problem])
         return (cmd_lgtm_on if enabled else cmd_lgtm_off)(
             only_services=only,
             disabled_services=disabled,
@@ -71,7 +71,7 @@ def _h_lgtm(
     if verb == "render":
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
-        render = options(args, _LgtmRenderOptions)
+        render = options(args, _RenderOptions)
         renderer = runtime_of(args)
         return cmd_grafana_render(
             home=renderer.home,
@@ -108,20 +108,23 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
     )
 
 
-def add_lgtm_parser(
+def add_observability_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> None:
     # meiva:note
-    # `meiva lgtm on|off|status` toggles the observability stack on THIS host:
-    # `off` removes the $MEIVA_HOME/lgtm-host marker and compose-downs the
-    # containers (volumes persist); `on` restores marker + stack with history intact.
-    lgtm_p = sub.add_parser(
-        "lgtm",
-        help="observability stack (Loki/Grafana/Tempo/Prometheus) on/off/status on this host",
+    # `meiva observability on|off|status|render` (short alias `meiva obs`) operates the
+    # observability stack on THIS host: `off` removes the $MEIVA_HOME/lgtm-host marker and
+    # compose-downs the containers (volumes persist); `on` restores marker + stack with
+    # history intact. The runtime tree stays `$MEIVA_HOME/lgtm/`: only the verb was renamed.
+    observability_p = sub.add_parser(
+        "observability",
+        aliases=["obs"],
+        help="observability stack (Loki/Grafana/Tempo/Prometheus) on/off/status/render on this "
+        "host; `obs` is the short alias",
     )
-    lgtm_sub = lgtm_p.add_subparsers(dest="lgtm_cmd", required=True)
+    observability_sub = observability_p.add_subparsers(dest="observability_cmd", required=True)
     for name, help_text in (
         (
             "on",
@@ -135,15 +138,15 @@ def add_lgtm_parser(
         ),
         ("status", "marker + containers + readiness probes"),
     ):
-        p = lgtm_sub.add_parser(name, help=help_text)
+        p = observability_sub.add_parser(name, help=help_text)
         if name != "status":
             add_service_selection(p)
         p.set_defaults(
-            func=_h_lgtm
+            func=_h_observability
             if retained_children is None or name == "status"
-            else partial(_h_lgtm, retained_children=retained_children)
+            else partial(_h_observability, retained_children=retained_children)
         )
-    render_p = lgtm_sub.add_parser(
+    render_p = observability_sub.add_parser(
         "render",
         help="render the meiva-ops dashboard from the metric registries and diff it "
         "against this host's provisioning copy (--force writes the render)",
@@ -160,7 +163,7 @@ def add_lgtm_parser(
         help="skip the installed-plugin registry read — render the checkout's "
         "plugins only (for a preview on a host without a reachable database)",
     )
-    render_p.set_defaults(func=_h_lgtm)
+    render_p.set_defaults(func=_h_observability)
 
 
 def add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

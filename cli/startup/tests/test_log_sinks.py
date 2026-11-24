@@ -24,8 +24,10 @@ from cli.startup.log_sinks import START_SINK, cli_log_name, pre_dispatch_log_sin
         (["start"], "cli-start"),
         (["restart"], "cli-restart"),
         (["restart", "--mode", "smooth"], "cli-restart"),
-        (["lgtm", "on"], "cli-lgtm"),
-        (["lgtm", "off"], "cli-lgtm"),
+        (["observability", "on"], "cli-observability"),
+        (["observability", "off"], "cli-observability"),
+        (["obs", "on"], "cli-observability"),
+        (["obs", "off"], "cli-observability"),
     ],
 )
 def test_the_verbs_that_bring_a_unit_up_open_a_named_sink(argv: list[str], name: str) -> None:
@@ -34,7 +36,16 @@ def test_the_verbs_that_bring_a_unit_up_open_a_named_sink(argv: list[str], name:
 
 @pytest.mark.parametrize(
     "argv",
-    [[], ["status"], ["lgtm", "status"], ["lgtm"], ["init"], ["stop"], ["config", "set", "A=B"]],
+    [
+        [],
+        ["status"],
+        ["observability", "status"],
+        ["obs", "status"],
+        ["observability"],
+        ["init"],
+        ["stop"],
+        ["config", "set", "A=B"],
+    ],
 )
 def test_the_verbs_that_print_to_the_terminal_open_none(argv: list[str]) -> None:
     assert cli_log_name(argv) is None
@@ -44,7 +55,7 @@ def test_pre_dispatch_log_sink_defers_init_and_start() -> None:
     assert pre_dispatch_log_sink(["start", "--all-services"]) is None
     assert pre_dispatch_log_sink(["init"]) is None
     assert pre_dispatch_log_sink(["restart"]) == "cli-restart"
-    assert pre_dispatch_log_sink(["lgtm", "on"]) == "cli-lgtm"
+    assert pre_dispatch_log_sink(["observability", "on"]) == "cli-observability"
 
 
 def test_entry_plan_lite_config_and_transport_key() -> None:

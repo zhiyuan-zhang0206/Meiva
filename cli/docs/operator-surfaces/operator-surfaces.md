@@ -94,8 +94,9 @@ instead of SQL or hand-built HTTP calls.
   `schedules/manifest.json` templates for built-in rows that `up` resyncs) and checks its imports, the names
   it reads and its calls into repo code in this checkout.
 - `meiva trace ship`
-- `meiva lgtm on/off/status`: observability-stack toggle on this host, represented
-  by its marker and native lifecycle.
+- `meiva observability on/off/status/render` (short alias `meiva obs`; the former `lgtm`
+  verb is retired): observability-stack toggle on this host, represented by its marker and
+  native lifecycle. The runtime tree stays `$MEIVA_HOME/lgtm/`.
 
 ## Public client wire proof
 

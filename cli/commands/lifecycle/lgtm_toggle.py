@@ -1,4 +1,4 @@
-"""`meiva lgtm on|off`: declare or retract this home as an observability station, then restart
+"""`meiva observability on|off`: declare or retract this home as an observability station, then restart
 the cluster so the desired services take effect.
 
 The switch itself belongs to observability (`observability/lgtm.py`: the station marker, the
@@ -26,13 +26,13 @@ def selection_problem(
 ) -> str | None:
     backends = set(BACKENDS)
     if enabled and backends & set(disabled_services):
-        return "`lgtm on` cannot --disable-service an LGTM backend"
+        return "`observability on` cannot --disable-service an LGTM backend"
     if enabled and only_services and not backends <= set(only_services):
-        return "`lgtm on` with --only-service must name every LGTM backend: " + ", ".join(
+        return "`observability on` with --only-service must name every LGTM backend: " + ", ".join(
             sorted(BACKENDS)
         )
     if not enabled and backends & set(only_services):
-        return "`lgtm off` cannot --only-service an LGTM backend"
+        return "`observability off` cannot --only-service an LGTM backend"
     return None
 
 

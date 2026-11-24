@@ -80,7 +80,7 @@ scrapes are the collector's own, so a marked gateway or pure runner reports
 host health even with the event stream reduced to its JSONL mirror only. An
 unmarked gateway has no collector. Silencing an allowed collector means
 stopping the sidecar
-(`meiva start --disable-service otel-collector`) or the backend (`meiva lgtm off`);
+(`meiva start --disable-service otel-collector`) or the backend (`meiva observability off`);
 with no backend reachable the Prometheus exporter's bounded retry drops them,
 the same shed path app metrics already take. On a pure runner the exporter
 targets the gateway collector's authenticated private receiver; only the

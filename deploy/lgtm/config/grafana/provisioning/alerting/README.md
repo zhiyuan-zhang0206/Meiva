@@ -85,7 +85,7 @@ Then execute the following maintenance sequence:
    after stopping the maintenance instance and start the normal service.
    A subsequent normal reload or restart never sees the one-time directives.
 
-Run `meiva lgtm status` on the station after reloading. It exits nonzero
+Run `meiva observability status` on the station after reloading. It exits nonzero
 and lists the UIDs present on only one side of the comparison between
 rendered provisioning and Grafana, including any locally managed rules.
 

@@ -32,8 +32,8 @@ def cli_log_name(args_in: Sequence[str]) -> str | None:
             return START_SINK
         case ("restart", *_):
             return "cli-restart"
-        case ("lgtm", "on" | "off"):
-            return "cli-lgtm"
+        case ("observability" | "obs", "on" | "off"):
+            return "cli-observability"
         case _:
             return None
 

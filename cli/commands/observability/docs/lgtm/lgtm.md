@@ -24,8 +24,8 @@ configuration digest bound into the root generation. Configuration or roster
 changes require a normal stop before a new generation; repeated unchanged start
 keeps the existing root. Observation data is retained across stops.
 
-`meiva lgtm on` records station intent and starts the service selection the operator
-names, which must not exclude these four; `meiva lgtm off` retracts it and starts a
+`meiva observability on` records station intent and starts the service selection the operator
+names, which must not exclude these four; `meiva observability off` retracts it and starts a
 named selection that must not name them. Nothing is derived from an earlier start;
 observation data is preserved. A running root refuses a
 changed generation; stop it normally before applying the changed selection. The marker or the
@@ -85,7 +85,7 @@ A dashboard can disappear while every readiness probe still passes: the render f
 that keeps `meiva-ops` present, the sidecar it reconciles, and the four-layer check that
 refuses the absence are in [dashboard provisioning](dashboard-provisioning.md).
 
-On the observability station, `meiva lgtm status` also compares the UIDs in
+On the observability station, `meiva observability status` also compares the UIDs in
 rendered alert provisioning with Grafana's default organization's provisioned
 rule list. It exits nonzero and lists the UIDs present on only one side. After
 a rule removal, follow the [provenance-checked cleanup procedure](../../../../../deploy/lgtm/config/grafana/provisioning/alerting/README.md#retired-rules).

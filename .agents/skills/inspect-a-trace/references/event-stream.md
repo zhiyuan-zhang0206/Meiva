@@ -186,5 +186,5 @@ trace the event stream only summarizes.
 | Grafana | `http://localhost:3003` (anonymous viewer; datasource uid `loki`) |
 | Gateway | `http://localhost:8000/api/events` (bearer `MEIVA_API_TOKEN` or the gateway's `MEIVA_CLUSTER_SECRET`) |
 
-`meiva lgtm status` reports the marker, containers, and readiness probes; the
+`meiva observability status` reports the marker, containers, and readiness probes; the
 whole stack only exists on the host holding the `$MEIVA_HOME/lgtm-host` marker.

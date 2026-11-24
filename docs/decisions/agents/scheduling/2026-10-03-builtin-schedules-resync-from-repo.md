@@ -24,7 +24,7 @@ import-only `meiva schedules verify` stayed green because every imported name st
   longer matches the library is red before it fires. This is the only guard for agent-created scripts,
   and `fleet_update down` runs it with the new checkout's code before stopping anything.
 - **Converge replaces a differing `meiva-ops-main.json`** instead of preserving it behind the user-edit
-  hash guard. `meiva lgtm render --force` writes the file without recording its hash, so every later
+  hash guard. `meiva observability render --force` writes the file without recording its hash, so every later
   rollout read it as a local edit and kept it stale.
 
 This follows the 2026-10-03 rule that local copies of repo-derived content converge to the source

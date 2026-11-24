@@ -83,8 +83,8 @@ symptom ──▶ Loki: one agent's event river ──▶ a trace_id ──▶ T
 
 For anything a human should look at themselves, build the Grafana Explore URL
 rather than pasting a span dump. Grafana runs on the LGTM host at
-`http://localhost:3003` (anonymous viewer; `meiva lgtm status` to check it is up,
-`meiva lgtm on` to bring it up). Override with `MEIVA_GRAFANA_URL` when it is on
+`http://localhost:3003` (anonymous viewer; `meiva observability status` to check it is up,
+`meiva observability on` to bring it up). Override with `MEIVA_GRAFANA_URL` when it is on
 another box.
 
 ```python
@@ -121,5 +121,5 @@ and the verified query set: [references/spans.md](references/spans.md).
 - Fleet-wide trends and dashboards — those are pre-shaped questions; use the
   core-metrics dashboards (`base/telemetry/metrics/core/observability.py`) and the
   alert rules, not run-level correlation.
-- Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `meiva lgtm`.
+- Deploying or operating the LGTM stack — `deploy/lgtm/README.md`, `meiva observability`.
 - Computer-use traces (`/api/computer/traces`) — a different subsystem.

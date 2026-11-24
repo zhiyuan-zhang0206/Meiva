@@ -139,7 +139,7 @@ def admitted_seals(record: Path) -> tuple[tuple[Path, str], ...]:
 # being replaceable: the root refuses every later birth of a unit whose input changed since its
 # admission, the health monitor's own replacement included (task #6403). Say it here, at the verb
 # that wrote the files, and name the recovery — a report one health round later reaches whoever is
-# on duty, never the person who just ran `meiva lgtm` or converge. `writer` is the command that
+# on duty, never the person who just ran `meiva observability` or converge. `writer` is the command that
 # wrote them, so the line names the run the reader can retrace.
 def warn_sealed_inputs(home: Path, changed: Iterable[Path], *, writer: str) -> None:
     files = tuple(changed)

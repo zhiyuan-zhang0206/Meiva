@@ -559,7 +559,7 @@ def test_a_dashboard_written_outside_converge_is_replaced_by_the_next_render(
     )
     dest = native / DASHBOARD_REL
     # meiva:note
-    # The stale-dashboard shape: `meiva lgtm render --force` once wrote the file without recording
+    # The stale-dashboard shape: `meiva observability render --force` once wrote the file without recording
     # its hash, so the sidecar named older content. The next rollout's render must still land.
     dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
 
