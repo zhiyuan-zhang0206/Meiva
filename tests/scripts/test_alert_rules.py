@@ -445,7 +445,6 @@ _PER_AGENT_RULES = {
     "meiva-ops-exec-node-timeout": True,
     "meiva-ops-exec-subprocess-killed": True,
     "meiva-ops-exec-child-boot-failed": False,
-    "meiva-ops-inspect-metrics-gap": False,
     "meiva-ops-delivery-stalled": False,
     "meiva-ops-delivery-stranded-wake": False,
 }

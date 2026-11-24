@@ -5652,7 +5652,7 @@
     "/api/metrics/agents": {
       "get": {
         "summary": "Get Metrics Agents",
-        "description": "Per-agent breakdown of the last `days` of events — one\nheadline-counter row per agent (cost / tokens / cache hit / turn + exec\noutcomes), sorted by cost descending. `since_compact=true` narrows each\nagent's events to those at or after its latest compact halt. Service-level\nevents (no agent_id) count toward `meta.total_events` but produce no row —\nand the count covers every telemetry/log event in the window (all\nprocesses).",
+        "description": "Per-agent usage over the last `days` — one headline row per agent that has\nusage (cost / tokens / cache hit), sorted by cost descending. Service-level\nusage (no agent_id) produces no row.",
         "operationId": "get_metrics_agents_api_metrics_agents_get",
         "parameters": [
           {
@@ -5671,16 +5671,6 @@
                 }
               ],
               "title": "Days"
-            }
-          },
-          {
-            "name": "since_compact",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Since Compact"
             }
           }
         ],
@@ -7879,53 +7869,6 @@
         "title": "Acceptance",
         "description": "Historical source acceptance; not copy readiness or agent execution."
       },
-      "AgentActivity": {
-        "properties": {
-          "active_seconds": {
-            "type": "number",
-            "minimum": 0.0,
-            "title": "Active Seconds"
-          },
-          "alive_seconds": {
-            "type": "number",
-            "minimum": 0.0,
-            "title": "Alive Seconds"
-          },
-          "active_rate": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Active Rate"
-          },
-          "llm_seconds": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Seconds"
-          },
-          "exec_seconds": {
-            "type": "number",
-            "minimum": 0.0,
-            "title": "Exec Seconds"
-          }
-        },
-        "type": "object",
-        "required": [
-          "active_seconds",
-          "alive_seconds",
-          "active_rate",
-          "llm_seconds",
-          "exec_seconds"
-        ],
-        "title": "AgentActivity",
-        "description": "Active-rate: the share of an agent's alive wall-clock it spent actively\nworking versus idle-waiting for its next input. The complement\n(`1 - active_rate`) is how much of its life the agent sat blocked on a\nhuman/peer message — the metric's reason for being: surface how much an\nagent is gated on people. A project-lead agent that decides/approves every\nminute reads near 100%; one woken once a week reads near 0%; a worker that\nruns flat-out then terminates reads ~100%.\n\n`active_seconds` = Σ `duration_seconds` of every non-`claim` graph\n`node_exit` in the window — llm generation + execute_code + before/after\nhooks, i.e. all real processing. `llm_seconds` = Σ `duration_seconds` of\nevery `turn_end` event within the window — the model's generation wall-clock\n(reasoning + output). `exec_seconds` = Σ `duration_seconds` of every\n`node_exit` for the `exec` node — the code execution wall-clock. The `claim`\nnode is excluded because its wall-clock IS the idle-wait (it parks the agent\nin the inbound wait between turns), so it falls into the blocked remainder.\n`alive_seconds` = the agent's alive wall-clock (spawn/resurrect→terminate\nintervals, open tail to now), clipped to the same window — the same lifecycle\nbasis as `AgentTps.agent_lifecycle_tps`. `active_rate` = active/alive, capped\nat 1.0 (a node that began before the window's leading edge counts in full, so\nraw active can momentarily exceed windowed alive); 0.0 when alive is 0. All\nfields follow the request's `?hours=` window."
-      },
       "AgentAvailability": {
         "properties": {
           "reason": {
@@ -8448,60 +8391,16 @@
             "title": "Applied Window Hours"
           },
           "cost": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentCost"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "stats": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentStats"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tps": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentTps"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "activity": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentActivity"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/InspectMetricsMetadata"
+            "$ref": "#/components/schemas/AgentCost"
           }
         },
         "type": "object",
         "required": [
           "agent_id",
-          "cost",
-          "stats",
-          "tps",
-          "activity",
-          "metadata"
+          "cost"
         ],
         "title": "AgentInspectStatistics",
-        "description": "Window-dependent statistics, with no current control-plane state.\n\n``window_hours`` identifies the requested view;\n``applied_window_hours`` echoes the served hour window without a Loki\nretention clamp. Metadata distinguishes observed, partial, and unavailable\nsource coverage. Unknown sections are null, never invented zero totals.\nCurrent state belongs exclusively to ``AgentInspectLive``."
+        "description": "Window-dependent usage of one agent, read from the usage ledger.\n\n``window_hours`` identifies the requested view; ``applied_window_hours`` echoes the served\nhour window. Current state belongs exclusively to ``AgentInspectLive``."
       },
       "AgentLineage": {
         "properties": {
@@ -8684,11 +8583,6 @@
             ],
             "title": "Label"
           },
-          "events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Events"
-          },
           "cost_usd": {
             "type": "number",
             "minimum": 0.0,
@@ -8750,46 +8644,21 @@
               }
             ],
             "title": "Cache Hit Pct"
-          },
-          "turn_ok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Turn Ok"
-          },
-          "turn_total": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Turn Total"
-          },
-          "exec_ok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Exec Ok"
-          },
-          "exec_failed": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Exec Failed"
           }
         },
         "type": "object",
         "required": [
           "agent_id",
           "label",
-          "events",
           "cost_usd",
           "llm_calls",
           "tokens_in",
           "tokens_out",
           "tokens_cached",
-          "cache_hit_pct",
-          "turn_ok",
-          "turn_total",
-          "exec_ok",
-          "exec_failed"
+          "cache_hit_pct"
         ],
         "title": "AgentMetricsItem",
-        "description": "One agent's row in the fleet metrics breakdown — headline counters\naggregated over its events within the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering. `exec_failed` is every exec outcome other than plain\n`exec`."
+        "description": "One agent's row in the fleet metrics breakdown — headline usage\naggregated over the report window. `label` is the\nagent's display name (None = unset; frontend falls back to \"#id\").\n`cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.\n`cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero\ninput has no cache metering."
       },
       "AgentMetricsReport": {
         "properties": {
@@ -8810,7 +8679,7 @@
           "agents"
         ],
         "title": "AgentMetricsReport",
-        "description": "GET /api/metrics/agents response — the per-agent breakdown behind the\nmetrics page's Agents panel, sorted by cost descending (ties by agent_id).\n`meta.since_compact` echoes the optional since-last-compact filter."
+        "description": "GET /api/metrics/agents response — the per-agent breakdown behind the\nmetrics page's Agents panel, sorted by cost descending (ties by agent_id)."
       },
       "AgentObservation": {
         "properties": {
@@ -9142,91 +9011,6 @@
         "title": "AgentRow",
         "description": "GET /api/agents/{id} detail, including response-required notice bodies.\n\nThe directory and live roster use bounded cards from base.agents.observation.roster.\nlast_active_at is the real-activity clock; last_inbound_at is the latest\ninbound message clock."
       },
-      "AgentStats": {
-        "properties": {
-          "turn_total": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Turn Total"
-          },
-          "turn_ok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Turn Ok"
-          },
-          "turn_p50_seconds": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn P50 Seconds"
-          },
-          "turn_p90_seconds": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn P90 Seconds"
-          },
-          "turn_min_seconds": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn Min Seconds"
-          },
-          "turn_max_seconds": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn Max Seconds"
-          },
-          "exec_ok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Exec Ok"
-          },
-          "exec_failed": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Exec Failed"
-          }
-        },
-        "type": "object",
-        "required": [
-          "turn_total",
-          "turn_ok",
-          "turn_p50_seconds",
-          "turn_p90_seconds",
-          "turn_min_seconds",
-          "turn_max_seconds",
-          "exec_ok",
-          "exec_failed"
-        ],
-        "title": "AgentStats",
-        "description": "Observed turn + exec counters within the selected window.\n\n`turn_ok` counts `turn_end` events with ok=true (abnormal/cancelled turns\nexcluded); duration fields are null when no duration evidence survives.\nThe metadata declares retained historical histogram precision.\n`exec_ok` is plain `exec` events; `exec_failed` is every other exec outcome\n(exec_failed / exec_timeout / exec_cancelled)."
-      },
       "AgentStatus": {
         "type": "string",
         "enum": [
@@ -9235,41 +9019,6 @@
           "terminated"
         ],
         "title": "AgentStatus"
-      },
-      "AgentTps": {
-        "properties": {
-          "lm_stage_tps": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lm Stage Tps"
-          },
-          "agent_lifecycle_tps": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Lifecycle Tps"
-          }
-        },
-        "type": "object",
-        "required": [
-          "lm_stage_tps",
-          "agent_lifecycle_tps"
-        ],
-        "title": "AgentTps",
-        "description": "Token-per-second metrics for one agent — two views of throughput.\n\n`lm_stage_tps` = output tokens / cumulative LLM-call wall-clock,\nisolating just the model's generation speed excluding execute_code and framework\noverhead. Denominator is the sum of all `turn_end.duration_seconds` over the window.\n\n`agent_lifecycle_tps` = output tokens / agent's cumulative alive\nwall-clock, covering the full agent runtime including non-LLM time.\nDenominator is the agent's total time in non-terminated status (sum of each\nspawn/resurrect → terminate interval, excluding gaps spent terminated)."
       },
       "AlertIngestResult": {
         "properties": {
@@ -12128,81 +11877,6 @@
         "title": "InboundKind",
         "description": "Legal values for inbound_messages.kind — in sync with the CHECK constraint in db/schema.sql.\n\nStrEnum lets the enum value be both a str (can be passed to SQL) and comparable\nto literals. The claim node's `match item.kind:` uses `case InboundKind.CHAT:`\nso pyright statically exhaustively checks (when a new kind is added but\ndispatch isn't synced, pyright reports \"unmatched\"). Same pattern as\n`base.api_contracts.agent_contract.AgentStatus(StrEnum)`."
       },
-      "InspectMetricsMetadata": {
-        "properties": {
-          "collection": {
-            "type": "string",
-            "const": "observed",
-            "title": "Collection",
-            "default": "observed"
-          },
-          "window_start": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Window Start"
-          },
-          "window_end": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Window End"
-          },
-          "sampled_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Sampled At"
-          },
-          "collection_started_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Collection Started At"
-          },
-          "last_observed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Observed At"
-          },
-          "cost": {
-            "$ref": "#/components/schemas/MetricEvidence"
-          },
-          "turns": {
-            "$ref": "#/components/schemas/MetricEvidence"
-          },
-          "activity": {
-            "$ref": "#/components/schemas/MetricEvidence"
-          },
-          "lifecycle": {
-            "$ref": "#/components/schemas/MetricEvidence"
-          }
-        },
-        "type": "object",
-        "required": [
-          "window_start",
-          "window_end",
-          "sampled_at",
-          "collection_started_at",
-          "last_observed_at",
-          "cost",
-          "turns",
-          "activity",
-          "lifecycle"
-        ],
-        "title": "InspectMetricsMetadata",
-        "description": "One pinned query window and the evidence behind each statistics family.\n\n``last_observed_at`` is the newest persisted observation, not a completeness\nwatermark. ``sampled_at`` identifies the DB read, including when cached."
-      },
       "InspectorScheduleInfo": {
         "properties": {
           "id": {
@@ -13263,72 +12937,6 @@
         "title": "MemorySearchResultItem",
         "description": "A single search result: file path, the chunk that matched, its relevance\nscore, and the frontmatter a caller can judge the hit by without opening it."
       },
-      "MetricEvidence": {
-        "properties": {
-          "availability": {
-            "type": "string",
-            "enum": [
-              "observed",
-              "partial",
-              "unavailable"
-            ],
-            "title": "Availability"
-          },
-          "sources": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Sources"
-          },
-          "retained_unapplied_sources": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Retained Unapplied Sources"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "historical_coverage_unknown",
-                  "missing_turn_durations",
-                  "archive_precision_unattributed"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "duration_precision": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "exact",
-                  "one_second_buckets",
-                  "mixed"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration Precision"
-          }
-        },
-        "type": "object",
-        "required": [
-          "availability",
-          "sources"
-        ],
-        "title": "MetricEvidence",
-        "description": "Availability of observed data, never a claim that every event was collected.\n\nA successful source scan cannot prove that an upstream producer lost nothing.\nMissing historical data and missing exact duration observations remain explicit."
-      },
       "MetricsMeta": {
         "properties": {
           "window_days": {
@@ -13339,31 +12947,20 @@
             "type": "string",
             "title": "Generated At"
           },
-          "total_events": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Total Events"
-          },
           "distinct_agents": {
             "type": "integer",
             "minimum": 0.0,
             "title": "Distinct Agents"
-          },
-          "since_compact": {
-            "type": "boolean",
-            "title": "Since Compact",
-            "default": false
           }
         },
         "type": "object",
         "required": [
           "window_days",
           "generated_at",
-          "total_events",
           "distinct_agents"
         ],
         "title": "MetricsMeta",
-        "description": "`/api/metrics/agents` report header — window +\nprovenance. `since_compact` echoes the request's filter: True = each\nagent's events were narrowed to those at or after its latest compact\nhalt before aggregating."
+        "description": "`/api/metrics/agents` report header — window + provenance."
       },
       "ModelInfo": {
         "properties": {

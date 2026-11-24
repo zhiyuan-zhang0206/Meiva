@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import type { CommandItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
@@ -171,12 +172,13 @@ export const SlashAutocomplete = forwardRef<SlashAutocompleteHandle, Props>(
 
     return (
       <div
-        ref={listRef}
         role="listbox"
         aria-label="Commands"
         data-testid="slash-autocomplete"
-        className="absolute bottom-full left-0 right-0 mb-2 z-50 max-h-[min(40vh,calc(var(--visual-viewport-height,100dvh)-7rem))] overflow-y-auto rounded-md border border-border bg-popover shadow-md"
+        className="absolute bottom-full left-0 right-0 mb-2 z-50 rounded-md border border-border bg-popover shadow-md"
       >
+        <ScrollArea className="rounded-md" viewportClassName="max-h-[min(40vh,calc(var(--visual-viewport-height,100dvh)-7rem))]">
+        <div ref={listRef}>
         {matches.map((cmd, i) => (
           <button
             type="button"
@@ -209,6 +211,8 @@ export const SlashAutocomplete = forwardRef<SlashAutocompleteHandle, Props>(
             ) : null}
           </button>
         ))}
+        </div>
+        </ScrollArea>
       </div>
     );
   },

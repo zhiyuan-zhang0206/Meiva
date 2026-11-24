@@ -147,7 +147,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `exec_memory_guard_skipped` | the host memory guard found critical pressure but the largest exec sat at or below the relief floor, so it killed nothing | observation | agent_id, pid, footprint_bytes, floor_bytes, running, pressure, free_swap_bytes | — | events | — |
 | `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events | ✓ |
 | `text` | LLM text output | noise | — | — | events | — |
-| `inspect_metrics_coverage_gap` | inspector statistics read shows a live recorder gap (turns without durations inside the collection era); re-emitted on every read while it holds | anomaly | family, condition, availability | — | events | — |
 | `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value, geometry_incident, geometry_phase, geometry_reason, geometry_elapsed_ms, geometry_layout_height, geometry_visual_height, geometry_visual_scale, geometry_html_inline_height, geometry_html_height, geometry_body_height, geometry_shell_height, geometry_shell_bottom, geometry_composer_height, geometry_composer_bottom | — | events | — |
 | `sse_drop` | SSE event dropped | anomaly | kind, n | — | events | ✓ |
 | `alerts` | alert webhook ingest heartbeat — epoch seconds of the last alert the ingest accepted | noise | last_ingest_timestamp_seconds | — | events | — |

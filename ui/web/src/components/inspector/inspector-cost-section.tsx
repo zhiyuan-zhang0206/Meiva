@@ -113,7 +113,6 @@ export function ContextSection({ agentId }: { agentId: number }) {
 }
 
 export function CostActivitySection({
-  agentId,
   inspect,
   failed,
   pending,
@@ -123,7 +122,6 @@ export function CostActivitySection({
   fetching,
   onRefresh,
 }: {
-  agentId: number;
   inspect: AgentInspectStatistics | undefined;
   failed: boolean;
   pending: boolean;
@@ -134,12 +132,7 @@ export function CostActivitySection({
   onRefresh: () => void;
 }) {
   const t = useTranslations("inspector");
-  const harness = useAgentHarness(agentId);
-  const isExternalHarness = harness != null && harness !== "meiva";
   const cost = inspect?.cost;
-  const activity = inspect?.activity ?? null;
-  const tps = inspect?.tps;
-  const hasLife = activity !== null && activity.alive_seconds > 0;
   // meiva:note
   // Two cost blocks, one per billing mode, each naming its own mode in the label:
   // `Cost (subscription)` covers the calls a subscription already paid for (their
@@ -235,30 +228,6 @@ export function CostActivitySection({
               />
             </div>
           ) : null}
-          {!isExternalHarness ? (
-            <div className="grid grid-cols-2 gap-1">
-              <Metric
-                label={t("metricTps")}
-                value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
-              />
-              <Metric
-                label={t("metricLlmOutput")}
-                value={
-                  hasLife && activity.llm_seconds != null
-                    ? formatInterval(Math.round(activity.llm_seconds))
-                    : "—"
-                }
-              />
-              <Metric
-                label={t("metricCodeExecution")}
-                value={
-                  hasLife
-                    ? formatInterval(Math.round(activity.exec_seconds))
-                    : "—"
-                }
-              />
-            </div>
-          ) : null}
         </div>
       )}
     </Section>
@@ -280,11 +249,6 @@ function unpricedLine(
   count: number,
 ): string | undefined {
   return count > 0 ? t("unpriced", { count: String(count) }) : undefined;
-}
-
-function formatTps(n: number): string {
-  if (n === 0) return "—";
-  return n.toFixed(1);
 }
 
 export function formatInterval(seconds: number): string {

@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import { resolveWorkspaceFile } from "@/components/content/markdown-image-url";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
@@ -77,7 +78,7 @@ function FolderMenu({ agentId, start, onClose }: { agentId: number; start: Folde
           <ChevronLeft aria-hidden className="size-3" />..
         </button>
       ) : null}
-      <div className="max-h-72 overflow-y-auto">
+      <ScrollArea viewportClassName="max-h-72 overscroll-y-contain">
         {listing.isLoading ? <div className="px-3 py-1.5"><Spinner className="size-3" label={t("loading")} /></div> : null}
         {listing.error ? <div className="px-3 py-1.5 text-[11px] text-destructive">{t("unreadable")}</div> : null}
         {listing.data?.entries.length === 0 ? <div className="px-3 py-1.5 text-[11px] text-muted-foreground">{t("filesEmptyFolder")}</div> : null}
@@ -101,7 +102,7 @@ function FolderMenu({ agentId, start, onClose }: { agentId: number; start: Folde
           </button>
         ))}
         {listing.data?.truncated ? <div className="px-3 py-1 text-[10px] text-muted-foreground">{t("filesTruncated", { count: listing.data.entries.length })}</div> : null}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

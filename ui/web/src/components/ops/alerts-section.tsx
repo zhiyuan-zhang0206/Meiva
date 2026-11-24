@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InlineError } from "@/components/ui/inline-error";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDuration } from "@/lib/format/item-summary";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
@@ -129,9 +130,9 @@ export default function AlertsSection() {
           {t("rules")}
         </a>
       </div>
-      <div data-testid="alerts-body" className="h-[28rem] overflow-y-auto">
+      <ScrollArea className="h-[28rem]" viewportTestId="alerts-body">
         {isLoading ? (
-          <div className={cn("h-full items-center justify-center py-8", FLEX)}>
+          <div className={cn("h-[28rem] items-center justify-center py-8", FLEX)}>
             <Spinner className="size-5" />
           </div>
         ) : error ? (
@@ -154,7 +155,7 @@ export default function AlertsSection() {
           // and State, which fit with the detail cell wrapping (md-to-lg tablets
           // keep the same three columns — six fixed columns squeezed the
           // Alert column to ~30px at iPad-portrait widths, QA #989). The shadcn
-          // Table's own overflow-x-auto container stays as a defensive net; with
+          // Table's own horizontal ScrollArea container stays as a defensive net; with
           // every cell wrapping it never overflows.
           // Multi-line wrapping detail cell: whitespace-normal + break-words
           // override the shared TableCell nowrap so long alert names and
@@ -219,7 +220,7 @@ export default function AlertsSection() {
             </TableBody>
           </Table>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

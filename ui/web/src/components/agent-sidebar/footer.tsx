@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { PluginNavIcons } from "@/components/plugins/plugin-nav";
 import { WindowSelect } from "@/components/agents/window-select";
@@ -52,7 +53,7 @@ import { SIDEBAR_ICON_CLASS, SidebarIconButton } from "./icon-button";
 
 /** Shared by the expanded footer and collapsed rail. */
 export const STATUS_POPOVER_CLASS =
-  "z-50 max-h-[var(--radix-popover-content-available-height)] w-80 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
+  "z-50 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
 
 // meiva:note
 // Point-in-time cluster state (`live_count` and plugin-declared balances / subscription
@@ -400,14 +401,16 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
               align="start"
               className={STATUS_POPOVER_CLASS}
             >
-              <StatusCards
-                stats={stats}
-                error={statsError}
-                fetching={isFetching}
-                windowHours={windowHours}
-                onWindowChange={setWindowHours}
-                onRetry={() => { void refetch(); }}
-              />
+              <ScrollArea viewportClassName="max-h-[calc(var(--radix-popover-content-available-height)-2px)] overscroll-y-contain">
+                <StatusCards
+                  stats={stats}
+                  error={statsError}
+                  fetching={isFetching}
+                  windowHours={windowHours}
+                  onWindowChange={setWindowHours}
+                  onRetry={() => { void refetch(); }}
+                />
+              </ScrollArea>
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>

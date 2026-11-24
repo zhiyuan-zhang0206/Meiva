@@ -51,9 +51,6 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-exec-child-boot-failed": Signal(
         "exec_child_boot_failed", "meiva-ops", "0s", "warning"
     ),
-    "meiva-ops-inspect-metrics-gap": Signal(
-        "inspect_metrics_coverage_gap", "meiva-ops", "0s", "warning"
-    ),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
     "meiva-ops-delivery-stranded-wake": Signal(
         "delivery_stranded_wake", "meiva-ops", "0m", "warning"

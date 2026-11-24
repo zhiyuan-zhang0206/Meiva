@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { ContextMeter } from "@/components/inspector/context-meter";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -104,15 +105,6 @@ export function ContextButton(props: ContextButtonProps) {
           role="region"
           aria-label={t("title")}
           data-testid="context-breakdown-panel"
-          // overflow-x-hidden is load-bearing, not decorative: per the CSS
-          // overflow spec, an element with overflow-y other than "visible"
-          // has its overflow-x computed value forced from "visible" to
-          // "auto" too — the two axes can't be set independently that way —
-          // so overflow-y-auto alone silently made this panel horizontally
-          // scrollable once content ran past the max-width ceiling, instead
-          // of the intended pure vertical scroll with only the ceiling-
-          // exceeding rows truncating in place.
-          //
           // whitespace-normal resets an inherited `white-space: nowrap`: the
           // composer's meta row wraps this panel in a `truncate` span (for
           // the *collapsed* meter's own text) — nowrap is an inherited
@@ -122,23 +114,27 @@ export function ContextButton(props: ContextButtonProps) {
           // hidden instead of flowing across lines like the rest of the
           // panel.
           className={cn(
-            "absolute left-0 z-50 min-w-80 max-w-[min(28rem,90vw)] max-h-[min(50dvh,calc(100dvh-8rem))] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground dark:text-[#ece9e2] shadow-md",
+            "absolute left-0 z-50 min-w-80 max-w-[min(28rem,90vw)] whitespace-normal rounded-md border border-border bg-popover text-popover-foreground dark:text-[#ece9e2] shadow-md",
             "bottom-full mb-2",
           )}
         >
-          <div className={cn("mb-2 items-start justify-between gap-2", FLEX)}>
-            <p className="text-[12.5px] font-semibold text-foreground dark:text-[#f2efe9]">{t("title")}</p>
-            <button
-              type="button"
-              data-testid="context-breakdown-close"
-              aria-label={t("close")}
-              onClick={() => onOpenChange(false)}
-              className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-          <ContextBreakdownBody agentId={agentId} />
+          <ScrollArea className="rounded-md" viewportClassName="max-h-[min(50dvh,calc(100dvh-8rem))] overflow-x-hidden">
+            <div className="p-2.5">
+              <div className={cn("mb-2 items-start justify-between gap-2", FLEX)}>
+                <p className="text-[12.5px] font-semibold text-foreground dark:text-[#f2efe9]">{t("title")}</p>
+                <button
+                  type="button"
+                  data-testid="context-breakdown-close"
+                  aria-label={t("close")}
+                  onClick={() => onOpenChange(false)}
+                  className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <ContextBreakdownBody agentId={agentId} />
+            </div>
+          </ScrollArea>
         </div>
       ) : null}
     </>

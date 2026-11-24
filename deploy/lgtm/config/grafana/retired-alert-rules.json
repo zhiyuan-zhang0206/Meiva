@@ -82,6 +82,7 @@
   "meiva-ops-impersonation-capture-failed",
   "meiva-ops-impersonation-notice-failed",
   "meiva-ops-impersonation-seal-stuck",
+  "meiva-ops-inspect-metrics-gap",
   "meiva-ops-lifecycle-pointer-stuck",
   "meiva-ops-maintenance-hold-overdue",
   "meiva-ops-pitr-storage-growth",

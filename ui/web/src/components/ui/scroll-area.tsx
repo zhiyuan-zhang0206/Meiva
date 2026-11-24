@@ -8,7 +8,37 @@ import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useNonce } from "@/lib/auth/nonce-context";
 
 const SCROLLBAR_IDLE_DELAY_MS = 800
+const VERTICAL_VIEWPORT = '[data-slot="scroll-area-viewport"][data-scroll-y="true"]'
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "])
+
+function positionAxisThumb(
+  viewport: HTMLElement,
+  track: HTMLElement | null,
+  thumb: HTMLElement | null,
+  orientation: "vertical" | "horizontal",
+) {
+  if (!track || !thumb) return
+  const vertical = orientation === "vertical"
+  const maxScroll = vertical
+    ? viewport.scrollHeight - viewport.clientHeight
+    : viewport.scrollWidth - viewport.clientWidth
+  if (maxScroll <= 0) {
+    thumb.style.transform = "translate3d(0, 0, 0)"
+    return
+  }
+  const trackStyle = getComputedStyle(track)
+  const padStart = Number.parseFloat(vertical ? trackStyle.paddingTop : trackStyle.paddingLeft) || 0
+  const padEnd = Number.parseFloat(vertical ? trackStyle.paddingBottom : trackStyle.paddingRight) || 0
+  const travel = Math.max(
+    0,
+    (vertical ? track.clientHeight : track.clientWidth) - padStart - padEnd -
+      (vertical ? thumb.offsetHeight : thumb.offsetWidth),
+  )
+  const offset = ((vertical ? viewport.scrollTop : viewport.scrollLeft) / maxScroll) * travel
+  thumb.style.transform = vertical
+    ? `translate3d(0, ${offset}px, 0)`
+    : `translate3d(${offset}px, 0, 0)`
+}
 
 function ScrollArea({
   className,
@@ -16,6 +46,9 @@ function ScrollArea({
   scrollbarClassName,
   viewportRef: externalViewportRef,
   viewportTestId,
+  viewportId,
+  showVerticalScrollbar = true,
+  showHorizontalScrollbar = false,
   scrollbarActivity = "scroll",
   children,
   onScrollCapture,
@@ -27,6 +60,9 @@ function ScrollArea({
   scrollbarClassName?: string;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
   viewportTestId?: string;
+  viewportId?: string;
+  showVerticalScrollbar?: boolean;
+  showHorizontalScrollbar?: boolean;
   scrollbarActivity?: "scroll" | "input";
 }) {
   const [isScrollActive, setIsScrollActive] = React.useState(false)
@@ -46,6 +82,8 @@ function ScrollArea({
   }, [externalViewportRef])
   const trackRef = React.useRef<HTMLDivElement | null>(null)
   const thumbRef = React.useRef<HTMLDivElement | null>(null)
+  const horizontalTrackRef = React.useRef<HTMLDivElement | null>(null)
+  const horizontalThumbRef = React.useRef<HTMLDivElement | null>(null)
 
   const clearIdleTimer = React.useCallback(() => {
     if (idleTimerRef.current !== null) {
@@ -77,26 +115,9 @@ function ScrollArea({
   // conflict.
   const positionThumb = React.useCallback(() => {
     const viewport = viewportRef.current
-    const track = trackRef.current
-    const thumb = thumbRef.current
-    if (!viewport || !track || !thumb) return
-    const maxScroll = viewport.scrollHeight - viewport.clientHeight
-    if (maxScroll <= 0) {
-      // meiva:note
-      // Content fits (or layout is not measured yet): park the thumb at the
-      // top of the track instead of a stale mid-track offset.
-      thumb.style.transform = "translate3d(0, 0, 0)"
-      return
-    }
-    const trackStyle = getComputedStyle(track)
-    const padTop = Number.parseFloat(trackStyle.paddingTop) || 0
-    const padBottom = Number.parseFloat(trackStyle.paddingBottom) || 0
-    const travel = Math.max(
-      0,
-      track.clientHeight - padTop - padBottom - thumb.offsetHeight,
-    )
-    const offset = (viewport.scrollTop / maxScroll) * travel
-    thumb.style.transform = `translate3d(0, ${offset}px, 0)`
+    if (!viewport) return
+    positionAxisThumb(viewport, trackRef.current, thumbRef.current, "vertical")
+    positionAxisThumb(viewport, horizontalTrackRef.current, horizontalThumbRef.current, "horizontal")
   }, [])
 
   // Radix renders the thumb only while content overflows; when it (un)mounts
@@ -108,6 +129,13 @@ function ScrollArea({
     },
     [positionThumb],
   )
+  const setHorizontalThumbRef = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      horizontalThumbRef.current = el
+      if (el) positionThumb()
+    },
+    [positionThumb],
+  )
 
   React.useEffect(() => {
     const viewport = viewportRef.current
@@ -115,18 +143,73 @@ function ScrollArea({
     viewport.addEventListener("scroll", positionThumb, { passive: true })
     // meiva:note
     // A viewport resize (window resize / panel drag) changes the scroll range
-    // and thumb travel; re-anchor even when no scroll event follows.
+    // and thumb travel; re-anchor even when no scroll event follows. A
+    // horizontal region also watches the wrapper's own child: globals.css
+    // forces Radix's content wrapper to `display: block`, so its width stays
+    // at the viewport width while the real content (a `w-max` <pre>, a table)
+    // widens during streaming; only that inner element's size reveals it. The
+    // inner element can mount or be replaced after this effect runs, so a
+    // MutationObserver on the viewport and the wrapper re-syncs the targets.
     let resizeObserver: ResizeObserver | null = null
+    let mutationObserver: MutationObserver | null = null
     if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => positionThumb())
-      resizeObserver.observe(viewport)
+      const ro = new ResizeObserver(() => positionThumb())
+      resizeObserver = ro
+      const observed = new Set<Element>()
+      const syncTargets = () => {
+        const wrapper = viewport.firstElementChild
+        const targets = new Set<Element>([viewport])
+        if (wrapper) targets.add(wrapper)
+        if (showHorizontalScrollbar && wrapper?.firstElementChild) targets.add(wrapper.firstElementChild)
+        for (const target of observed) {
+          if (targets.has(target)) continue
+          ro.unobserve(target)
+          observed.delete(target)
+        }
+        for (const target of targets) {
+          if (observed.has(target)) continue
+          ro.observe(target)
+          observed.add(target)
+        }
+        return wrapper
+      }
+      const wrapper = syncTargets()
+      if (showHorizontalScrollbar && typeof MutationObserver !== "undefined") {
+        const mo = new MutationObserver(() => {
+          syncTargets()
+          positionThumb()
+        })
+        mo.observe(viewport, { childList: true })
+        if (wrapper) mo.observe(wrapper, { childList: true })
+        mutationObserver = mo
+      }
     }
     positionThumb()
     return () => {
       viewport.removeEventListener("scroll", positionThumb)
       resizeObserver?.disconnect()
+      mutationObserver?.disconnect()
     }
-  }, [positionThumb])
+  }, [positionThumb, showHorizontalScrollbar])
+
+  const scrollbarState = {
+    "data-visible": isScrollActive || isDraggingScrollbar,
+    onPointerDown: (event: React.PointerEvent) => {
+      if (event.button !== 0) return
+      clearIdleTimer()
+      setIsDraggingScrollbar(true)
+    },
+    onPointerUp: () => {
+      if (!isDraggingScrollbar) return
+      setIsDraggingScrollbar(false)
+      showScrollbarUntilIdle()
+    },
+    onPointerCancel: () => {
+      if (!isDraggingScrollbar) return
+      setIsDraggingScrollbar(false)
+      showScrollbarUntilIdle()
+    },
+  }
 
   return (
     <ScrollAreaPrimitive.Root
@@ -144,22 +227,24 @@ function ScrollArea({
         ref={setViewportRef}
         nonce={nonce}
         data-slot="scroll-area-viewport"
+        id={viewportId}
         data-testid={viewportTestId}
+        data-scroll-y={showVerticalScrollbar ? "true" : undefined}
         onWheel={scrollbarActivity === "input" ? (event) => {
           if (!event.ctrlKey && event.deltaY !== 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX) &&
-              event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+              event.target instanceof Element && event.target.closest(VERTICAL_VIEWPORT) === event.currentTarget) {
             showScrollbarUntilIdle()
           }
         } : undefined}
         onTouchMove={scrollbarActivity === "input" ? (event) => {
-          if (event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+          if (event.target instanceof Element && event.target.closest(VERTICAL_VIEWPORT) === event.currentTarget) {
             showScrollbarUntilIdle()
           }
         } : undefined}
         onKeyDown={scrollbarActivity === "input" ? (event) => {
           const target = event.target
           if (!event.defaultPrevented && SCROLL_KEYS.has(event.key) && target instanceof Element &&
-              target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget &&
+              target.closest(VERTICAL_VIEWPORT) === event.currentTarget &&
               !target.closest('input, textarea, select, [contenteditable]') &&
               !(event.key === " " && target.closest('button, [role="button"]'))) {
             showScrollbarUntilIdle()
@@ -172,27 +257,23 @@ function ScrollArea({
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      <ScrollBar
-        className={scrollbarClassName}
-        trackRef={trackRef}
-        thumbRef={setThumbRef}
-        data-visible={isScrollActive || isDraggingScrollbar}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return
-          clearIdleTimer()
-          setIsDraggingScrollbar(true)
-        }}
-        onPointerUp={() => {
-          if (!isDraggingScrollbar) return
-          setIsDraggingScrollbar(false)
-          showScrollbarUntilIdle()
-        }}
-        onPointerCancel={() => {
-          if (!isDraggingScrollbar) return
-          setIsDraggingScrollbar(false)
-          showScrollbarUntilIdle()
-        }}
-      />
+      {showVerticalScrollbar && (
+        <ScrollBar
+          className={scrollbarClassName}
+          trackRef={trackRef}
+          thumbRef={setThumbRef}
+          {...scrollbarState}
+        />
+      )}
+      {showHorizontalScrollbar && (
+        <ScrollBar
+          orientation="horizontal"
+          className={scrollbarClassName}
+          trackRef={horizontalTrackRef}
+          thumbRef={setHorizontalThumbRef}
+          {...scrollbarState}
+        />
+      )}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )

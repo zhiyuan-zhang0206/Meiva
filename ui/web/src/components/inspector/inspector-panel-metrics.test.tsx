@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,41 +55,6 @@ describe("InspectorPanel metrics and durations", () => {
     expect(screen.getByText("7 unpriced")).toBeTruthy();
   });
 
-  it.each([
-    [0, "—"],
-    [42.54, "42.5"],
-    [5_834, "5834.0"],
-  ] as const)("formats TPS %s as %s", async (tps, expected) => {
-    getAgentInspectStatistics.mockResolvedValue(
-      fixture({ tps: { lm_stage_tps: tps, agent_lifecycle_tps: 0 } }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    const activitySection = screen.getByText("Activity").closest("section");
-    expect(activitySection).not.toBeNull();
-    expect(within(activitySection!).getByText(expected)).toBeTruthy();
-  });
-
-  it("formats durations past 24h as Xd Yh (task #824): llm output 24d 3h", async () => {
-    getAgentInspectStatistics.mockResolvedValue(
-      fixture({
-        activity: {
-          active_seconds: 24 * 86_400 + 4 * 3_600,
-          alive_seconds: 24 * 86_400 + 4 * 3_600,
-          active_rate: 1,
-          llm_seconds: 24 * 86_400 + 3 * 3_600,
-          exec_seconds: 3_600,
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    expect(screen.getByText("24d 3h")).toBeTruthy();
-    expect(screen.getAllByText("1h").length).toBeGreaterThanOrEqual(2);
-  });
-
   it("formats shell uptime past 24h as Xd Yh (task #824)", async () => {
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -102,17 +67,6 @@ describe("InspectorPanel metrics and durations", () => {
     expect(screen.getByText("24d 3h")).toBeTruthy();
   });
 
-  it("activity durations show em dashes when alive is 0 while TPS remains visible", async () => {
-    getAgentInspectStatistics.mockResolvedValue(
-      fixture({ activity: { active_seconds: 0, alive_seconds: 0, active_rate: 0, llm_seconds: 0, exec_seconds: 0 } }),
-    );
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    const activitySection = screen.getByText("Activity").closest("section");
-    expect(activitySection).not.toBeNull();
-    expect(within(activitySection!).getAllByText("—")).toHaveLength(2);
-    expect(within(activitySection!).getByText("42.5")).toBeTruthy();
-  });
 });
 
 describe("Cost blocks by billing mode (user ruling 2026-11-08)", () => {
@@ -142,8 +96,8 @@ describe("Cost blocks by billing mode (user ruling 2026-11-08)", () => {
   const apiCost = (unpricedCalls: number) =>
     fixture({
       cost: {
-        ...fixture().cost!,
-        cost_usd_api: fixture().cost!.cost_usd,
+        ...fixture().cost,
+        cost_usd_api: fixture().cost.cost_usd,
         unpriced_calls_api: unpricedCalls,
       },
     });
@@ -151,9 +105,9 @@ describe("Cost blocks by billing mode (user ruling 2026-11-08)", () => {
   const subscriptionCost = (unpricedCalls: number) =>
     fixture({
       cost: {
-        ...fixture().cost!,
+        ...fixture().cost,
         cost_usd_api: 0,
-        cost_usd_subscription: fixture().cost!.cost_usd,
+        cost_usd_subscription: fixture().cost.cost_usd,
         unpriced_calls_api: 0,
         unpriced_calls_subscription: unpricedCalls,
       },
@@ -188,8 +142,8 @@ describe("Inspector read ownership", () => {
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(screen.getByText("$0.4213")).toBeTruthy();
     const changed = fixture();
-    changed.cost!.cost_usd = 9;
-    changed.cost!.cost_usd_api = 9;
+    changed.cost.cost_usd = 9;
+    changed.cost.cost_usd_api = 9;
     getAgentInspectStatistics.mockResolvedValue(changed);
     act(() => {
       for (let index = 0; index < 20; index++) streamHandlers.connection?.({ type: "open" });
@@ -250,80 +204,6 @@ describe("Inspector read ownership", () => {
     expect(revalidated).toBeLessThanOrEqual(BACK_VISIT_REVALIDATE_MAX);
   });
 });
-
-describe("persisted metric evidence is internal (task #3869)", () => {
-  it("renders unavailable metrics without manufacturing zero cost, throughput, or a verdict", async () => {
-    const data = fixture({
-      cost: null,
-      stats: null,
-      tps: null,
-      activity: null,
-    });
-    data.metadata.cost = { availability: "unavailable", sources: [] };
-    data.metadata.activity = { availability: "unavailable", sources: [] };
-    data.metadata.lifecycle = { availability: "unavailable", sources: [] };
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    expect(screen.queryByText("$0.0000")).toBeNull();
-    expect(screen.queryByText("0.00 tok/s")).toBeNull();
-    expect(screen.queryByText("No recorded data is available for this window.")).toBeNull();
-    expect(screen.queryByText("Historical coverage is incomplete")).toBeNull();
-  });
-
-  it("keeps the recorded amount while never rendering the historical-coverage verdict", async () => {
-    const data = fixture();
-    data.metadata.cost = {
-      availability: "partial",
-      sources: ["historical_daily_costs"],
-    };
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("$0.4213");
-    expect(screen.queryByText("Historical coverage is incomplete")).toBeNull();
-    expect(screen.queryByText(/Latest recorded observation:/)).toBeNull();
-  });
-});
-
-describe("internal duration evidence never renders (task #3869)", () => {
-  it.each([
-    ["one_second_buckets", "Historical durations use one-second buckets."],
-    ["mixed", "Durations combine exact values and historical one-second buckets."],
-  ] as const)("hides the %s precision note while activity stays visible", async (precision, label) => {
-    const data = fixture();
-    data.metadata.turns.duration_precision = precision;
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("42.5");
-    expect(screen.queryByText(label)).toBeNull();
-  });
-
-  it("hides the retained-durations note", async () => {
-    const data = fixture();
-    data.metadata.turns.retained_unapplied_sources = ["historical_archive_distribution"];
-    data.metadata.turns.reason = "archive_precision_unattributed";
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("42.5");
-    expect(
-      screen.queryByText("Older exact durations are retained, but cannot be assigned to this window."),
-    ).toBeNull();
-    expect(screen.queryByText("historical_archive_distribution")).toBeNull();
-  });
-
-  it("hides the missing-durations note while throughput stays unknown", async () => {
-    const data = fixture({ tps: { lm_stage_tps: null, agent_lifecycle_tps: null } });
-    data.metadata.turns.reason = "missing_turn_durations";
-    getAgentInspectStatistics.mockResolvedValue(data);
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
-    expect(
-      screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
-    ).toBeNull();
-    expect(screen.queryByText("42.5")).toBeNull();
-  });
-});
-
 
 describe("InspectorPanel cost blocks by billing mode (user ruling 2026-11-08)", () => {
   // meiva:note

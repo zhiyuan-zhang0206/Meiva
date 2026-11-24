@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { SpawnForm, useSpawnStatus } from "@/components/agents/spawn-form";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { cn } from "@/lib/format/utils";
@@ -64,15 +65,17 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
           // unavailability reasons remain reachable without hover-only tooltips.
           // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
           className={cn(
-            "z-50 max-w-[94vw] max-h-[min(80dvh,var(--radix-popover-content-available-height,80dvh))] overflow-y-auto text-popover-foreground outline-none",
+            "z-50 max-w-[94vw] text-popover-foreground outline-none",
             isNarrow ? "w-[94vw]" : coarsePointer ? "w-[min(26rem,94vw)]" : "w-fit",
           )}
         >
-          <SpawnForm
-            onSpawn={onSpawn}
-            onDone={() => setOpen(false)}
-            layout={stacked ? "stack" : "table"}
-          />
+          <ScrollArea viewportClassName="max-h-[min(80dvh,var(--radix-popover-content-available-height,80dvh))] overscroll-y-contain">
+            <SpawnForm
+              onSpawn={onSpawn}
+              onDone={() => setOpen(false)}
+              layout={stacked ? "stack" : "table"}
+            />
+          </ScrollArea>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

@@ -36,7 +36,7 @@ import { useStore } from "@/lib/state/store";
 import type { ScheduleCreate } from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../visibility";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { ScheduleForm, ScheduleRow } from "./_schedule_components";
 import { useApi } from "@/lib/transport/transport-context";
@@ -276,7 +276,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
       {shown.length === 0 ? (
         <p className="text-xs text-muted-foreground py-4 text-center">{t("noSchedules")}</p>
       ) : (
-        <div className="border border-border rounded-md overflow-x-auto">
+        <div className={cn("border border-border rounded-md", OVERFLOW_HIDDEN)}>
           <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
             <TableHeader>
               <TableRow>

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { isOngoingTab, machineOf, ongoingTab, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { COLUMN_TITLE_BAR_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 const EMPTY: WorkspaceFileTarget[] = [];
@@ -57,34 +58,36 @@ export function PanelBar({ agentId, mobile, inspecting, hasOngoing = false, onIn
       {inspecting ? (
         <span className="px-1 text-[11px] text-muted-foreground">{tInspector("title")}</span>
       ) : (
-        <div role="tablist" aria-label={t("filesSharedContext")} className={cn("items-center gap-0.5 overflow-x-auto", MIN_W_0, FLEX)}>
-          <button type="button" role="tab" aria-selected={shownFile === null} onClick={() => selectTab(null)} className={tabClass(shownFile === null)}>
-            <span className="whitespace-nowrap">{t("filesSharedContext")}</span>
-          </button>
-          <button type="button" role="tab" aria-selected={showingOngoing} onClick={() => selectTab(ongoing)} className={tabClass(showingOngoing)}>
-            <span className="whitespace-nowrap">{t("ongoing")}</span>
-            {hasOngoing ? <span role="img" aria-label={t("ongoingPresent")} className="size-1.5 rounded-full bg-current opacity-60" /> : null}
-          </button>
-          {tabs.map((tab) => {
-            const active = !showingOngoing && sameFile(shownFile, tab);
-            const name = fileName(tab.path);
-            return (
-              <div key={`${machineOf(tab)}:${tab.path}`} className={tabClass(active)}>
-                <button type="button" role="tab" aria-selected={active} onClick={() => selectTab(tab)} className={cn("items-center", MIN_W_0, FLEX)}>
-                  <span className="max-w-40 truncate" title={tab.path}>{name}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={t("filesClose", { name })}
-                  onClick={() => closeTab(tab)}
-                  className="rounded p-0.5 opacity-60 hover:bg-foreground/10 hover:opacity-100"
-                >
-                  <X aria-hidden className="size-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
+        <ScrollArea className={MIN_W_0} showVerticalScrollbar={false} showHorizontalScrollbar>
+          <div role="tablist" aria-label={t("filesSharedContext")} className={cn("w-max items-center gap-0.5", FLEX)}>
+            <button type="button" role="tab" aria-selected={shownFile === null} onClick={() => selectTab(null)} className={tabClass(shownFile === null)}>
+              <span className="whitespace-nowrap">{t("filesSharedContext")}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={showingOngoing} onClick={() => selectTab(ongoing)} className={tabClass(showingOngoing)}>
+              <span className="whitespace-nowrap">{t("ongoing")}</span>
+              {hasOngoing ? <span role="img" aria-label={t("ongoingPresent")} className="size-1.5 rounded-full bg-current opacity-60" /> : null}
+            </button>
+            {tabs.map((tab) => {
+              const active = !showingOngoing && sameFile(shownFile, tab);
+              const name = fileName(tab.path);
+              return (
+                <div key={`${machineOf(tab)}:${tab.path}`} className={tabClass(active)}>
+                  <button type="button" role="tab" aria-selected={active} onClick={() => selectTab(tab)} className={cn("items-center", MIN_W_0, FLEX)}>
+                    <span className="max-w-40 truncate" title={tab.path}>{name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("filesClose", { name })}
+                    onClick={() => closeTab(tab)}
+                    className="rounded p-0.5 opacity-60 hover:bg-foreground/10 hover:opacity-100"
+                  >
+                    <X aria-hidden className="size-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
       )}
       <div className={cn("ml-auto shrink-0 items-center gap-0.5", FLEX)}>
         {mobile || inspecting ? null : (

@@ -189,8 +189,8 @@ describe("AlertsSection", () => {
     await waitFor(() => screen.getByTestId("alert-row-1"));
 
     const body = screen.getByTestId("alerts-body");
-    expect(body.className).toContain("h-[28rem]");
-    expect(body.className).toContain("overflow-y-auto");
+    expect(body.getAttribute("data-slot")).toBe("scroll-area-viewport");
+    expect(body.closest('[data-slot="scroll-area"]')?.className).toContain("h-[28rem]");
 
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
     expect(screen.getAllByTestId(/^alert-row-/)).toHaveLength(10);

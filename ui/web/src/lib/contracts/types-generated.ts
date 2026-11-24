@@ -2219,13 +2219,6 @@ export interface components {
             status_url: string;
             quote?: components["schemas"]["Quote"] | null;
         };
-        AgentActivity: {
-            active_seconds: number;
-            alive_seconds: number;
-            active_rate: number;
-            llm_seconds: number | null;
-            exec_seconds: number;
-        };
         AgentAvailability: {
             reason: components["schemas"]["AvailabilityReason"];
             observed_at: string;
@@ -2307,11 +2300,7 @@ export interface components {
             agent_id: number;
             window_hours?: components["schemas"]["StatsWindowHours"] | null;
             applied_window_hours?: number | null;
-            cost: components["schemas"]["AgentCost"] | null;
-            stats: components["schemas"]["AgentStats"] | null;
-            tps: components["schemas"]["AgentTps"] | null;
-            activity: components["schemas"]["AgentActivity"] | null;
-            metadata: components["schemas"]["InspectMetricsMetadata"];
+            cost: components["schemas"]["AgentCost"];
         };
         AgentLineage: {
             agent_id: number;
@@ -2346,7 +2335,6 @@ export interface components {
         AgentMetricsItem: {
             agent_id: number;
             label: string | null;
-            events: number;
             cost_usd: number;
             cost_usd_api: number;
             cost_usd_subscription: number;
@@ -2357,10 +2345,6 @@ export interface components {
             tokens_out: number;
             tokens_cached: number;
             cache_hit_pct: number | null;
-            turn_ok: number;
-            turn_total: number;
-            exec_ok: number;
-            exec_failed: number;
         };
         AgentMetricsReport: {
             meta: components["schemas"]["MetricsMeta"];
@@ -2408,21 +2392,7 @@ export interface components {
             permanent_reject_streak: number;
             last_permanent_reject_reason?: string | null;
         };
-        AgentStats: {
-            turn_total: number;
-            turn_ok: number;
-            turn_p50_seconds: number | null;
-            turn_p90_seconds: number | null;
-            turn_min_seconds: number | null;
-            turn_max_seconds: number | null;
-            exec_ok: number;
-            exec_failed: number;
-        };
         AgentStatus: "running" | "idling" | "terminated";
-        AgentTps: {
-            lm_stage_tps: number | null;
-            agent_lifecycle_tps: number | null;
-        };
         AlertIngestResult: {
             processed: number;
             inserted: number;
@@ -2899,18 +2869,6 @@ export interface components {
             items: components["schemas"]["InboundHistoryItem"][];
         };
         InboundKind: "chat" | "system_note" | "compact_summary" | "compact_request" | "interrupt" | "terminate" | "restart" | "resurrect" | "fork" | "heartbeat";
-        InspectMetricsMetadata: {
-            collection: "observed";
-            window_start: string | null;
-            window_end: string;
-            sampled_at: string;
-            collection_started_at: string;
-            last_observed_at: string | null;
-            cost: components["schemas"]["MetricEvidence"];
-            turns: components["schemas"]["MetricEvidence"];
-            activity: components["schemas"]["MetricEvidence"];
-            lifecycle: components["schemas"]["MetricEvidence"];
-        };
         InspectorScheduleInfo: {
             id: number;
             name: string;
@@ -3084,19 +3042,10 @@ export interface components {
             score: number;
             chunk: string;
         };
-        MetricEvidence: {
-            availability: "observed" | "partial" | "unavailable";
-            sources: string[];
-            retained_unapplied_sources?: string[];
-            reason?: ("historical_coverage_unknown" | "missing_turn_durations" | "archive_precision_unattributed") | null;
-            duration_precision?: ("exact" | "one_second_buckets" | "mixed") | null;
-        };
         MetricsMeta: {
             window_days: number;
             generated_at: string;
-            total_events: number;
             distinct_agents: number;
-            since_compact: boolean;
         };
         ModelInfo: {
             provider: string;
@@ -7375,7 +7324,6 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number | null;
-                since_compact?: boolean;
             };
             header?: never;
             path?: never;

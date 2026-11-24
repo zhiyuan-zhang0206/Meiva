@@ -9,13 +9,14 @@ import {
   ITEM_IMAGE_BATCH_TIMEOUT_MS,
 } from "../model/image-loading";
 import {
-  ScrollAreaMock,
   cleanupTimelineTest,
   makeItem,
   render,
 } from "./timeline-test-mock";
 
-vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
+vi.mock("@/components/ui/scroll-area", async () => ({
+  ScrollArea: (await import("./timeline-test-mock")).ScrollAreaMock,
+}));
 
 import { TimelineView } from "..";
 

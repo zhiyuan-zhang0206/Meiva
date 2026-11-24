@@ -1,6 +1,6 @@
 # Agent Inspect Router
 
-`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` — per-agent LLM cost/token/TPS + neighbor graph.
+`/api/agents/{id}/inspect/statistics` + `/inspect/live` + `/neighbors` — per-agent LLM cost/token usage + neighbor graph.
 
 The live inspector's heartbeat block — the four display states (a pause, a queued wake,
 a projected check-in, nothing) and the daemon predicate each one mirrors — has its own
@@ -12,21 +12,10 @@ a price and incomplete usage reports. Cache-hit rates divide reported cache
 reads by input from reports that include cache metering. A window with nonzero
 input and no cache metering returns a null cache-hit rate.
 
-Turn and activity fields use persisted observations and day summaries.
-Pre-cutover full days use the original turn ledger. Exact observations feed
-duration quantiles, and historical histograms carry integer-second precision.
-The panel renders the observed metrics only: coverage verdicts (availability,
-duration precision, retained sources, last-observed) go to the background log
-instead, with unexpected gaps emitted as the `inspect_metrics_coverage_gap` event
-(task #3869, user ruling 2026-09-17). Which limits a read shows, and which is unexpected, is the strict
-`gateway/inspect/_coverage.py` (`coverage_notes`); `_metrics_health.py` only logs them.
-Missing evidence is null/partial with window and observation timestamps, not a
-zero or a claim of complete collection. No synchronous log scan or completed
-result TTL is part of the statistics path. The statistics path serves only the
-explicit hour windows whitelisted by `StatsWindowHours` (0/1/6/24/72/168/720); it
-has no since-compact window (a window over compact boundaries would first need
-an authoritative completed-compact stamp — a separate execution-contract
-decision). The `/inspect/live` half remains
+The statistics path serves only the explicit hour windows whitelisted by `StatsWindowHours`
+(0/1/6/24/72/168/720) and cumulative-since-spawn; turn counts, exec outcomes, durations, TPS and
+active time are not served (they came from persisted observations of `telemetry_events`, which
+has no consumer left). The `/inspect/live` half remains
 window-independent — see [Ops Surfaces (cluster admin + stats dashboard)](../../cluster/docs/ops-surfaces.md).
 
 The Gateway lifespan owns shared SQL work until its native executor future

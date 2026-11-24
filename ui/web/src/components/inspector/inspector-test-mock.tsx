@@ -178,22 +178,6 @@ export function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentI
   return {
     agent_id: 1,
     window_hours: 24,
-    metadata: {
-      collection: "observed",
-      window_start: null,
-      window_end: "2026-09-17T00:00:00Z",
-      sampled_at: "2026-09-17T00:00:00Z",
-      collection_started_at: "2026-09-01T00:00:00Z",
-      last_observed_at: "2026-09-17T00:00:00Z",
-      cost: { availability: "observed", sources: ["observations"] },
-      turns: {
-        availability: "observed",
-        sources: ["observations"],
-        duration_precision: "exact",
-      },
-      activity: { availability: "observed", sources: ["observations"] },
-      lifecycle: { availability: "observed", sources: ["state_transitions"] },
-    },
     cost: {
       cost_usd: 0.4213,
       cost_usd_api: 0.4213,
@@ -209,18 +193,6 @@ export function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentI
       tokens_reasoning: 5_000,
       cache_hit_pct: 91.7,
     },
-    stats: {
-      turn_total: 7,
-      turn_ok: 6,
-      turn_p50_seconds: 3.1,
-      turn_p90_seconds: 9.4,
-      turn_min_seconds: 1.2,
-      turn_max_seconds: 41,
-      exec_ok: 51,
-      exec_failed: 2,
-    },
-    tps: { lm_stage_tps: 42.5, agent_lifecycle_tps: 8.3 },
-    activity: { active_seconds: 1800, alive_seconds: 3600, active_rate: 0.5, llm_seconds: 1200, exec_seconds: 450 },
     ...overrides,
   };
 }

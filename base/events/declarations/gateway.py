@@ -161,19 +161,6 @@ class MemoryIndexPatrol(TypedDict):
     last_success_at: float
 
 
-class InspectMetricsCoverageGap(TypedDict):
-    """`inspect_metrics_coverage_gap` payload — gateway/inspect/_metrics_health.py.
-
-    One event per statistics read that still shows a live recorder gap: turns
-    recorded without durations on a window inside the observation-collection
-    era. Emitted on every such read while the gap holds (state, not edge); the
-    agent is the event's `agent_id`."""
-
-    family: str
-    condition: str
-    availability: str
-
-
 class UploadDeliveryHeld(TypedDict):
     """`upload_delivery_held` payload — gateway/upload_delivery/worker.py.
 
@@ -221,13 +208,6 @@ class AlertsLastIngest(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
-    "inspect_metrics_coverage_gap": telemetry_event(
-        "inspect_metrics_coverage_gap",
-        "inspector statistics read shows a live recorder gap (turns without durations "
-        "inside the collection era); re-emitted on every read while it holds",
-        payload=InspectMetricsCoverageGap,
-        tier="anomaly",
-    ),
     # frontend user modeling
     "frontend_interaction": telemetry_event(
         "frontend_interaction",

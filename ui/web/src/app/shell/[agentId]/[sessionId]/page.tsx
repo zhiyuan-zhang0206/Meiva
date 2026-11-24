@@ -25,6 +25,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { InlineError } from "@/components/ui/inline-error";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 
 import { useWallNow } from "@/lib/transport/transport-context";
@@ -340,12 +341,14 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
         </span>
       </header>
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        data-testid="shell-pane"
-        className={`min-h-0 flex-1 overflow-auto px-3 py-2 sm:px-4 ${terminalBg}`}
+      <ScrollArea
+        viewportRef={scrollRef}
+        onScrollCapture={onScroll}
+        viewportTestId="shell-pane"
+        className={cn(FLEX_1, MIN_H_0)}
+        viewportClassName={terminalBg}
       >
+        <div className="px-3 py-2 sm:px-4">
         {!validParams ? (
           <p className={`font-mono text-xs ${terminalMuted}`}>
             Invalid agent or session id
@@ -368,7 +371,8 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
             {data.lines.join("\n")}
           </pre>
         )}
-      </div>
+        </div>
+      </ScrollArea>
     </main>
   );
 }

@@ -238,8 +238,6 @@ export type InspectorScheduleInfo = Schemas["InspectorScheduleInfo"];
 export type ShellInfo = Schemas["ShellInfo"];
 export type ShellCapture = Schemas["ShellCaptureResponse"];
 export type AgentCost = Schemas["AgentCost"];
-export type AgentStats = Schemas["AgentStats"];
-export type AgentTps = Schemas["AgentTps"];
 export type HeartbeatInfo = Schemas["HeartbeatInfo"];
 export type HeartbeatLastPause = Schemas["HeartbeatLastPause"];
 // closed-set data rendered by the console's own components — a kind the

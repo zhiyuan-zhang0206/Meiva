@@ -32,7 +32,7 @@ from base.db.rows import CountRow, query_one
 from base.host.boundary.json_values import is_object_dict
 from base.telemetry.delivery.mirror import event_row
 from base.telemetry.delivery.receipts import Event
-from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
+from base.telemetry.metrics.event_sql import EXEC_FAILURE_EVENTS
 
 
 @dataclass(frozen=True)

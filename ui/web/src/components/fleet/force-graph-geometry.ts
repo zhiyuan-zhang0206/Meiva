@@ -230,7 +230,6 @@ export function useHoverCardState(
       if (scroller.style.maxHeight !== placement.maxHeight) {
         scroller.style.maxHeight = placement.maxHeight;
       }
-      scroller.style.overflowY = placement.maxHeight !== "" ? "auto" : "";
       const bridgeStyle = hoverCardBridge({ canvas, node, card: cardBox, placement });
       bridge.style.left = bridgeStyle.left;
       bridge.style.right = bridgeStyle.right;

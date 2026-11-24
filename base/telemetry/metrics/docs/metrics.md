@@ -9,22 +9,21 @@ and one Postgres read, the per-agent rollups behind `GET /api/metrics/agents` an
 
 ## Per-agent rollups
 
-`aggregate.fetch_agent_rollups` (`aggregate_sql.read_agent_window`) runs a few statements in one
-connection: the per-agent counters (events, turn and exec outcomes) over `telemetry_events`, and the
-`llm_usage` sums over the usage ledger (`llm_usage_ledger`). Nothing is materialized per row. The
-whole-fleet digest (`/api/metrics`, the `exec` / `llm_turns` / `agent_activity` /
-`plugin_activation` sections) and the per-agent `/api/agents/{id}/inspect/metrics` surface were
-removed with the other `telemetry_events` readers that had no consumer.
+`aggregate.fetch_agent_rollups` reads the usage ledger (`llm_usage_ledger`) in one statement and
+returns one headline row per agent with usage in the window. Turn counts, exec outcomes and event
+counts are not served: they came from `telemetry_events`, which has no consumer left. The
+whole-fleet digest (`/api/metrics`), the per-agent `/api/agents/{id}/inspect/metrics` surface and the
+`--since-compact` window were removed with those readers.
 
 ## Notes
 
 - Cache-hit rates use the same calls in numerator and denominator: only calls with numeric `cache_read` metering. A reported zero remains a measured miss; absent metering contributes no cache-rate input. Nonzero usage without metering yields null/N/A while calls, tokens and cost stay complete within the observed window.
 
-- `/api/metrics/agents` sums usage-time `cost_usd` snapshots, including cache-write costs and the served Standard/Fast rates. Recorded zero is priced; `unpriced=1` is counted without fabricating a cost. Token totals and monetary totals are reduced independently within the same agent/window/since-compact scope.
+- `/api/metrics/agents` sums usage-time `cost_usd` snapshots, including cache-write costs and the served Standard/Fast rates. Recorded zero is priced; `unpriced=1` is counted without fabricating a cost. Token totals and monetary totals are reduced independently within the same agent/window scope.
 
 ## Key Dependencies
 
-- [Database Layer](../../../../agent/db/docs/db.md) — Postgres pool (`telemetry_events` holds the telemetry and log stream; the per-agent counters read it)
+- [Database Layer](../../../../agent/db/docs/db.md) — Postgres pool (the usage ledger the rollups read)
 - [Logging](../../../log/docs/log.md) — the event stream is written by the unified emitter (`base/telemetry/emitter.py`), fed by `base/log/process.py`
 
 ## SDK event collection

@@ -38,9 +38,9 @@ def test_display_math_preserves_ink_and_scrolls_wide_formulas(
             reconnect_sse=False,
             timeline_items=items,
         )
-        blocks = page.locator(".chat-md .katex-display")
-        expect(blocks).to_have_count(len(_FORMULAS) + 1)
-        wide = blocks.last
+        viewports = page.locator('.chat-md .md-scroll-math [data-slot="scroll-area-viewport"]')
+        expect(viewports).to_have_count(len(_FORMULAS) + 1)
+        wide = viewports.last
         assert wide.evaluate("e => e.scrollWidth > e.clientWidth && e.clientWidth <= innerWidth"), (
             "a wide equation must scroll within its own box"
         )
@@ -49,12 +49,28 @@ def test_display_math_preserves_ink_and_scrolls_wide_formulas(
 
         # meiva:note
         # With fonts loaded, compare the same message against its unclipped
-        # rendering. The DOM alone cannot detect ink outside the line box.
+        # rendering. The DOM alone cannot detect ink outside the line box. Each
+        # formula sits in a ScrollArea (.md-scroll-math) whose Radix viewport is
+        # the element that scrolls, so the clip boundaries are that root, its
+        # viewport and .katex-display itself; all three are lifted for the short
+        # formulas, each kept a flow-root so margins do not collapse and shift
+        # the layout.
         _ = page.evaluate("document.fonts.ready")
-        prose = blocks.first.locator("..")
+        prose = page.locator(".chat-md").first
         actual = prose.screenshot(animations="disabled")
-        _ = blocks.evaluate_all(
-            "els => els.slice(0, -1).forEach(e => e.style.overflow = 'visible')"
+        _ = page.evaluate(
+            """n => document.querySelectorAll(".chat-md .md-scroll-math").forEach((root, i) => {
+              if (i >= n) return;
+              for (const el of [
+                root,
+                root.querySelector('[data-slot="scroll-area-viewport"]'),
+                root.querySelector(".katex-display"),
+              ]) if (el) {
+                el.style.overflow = "visible";
+                el.style.display = "flow-root";
+              }
+            })""",
+            len(_FORMULAS),
         )
         assert prose.screenshot(animations="disabled") == actual, (
             "display math lost ink to clipping"

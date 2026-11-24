@@ -39,24 +39,17 @@ def get_metrics_agents(
     # task #3696 exception inventory); the default *window* is
     # display.metrics_default_window_days.
     days: Annotated[int | None, Query(ge=1, le=30)] = None,
-    since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
 ) -> AgentMetricsReport:
-    """Per-agent breakdown of the last `days` of events — one
-    headline-counter row per agent (cost / tokens / cache hit / turn + exec
-    outcomes), sorted by cost descending. `since_compact=true` narrows each
-    agent's events to those at or after its latest compact halt. Service-level
-    events (no agent_id) count toward `meta.total_events` but produce no row —
-    and the count covers every telemetry/log event in the window (all
-    processes)."""
+    """Per-agent usage over the last `days` — one headline row per agent that has
+    usage (cost / tokens / cache hit), sorted by cost descending. Service-level
+    usage (no agent_id) produces no row."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
     now = gateway_clock(request).now()
     try:
         with gateway_state(request).db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            total_events, rollups = fetch_agent_rollups(
-                conn, days, now=now, since_compact=since_compact
-            )
+            rollups = fetch_agent_rollups(conn, days, now=now)
             labels: dict[int, str | None] = {}
             if rollups:
                 labelled = query_all(
@@ -69,7 +62,7 @@ def get_metrics_agents(
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     items = [
-        # telemetry_events.agent_id has no FK: a deleted agent's rows keep their id, label None.
+        # llm_usage_ledger.agent_id has no FK: a deleted agent's rows keep their id, label None.
         AgentMetricsItem.model_validate({**rollup, "agent_id": aid, "label": labels.get(aid)})
         for aid, rollup in rollups.items()
     ]
@@ -77,8 +70,6 @@ def get_metrics_agents(
     meta = MetricsMeta(
         window_days=days,
         generated_at=now.isoformat(),
-        total_events=total_events,
         distinct_agents=len(rollups),
-        since_compact=since_compact,
     )
     return AgentMetricsReport(meta=meta, agents=items)

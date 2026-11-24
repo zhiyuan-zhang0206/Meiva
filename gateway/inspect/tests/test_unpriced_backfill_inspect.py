@@ -8,11 +8,9 @@ import psycopg
 from base.db.rows import IdRow, query_one
 from base.telemetry.delivery.mirror import event_id as mirror_event_id
 from base.telemetry.event_store import event_uid
-from gateway.inspect._metrics import read_snapshot
+from gateway.inspect._metrics import read_cost
 from services.upkeep.events_maintenance.unpriced_backfill import load_price_book
 from services.upkeep.events_maintenance.usage_ledger_backfill import backfill_usage_ledger
-
-_CUTOVER = datetime(2026, 9, 17, 0, 0, tzinfo=UTC)
 
 
 def _seed_usage(
@@ -82,17 +80,14 @@ def test_inspector_reads_historical_usage_after_ledger_backfill(
         tag="neon-already-priced",
     )
 
-    before = read_snapshot(
+    before = read_cost(
         db_conn,
         agent_id,
         datetime(2026, 11, 20, tzinfo=UTC),
         datetime(2026, 11, 22, 12, 0, tzinfo=UTC),
-        datetime(2026, 11, 1, tzinfo=UTC),
-        _CUTOVER,
     )
-    assert before.cost is not None
-    assert before.cost.llm_calls == 0
-    assert before.cost.cost_usd_subscription == 0
+    assert before.llm_calls == 0
+    assert before.cost_usd_subscription == 0
 
     report = backfill_usage_ledger(
         db_conn,
@@ -103,19 +98,16 @@ def test_inspector_reads_historical_usage_after_ledger_backfill(
     )
     assert (report.scanned, report.inserted, report.catalog_priced) == (2, 2, 1)
 
-    after = read_snapshot(
+    after = read_cost(
         db_conn,
         agent_id,
         datetime(2026, 11, 20, tzinfo=UTC),
         datetime(2026, 11, 22, 12, 0, tzinfo=UTC),
-        datetime(2026, 11, 1, tzinfo=UTC),
-        _CUTOVER,
     )
-    assert after.cost is not None
-    assert after.cost.llm_calls == 2
-    assert after.cost.tokens_in == 200_000
-    assert after.cost.cost_usd_api == 0
-    assert after.cost.unpriced_calls == 0
-    assert after.cost.unpriced_calls_subscription == 0
-    assert after.cost.unpriced_calls_api == 0
-    assert after.cost.cost_usd_subscription > 0.4321
+    assert after.llm_calls == 2
+    assert after.tokens_in == 200_000
+    assert after.cost_usd_api == 0
+    assert after.unpriced_calls == 0
+    assert after.unpriced_calls_subscription == 0
+    assert after.unpriced_calls_api == 0
+    assert after.cost_usd_subscription > 0.4321

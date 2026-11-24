@@ -50,6 +50,10 @@ below:
   as the single total it replaced. The Inspector keeps the opposite rule (a zero
   block disappears) because there each block is a claim about one agent's spend.
 
+The popover clips (`overflow-hidden`) and its content sits in a `ScrollArea` whose
+viewport is capped at the popover's available height, so a short panel hugs its
+content and a tall one scrolls with the shared overlay scrollbar.
+
 Keeping the panel behind the footer trigger means the closed sidebar spends no
 height on numbers a reader checks occasionally (the old inline bar occupied a
 row permanently).
