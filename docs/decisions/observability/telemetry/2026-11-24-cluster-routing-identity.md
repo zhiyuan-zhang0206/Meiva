@@ -60,3 +60,13 @@ the whole fleet stamps `meiva.cluster` it only rejects a runner whose home
 basename differs from the gateway's; dropping it is a separate change.
 `production_identity` still names production by `.meiva` basename; the routing
 identity already stops such a home from polluting another cluster's backends.
+
+## Verification
+
+The rendered-config tests prove each home's pattern admits its own id and
+rejects the other's. The rendered expression itself was also run on a real
+`otelcol-contrib` 0.162.0 (a record with the collector's own id and a record
+without one passed, a record with another cluster's id was dropped, and
+`otelcol_processor_filter_logs_filtered{filter="filter/cluster_allow"}` read 1).
+That run is manual: the test tree's skip-site count only shrinks, and CI has no
+collector binary.

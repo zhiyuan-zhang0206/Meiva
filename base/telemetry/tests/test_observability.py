@@ -92,11 +92,11 @@ def test_cluster_identity_is_derived_from_the_telemetry_token(tmp_path: Path) ->
     assert observability.cluster_identity(home) is None
     assert observability.cluster_identity_attributes(home) == {}
 
-    ensure_telemetry_token(home.resolve(), "telemetry-token-one")
+    ensure_telemetry_token(home.resolve(), "fixture-token-one")
 
-    assert observability.cluster_identity(home) == cluster_id("telemetry-token-one")
+    assert observability.cluster_identity(home) == cluster_id("fixture-token-one")
     assert observability.cluster_identity_attributes(home) == {
-        "meiva.cluster": cluster_id("telemetry-token-one")
+        "meiva.cluster": cluster_id("fixture-token-one")
     }
 
 
@@ -104,7 +104,7 @@ def test_same_named_homes_share_a_label_but_not_a_routing_identity(tmp_path: Pat
     from base.host.db_authority.api import ensure_telemetry_token
 
     homes = [tmp_path / name / ".meiva" for name in ("a", "b")]
-    for home, token in zip(homes, ("token-of-a", "token-of-b"), strict=True):
+    for home, token in zip(homes, ("fixture-token-a", "fixture-token-b"), strict=True):
         home.mkdir(parents=True)
         ensure_telemetry_token(home.resolve(), token)
 
@@ -118,7 +118,7 @@ def test_metrics_and_trace_resources_carry_the_routing_identity(tmp_path: Path) 
 
     home = tmp_path / ".meiva"
     home.mkdir()
-    ensure_telemetry_token(home.resolve(), "token-of-a")
+    ensure_telemetry_token(home.resolve(), "fixture-token-a")
 
     attributes = metrics_resource_attributes(home=home, instance_id="i")
 
