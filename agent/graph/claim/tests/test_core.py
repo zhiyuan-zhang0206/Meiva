@@ -426,9 +426,9 @@ class TestPauseHeartbeat:
             trail_rows = cur.fetchall()
         assert scalar(window_row) == pytest.approx(1800, abs=5)
         assert [scalar(row) for row in trail_rows] == [1800]
-        (attributes,) = emitted_events.attributes("heartbeat_paused")
-        assert emitted_events.named("heartbeat_paused")[0].agent_id == meiva.self.AGENT_ID
-        duration_s = attributes["duration_s"]
+        (paused,) = emitted_events.named("heartbeat_paused")
+        assert paused.agent_id == meiva.self.AGENT_ID
+        duration_s = paused.attributes["duration_s"]
         # int since the emit cast (task #4011): the metric kind rides the runtime type.
         assert duration_s == 1800 and isinstance(duration_s, int)
 

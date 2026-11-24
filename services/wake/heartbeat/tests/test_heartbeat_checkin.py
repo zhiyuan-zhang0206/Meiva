@@ -85,7 +85,9 @@ def _emitted_nudge(events: EmittedEvents, agent_id: int) -> tuple[str, str, int]
     if not nudges:
         return None
     event = nudges[-1]
-    return event.event_name, event.level, int(event.attributes["idle_minutes"])
+    idle_minutes = event.attributes["idle_minutes"]
+    assert isinstance(idle_minutes, int)
+    return event.event_name, event.level, idle_minutes
 
 
 class TestSendHeartbeatCheckin:

@@ -10,7 +10,6 @@ import threading
 import time
 from collections.abc import Generator, Mapping
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import pytest
@@ -249,13 +248,13 @@ assert trace.get_tracer_provider().force_flush()
     _assert_child_correlation(trace_id)
 
 
-def _posted_spans() -> list[Any]:
+def _posted_spans() -> list[tuple[str, str, str]]:
     from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
 
     with _POSTS_LOCK:
         posts = list(_POSTS)
     return [
-        span
+        (span.name, span.trace_id.hex(), span.parent_span_id.hex())
         for path, raw in posts
         if path == "/v1/traces"
         for resource in trace_service_pb2.ExportTraceServiceRequest.FromString(raw).resource_spans
@@ -283,9 +282,11 @@ def _posted_correlations() -> set[tuple[str, str]]:
 
 
 def _assert_child_correlation(trace_id: str) -> None:
-    [probe] = [span for span in _posted_spans() if span.name == "correlation-probe"]
-    assert probe.trace_id.hex() == trace_id
-    assert _posted_correlations() == {(trace_id, probe.parent_span_id.hex())}
+    [(_, probe_trace_id, probe_parent)] = [
+        span for span in _posted_spans() if span[0] == "correlation-probe"
+    ]
+    assert probe_trace_id == trace_id
+    assert _posted_correlations() == {(trace_id, probe_parent)}
 
 
 def test_exec_trace_drain_exits_while_collector_response_is_blocked(

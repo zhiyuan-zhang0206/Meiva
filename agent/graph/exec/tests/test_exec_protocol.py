@@ -183,7 +183,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     finally:
         logger.remove(sink_id)
 
-    events = emitted_events.attributes("exec_envelope")
+    events = [event.attributes for event in emitted_events.named("exec_envelope")]
     assert len(events) >= 2
     request_events = [event for event in events if event["envelope"] == "request"]
     by_op = {str(event["op"]): event for event in request_events}
