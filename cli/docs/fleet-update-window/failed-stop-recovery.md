@@ -1,5 +1,9 @@
 # The failed-stop recovery
 
+A *runner's* failed stop is not recovered: that runner is deferred and the window goes on without
+it ([One runner never strands the cluster](../fleet-update.md#one-runner-never-strands-the-cluster)).
+This page is what a failed *gateway* stop, or a failed gateway switch, does.
+
 Runners stop in parallel before the gateway stops, so a failure in the stop phase
 leaves the machines that already finished stopping serving nothing — and the window's
 own message ("failed phase: down, nothing rolled back") describes the code, not the
@@ -38,6 +42,15 @@ cannot claim. If one host's evidence cannot be read, that host is named under
 `needs manual:` and recovery continues for the other hosts. The final failure
 retains the original stop error and its retry instructions; a later SSH read
 failure does not replace them.
+
+## The failed gateway switch
+
+If the gateway cannot switch to NEW the cluster cannot run NEW. Migrations run in the gateway's
+own start, which `up` has not reached, so the database is still the one the old code left and the
+old commit is safe to start. The window returns every host still in it to the commit its
+preflight probe read (`switch_command` of that commit, idempotent), starts the hosts that were
+serving gateway first (runners are not started when the gateway could not be put back), prints
+`recovered:` and `needs manual:`, and exits 1.
 
 ## Contract
 

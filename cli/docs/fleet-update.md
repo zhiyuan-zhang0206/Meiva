@@ -9,8 +9,9 @@ the runbook
 this node owns the code-side order, and the window's guards are
 [Fleet update window guarantees](fleet-update-window/fleet-update-window.md).
 The halves are idempotent: after a failure, fix the cause and rerun the failed
-half. `run` accepts both halves' options, resolves the target channel (`latest` by default, or `stable` / `--track-branch`), uses one log and
-stops at the first failure; a failed `down` never enters `up`. A failed `up`
+half. `run` accepts both halves' options, resolves the target channel (`latest` by default, or `stable` / `--track-branch`) and uses one log.
+Only the gateway is essential to a window ([One runner never strands the cluster](#one-runner-never-strands-the-cluster));
+a failed gateway `down` never enters `up`. A failed `up`
 does not require repeating `down`. Its
 shape is [Fleet update structure](../fleet_update/docs/structure.md).
 
@@ -55,15 +56,36 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
    check shows a dirty tree and never cleans it: untracked files are the
    operator's to move (not delete), never the update's.
 
+## One runner never strands the cluster
+
+Only the gateway can end a window. A runner whose command fails at any step (preflight probe or
+refusal of its own state, fetch, prestage, stop, switch; an SSH timeout or `exit 255` included) is
+*deferred*: `Session.defer` records the step and reason, every later wave skips it, and the
+gateway and the other runners finish the update, start and verify. A deferred runner is not touched
+again, so it keeps whatever it was running (stopped, or old code if its stop never took) and
+needs a catch-up window once it is reachable. The window then exits 3 with `DEFERRED:` lines and one
+machine-readable line, `fleet-update-result: {"status": "partial", "deferred": [{host, step,
+reason}], "failed": [...]}` (`failed` are hosts that failed after the window reached them, such
+as a start or a drift check). With the split halves, `down` reports its deferrals and the operator
+runs `up` naming only the serving runners.
+
+The gateway ending the window is bounded by one fact: migrations run in the gateway's own start
+(`up`), never in `down`. A gateway stop failure brings back the hosts already stopped
+([failed-stop recovery](fleet-update-window/failed-stop-recovery.md)); a gateway switch failure
+returns every host to the commit its probe read and starts the serving ones again, gateway first;
+a gateway start failure (a migration included) is the one failure that leaves the cluster
+stopped, because the old code is not started over a database the new start may have migrated: the
+summary says so and `up` is rerun once the gateway is fixed.
+
 ## The up half
 
 Ordered steps (`meiva start` on gateway then runners, roster convergence,
 `meiva packages refresh`, drift checks and silence expiry) and completion
 gates live in [Fleet update up half and completion gates](fleet-update-window/up-half.md).
 
-A failure ends the half: nothing rolls back, the message names the step to
-fix, and the whole half is rerun. Refusals exit 2 (nothing touched); failures
-exit 1. `--dry-run` really runs only the read-only steps — each host's probe
+A gateway failure ends the half and names the step to fix; the whole half is rerun. Refusals
+exit 2 (nothing touched); failures exit 1; a window that finished for the gateway and the healthy
+hosts but deferred or failed a runner exits 3. `--dry-run` really runs only the read-only steps — each host's probe
 and the stored-schedule verify — and prints every other effect without
 performing it. With `run`, it previews both halves without stopping, switching
 or starting hosts.
@@ -93,12 +115,12 @@ Only effect commands carry it: a read is a question, not an operation.
 ```meiva-contract
 id = "complete-update"
 kind = "invariant"
-statement = "run requires a target and every lifecycle choice as an explicit argument (a missing or conflicting one exits 2, all listed at once, before any host is touched), forwards the stop and start choices verbatim to each host (--keep-infra/--stop-infra to the gateway's stop only), and executes down then up in one log; a failure stops at its phase, names that half for recovery and never rolls back or retries; a failed down never starts a host, and --dry-run previews both halves without their effects."
+statement = "run requires a target and every lifecycle choice as an explicit argument (a missing or conflicting one exits 2, all listed at once, before any host is touched), forwards the stop and start choices verbatim to each host (--keep-infra/--stop-infra to the gateway's stop only), and executes down then up in one log; a gateway failure stops at its phase and names that half for recovery, never retries, and brings back (on the commit each ran) the hosts it had stopped, except that a gateway start failure keeps the cluster stopped; a runner failing at any step is deferred and never keeps the gateway or any other healthy host stopped (exit 3, a DEFERRED line per host and one fleet-update-result JSON line); and --dry-run previews both halves without their effects."
 code = ["cli/fleet_update/__init__.py:main", "cli/fleet_update/down.py:down", "cli/fleet_update/plan/release_target.py:resolve_update_target"]
-tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched", "cli/tests/fleet_update/test_fleet_update_gates.py::test_uncertified_or_tampered_targets_refuse_exit_2_before_any_ssh_command"]
+tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update_run.py::test_run_does_not_enter_up_after_the_gateway_fails_down", "cli/tests/fleet_update/test_fleet_update_deferral.py::test_a_runner_that_goes_dark_at_switch_does_not_strand_the_cluster", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched", "cli/tests/fleet_update/test_fleet_update_gates.py::test_uncertified_or_tampered_targets_refuse_exit_2_before_any_ssh_command"]
 ```
 
-The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
+The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the refresh; a gateway failure ends the half (refusals exit 2, failures exit 1, a deferred or failed runner exit 3).
 
 Parent: [CLI](cli.md).
 

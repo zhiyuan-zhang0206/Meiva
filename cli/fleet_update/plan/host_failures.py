@@ -101,9 +101,52 @@ def outcome(alias: str, failures: tuple[HostFailure, ...], skipped: Mapping[str,
     return "serving"
 
 
-def incomplete_summary(failures: tuple[HostFailure, ...]) -> tuple[str, ...]:
-    return (
+RESULT_PREFIX = "fleet-update-result: "
+
+
+def _entry(failure: HostFailure) -> dict[str, str]:
+    return {"host": failure.alias, "step": failure.step, "reason": failure.reason}
+
+
+def result_line(deferred: tuple[HostFailure, ...], failures: tuple[HostFailure, ...]) -> str:
+    record = {
+        "status": "partial",
+        "deferred": [_entry(failure) for failure in deferred],
+        "failed": [_entry(failure) for failure in failures],
+    }
+    return RESULT_PREFIX + json.dumps(record, sort_keys=True)
+
+
+def partial_summary(
+    deferred: tuple[HostFailure, ...], failures: tuple[HostFailure, ...], *, gateway: str
+) -> tuple[str, ...]:
+    if not deferred and not failures:
+        return ()
+    lines = [
+        *(
+            f"DEFERRED: {failure.alias} left out at {failure.step!r}: {failure.reason}"
+            for failure in deferred
+        ),
         *(f"PARTIAL: {failure.line()}" for failure in failures),
-        f"up incomplete: {len(failures)} host(s) failed; the rest are serving. "
-        "Fix each and rerun `up` (idempotent).",
-    )
+    ]
+    if failures:
+        lines.append(
+            f"up incomplete: {len(failures)} host(s) failed; the rest are serving. "
+            "Fix each and rerun `up` (idempotent)."
+        )
+    if any(failure.alias == gateway for failure in failures):
+        lines.append(
+            "the gateway did not come up: runners were not started, and the window does not start "
+            "the old version again, because the new gateway start may already have migrated the "
+            "database. Fix the gateway, then rerun `up`."
+        )
+    if deferred:
+        names = ", ".join(failure.alias for failure in deferred)
+        lines.append(
+            f"deferred: {names} {'was' if len(deferred) == 1 else 'were'} left out of this update "
+            "and not started on the new commit; the healthy hosts went on without "
+            f"{'it' if len(deferred) == 1 else 'them'}. Catch each up with a later `meiva update run` "
+            "once reachable; to run `up` after a split `down`, name only the serving runners."
+        )
+    lines.append(result_line(deferred, failures))
+    return tuple(lines)

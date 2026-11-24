@@ -155,7 +155,7 @@ def ssh_on_path(bin_dir: Path, script: Path) -> Path:
 # `_IDLE` record per alias plus `os` and `head`, and the roster's `names`, `silent`, `hidden`,
 # `laptop`); what a test stages (`fail`, `stop_fails`, `stop_fails_leaves_up`, `recover_fails`,
 # `output`, `incomplete`, `roster_reply`, `roster_lag`, `lease_reply`, `lease_rc`,
-# `silence_reply`, `stored_schedules`, `root_checks`, `barriers`); what the run reports (`effects`, `commands`,
+# `silence_reply`, `die_at`, `stored_schedules`, `root_checks`, `barriers`); what the run reports (`effects`, `commands`,
 # `run_started_at`, `roster_reads`, `lease_reads`, `silence_open`, `silence_hours`,
 # `silence_comment`, `violations`); and the healthy baseline every host reports (`host_up`,
 # `journal`, `journal_after_stop`, `helper_hash`, `helper_cert_root`).
@@ -185,6 +185,9 @@ class Cluster:
         self.messages: list[tuple[int, str]] = []
         self.run_started_at = 0
         self.fail: dict[tuple[str, str], int] = {}
+        self.die_at: dict[str, str] = {}
+        self.dead: list[str] = []
+        self.outside: set[str] = set()
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (0, [])
         self.root_checks: dict[str, tuple[int, str]] = {}
@@ -250,6 +253,9 @@ class Cluster:
             "messages": self.messages,
             "run_started_at": self.run_started_at,
             "fail": {f"{kind}|{alias}": rc for (kind, alias), rc in self.fail.items()},
+            "die_at": self.die_at,
+            "dead": self.dead,
+            "outside": sorted(self.outside),
             "output": self.output,
             "stored_schedules": list(self.stored_schedules),
             "root_checks": {alias: list(answer) for alias, answer in self.root_checks.items()},
@@ -286,6 +292,7 @@ class Cluster:
         self.journal = data["journal"]
         self.roster_lag = data["roster_lag"]
         self.violations = data["violations"]
+        self.dead = data["dead"]
 
     # meiva:note
     # Run `fleet_update.main` against this cluster: write the state the fake `ssh` will read,

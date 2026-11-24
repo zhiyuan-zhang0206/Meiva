@@ -62,7 +62,7 @@ def test_worker_preflight_refusal_notifies_only_agent_initiator_without_stopping
     source: str,
 ) -> None:
     cluster, _ = env
-    cluster.hosts["mac"]["dirty"] = 1
+    cluster.hosts["gw"]["dirty"] = 1
     rc, output = cluster.invoke_worker(_record(cluster, source))
     assert rc == 2, output
     assert not any(kind == "stop" for kind, _ in cluster.effects)

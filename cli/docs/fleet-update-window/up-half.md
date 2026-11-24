@@ -14,6 +14,6 @@
 
 Before `up` completes: every listed machine is online on the roster with checkout and running code on one commit — re-read on the poll interval until `--roster-timeout`; a listed host is matched by the machine name it reports, a name with no row fails, unlisted machines are reported and never block; and every host ran `meiva packages refresh`, which replaces a differing local copy and never forces.
 
-A failure ends the half: nothing rolls back, the message names the step to fix, and the whole half is rerun (`up` never repeats `down`). Refusals exit 2 (nothing touched); failures exit 1.
+A failure of the gateway's start (a migration included) ends the half with the cluster stopped: nothing rolls back, because the new start may already have migrated the database, the summary names the gateway and the whole half is rerun (`up` never repeats `down`). A runner failing its start or a check is that host's line: the others still start and verify, runners the window deferred in `down` are not attempted, and the half exits 3 with `fleet-update-result:` naming them. Refusals exit 2 (nothing touched); other failures exit 1.
 
 Parent: [Fleet update over SSH](../fleet-update.md).

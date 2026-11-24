@@ -3,7 +3,8 @@
 # start selection, prove the cluster, and end the window's silence. One host's converge failure
 # must not stop the rest: each start is attempted, the failures are collected with their step and
 # reason, and the caller reports them and exits 3. A half-up cluster is reported, never hidden
-# behind a single abort that leaves the remaining hosts untouched. The one dependency is the
+# behind a single abort that leaves the remaining hosts untouched. A runner `down` deferred is
+# outside the window and is not attempted. The one dependency is the
 # gateway: a runner joins the cluster through it, so when it did not start the runners are not
 # attempted (each would only fail on the unreachable gateway) and the matrix says so.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
@@ -85,14 +86,14 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     # with its own line.
     failures: list[HostFailure] = []
     window = (s.now, s.now + timedelta(seconds=args.start_timeout))
-    hosts = start_order(args.gateway, tuple(args.runner))
+    runners = s.live(args.runner)
+    hosts = start_order(args.gateway, runners)
     started: set[str] = set()
     gateway_failure = _start_one(s, args, args.gateway, window)
     if gateway_failure is None:
         started.add(args.gateway)
         if not args.dry_run:
             gateway_failure = _check_gateway_bootstrap(s, args.gateway)
-    runners = tuple(args.runner)
     if gateway_failure is not None:
         failures.append(gateway_failure)
         s.say(f"PARTIAL: {gateway_failure.line()}")
@@ -126,5 +127,6 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     for alias in hosts:
         s.say(f"matrix: {alias} {outcome(alias, tuple(failures), skipped)}")
     if not failures:
-        s.say(f"up complete: every listed machine runs {commit[:12]}")
+        left_out = f" except {', '.join(s.deferred)} (deferred)" if s.deferred else ""
+        s.say(f"up complete: every listed machine{left_out} runs {commit[:12]}")
     return failures

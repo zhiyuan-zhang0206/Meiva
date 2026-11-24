@@ -194,9 +194,29 @@ def test_preflight_refuses(
     env: tuple[Cluster, Callable[..., int]], key: str, value: object
 ) -> None:
     cluster, run = env
-    cluster.hosts["lin"][key] = value
+    cluster.hosts["gw"][key] = value
     assert run("down") == 2
     assert cluster.effects == []
+
+
+@pytest.mark.parametrize(("key", "value"), _UNSAFE)
+def test_an_unsafe_runner_is_deferred_not_a_refusal(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    key: str,
+    value: object,
+) -> None:
+    cluster, run = env
+    cluster.hosts["lin"][key] = value
+    cluster.outside.add("lin")
+    assert run("down") == PARTIAL_FAILURE_EXIT
+    assert [alias for _, alias in cluster.effects if alias == "lin"] == []
+    assert {alias for kind, alias in cluster.effects if kind == "switch"} == {"gw", "mac"}
+    out = capsys.readouterr().out
+    assert "DEFERRED: lin left out at 'preflight'" in out
+    assert (
+        cluster.hosts["lin"]["head"] == cluster.old and cluster.hosts["mac"]["head"] == cluster.new
+    )
 
 
 @pytest.mark.parametrize("command", ["run", "down", "up"])
@@ -247,10 +267,12 @@ def test_down_judges_a_stop_by_the_hosts_journal_as_well_as_the_exit_code(
     cluster, run = env
     cluster.journal_after_stop["lin"] = journal
 
-    assert run("down") == 1
+    assert run("down") == PARTIAL_FAILURE_EXIT
 
-    assert "stop exited 0 but its journal records no completed stop" in capsys.readouterr().out
-    assert [alias for kind, alias in cluster.effects if kind == "switch"] == []
+    out = capsys.readouterr().out
+    assert "DEFERRED: lin left out at 'stop'" in out
+    assert "stop exited 0 but its journal records no completed stop" in out
+    assert {alias for kind, alias in cluster.effects if kind == "switch"} == {"gw", "mac"}
 
 
 def test_down_and_up_never_read_a_hold(env: tuple[Cluster, Callable[..., int]]) -> None:
