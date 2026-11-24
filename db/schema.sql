@@ -1731,7 +1731,7 @@ $$;
 
 -- ─────────────── telemetry_events ───────────────
 -- Durable record of category=telemetry and category=log events. Loki keeps an
--- observation copy for Grafana and short windows; its 84-hour retention is not
+-- observation copy for Grafana and short windows; its 7-day retention is not
 -- a record. Rows are appended by the emitter's drain thread in batches.
 --
 -- Same columns as audit_events plus the two the audit table does not need:

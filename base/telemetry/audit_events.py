@@ -6,7 +6,7 @@ skill_invoked, ...) is an audit event, and Postgres is its system of record: the
 (docs/decisions/data/database/2026-10-02-audit-events-in-postgres.md). Loki and the day-stamped
 JSONL mirror receive the same event through the unified emitter
 (`base.telemetry`) as a projection that sheds under overload, truncates long
-lines and expires after 84 hours; losing the projection loses no record.
+lines and expires after Loki's 7-day retention; losing the projection loses no record.
 
 The primitives that record an event, one of which every audit emit site must use
 (`scripts/content_lint/lint_audit_record.py` enforces it):
@@ -258,7 +258,7 @@ def _report_unrecorded(
     """Make a failed audit write loud without failing the caller.
 
     An error log with the traceback plus an `audit_write_failed` anomaly event.
-    The projection still goes out: Loki then carries the fact for 84 hours
+    The projection still goes out: Loki then carries the fact for 7 days
     even though the record does not.
     """
     from base.log import logger

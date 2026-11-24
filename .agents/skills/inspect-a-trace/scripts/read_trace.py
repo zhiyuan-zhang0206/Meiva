@@ -29,7 +29,7 @@ a text summary on stdout.
 - events: `GET /api/events?trace_id=...` — the correlated events Postgres stores. The
   `telemetry_events` table keeps only the events a reader queries (and anything at warning or
   above), so this is a subset of the chain. `--with-events` also reads Loki for the same
-  trace id (`events_loki`), which holds every event of its 84-hour window; a trace older than
+  trace id (`events_loki`), which holds every event of its 7-day window; a trace older than
   that is complete only in the JSONL event mirror (`$MEIVA_HOME/logs/events-*.jsonl`).
 
 Gateway auth: `Authorization: Bearer <token>` — the process's machine API token
@@ -228,7 +228,7 @@ def _fetch_events(gateway: str, trace_id: str, from_iso: str) -> dict:
 
 
 def _fetch_loki_events(loki: str, trace_id: str, start_ns: int, end_ns: int) -> list[dict]:
-    """Every event of the trace that Loki still holds (84-hour window), oldest first."""
+    """Every event of the trace that Loki still holds (7-day window), oldest first."""
     import urllib.parse
     import urllib.request
 
@@ -292,7 +292,7 @@ def _print_summary(out: dict) -> None:
     if out["events"] is not None:
         print(f"events: {len(out['events'])} rows stored in Postgres (a subset of the chain)")
     if out["events_loki"] is not None:
-        print(f"events_loki: {len(out['events_loki'])} rows (Loki, 84-hour window)")
+        print(f"events_loki: {len(out['events_loki'])} rows (Loki, 7-day window)")
 
 
 def main() -> int:

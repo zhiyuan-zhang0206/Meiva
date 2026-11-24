@@ -11,7 +11,7 @@ hook form). Also a pre-commit hook.
 truncates and expires. A call site that builds an audit event without
 recording it through one of the `record_audit*` primitives
 (`base/telemetry/audit_events.py`) silently produces a fact that exists only in
-the projection. No test notices: the event still shows up in Loki for 84 hours.
+the projection. No test notices: the event still shows up in Loki for 7 days.
 
 ## The rule
 
