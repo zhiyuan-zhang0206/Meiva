@@ -48,7 +48,7 @@ its already stamped ToolMessage; its caption/image pairing is unchanged.
 ### Exec Output (`exec_output_message`)
 - Wraps sandbox execution results from `execute_code`
 - Contains merged stdout/stderr output
-- `created_at` is a required argument: every writer (exec node, repair hook, syntax-fix plugin) stamps `meiva_created_at`, which is also the read time
+- `created_at` is a required argument: every writer (exec node, repair hook) stamps `meiva_created_at`, which is also the read time
 
 ### Attachments (`attach_message`)
 - The media message of the files one exec call registered with `meiva.self.attach`; see [Attachment Message](attachment-message.md)
