@@ -50,7 +50,8 @@ class ResolveReason(StrEnum):
 # meiva:note
 # One row of `signal_state` as callers read it: identity, the newest reading, and how the
 # episode ended (or that it has not). `count` is how many reports it absorbed; the reports
-# themselves are in Loki for seven days (`first_event_id` and `last_event_id` name them while they last).
+# themselves live only in the event stream's seven-day store (`first_event_id` and
+# `last_event_id` name them while they last).
 @dataclass(frozen=True)
 class Episode:
     id: int

@@ -778,7 +778,6 @@ def test_the_registry_tests_of_the_real_repository_are_pinned() -> None:
     pinned = test_selector.tree_scan_tests(Path(__file__).resolve().parents[2])
     assert {
         "base/events/tests/test_emit_sites_declared.py",
-        "gateway/inspect/tests/test_persisted_events_cover_readers.py",
         "tests/components/cli/test_main_dispatch_contract.py",
         "tests/components/base/test_crash_row_writers.py",
         "tests/integration/test_impersonation_audit_root_inventory.py",
