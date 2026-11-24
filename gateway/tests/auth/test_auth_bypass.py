@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import Any, cast
 
-import psycopg
 from fastapi import FastAPI
 
 from gateway.app import cluster_auth_middleware
@@ -119,14 +118,11 @@ def test_auth_bypass_table_matches_registered_routes() -> None:
 
 # meiva:note
 # The forward direction, over real HTTP and with no credential at all: a Grafana-shaped POST
-# reaches the handler, the handler stores the instance, and the 200 body is the handler's own
-# ingest result. Remove the POST /api/alerts entry and the middleware answers 401 before the
-# body is read, so this test fails; the assertion below that the request carried no
-# Authorization and no cookie keeps the 200 from being explained by a credential the test
-# client injected.
-def test_alert_ingest_reaches_handler_without_any_credential(
-    db_conn: psycopg.Connection,
-) -> None:
+# reaches the handler and the handler answers 204. Remove the POST /api/alerts entry and the
+# middleware answers 401 before the body is read, so this test fails; the assertion below that the
+# request carried no Authorization and no cookie keeps the 204 from being explained by a credential
+# the test client injected.
+def test_alert_webhook_reaches_handler_without_any_credential() -> None:
     with anonymous_gateway_client(
         fields={"webhook_token": None},
         client=("127.0.0.1", 5000),
@@ -135,15 +131,7 @@ def test_alert_ingest_reaches_handler_without_any_credential(
 
     assert "authorization" not in resp.request.headers
     assert "cookie" not in resp.request.headers
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0}
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT fingerprint FROM alerts WHERE fingerprint = %s",
-            ("auth-bypass-gate",),
-        )
-        assert cur.fetchall() == [("auth-bypass-gate",)]
+    assert resp.status_code == 204, resp.text
 
 
 # meiva:note

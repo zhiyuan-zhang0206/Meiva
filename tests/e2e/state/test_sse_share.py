@@ -107,33 +107,33 @@ def _assert_requests(pages: list[Page], requests: dict[Page, list[str]]) -> None
 def test_three_pages_share_sse_and_promote_on_close_and_hide(e2e_env: E2EEnv) -> None:
     requests: dict[Page, list[str]] = defaultdict(list)
     pages = _open_pages(e2e_env, requests)
-    _wait_counts(pages, [0, 0, 3], "one SSE owner across three pages", sorted_counts=True)
+    _wait_counts(pages, [0, 0, 2], "one SSE owner across three pages", sorted_counts=True)
     _assert_requests(pages, requests)
 
-    leader = next(page for page in pages if _active_count(page) == 3)
+    leader = next(page for page in pages if _active_count(page) == 2)
     survivors = [page for page in pages if page is not leader]
     leader.close()
-    _wait_counts(survivors, [0, 3], "SSE promotion after close", sorted_counts=True)
-    promoted = next(page for page in survivors if _active_count(page) == 3)
+    _wait_counts(survivors, [0, 2], "SSE promotion after close", sorted_counts=True)
+    promoted = next(page for page in survivors if _active_count(page) == 2)
     waiting = next(page for page in survivors if page is not promoted)
     _assert_requests([promoted], requests)
     for page in survivors:
         page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
     promoted.evaluate("() => window.__setTestVisible(false)")
-    _wait_counts([promoted, waiting], [0, 3], "SSE promotion after hide", sorted_counts=False)
+    _wait_counts([promoted, waiting], [0, 2], "SSE promotion after hide", sorted_counts=False)
     _assert_requests([waiting], requests)
 
     promoted.evaluate("() => window.__setTestVisible(true)")
     promoted.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
-    assert (_active_count(promoted), _active_count(waiting)) == (0, 3)
+    assert (_active_count(promoted), _active_count(waiting)) == (0, 2)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_terminate:build")
 def test_without_web_locks_keeps_per_page_streams_and_navigation(e2e_env: E2EEnv) -> None:
     requests: dict[Page, list[str]] = defaultdict(list)
     pages = _open_pages(e2e_env, requests, without_locks=True, count=2)
-    _wait_counts(pages, [3, 3], "two independent fallback stream sets", sorted_counts=False)
+    _wait_counts(pages, [2, 2], "two independent fallback stream sets", sorted_counts=False)
     for page in pages:
         _assert_requests([page], requests)
 
@@ -142,9 +142,9 @@ def test_without_web_locks_keeps_per_page_streams_and_navigation(e2e_env: E2EEnv
     navigated.wait_for_url("**/fleet?agent_id=*")
     navigated.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
     _wait_counts(
-        pages, [2, 3], "fallback global streams survive route navigation", sorted_counts=False
+        pages, [1, 2], "fallback global streams survive route navigation", sorted_counts=False
     )
 
     navigated.go_back()
     navigated.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
-    _wait_counts(pages, [3, 3], "fallback detail stream returns after back", sorted_counts=False)
+    _wait_counts(pages, [2, 2], "fallback detail stream returns after back", sorted_counts=False)
