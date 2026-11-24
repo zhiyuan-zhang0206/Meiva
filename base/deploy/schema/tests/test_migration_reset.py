@@ -301,14 +301,15 @@ def test_current_reset_refuses_missing_history_without_mutation(
         assert applied_migration_names(conn) == before
 
 
-def _restore_task_budget_table(conn: psycopg.Connection) -> None:
-    """Restore the table and columns the frozen reset anchor alters."""
+def _restore_dropped_tables(conn: psycopg.Connection) -> None:
+    """Restore the tables that the frozen reset anchor and the replayed history still alter."""
     conn.execute(
         "CREATE TABLE agent_tasks (id bigint PRIMARY KEY, "
         "token_budget bigint, usd_budget double precision, "
         "token_used bigint, usd_used double precision, "
         "token_budget_notified_at timestamptz, usd_budget_notified_at timestamptz)"
     )
+    conn.execute("CREATE TABLE agent_model_tokens_daily (agent_id bigint)")
 
 
 def test_current_reset_converges_when_the_missing_names_still_have_files(
@@ -337,7 +338,7 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
     with throwaway_database("reset_partial_files") as url:
         with psycopg.connect(url, autocommit=True) as c:
             c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            _restore_task_budget_table(c)
+            _restore_dropped_tables(c)
             # meiva:note
             # This historical applied set predates delivery tables; remove their folded
             # schema effects before replaying the real migration tree from that state.
@@ -387,7 +388,7 @@ def _live_reset_shape(url: str) -> set[str]:
     before = {BASELINE_NAME, *(set(PRE_RESET_SET) - file_backed)}
     with psycopg.connect(url, autocommit=True) as c:
         c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-        _restore_task_budget_table(c)
+        _restore_dropped_tables(c)
         restore_pre_split_names(c)
         c.execute(
             "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
@@ -498,7 +499,7 @@ def test_current_reset_converges_complete_history(
     with throwaway_database("reset_complete_history") as url:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            _restore_task_budget_table(conn)
+            _restore_dropped_tables(conn)
             set_table_to(conn, "set", predecessor)
         with psycopg.connect(url) as conn:
             applied = apply_pending_migrations(
