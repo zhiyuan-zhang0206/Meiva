@@ -1,9 +1,0 @@
-exports = ["webscrape.py"]
-
-[purity]
-"scrape_ladder.py" = "strict"
-"scrape_post.py" = "strict"
-"scrape_wire.py" = "strict"
-
-[roots]
-"webscrape.py" = { kinds = ["clock", "environ", "home", "argv"], why = "Web-scrape CLI entry reads ScrapeConfig from process environment, resolves the Meiva home for the default mirror directory and stamps fetched posts with UTC time; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }

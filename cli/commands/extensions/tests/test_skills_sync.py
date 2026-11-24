@@ -213,54 +213,54 @@ def test_lost_registry_row_different_copy_still_warned(unit_home: Path, fake_rep
     assert "goal" not in _loaded_names(unit_home)
 
 
-def _web_sources_repo(tmp_path: Path) -> Path:
-    """A repo with a web-sources skill + local adapter subdirs in the load dir."""
+def _rss_pack_repo(tmp_path: Path) -> Path:
+    """A repo with a rss-pack skill + local adapter subdirs in the load dir."""
     repo = tmp_path / "repo-ws"
-    _write_skill(repo / "meiva_builtins" / "skills", "web-sources")
+    _write_skill(repo / "meiva_builtins" / "skills", "rss-pack")
     return repo
 
 
 def test_preserved_subtrees_survive_bootstrap_only(unit_home: Path, tmp_path: Path) -> None:
-    """Local adapters (web-sources/people, web-sources/rmrb) inside a managed
+    """Local adapters (rss-pack/people, rss-pack/rmrb) inside a managed
     package survive converge: repo-native packages are bootstrap-only, so the
     copy — local adapters included — is never rewritten by converge."""
-    repo = _web_sources_repo(tmp_path)
+    repo = _rss_pack_repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     for sub in ("people", "rmrb"):
-        d = unit_home / "skills" / "web-sources" / sub
+        d = unit_home / "skills" / "rss-pack" / sub
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(
             f"---\nname: {sub}\ndescription: local\n---\n", encoding="utf-8"
         )
         (d / ".preserved").touch()
-    (repo / "meiva_builtins" / "skills" / "web-sources" / "SKILL.md").write_text(
-        "---\nname: web-sources\ndescription: d2\n---\n\nnew content\n",
+    (repo / "meiva_builtins" / "skills" / "rss-pack" / "SKILL.md").write_text(
+        "---\nname: rss-pack\ndescription: d2\n---\n\nnew content\n",
         encoding="utf-8",
     )
     result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert result.updated == []
-    assert "web-sources" in result.unchanged
+    assert "rss-pack" in result.unchanged
     # Converge left the copy (and the adapters) alone; updating to the new
     # source is `meiva skill update`'s job.
-    body = (unit_home / "skills" / "web-sources" / "SKILL.md").read_text(encoding="utf-8")
+    body = (unit_home / "skills" / "rss-pack" / "SKILL.md").read_text(encoding="utf-8")
     assert "new content" not in body
     for sub in ("people", "rmrb"):
-        assert (unit_home / "skills" / "web-sources" / sub / "SKILL.md").exists()
+        assert (unit_home / "skills" / "rss-pack" / sub / "SKILL.md").exists()
 
 
 def test_preserved_only_drift_reads_unchanged(unit_home: Path, tmp_path: Path) -> None:
     """A package whose only drift is preserved local content is in-sync: no
     warning, no freeze, no rewrite."""
-    repo = _web_sources_repo(tmp_path)
+    repo = _rss_pack_repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    d = unit_home / "skills" / "web-sources" / "people"
+    d = unit_home / "skills" / "rss-pack" / "people"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: people\ndescription: local\n---\n", encoding="utf-8")
     (d / ".preserved").touch()
     result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    assert "web-sources" in result.unchanged
+    assert "rss-pack" in result.unchanged
     assert not any("modified locally" in w for w in result.warnings)
-    assert (unit_home / "skills" / "web-sources" / "people" / "SKILL.md").exists()
+    assert (unit_home / "skills" / "rss-pack" / "people" / "SKILL.md").exists()
 
 
 def test_cleanup_keeps_source_vanish_with_preserved_subtree(
@@ -270,17 +270,17 @@ def test_cleanup_keeps_source_vanish_with_preserved_subtree(
     a warning, not silently removed."""
     import shutil
 
-    repo = _web_sources_repo(tmp_path)
+    repo = _rss_pack_repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    d = unit_home / "skills" / "web-sources" / "people"
+    d = unit_home / "skills" / "rss-pack" / "people"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: people\ndescription: local\n---\n", encoding="utf-8")
     (d / ".preserved").touch()
-    shutil.rmtree(repo / "meiva_builtins" / "skills" / "web-sources")
+    shutil.rmtree(repo / "meiva_builtins" / "skills" / "rss-pack")
     result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert result.removed == []
     assert any("preserved local content" in w for w in result.warnings)
-    assert (unit_home / "skills" / "web-sources" / "people" / "SKILL.md").exists()
+    assert (unit_home / "skills" / "rss-pack" / "people" / "SKILL.md").exists()
 
 
 def test_user_install_shadowing_source_kept(unit_home: Path, fake_repo: Path) -> None:
@@ -576,19 +576,19 @@ def test_unmarked_local_subtree_not_preserved(unit_home: Path, tmp_path: Path) -
     #11) — a new adapter that forgets it gets cleaned, visibly, rather than
     a global registry silently missing the entry."""
 
-    repo = _web_sources_repo(tmp_path)
+    repo = _rss_pack_repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    d = unit_home / "skills" / "web-sources" / "newadapter"
+    d = unit_home / "skills" / "rss-pack" / "newadapter"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text(
         "---\nname: newadapter\ndescription: local\n---\n", encoding="utf-8"
     )
     # Package-source change -> converge does not update (bootstrap-only), so verify tree_hash and _copy_tree semantics directly:
     # Untagged subtrees count as drift (not preserved)
-    skip = reg.preserved_subpaths(unit_home / "skills" / "web-sources")
+    skip = reg.preserved_subpaths(unit_home / "skills" / "rss-pack")
     assert skip == frozenset()  # no marker, no protection
-    assert reg.tree_hash(unit_home / "skills" / "web-sources") != reg.tree_hash(
-        repo / "meiva_builtins" / "skills" / "web-sources"
+    assert reg.tree_hash(unit_home / "skills" / "rss-pack") != reg.tree_hash(
+        repo / "meiva_builtins" / "skills" / "rss-pack"
     )
 
 

@@ -95,8 +95,9 @@ class S1Media(TypedDict):
 
 
 # meiva:note
-# The cross-platform S1 item `to_s1` projects a post onto: the schema the `web-sources` adapters
-# share, with the newsletter's List-Id as the author and no matrix entity (issues are singletons).
+# The cross-platform S1 item `to_s1` projects a post onto: the schema shared across
+# content adapters, with the newsletter's List-Id as the author and no matrix entity (issues are
+# singletons).
 class S1Item(TypedDict):
     platform: str
     source_id: str
@@ -462,8 +463,8 @@ def _render_markdown(post: Post) -> str:
 
 
 # meiva:note
-# Project a fetched message onto the cross-platform S1 item schema shared with the
-# `web-sources` adapters (see `web-sources/SKILL.md`). author.id = List-Id (the durable
+# Project a fetched message onto the cross-platform S1 item schema shared across
+# content adapters. author.id = List-Id (the durable
 # per-newsletter key); newsletters are singletons, so matrix_entity stays null. `root` is the
 # mirror root the message was saved under, which is where `raw_path` points.
 def to_s1(post: Post, *, root: Path, matrix_entity: str | None = None) -> S1Item:

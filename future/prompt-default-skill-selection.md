@@ -21,7 +21,6 @@ or turn a general-agent shortlist into a capability boundary.
 | meiva-guide | Default Meiva entry | Routes operations, agent management, packages, publishing and configuration. |
 | meiva-serious-engineering | Domain entry | Covers consequential software work; individual practices load through the root. |
 | meiva-serious-research | Domain entry | Covers research evidence and evaluation; individual practices load through the root. |
-| web-sources | Installed capability entry | Makes web retrieval discoverable without advertising each source adapter permanently. |
 | gmail | Installed capability entry | Mail capability must be discoverable; installation is not authority to send. |
 | meiva-fleet | Enabled-plugin entry | Optional collaboration implementation; not a default topology. |
 | meiva-memory | Enabled-plugin entry | Memory operations and stewardship on relevant tasks. |

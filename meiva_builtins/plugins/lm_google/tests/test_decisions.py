@@ -344,8 +344,8 @@ async def test_recall_skills_scores_colon_and_long_subskills_over_gemini_server(
         Skill(
             name="rss",
             description="Fetch RSS and Atom feeds.",
-            path="/skills/web-sources/rss/SKILL.md",
-            namespace=("web-sources",),
+            path="/skills/rss-pack/rss/SKILL.md",
+            namespace=("rss-pack",),
         ),
         Skill(
             name=long_subskill_name,
@@ -359,7 +359,7 @@ async def test_recall_skills_scores_colon_and_long_subskills_over_gemini_server(
     assert len(long_identifier) > 64
     assert [c.identifier for c in candidates] == [
         "meiva-guide:mcp",
-        "web-sources:rss",
+        "rss-pack:rss",
         long_identifier,
     ]
 
@@ -415,7 +415,7 @@ async def test_recall_skills_scores_colon_and_long_subskills_over_gemini_server(
         "`meiva.skills.meiva_serious_research.practices."
         "reproducible_measurement_and_ablation_control_playbook`" in recalled.note.text
     )
-    assert "web_sources" not in recalled.note.text
+    assert "rss_pack" not in recalled.note.text
     [received] = gemini_server.received
     assert received.path == "/v1beta/decisions"
     wire_questions = received.body["questions"]

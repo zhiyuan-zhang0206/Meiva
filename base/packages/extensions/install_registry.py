@@ -44,8 +44,8 @@ IGNORED_NAMES = frozenset({"__pycache__", ".git", ".DS_Store", ".preserved"})
 # The marker file a local adapter drops inside a managed package to protect
 # itself from converge re-syncs: a subtree under the load dir carrying this
 # marker is never deleted or overwritten, even when its parent package is
-# re-copied from source (local adapters — e.g. intel's `web-sources/people` +
-# `web-sources/rmrb` — live inside a repo-managed package directory, and a
+# re-copied from source (local adapters live inside a repo-managed package
+# directory — e.g. a machine-local `<package>/people` adapter — and a
 # wholesale re-copy would silently drop them). Marker-based, not a global
 # registry: a new adapter is protected by creating the marker alongside it,
 # so there is no central list to forget to extend (audit round 2, #11).

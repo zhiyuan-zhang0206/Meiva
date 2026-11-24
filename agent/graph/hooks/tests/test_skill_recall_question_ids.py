@@ -44,8 +44,8 @@ async def test_default_provider_recalls_colon_and_over_64_char_subskills_without
         Skill(
             name="rss",
             description="Fetch RSS and Atom feeds.",
-            path="/skills/web-sources/rss/SKILL.md",
-            namespace=("web-sources",),
+            path="/skills/rss-pack/rss/SKILL.md",
+            namespace=("rss-pack",),
         ),
         Skill(
             name=long_leaf,

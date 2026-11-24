@@ -115,7 +115,7 @@ def test_the_within_skill_file_guard_is_not_a_site(source: str, rel_path: str) -
             "import sys\nfrom pathlib import Path\n"
             "sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent "
             "/ 'audio-transcribe' / 'scripts'))\n",
-            "meiva_builtins/skills/integrations/web-sources/youtube/scripts/feed.py",
+            "meiva_builtins/skills/integrations/gmail/scripts/transcribe.py",
         ),
         (
             "import sys\nfrom pathlib import Path\n"

@@ -152,15 +152,15 @@ def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Pat
 def test_preserved_subtree_not_reported_as_drift(unit_home: Path) -> None:
     from gateway.extensions.skills import get_skills
 
-    ws = _mk_skill("web-sources")
-    _register("web-sources", origin="repo", content_hash=tree_hash(ws), enabled=True)
+    ws = _mk_skill("rss-pack")
+    _register("rss-pack", origin="repo", content_hash=tree_hash(ws), enabled=True)
     (ws / "people").mkdir(parents=True)
     (ws / "people" / "SKILL.md").write_text(
         "---\nname: people\ndescription: local\n---\n", encoding="utf-8"
     )
     (ws / "people" / ".preserved").touch()
     rows = {r.name: r for r in get_skills(_request(unit_home)).skills}
-    assert rows["web-sources"].modified_locally is False
+    assert rows["rss-pack"].modified_locally is False
 
 
 def test_put_rejects_untracked_skill(unit_home: Path) -> None:
@@ -180,7 +180,7 @@ def test_put_rejects_untracked_skill(unit_home: Path) -> None:
 
 def test_dot_dirs_not_panel_rows(unit_home: Path) -> None:
     _mk_skill(".goal.new")
-    _mk_skill(".web-sources.trash")
+    _mk_skill(".rss-pack.trash")
     assert get_skills(_request(unit_home)).skills == []
 
 

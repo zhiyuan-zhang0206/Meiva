@@ -55,14 +55,6 @@ tech debt.
 | meiva-self-evolution | Weekly collect real runs into trace dataset, mine skill/plugin regressions and produce fix reports | [meiva-self-evolution skill — Mining regressions from real runs](platform/meiva-self-evolution/docs/meiva-self-evolution.md) |
 | skill-creator | Create / improve / review skill | [skill-creator skill — Create/modify/review skill](platform/skill-creator/README.md) |
 
-## Web & media
-Fetching content from the web and media — driving AI web apps, per-source
-adapters, transcription.
-
-| Skill | Purpose | Detail |
-|------|------|------|
-| web-sources | Fetch content from any source; per-platform adapter subs: generic / rss / youtube | [web-sources skill — Fetch content from any source](integrations/web-sources/README.md) |
-
 ## Not indexed here
 The remaining top-level built-ins (such as `meiva-corp`,
 `meiva-serious-engineering` and `meiva-serious-research`)
