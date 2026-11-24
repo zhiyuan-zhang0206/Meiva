@@ -162,40 +162,21 @@ def _as_mapping(value: object) -> Mapping[str, object]:
     return value if _is_str_mapping(value) else {}
 
 
-def _default_reasoning_effort(
-    model: str | None,
-    catalog: ModelCatalog,
-    harness_enum: Harness,
-) -> str | None:
-    if harness_enum is not Harness.MEIVA or not model:
-        return None
-    from base.lm.registry import explain_setting
-
-    setting = explain_setting("reasoning_effort", model=model, explicit=None, models=catalog.models)
-    return str(setting.value) if setting.value else None
-
-
 def _resolve_same_harness_inheritance(
     parent_model: object | None,
     parent_effort: object | None,
     req_model: object | None,
     req_effort: object | None,
-    catalog: ModelCatalog,
-    harness_enum: Harness,
 ) -> dict[str, object] | None:
     inherited: dict[str, object] = {}
-    effective_model = req_model or parent_model
     if not req_model:
         inherited["llm_model"] = parent_model
-    if req_effort in (None, ""):
-        if (req_model is None or req_model == parent_model) and parent_effort is not None:
-            inherited["reasoning_effort"] = parent_effort
-        else:
-            effort = _default_reasoning_effort(
-                str(effective_model) if effective_model else None, catalog, harness_enum
-            )
-            if effort:
-                inherited["reasoning_effort"] = effort
+    if (
+        req_effort in (None, "")
+        and (req_model is None or req_model == parent_model)
+        and parent_effort is not None
+    ):
+        inherited["reasoning_effort"] = parent_effort
     return inherited or None
 
 
@@ -204,9 +185,7 @@ def _resolve_parent_spawn_inheritance(
     parent_id: int,
     config: dict[str, object] | None,
     harness: str,
-    catalog: ModelCatalog,
 ) -> dict[str, object] | None:
-    harness_enum = Harness(harness)
     cur.execute(
         "SELECT harness, config_overlay, birth_config FROM agents_meta WHERE id = %s",
         (parent_id,),
@@ -214,12 +193,12 @@ def _resolve_parent_spawn_inheritance(
     p_row = cur.fetchone()
     if p_row is None:
         logger.warning(
-            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash at max effort",
             id=parent_id,
         )
         parent_harness = "meiva"
         parent_model = "deepseek-flash"
-        parent_effort = None
+        parent_effort = "max"
     else:
         parent_harness = str(p_row[0])
         parent_overlay = _as_mapping(p_row[1])
@@ -242,15 +221,9 @@ def _resolve_parent_spawn_inheritance(
             raise ValueError(
                 f"llm_model must be explicitly provided when spawning on a different harness ({harness} != {parent_harness})"
             )
-        if req_effort in (None, ""):
-            effort = _default_reasoning_effort(str(req_model), catalog, harness_enum)
-            if effort:
-                return {"reasoning_effort": effort}
         return None
 
-    return _resolve_same_harness_inheritance(
-        parent_model, parent_effort, req_model, req_effort, catalog, harness_enum
-    )
+    return _resolve_same_harness_inheritance(parent_model, parent_effort, req_model, req_effort)
 
 
 def _resolve_fork_overlay_and_inherited(
@@ -269,20 +242,9 @@ def _resolve_fork_overlay_and_inherited(
     return resolved_config, inherited
 
 
-def _resolve_root_spawn_inherited(
-    config: dict[str, object] | None,
-    harness_enum: Harness,
-    catalog: ModelCatalog,
-) -> dict[str, object] | None:
-    req_model = config.get("llm_model") if config else None
-    req_effort = config.get("reasoning_effort") if config else None
-    if not req_model:
+def _require_root_spawn_model(config: dict[str, object] | None) -> None:
+    if not (config.get("llm_model") if config else None):
         raise ValueError("llm_model must be explicitly provided for root/non-agent spawn")
-    if req_effort in (None, ""):
-        effort = _default_reasoning_effort(str(req_model), catalog, harness_enum)
-        if effort:
-            return {"reasoning_effort": effort}
-    return None
 
 
 def _resolve_birth_overlay(
@@ -300,12 +262,14 @@ def _resolve_birth_overlay(
     from base.lm.factory import validate_model_config
 
     harness_enum = Harness(harness)
+    inherited: dict[str, object] | None
     if fork_from is not None:
         config, inherited = _resolve_fork_overlay_and_inherited(cur, fork_from, config)
     elif (parent_id := parse_spawner_agent_id(spawner)) is not None:
-        inherited = _resolve_parent_spawn_inheritance(cur, parent_id, config, harness, catalog)
+        inherited = _resolve_parent_spawn_inheritance(cur, parent_id, config, harness)
     else:
-        inherited = _resolve_root_spawn_inherited(config, harness_enum, catalog)
+        _require_root_spawn_model(config)
+        inherited = None
 
     if harness_defaults:
         config, h_inherited = _apply_birth_harness_defaults(config, harness_defaults)
@@ -325,7 +289,9 @@ def _resolve_birth_overlay(
 
     try:
         pins = resolve_agent_config_pins(config, birth_config)
-        validate_model_config(catalog=catalog, config=pins, harness=harness_enum)
+        validate_model_config(
+            catalog=catalog, config=pins, harness=harness_enum, require_effort=fork_from is None
+        )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
     if harness_enum is not Harness.MEIVA:

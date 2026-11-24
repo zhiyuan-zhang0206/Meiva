@@ -346,7 +346,9 @@ async def test_a_harness_switch_the_agent_asks_for_waits_for_its_turn_to_end(
         "I need a real shell",
         kind="restart",
         source="self",
-        payload=RestartTransition("codex", {"llm_model": "gpt-6.1-sol"}).payload(),
+        payload=RestartTransition(
+            "codex", {"llm_model": "gpt-6.1-sol", "reasoning_effort": "medium"}
+        ).payload(),
     )
     cluster.let_grace_pass(restart)
     behind = [

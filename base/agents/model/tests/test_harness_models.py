@@ -240,6 +240,42 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
         )
 
 
+def test_birth_selection_requires_an_explicit_effort_only_from_a_model_that_has_levels() -> None:
+    models = (
+        ProbedHarnessModel(
+            id="gpt-oss-120b",
+            reasoning_effort_options=("medium", "high"),
+            reasoning_effort_default="medium",
+        ),
+        ProbedHarnessModel(id="claude-haiku-4-5-20251001"),
+    )
+    with pytest.raises(InvalidModelConfig, match="reasoning_effort must be explicitly provided"):
+        resolve_probed_harness_selection(
+            Harness.ANTIGRAVITY, models, requested_model="gpt-oss-120b", require_effort=True
+        )
+    assert resolve_probed_harness_selection(
+        Harness.ANTIGRAVITY,
+        models,
+        requested_model="gpt-oss-120b",
+        requested_effort="high",
+        require_effort=True,
+    ) == ("gpt-oss-120b", "high")
+    assert resolve_probed_harness_selection(
+        Harness.CLAUDE_CODE,
+        models,
+        requested_model="claude-haiku-4-5-20251001",
+        require_effort=True,
+    ) == ("claude-haiku-4-5-20251001", None)
+    with pytest.raises(InvalidModelConfig, match="does not accept reasoning_effort"):
+        resolve_probed_harness_selection(
+            Harness.CLAUDE_CODE,
+            models,
+            requested_model="claude-haiku-4-5-20251001",
+            requested_effort="low",
+            require_effort=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("raw_model", "expected"),
     [

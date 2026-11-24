@@ -18,7 +18,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MEIVA_MODEL",
     "MEIVA_LABELER_MODEL",
     "MEIVA_HIERARCHY_MODEL",
-    "MEIVA_REASONING_EFFORT",
     "MEIVA_DASHSCOPE_BASE_URL",
     "MEIVA_UNDERSTAND_TEXT_MODEL",
     "MEIVA_UNDERSTAND_IMAGE_MODEL",
@@ -182,6 +181,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 // meiva:link ui/web/src/app/control/config/docs/configuration.md
 export const HIDDEN_ENV_VARS = new Set<string>([
   "MEIVA_CLUSTER_SECRET",
+  "MEIVA_REASONING_EFFORT",
   "MEIVA_GATEWAY_MAX_RETRIES",
   "MEIVA_GATEWAY_RETRY_DELAY_SECONDS",
 ]);

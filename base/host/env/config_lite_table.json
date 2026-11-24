@@ -1225,7 +1225,7 @@
     "provider_guard_blocked_agents_window_hours": "cluster-pinned",
     "provision_builtin_schedules": "cluster-pinned",
     "questions_open_default_limit": "cluster-pinned",
-    "reasoning_effort": "cluster-default",
+    "reasoning_effort": "agent",
     "redis_admin_password": "cluster-pinned",
     "redis_bin_dir": "host",
     "redis_url": "cluster-pinned",

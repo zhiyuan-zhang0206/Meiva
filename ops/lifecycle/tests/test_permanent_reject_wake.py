@@ -99,7 +99,7 @@ def terminated(
         machine=local_machine.name(),
         catalog=model_catalog,
         authority=config_authority,
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     )
     conn.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",

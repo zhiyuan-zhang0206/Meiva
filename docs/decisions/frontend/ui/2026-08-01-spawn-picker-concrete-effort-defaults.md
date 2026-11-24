@@ -84,3 +84,5 @@ equivalent — with a preset pinning a different model, omitting let the preset'
 model silently win over what the user visibly picked).
 
 Superseded in part by: [decisions/runtime/config/2026-10-17-preset-removal.md](../../runtime/config/2026-10-17-preset-removal.md) — the preset picker is removed, so Decision 3 no longer applies; Decisions 1–2 remain.
+
+<!-- The cluster-wide `MEIVA_REASONING_EFFORT` pin described above was removed by decisions/runtime/config/2026-11-24-explicit-reasoning-effort-no-cluster-default.md -->

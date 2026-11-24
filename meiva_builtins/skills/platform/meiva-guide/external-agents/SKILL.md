@@ -45,8 +45,8 @@ child_id = meiva.agents.spawn(
     label="codex-auth-fix",
     config_overlay={
         "harness": "codex",          # "meiva" (default) | "codex" | "claude_code" | "antigravity"
-        "llm_model": "gpt-5.4",      # optional; must be supported by the chosen harness
-        "reasoning_effort": "xhigh", # optional
+        "llm_model": "gpt-5.4",      # required on another harness; must be supported by it
+        "reasoning_effort": "xhigh", # required when the model has effort options; omit otherwise
     },
 )
 ```
@@ -66,7 +66,7 @@ import meiva
 print(meiva.agents.spawn(
     prompt="<prompt>",
     label="codex-auth-fix",
-    config_overlay={"harness": "codex", "llm_model": "<model>"},
+    config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"},
 ))
 PY
 ```
@@ -112,7 +112,7 @@ for flag availability.
 
 To switch yourself after a turn, use `meiva.self.restart` and end the turn after
 its receipt, or schedule `meiva agents restart <id> -m "<reason and handoff path>"
---overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<your_id>`.
+--overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort> --at +60s --source agent:<your_id>`.
 A scheduled cross-machine move uses `meiva agents transfer <id> --to <machine>
 --message "<reason>" --at +60s --source agent:<your_id>`. Finish the turn before
 the returned `run_at`: each schedule attempts once and refuses a running target.

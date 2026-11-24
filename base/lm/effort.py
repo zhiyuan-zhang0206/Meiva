@@ -3,7 +3,7 @@
 Split out of `base/lm/factory.py` (its companion module — factory re-exports
 these names, so callers and tests keep importing from factory). Provider plugins
 own endpoint vocabularies and wire switches. This module keeps only the shared
-``MEIVA_REASONING_EFFORT`` vocabulary, its public SDK enum/coercion surface, and
+``reasoning_effort`` vocabulary, its public SDK enum/coercion surface, and
 validation against a plugin's declared levels without remapping the selection.
 """
 

@@ -29,7 +29,7 @@ from tests.e2e._credentials import gateway_post
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
-from tests.e2e.fakes.scenarios.budget_handoff import BUDGET_MODEL
+from tests.e2e.fakes.scenarios.budget_handoff import BUDGET_EFFORT, BUDGET_MODEL
 from tests.fixtures.gateway_config import post_spawn
 
 _OBSERVER = (
@@ -42,7 +42,12 @@ _OBSERVER = (
 def budget_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> Iterator[int]:
     """Choose the scenario's fixed-price model through the actual birth boundary."""
     response = post_spawn(
-        GATEWAY_URL, {"spawner": "user", "config": {"llm_model": BUDGET_MODEL}}, timeout=30
+        GATEWAY_URL,
+        {
+            "spawner": "user",
+            "config": {"llm_model": BUDGET_MODEL, "reasoning_effort": BUDGET_EFFORT},
+        },
+        timeout=30,
     )
     response.raise_for_status()
     owner = int(response.json()["id"])

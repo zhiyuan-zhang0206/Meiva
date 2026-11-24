@@ -242,7 +242,10 @@ class TestRestart:
         db_conn.commit()
 
         with pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart("model change", config_overlay={"llm_model": "gpt-5.6-sol"})
+            meiva.self.restart(
+                "model change",
+                config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"},
+            )
 
         # Column should have MERGED result (pre-existing key preserved).
         with db_conn.cursor() as cur:
@@ -252,7 +255,11 @@ class TestRestart:
             )
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == {"auto_compact_fraction": 0.7, "llm_model": "gpt-5.6-sol"}
+        assert row[0] == {
+            "auto_compact_fraction": 0.7,
+            "llm_model": "gpt-5.6-sol",
+            "reasoning_effort": "medium",
+        }
 
         # Inbound payload carries only the this-restart diff, not the merged result.
         with db_conn.cursor() as cur:
@@ -263,7 +270,9 @@ class TestRestart:
             )
             inbound_row = cur.fetchone()
         assert inbound_row is not None
-        assert inbound_row[0] == {"config_overlay": {"llm_model": "gpt-5.6-sol"}}
+        assert inbound_row[0] == {
+            "config_overlay": {"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"}
+        }
 
     def test_restart_with_invalid_config_raises_and_no_inbound(
         self,
@@ -322,7 +331,11 @@ class TestRestart:
             )
             before_row = cur.fetchone()
         assert before_row is not None
-        assert before_row[0] in (None, {}, {"llm_model": "deepseek-flash"})
+        assert before_row[0] in (
+            None,
+            {},
+            {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+        )
 
         with pytest.raises(meiva.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
             meiva.self.restart(
@@ -382,7 +395,9 @@ class TestRestart:
             )
         )
         with held_installation(model_installation), pytest.raises(meiva.self.AgentRestart):
-            meiva.self.restart("retired model", config_overlay={"llm_model": model})
+            meiva.self.restart(
+                "retired model", config_overlay={"llm_model": model, "reasoning_effort": "max"}
+            )
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT config_overlay FROM agents_meta WHERE id = %s",
@@ -390,7 +405,7 @@ class TestRestart:
             )
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == {"llm_model": "deepseek-flash"}
+        assert row[0] == {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT payload FROM inbound_messages "
@@ -399,7 +414,9 @@ class TestRestart:
             )
             inbound_row = cur.fetchone()
         assert inbound_row is not None
-        assert inbound_row[0] == {"config_overlay": {"llm_model": "deepseek-flash"}}
+        assert inbound_row[0] == {
+            "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
+        }
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

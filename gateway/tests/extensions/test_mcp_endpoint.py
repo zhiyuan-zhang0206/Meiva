@@ -48,7 +48,7 @@ def _spawn(client: GatewayTestClient, key: str = "birth-intent") -> int:
             {
                 "idempotency_key": key,
                 "prompt": "goal",
-                "config_overlay": {"llm_model": "deepseek-flash"},
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
     )
@@ -242,7 +242,7 @@ def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Conn
                     "prompt": "goal",
                     "prompt_source": "external_agent:codex",
                     "spawner": "codex",
-                    "config_overlay": {"llm_model": "deepseek-flash"},
+                    "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
                 },
             )
         )
@@ -253,7 +253,7 @@ def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Conn
                 "idempotency_key": "bad",
                 "prompt": "goal",
                 "prompt_source": "bogus",
-                "config_overlay": {"llm_model": "deepseek-flash"},
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
     assert _error_envelope(bad)["status"] == 422
@@ -279,7 +279,7 @@ def test_idempotency_keys_reach_the_api() -> None:
             {
                 "idempotency_key": "birth-intent",
                 "prompt": "new",
-                "config_overlay": {"llm_model": "deepseek-flash"},
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
         assert _error_envelope(changed)["status"] == 409
@@ -322,7 +322,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
             {
                 "idempotency_key": "birth-intent",
                 "prompt": "Keep this task",
-                "config_overlay": {"llm_model": "deepseek-flash"},
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
     assert response["result"]["isError"] is True

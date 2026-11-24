@@ -62,7 +62,7 @@ def _park(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner="user",
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         machine=machine_identity.name(),
         authority=config_authority,
         catalog=model_catalog,

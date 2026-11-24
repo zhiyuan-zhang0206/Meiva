@@ -88,13 +88,27 @@ def test_a_running_external_agent_may_ask_for_a_switch_and_is_not_touched_yet(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
+            client,
+            {
+                "config": {
+                    "harness": "codex",
+                    "llm_model": "gpt-6.1-sol",
+                    "reasoning_effort": "medium",
+                }
+            },
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
         answer = client.post(
             f"/api/agents/{agent_id}/restart",
-            json=_own(agent_id, config_overlay={"harness": "meiva", "llm_model": "deepseek-flash"}),
+            json=_own(
+                agent_id,
+                config_overlay={
+                    "harness": "meiva",
+                    "llm_model": "deepseek-flash",
+                    "reasoning_effort": "max",
+                },
+            ),
         )
 
     assert answer.status_code == 200
@@ -153,7 +167,14 @@ def test_a_claude_code_agent_on_the_bare_fable_id_restarts_with_an_unrelated_ove
     with gateway_test_client(machine=_local_machine) as client:
         _seed_claude_code_from_initialize(client, gateway_local_runner.name)
         spawned = spawn_via_http(
-            client, {"config": {"harness": "claude_code", "llm_model": "claude-fable-5-2"}}
+            client,
+            {
+                "config": {
+                    "harness": "claude_code",
+                    "llm_model": "claude-fable-5-2",
+                    "reasoning_effort": "high",
+                }
+            },
         )
         assert spawned.status_code == 201, spawned.text
         agent_id = spawned.json()["id"]
@@ -178,7 +199,14 @@ def test_only_the_agent_itself_may_queue_its_restart(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
+            client,
+            {
+                "config": {
+                    "harness": "codex",
+                    "llm_model": "gpt-6.1-sol",
+                    "reasoning_effort": "medium",
+                }
+            },
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
@@ -214,7 +242,14 @@ def test_a_request_that_fails_the_usual_validation_is_refused_at_once_and_record
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
+            client,
+            {
+                "config": {
+                    "harness": "codex",
+                    "llm_model": "gpt-6.1-sol",
+                    "reasoning_effort": "medium",
+                }
+            },
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
@@ -238,7 +273,14 @@ def test_a_terminated_agent_cannot_queue_a_restart(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
+            client,
+            {
+                "config": {
+                    "harness": "codex",
+                    "llm_model": "gpt-6.1-sol",
+                    "reasoning_effort": "medium",
+                }
+            },
         ).json()["id"]
         _set_status(db_conn, agent_id, "terminated")
 
@@ -353,7 +395,14 @@ def test_external_restart_without_overlay_probes_launchability(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
+            client,
+            {
+                "config": {
+                    "harness": "codex",
+                    "llm_model": "gpt-6.1-sol",
+                    "reasoning_effort": "medium",
+                }
+            },
         ).json()["id"]
         client.app.state.harness_cache.store(
             gateway_local_runner.name,

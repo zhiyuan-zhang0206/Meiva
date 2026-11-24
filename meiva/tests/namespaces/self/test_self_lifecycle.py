@@ -122,7 +122,10 @@ def test_restart_without_an_overlay_queues_a_bare_restart_row(
     overlay = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
-    assert overlay is not None and overlay[0] == {"llm_model": "deepseek-flash"}
+    assert overlay is not None and overlay[0] == {
+        "llm_model": "deepseek-flash",
+        "reasoning_effort": "max",
+    }
 
 
 @pytest.mark.usefixtures("sdk_model_owner")
@@ -274,6 +277,7 @@ def test_restart_checks_the_overlay_against_the_plugin_configs_of_the_contexts_h
     ).fetchone()
     assert stored is not None and stored[0] == {
         "llm_model": "deepseek-flash",
+        "reasoning_effort": "max",
         "restart_probe": "x",
     }
 
@@ -297,6 +301,7 @@ def test_restart_persists_and_overwrites_exec_timeout_seconds_overlay(
     ).fetchone()
     assert stored is not None and stored[0] == {
         "llm_model": "deepseek-flash",
+        "reasoning_effort": "max",
         "exec_timeout_seconds": 25.0,
     }
 
@@ -308,6 +313,7 @@ def test_restart_persists_and_overwrites_exec_timeout_seconds_overlay(
     ).fetchone()
     assert restored is not None and restored[0] == {
         "llm_model": "deepseek-flash",
+        "reasoning_effort": "max",
         "exec_timeout_seconds": 300.0,
     }
 

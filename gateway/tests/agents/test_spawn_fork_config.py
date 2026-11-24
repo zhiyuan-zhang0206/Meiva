@@ -43,12 +43,15 @@ class TestForkConfigStability:
         with gateway_test_client() as client:
             src = spawn_via_http(
                 client,
-                {"spawner": "user", "config": {"llm_model": "deepseek-flash"}},
+                {
+                    "spawner": "user",
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                },
             ).json()["id"]
             _checkpoint(db_conn, src)
             fork = spawn_via_http(client, {"spawner": "user", "fork_from": src}).json()["id"]
         overlay = _row(db_conn, fork)
-        assert overlay == {"llm_model": "deepseek-flash"}
+        assert overlay == {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
         assert _fork_inbound(db_conn, fork) is None
 
     def test_fork_with_identical_explicit_config_is_allowed(
@@ -56,7 +59,11 @@ class TestForkConfigStability:
     ) -> None:
         with gateway_test_client() as client:
             src = spawn_via_http(
-                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
+                client,
+                {
+                    "spawner": "user",
+                    "config": {"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
+                },
             ).json()["id"]
             _checkpoint(db_conn, src)
             r = spawn_via_http(
@@ -64,18 +71,22 @@ class TestForkConfigStability:
                 {
                     "spawner": "user",
                     "fork_from": src,
-                    "config": {"llm_model": "claude-sonnet-5"},
+                    "config": {"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
                 },
             )
             assert r.status_code == 201, r.text
             fork = r.json()["id"]
         overlay = _row(db_conn, fork)
-        assert overlay == {"llm_model": "claude-sonnet-5"}
+        assert overlay == {"llm_model": "claude-sonnet-5", "reasoning_effort": "high"}
 
     def test_fork_model_change_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             src = spawn_via_http(
-                client, {"spawner": "user", "config": {"llm_model": "claude-sonnet-5"}}
+                client,
+                {
+                    "spawner": "user",
+                    "config": {"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
+                },
             ).json()["id"]
             _checkpoint(db_conn, src)
             r = spawn_via_http(
@@ -143,6 +154,7 @@ class TestForkConfigStability:
         overlay = _row(db_conn, fork)
         assert overlay == {
             "llm_model": "deepseek-flash",
+            "reasoning_effort": "max",
             "skills_to_inject_into_system_prompt": ["a", "b"],
             "skills_to_expand_at_start": ["e", "b"],
         }

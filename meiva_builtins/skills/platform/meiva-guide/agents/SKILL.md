@@ -81,13 +81,13 @@ SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `interrupt` /
 An agent's harness (the runtime loop it runs on: `meiva`, `claude_code`, `codex`,
 `antigravity`) can be switched bidirectionally (`meiva` <-> external,
 or external <-> external) via `restart` with a config overlay. A new agent picks its
-harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex", "llm_model": "<model>"})`
+harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
 (`spawn` has no separate `harness` argument).
 
-- **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex"})`
-- **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex`
-- **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "..."}}`
-- **From the agent itself** (on any harness): `print(meiva.self.restart("Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>"}))`.
+- **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
+- **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort>`
+- **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "...", "llm_model": "<model>", "reasoning_effort": "<effort>"}}`
+- **From the agent itself** (on any harness): `print(meiva.self.restart("Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}))`.
   The request is validated
   like any restart (a refusal raises at once), recorded, and applied when the current turn
   ends, never during it. On the native harness the call ends your execution; on an external
@@ -101,8 +101,10 @@ harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex
    targets and check for quiescence once when the schedule fires.
 2. **Mandatory Message**: `message` is mandatory across all restart calls (minimum
    1 non-whitespace character).
-3. **Model Compatibility**: If changing harness, ensure the target harness supports
-   the agent's model, or supply a compatible `llm_model` in the overlay.
+3. **Model Compatibility**: A harness switch must name the target harness's `llm_model`
+   and, when that model has effort options, its `reasoning_effort` in the overlay; the
+   previous harness's model and effort never carry over. Changing `llm_model` on the same
+   harness likewise requires naming `reasoning_effort` (a model without effort options takes none).
 4. **Handoff Document**: Before stopping or requesting a harness switch, have the
    outgoing agent write a comprehensive handoff file (`README.md` or `HANDOFF.md`)
    in its workspace root. This document should cover:
@@ -150,7 +152,7 @@ before using them.
 
 ```bash
 meiva agents transfer <id> --to <machine> --message "Move after this turn" --at +60s --source agent:<caller_id>
-meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<caller_id>
+meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort> --at +60s --source agent:<caller_id>
 ```
 
 `--at` accepts relative times such as `+60s` / `+10m` or an ISO-8601 timestamp,
@@ -233,13 +235,14 @@ Passed at spawn time — not edited on a running agent:
 
 ```python
 
-# Explicit fields — model_id is an id from the live roster, see the models sub-skill
-meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id})
-
-# Several fields at once — every key must be a per_agent field
+# A model and its effort go together — model_id is an id from the live roster, see the models
+# sub-skill; effort is one of that model's reasoning_effort_options (none for a model without any)
 meiva.agents.spawn(prompt="...",
                  config_overlay={"llm_model": model_id, "reasoning_effort": "high"},
 )
+
+# Omit both to inherit the spawning agent's own model and effort; every key must be a per_agent field
+meiva.agents.spawn(prompt="...", config_overlay={"skills_to_inject_into_system_prompt": ["..."]})
 ```
 
 Per-agent config is snapshotted into the agent row at spawn; a later

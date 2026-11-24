@@ -9,7 +9,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base.db.rows import query_one
-from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.agents.creation import (
+    DRAFT_AGENT_CONFIG,
+    create_and_launch_agent,
+    guarded_draft_key,
+)
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.config import (
     gateway_clock,
@@ -40,7 +44,7 @@ async def guarded_draft_schedule(
         prompt=prompt,
         prompt_source="user",
         label="meiva-schedule-writer",
-        config={"llm_model": "deepseek-flash"},
+        config=dict(DRAFT_AGENT_CONFIG),
     )
     state = gateway_state(request)
     spawned = await create_and_launch_agent(

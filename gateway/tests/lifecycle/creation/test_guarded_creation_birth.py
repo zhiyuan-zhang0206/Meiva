@@ -30,7 +30,7 @@ BODY = {
     "machine": "local-test",
     "prompt": "one goal",
     "prompt_source": "user",
-    "config": {"llm_model": "deepseek-flash"},
+    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
 }
 
 
@@ -85,7 +85,7 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
     body = {
         "prompt": "one goal",
         "prompt_source": "user",
-        "config": {"llm_model": "deepseek-flash"},
+        "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     }
     first = client.post(PATH, json=body, headers=HEADERS)
     assert first.status_code == 201, first.text
@@ -95,7 +95,11 @@ def test_original_manifest_precedes_mutable_config_and_defaults(
         "FROM agent_creation_snapshots"
     ).fetchone()
     assert stored is not None
-    changed = {"llm_model": "deepseek-flash", "inject_skills": ["operator-added"]}
+    changed = {
+        "llm_model": "deepseek-flash",
+        "reasoning_effort": "max",
+        "inject_skills": ["operator-added"],
+    }
     db_conn.execute(
         "UPDATE agents_meta SET config_overlay=%s WHERE id=%s", (Jsonb(changed), agent_id)
     )

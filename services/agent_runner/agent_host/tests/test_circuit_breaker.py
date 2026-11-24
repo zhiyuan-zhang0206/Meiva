@@ -213,7 +213,10 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=MagicMock(),
-            agent=AgentSlices.resolve({"llm_model": "deepseek-flash"}, default_reader=defaults()),
+            agent=AgentSlices.resolve(
+                {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                default_reader=defaults(),
+            ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=model_catalog,

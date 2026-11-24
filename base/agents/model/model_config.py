@@ -38,6 +38,7 @@ def _resolve_probed_spawn_defaults(
         probed_models,
         requested_model=config.get("llm_model") if config else None,
         requested_effort=config.get("reasoning_effort") if config else None,
+        require_effort=True,
     )
     cleaned = (
         {
@@ -99,12 +100,12 @@ def _resolve_spawn_parent_inheritance(
     p_row = cur.fetchone()
     if p_row is None:
         logger.warning(
-            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash at max effort",
             id=parent_id,
         )
         parent_harness = "meiva"
         parent_model = "deepseek-flash"
-        parent_effort = None
+        parent_effort = "max"
     else:
         parent_harness = str(p_row[0])
         parent_overlay = _as_mapping(p_row[1])
@@ -151,6 +152,7 @@ def _check_launch(
     keys: ProviderKeys,
     llm_override: str,
     authority: ConfigAuthority,
+    require_effort: bool,
 ) -> str:
     if harness is not Harness.MEIVA and probed_models is not None:
         effective_cfg = {**(inherited or {}), **(config or {})}
@@ -166,6 +168,7 @@ def _check_launch(
             keys=keys,
             llm_override=llm_override,
             harness=harness,
+            require_effort=require_effort,
         )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
@@ -210,4 +213,5 @@ def validate_spawn_model_config(
         keys=keys,
         llm_override=llm_override,
         authority=authority,
+        require_effort=fork_from is None,
     )

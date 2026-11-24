@@ -141,10 +141,10 @@ def _parent_source(pool: ConnectionPool, parent_id: int) -> tuple[str, str | Non
         )
     if row is None:
         logger.warning(
-            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash at max effort",
             id=parent_id,
         )
-        return ("meiva", "deepseek-flash", None)
+        return ("meiva", "deepseek-flash", "max")
     parent_harness = row.harness
     overlay = row.config_overlay or {}
     birth = row.birth_config or {}
@@ -187,6 +187,7 @@ async def _resolve_external_spawn_probe(
         probed_models,
         requested_model=effective_model,
         requested_effort=effective_effort,
+        require_effort=True,
     )
     return (
         probed_models,
@@ -292,6 +293,12 @@ async def _resolve_spawn_effective_model_and_effort(
         )
 
     return _resolve_root_spawn_effective_model_and_effort(body)
+
+
+DRAFT_AGENT_CONFIG: Mapping[str, object] = {
+    "llm_model": "deepseek-flash",
+    "reasoning_effort": "max",
+}
 
 
 async def create_and_launch_agent(

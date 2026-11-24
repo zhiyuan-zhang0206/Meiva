@@ -2,7 +2,7 @@ import psycopg
 import pytest
 
 from base.agents.birth.creation_identity import creation_request_hash
-from base.agents.birth.transaction import insert_agent_birth
+from base.agents.birth.transaction import AgentBirth, insert_agent_birth
 from base.api_contracts.agent_contract import InvalidModelConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -46,6 +46,87 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
     assert _counts(db_conn) == before
 
 
+def _birth(
+    cur: psycopg.Cursor,
+    config: dict[str, object] | None,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+    spawner: str = "user",
+) -> AgentBirth:
+    return insert_agent_birth(
+        cur,
+        machine=machine_identity.name(),
+        config=config,
+        prompt="Born to be checked",
+        prompt_source="user",
+        spawner=spawner,
+        catalog=build_model_catalog(home=meiva_home()),
+        authority=config_authority,
+    )
+
+
+def test_a_root_birth_names_its_effort_with_its_model(
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    before = _counts(db_conn)
+    with (
+        pytest.raises(InvalidModelConfig, match="reasoning_effort must be explicitly provided"),
+        db_conn.transaction(),
+        db_conn.cursor() as cur,
+    ):
+        _birth(
+            cur,
+            {"llm_model": "deepseek-flash"},
+            config_authority=config_authority,
+            machine_identity=machine_identity,
+        )
+    assert _counts(db_conn) == before
+
+
+def test_a_child_inherits_its_parents_pair_but_a_new_model_names_its_own_effort(
+    db_conn: psycopg.Connection,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    with db_conn.transaction(), db_conn.cursor() as cur:
+        parent = _birth(
+            cur,
+            {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            config_authority=config_authority,
+            machine_identity=machine_identity,
+        )
+    spawner = f"agent:{parent.agent_id}"
+    with db_conn.transaction(), db_conn.cursor() as cur:
+        child = _birth(
+            cur,
+            None,
+            config_authority=config_authority,
+            machine_identity=machine_identity,
+            spawner=spawner,
+        )
+    assert child.birth_config is not None
+    assert child.birth_config["llm_model"] == "deepseek-flash"
+    assert child.birth_config["reasoning_effort"] == "max"
+
+    with (
+        pytest.raises(InvalidModelConfig, match="reasoning_effort must be explicitly provided"),
+        db_conn.transaction(),
+        db_conn.cursor() as cur,
+    ):
+        _birth(
+            cur,
+            {"llm_model": "mimo-v2.6-pro"},
+            config_authority=config_authority,
+            machine_identity=machine_identity,
+            spawner=spawner,
+        )
+
+
 def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
     db_conn: psycopg.Connection,
     *,
@@ -56,7 +137,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
         original = insert_agent_birth(
             cur,
             machine=machine_identity.name(),
-            config={"llm_model": "deepseek-flash"},
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",
@@ -70,7 +151,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
         replay = insert_agent_birth(
             cur,
             machine=machine_identity.name(),
-            config={"llm_model": "deepseek-flash"},
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",

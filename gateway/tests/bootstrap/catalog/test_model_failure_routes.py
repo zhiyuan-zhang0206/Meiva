@@ -28,7 +28,7 @@ def failed_provider_agent(
             {
                 "prompt": "keep this agent",
                 "prompt_source": "user",
-                "config": {"llm_model": "deepseek-flash"},
+                "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
         assert born.status_code == 201, born.text
@@ -51,7 +51,7 @@ def test_unavailable_model_cannot_change_defaults_or_spawn(
         {
             "prompt": "blocked",
             "prompt_source": "user",
-            "config": {"llm_model": "deepseek-flash"},
+            "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         },
     )
     assert spawn.status_code == 503, spawn.text
@@ -83,7 +83,7 @@ def test_normal_birth_pin_keeps_list_and_detail_capabilities_consistent(
             {
                 "prompt": "retain the birth model",
                 "prompt_source": "user",
-                "config": {"llm_model": "claude-sonnet-5"},
+                "config": {"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
             },
         )
         assert born.status_code == 201, born.text
@@ -157,7 +157,10 @@ def test_model_requests_report_unavailable(
         ("/api/memory/search", {"query": "recover the provider", "purpose": "search"}),
         (
             f"/api/agents/{agent_id}/restart",
-            {"message": "recover the provider", "config_overlay": {"llm_model": "deepseek-flash"}},
+            {
+                "message": "recover the provider",
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            },
         ),
     ):
         response = client.post(path, json=body)

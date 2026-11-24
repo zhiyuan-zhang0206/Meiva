@@ -32,7 +32,10 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
 ) -> None:
     parent = client.post(
         PATH,
-        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        json={
+            "machine": "local-test",
+            "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+        },
         headers={**HEADERS, "Idempotency-Key": "parent"},
     )
     assert parent.status_code == 201, parent.text
@@ -84,7 +87,10 @@ def test_keyed_fork_uses_the_latest_root_checkpoint(
 ) -> None:
     parent = client.post(
         PATH,
-        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        json={
+            "machine": "local-test",
+            "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+        },
         headers={**HEADERS, "Idempotency-Key": "parent"},
     )
     assert parent.status_code == 201, parent.text

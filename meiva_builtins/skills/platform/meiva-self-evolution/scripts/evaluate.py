@@ -238,10 +238,18 @@ def _state_path(skill: str, stamp: str) -> Path:
     return _eval_dir() / f"{safe}-{stamp}.json"
 
 
-def launch(skill: str, tasks: list[RecordBody], *, model: str | None = None) -> EvalState:
+def launch(
+    skill: str,
+    tasks: list[RecordBody],
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> EvalState:
     """Spawn one fresh agent per replay-safe task to re-run it under the current
     skill text. Returns (and persists) the eval state; pass it to `gather` once
-    the agents finish. Must run inside an agent process."""
+    the agents finish. Must run inside an agent process. Without `model` the eval agents
+    inherit the caller's model and effort; naming a `model` means naming its
+    `reasoning_effort` too (omit it only for a model with no effort levels)."""
     import meiva
 
     runs: list[EvalRun] = []
@@ -254,6 +262,8 @@ def launch(skill: str, tasks: list[RecordBody], *, model: str | None = None) -> 
         overlay: dict[str, object] = {"eval_isolation": True}
         if model:
             overlay["llm_model"] = model
+            if reasoning_effort:
+                overlay["reasoning_effort"] = reasoning_effort
         prompt = task_prompt_of(task)
         eval_id = meiva.agents.spawn(
             prompt=prompt,

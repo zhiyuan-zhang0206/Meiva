@@ -11,7 +11,7 @@ Your task: Use config_overlay to demonstrate Meiva's multi-model switching capab
 
 1. Choose an interesting question that does not rely on time-sensitive information (for example: philosophical thinking, code design trade-offs, creative writing) as a common test question for the three models.
 
-2. Use `meiva.agents.spawn()` to create 3 agents, each specifying a different `llm_model`:
+2. Use `meiva.agents.spawn()` to create 3 agents, each specifying a different `llm_model` and that model's `reasoning_effort`:
    - `claude-sonnet-5`
    - `gpt-5.6-luna`
    - `deepseek-flash`
@@ -20,7 +20,7 @@ Your task: Use config_overlay to demonstrate Meiva's multi-model switching capab
    ```python
    meiva.agents.spawn(
        prompt=question_prompt,
-       config_overlay={"llm_model": "claude-sonnet-5"},
+       config_overlay={"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
        label="demo-claude"
    )
    ```

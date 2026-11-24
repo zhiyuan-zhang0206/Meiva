@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
+from gateway.agents.creation import (
+    DRAFT_AGENT_CONFIG,
+    create_and_launch_agent,
+    guarded_draft_key,
+)
 from gateway.http.config import (
     gateway_clock,
     gateway_ensure_harnesses,
@@ -43,7 +47,7 @@ async def guarded_draft_guide(
         prompt=prompt,
         prompt_source="user",
         label="meiva-guide",
-        config={"llm_model": "deepseek-flash"},
+        config=dict(DRAFT_AGENT_CONFIG),
     )
     spawned = await create_and_launch_agent(
         body_obj,

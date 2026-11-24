@@ -158,7 +158,7 @@ class TestSpawnHarness:
         assert row[0]["llm_model"] == "gpt-oss-120b"
         assert row[0]["reasoning_effort"] == "medium"
 
-    def test_cold_cache_external_spawn_probes_runner_once_and_stamps_defaults(
+    def test_cold_cache_external_spawn_probes_runner_once_and_checks_the_named_effort(
         self, db_conn: psycopg.Connection
     ) -> None:
         probe_payload = {
@@ -192,7 +192,11 @@ class TestSpawnHarness:
                 client,
                 {
                     "machine": "remote-probe",
-                    "config": {"harness": "codex", "llm_model": "gpt-6.1-terra"},
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-terra",
+                        "reasoning_effort": "low",
+                    },
                 },
             )
             second = _spawn(
@@ -218,7 +222,7 @@ class TestSpawnHarness:
             second_row = cur.fetchone()
         assert first_birth is not None
         assert first_birth["harness_model_selection"] == 1
-        assert first_birth["reasoning_effort"] == "low"
+        assert first_overlay["reasoning_effort"] == "low"
         assert first_overlay["llm_model"] == "gpt-6.1-terra"
         assert second_row is not None
         assert second_row[0]["reasoning_effort"] == "ultra"
@@ -231,7 +235,14 @@ class TestSpawnHarness:
             _seed_harnesses(client)
             bad_model = spawn_via_http(
                 client,
-                {"spawner": "user", "config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}},
+                {
+                    "spawner": "user",
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-sol",
+                        "reasoning_effort": "medium",
+                    },
+                },
             )
             bad_effort = spawn_via_http(
                 client,
@@ -272,7 +283,11 @@ class TestSpawnHarness:
     ) -> None:
         with gateway_test_client() as client:
             agent = spawn_via_http(
-                client, {"spawner": "user", "config": {"llm_model": "deepseek-flash"}}
+                client,
+                {
+                    "spawner": "user",
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                },
             ).json()["id"]
         assert _harness(db_conn, agent) == "meiva"
 
@@ -292,7 +307,11 @@ class TestSpawnHarness:
                 client,
                 {
                     "spawner": "user",
-                    "config": {"harness": "claude-code", "llm_model": "deepseek-flash"},
+                    "config": {
+                        "harness": "claude-code",
+                        "llm_model": "deepseek-flash",
+                        "reasoning_effort": "max",
+                    },
                 },
             )
         assert response.status_code == 422
@@ -305,11 +324,22 @@ class TestSpawnHarness:
         with gateway_test_client() as client:
             old_field = spawn_via_http(
                 client,
-                {"spawner": "user", "harness": "codex", "config": {"llm_model": "gpt-6.1-terra"}},
+                {
+                    "spawner": "user",
+                    "harness": "codex",
+                    "config": {"llm_model": "gpt-6.1-terra", "reasoning_effort": "medium"},
+                },
             )
             null_harness = spawn_via_http(
                 client,
-                {"spawner": "user", "config": {"harness": None, "llm_model": "deepseek-flash"}},
+                {
+                    "spawner": "user",
+                    "config": {
+                        "harness": None,
+                        "llm_model": "deepseek-flash",
+                        "reasoning_effort": "max",
+                    },
+                },
             )
         assert old_field.status_code == 422
         assert null_harness.status_code == 422
@@ -320,7 +350,13 @@ class TestSpawnHarness:
             _seed_harnesses(client)
             agent = _spawn(
                 client,
-                {"config": {"harness": "codex", "llm_model": "gpt-6.1-terra"}},
+                {
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-terra",
+                        "reasoning_effort": "medium",
+                    }
+                },
             )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -335,7 +371,16 @@ class TestSpawnHarness:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"config": {"harness": "meiva", "llm_model": "deepseek-flash"}})
+            source = _spawn(
+                client,
+                {
+                    "config": {
+                        "harness": "meiva",
+                        "llm_model": "deepseek-flash",
+                        "reasoning_effort": "max",
+                    }
+                },
+            )
             _checkpoint(db_conn, source)
             fork = _spawn(client, {"fork_from": source})
         assert _harness(db_conn, source) == "meiva"
@@ -387,7 +432,11 @@ class TestSpawnHarness:
     def test_fork_naming_another_harness_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
             source = spawn_via_http(
-                client, {"spawner": "user", "config": {"llm_model": "deepseek-flash"}}
+                client,
+                {
+                    "spawner": "user",
+                    "config": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+                },
             ).json()["id"]
             _checkpoint(db_conn, source)
             response = spawn_via_http(
@@ -401,7 +450,16 @@ class TestSpawnHarness:
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"config": {"harness": "meiva", "llm_model": "deepseek-flash"}})
+            source = _spawn(
+                client,
+                {
+                    "config": {
+                        "harness": "meiva",
+                        "llm_model": "deepseek-flash",
+                        "reasoning_effort": "max",
+                    }
+                },
+            )
             _checkpoint(db_conn, source)
             fork = _spawn(client, {"fork_from": source, "config": {"harness": "meiva"}})
         assert _harness(db_conn, fork) == "meiva"

@@ -46,7 +46,7 @@ def _spawn_agent(
     the stamp rides out to the child)."""
 
     if config is None and kw.get("fork_from") is None and not spawner.startswith("agent:"):
-        config = {"llm_model": "deepseek-flash"}
+        config = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -98,7 +98,7 @@ class TestSpawnStamping:
     ) -> None:
         parent_id = _spawn_agent(
             spawner="test",
-            config={"llm_model": "deepseek-flash"},
+            config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -125,7 +125,7 @@ class TestSpawnStamping:
     ) -> None:
         agent_id = _spawn_agent(
             spawner="test",
-            config={"llm_model": "claude-sonnet-5"},
+            config={"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -133,7 +133,7 @@ class TestSpawnStamping:
         )
         stamped = _birth_config(db_conn, agent_id) or {}
         assert "llm_model" not in stamped
-        assert set(stamped) == frozen_field_names() - {"llm_model"}
+        assert set(stamped) == frozen_field_names() - {"llm_model", "reasoning_effort"}
 
     def test_the_parent_model_is_what_gets_frozen(
         self,
@@ -147,7 +147,7 @@ class TestSpawnStamping:
     ) -> None:
         parent_id = _spawn_agent(
             spawner="test",
-            config={"llm_model": "claude-sonnet-5"},
+            config={"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -287,4 +287,7 @@ class TestForkInheritance:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        assert set(_birth_config(db_conn, child) or {}) == frozen_field_names() - {"llm_model"}
+        assert set(_birth_config(db_conn, child) or {}) == frozen_field_names() - {
+            "llm_model",
+            "reasoning_effort",
+        }

@@ -660,7 +660,7 @@ def test_scheduled_restart_fire_wakes_target_with_restart_note(
         json={
             "source": f"agent:{agent_id}",
             "message": "scheduled restart wake",
-            "config_overlay": {"llm_model": "deepseek-flash"},
+            "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         },
     )
     assert answer.status_code == 200, answer.text
@@ -699,7 +699,7 @@ def test_scheduled_native_restart_claim_during_validation_notifies_both_actors(
             json={
                 "source": f"agent:{caller}",
                 "message": "race attempt",
-                "config_overlay": {"llm_model": "deepseek-flash"},
+                "config_overlay": {"llm_model": "deepseek-flash", "reasoning_effort": "max"},
             },
         )
         try:

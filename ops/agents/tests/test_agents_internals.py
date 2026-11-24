@@ -82,7 +82,7 @@ def spawn_agent(
 ) -> int:
     bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
     if config is None and fork_from is None and not spawner.startswith("agent:"):
-        config = {"llm_model": "deepseek-flash"}
+        config = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         bus,
@@ -209,7 +209,7 @@ class TestSpawnAgent:
 
         new_id = spawn_agent(
             spawner="user",
-            config={"llm_model": "gpt-5.6-sol"},
+            config={"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -220,7 +220,7 @@ class TestSpawnAgent:
             cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (new_id,))
             row = cur.fetchone()
         assert row is not None
-        assert row[0] == {"llm_model": "gpt-5.6-sol"}
+        assert row[0] == {"llm_model": "gpt-5.6-sol", "reasoning_effort": "medium"}
 
     def test_snapshot_reports_effective_model_vision_support(
         self,
@@ -258,14 +258,14 @@ class TestSpawnAgent:
         )
         db_conn.commit()
         text_only_agent = spawn_agent(
-            config={"llm_model": "glm-5.3"},
+            config={"llm_model": "glm-5.3", "reasoning_effort": "high"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
         withdrawn_vision_agent = spawn_agent(
-            config={"llm_model": model},
+            config={"llm_model": model, "reasoning_effort": "high"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,

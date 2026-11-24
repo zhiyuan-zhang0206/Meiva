@@ -46,10 +46,11 @@ a machine whose gateway `HarnessProbeCache` is cold, the gateway coalesces an
 on-demand `harness_probe` (`ensure_machine_harnesses`) and validates
 `(llm_model, reasoning_effort)` against the live `ProbedHarnessModel` list via
 `resolve_probed_harness_selection` before creating or restarting the agent.
-Unsupported models or efforts fail fast with `InvalidModelConfig` (HTTP 400);
-omitted fields resolve to the probed `default_model` and its
-`reasoning_effort_default` (never the native cluster default or prior-harness
-pins).
+Unsupported models or efforts fail fast with `InvalidModelConfig` (HTTP 400). A birth or a
+model switch must name the effort of a model whose probe lists effort options, and must name none
+for a model that lists none; `reasoning_effort_default` only preselects the picker and is how
+transfer and stored legacy rows resolve an effort they never pinned (see
+`docs/decisions/runtime/config/2026-11-24-explicit-reasoning-effort-no-cluster-default.md`).
 
 The stored `llm_model` and `reasoning_effort` select the execution session.
 The runner passes them through `bridge_for` and `open_session`: Claude receives

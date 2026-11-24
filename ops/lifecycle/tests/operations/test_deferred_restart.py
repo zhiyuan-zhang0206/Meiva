@@ -69,8 +69,20 @@ def _meta(db_conn: psycopg.Connection, agent_id: int) -> tuple[object, ...]:
 @pytest.mark.parametrize(
     ("status", "stored", "overlay", "target", "kept"),
     [
-        ("running", "meiva", {"harness": "codex", "llm_model": "gpt-6.1-sol"}, "codex", {}),
-        ("running", "codex", {"harness": "meiva", "llm_model": "deepseek-flash"}, "meiva", {}),
+        (
+            "running",
+            "meiva",
+            {"harness": "codex", "llm_model": "gpt-6.1-sol", "reasoning_effort": "medium"},
+            "codex",
+            {},
+        ),
+        (
+            "running",
+            "codex",
+            {"harness": "meiva", "llm_model": "deepseek-flash", "reasoning_effort": "max"},
+            "meiva",
+            {},
+        ),
         ("running", "codex", {"exec_timeout_seconds": 30}, "codex", {"exec_timeout_seconds": 30}),
         ("idling", "claude_code", None, "claude_code", {}),
     ],

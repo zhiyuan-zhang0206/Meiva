@@ -423,18 +423,17 @@ class LmSettings(EnvSettings):
         default=None,
         alias="MEIVA_REASONING_EFFORT",
         description=(
-            "Cross-provider reasoning effort (`` / `none` / `minimal` / `low` / "
-            "`medium` / `high` / `xhigh` / `max` / `ultra`, which is Codex-only). "
-            "Unset resolves the native model or external harness binding's default. "
-            "An empty value selects that runtime's default. Unsupported values fail "
-            "before execution. Per-agent overridable."
+            "Per-agent reasoning effort pin (`` / `none` / `minimal` / `low` / `medium` / "
+            "`high` / `xhigh` / `max` / `ultra`, which is Codex-only). It has no cluster "
+            "default: every spawn and model switch names it explicitly alongside `llm_model` "
+            "(a model without effort levels takes none), and a fork inherits its source's. "
+            "Unsupported values fail before execution."
         ),
         json_schema_extra={
-            "help_text": "Leave empty to use the model or harness default.",
             "restart_required": "agent",
-            "writable": True,
+            "writable": False,
             "sensitive": False,
-            "scope": "cluster-default",
+            "scope": "agent",
             "per_agent": True,
             "lifecycle": "frozen",
         },

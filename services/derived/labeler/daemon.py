@@ -98,10 +98,7 @@ def labeler_model_overrides(*, profile: str | None, lm: LmSettings) -> ModelOver
     if profile == "gateway":
         return ModelOverrides.from_pins({})
     return ModelOverrides.from_pins(
-        {
-            "reasoning_effort": lm.reasoning_effort,
-            "claude_thinking_budget_tokens": lm.claude_thinking_budget_tokens,
-        }
+        {"claude_thinking_budget_tokens": lm.claude_thinking_budget_tokens}
     )
 
 

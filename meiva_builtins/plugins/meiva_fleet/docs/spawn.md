@@ -15,7 +15,7 @@ Creates a new agent, returns its agent_id.
 | `prompt` | First message; omit = agent idle after creation |
 | `fork_from` | Copy that agent's conversation state to the new agent |
 | `machine` | Target machine; omit = current machine (`meiva.self.MACHINE_SPEC.name`) |
-| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}`; its `harness` key picks the runtime loop (`"meiva"` default, `"claude_code"`, `"codex"`, `"antigravity"`), the same key `restart` uses to switch it |
+| `config_overlay` | Per-field config override, e.g. `{"llm_model": "...", "reasoning_effort": "..."}` (a model and its effort are named together; omit both to inherit the spawning agent's, and a fork inherits its source's); its `harness` key picks the runtime loop (`"meiva"` default, `"claude_code"`, `"codex"`, `"antigravity"`), the same key `restart` uses to switch it |
 | `label` | Initial role/name; omit = auto-named |
 
 ### `meiva.agents.fork_from` (parameter of spawn, not a standalone function)
@@ -73,7 +73,7 @@ worker_ids = []
 for task in sub_tasks:
     wid = meiva.agents.spawn(
         prompt=task,
-        config_overlay={"llm_model": "claude-sonnet-4-5"},
+        config_overlay={"llm_model": "claude-sonnet-4-5", "reasoning_effort": "high"},
         label=f"worker-{task.topic}",
     )
     worker_ids.append(wid)

@@ -388,7 +388,11 @@ def _select_probed_model(
 
 
 def _select_probed_effort(
-    harness: Harness, selected: ProbedHarnessModel, requested_effort: object
+    harness: Harness,
+    selected: ProbedHarnessModel,
+    requested_effort: object,
+    *,
+    require_effort: bool,
 ) -> str | None:
     if requested_effort is not None and not isinstance(requested_effort, str):
         raise InvalidModelConfig("reasoning_effort must be a string")
@@ -404,6 +408,11 @@ def _select_probed_effort(
             )
         return None
     if effort_str is None:
+        if require_effort:
+            raise InvalidModelConfig(
+                f"reasoning_effort must be explicitly provided with llm_model {selected.id!r} "
+                f"on harness {harness.value!r} (supported: {', '.join(options)})"
+            )
         return _choose_effort_default(options, selected.reasoning_effort_default)
     if effort_str not in options:
         supported = ", ".join(options)
@@ -420,7 +429,10 @@ def resolve_probed_harness_selection(
     *,
     requested_model: object = None,
     requested_effort: object = None,
+    require_effort: bool = False,
 ) -> tuple[str, str | None]:
     selected = _select_probed_model(harness, models, requested_model)
-    resolved_effort = _select_probed_effort(harness, selected, requested_effort)
+    resolved_effort = _select_probed_effort(
+        harness, selected, requested_effort, require_effort=require_effort
+    )
     return (selected.id, resolved_effort)
