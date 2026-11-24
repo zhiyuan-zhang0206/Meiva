@@ -1,4 +1,4 @@
-exports = ["daemon.py", "ledger_repricing.py", "legacy_usage_import.py"]
+exports = ["daemon.py", "ledger_repricing.py"]
 
 [uses]
 "alert_reconciler.py" = ["config.py"]
