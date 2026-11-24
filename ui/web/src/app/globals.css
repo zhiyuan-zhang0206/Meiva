@@ -283,10 +283,10 @@
      as the scrolled content of an overflow:scroll viewport triggers a
      tiled-backing-store repaint bug — regions revealed mid-scroll are left
      unpainted (the content blanks to white). Force block layout. !important
-     is required to beat the element's inline style. Our ScrollAreas
-     (timeline, agent-sidebar, inspector) are vertical-only and their content
-     handles its own width (code/tables use overflow-x-auto), so they do
-     not depend on Radix's table-box horizontal-scrollbar sizing. */
+     is required to beat the element's inline style. Our ScrollAreas do not
+     depend on Radix's table-box horizontal-scrollbar sizing: a horizontal
+     region gives its own child `w-max min-w-full` (code) or lets a table
+     overflow the block-width wrapper (markdown tables). */
   [data-slot="scroll-area-viewport"] > div {
     display: block !important;
   }
@@ -339,9 +339,11 @@
   div.chat-md { display: flow-root; }
   .chat-md > :first-child,
   .chat-md > :first-child > pre:first-of-type,
+  .chat-md > :first-child > .md-scroll-code,
   .chat-md > :is(ul, ol):first-child > li:first-child { @apply mt-0; }
   .chat-md > :last-child,
   .chat-md > :last-child > pre:last-child,
+  .chat-md > :last-child > .md-scroll-code,
   .chat-md > :is(ul, ol):last-child > li:last-child { @apply mb-0; }
   .chat-md p { margin-block: var(--chat-md-p-my); }
   .chat-md ul {
@@ -366,8 +368,20 @@
   .chat-md code {
     @apply bg-muted/75 dark:bg-white/[0.06] text-foreground/90 dark:text-[#e8e4dd] px-1.5 py-[1px] rounded-[5px] text-[0.86em] leading-[1.2] font-mono;
   }
+  /* Code card chrome. A fenced block draws it on its ScrollArea frame
+     (.md-scroll-code) so the border and background stay put while long lines
+     scroll; PythonCode wraps its lines and keeps drawing it on the <pre>. */
+  .chat-md pre,
+  .chat-md .md-scroll-code {
+    @apply bg-card dark:bg-[#252421] border border-border/60 dark:border-white/[0.07] rounded-lg my-3 text-foreground/90 dark:text-[#e4e1db];
+  }
   .chat-md pre {
-    @apply bg-card dark:bg-[#252421] border border-border/60 dark:border-white/[0.07] px-3.5 py-2.5 rounded-lg my-3 font-mono text-[13px] leading-[1.6] text-foreground/90 dark:text-[#e4e1db] overflow-x-auto max-w-full;
+    @apply px-3.5 py-2.5 font-mono text-[13px] leading-[1.6] max-w-full;
+  }
+  /* The <pre> inside the frame is only the scrolling content: no chrome of
+     its own, as wide as its longest line but never narrower than the frame. */
+  .chat-md .md-scroll-code pre.md-scroll-pre {
+    @apply m-0 w-max min-w-full max-w-none rounded-none border-0 bg-transparent dark:bg-transparent;
   }
   .chat-md pre > code {
     @apply bg-transparent dark:bg-transparent px-0 py-0 text-inherit dark:text-inherit leading-[inherit];
@@ -379,14 +393,15 @@
     @apply text-primary underline underline-offset-2;
   }
   .chat-md table {
-    @apply my-3 border-collapse block overflow-x-auto text-[13.5px] leading-[1.5];
+    @apply border-collapse text-[13.5px] leading-[1.5];
   }
+  .chat-md .md-scroll-table { @apply my-3; }
   .chat-md th,
   .chat-md td {
     /* Cells wrap only at word boundaries — override the container's
        overflow-wrap:anywhere, which otherwise breaks every cell mid-word and
        squishes the table into a tall, narrow mess. Genuinely-wide tables
-       scroll instead, via the table's overflow-x-auto above. */
+       scroll instead, inside the table's horizontal ScrollArea (.md-scroll-table). */
     @apply border border-border/70 dark:border-white/[0.08] px-3 py-1.5 text-left [overflow-wrap:normal];
   }
   .chat-md th { @apply bg-muted/70 dark:bg-white/[0.04] font-semibold text-foreground dark:text-[#ece8e1]; }
@@ -394,10 +409,11 @@
      otherwise break a formula mid-expression (the 2026-10-20 phone report had
      \frac and \left( split across three lines). A display formula wider than
      the column scrolls sideways instead of wrapping or pushing the message
-     wider than the viewport. */
+     wider than the viewport; the scrolling is the ScrollArea that
+     markdown-renderer wraps around each display formula. */
   .chat-md .katex { @apply [overflow-wrap:normal] [white-space:nowrap]; }
   .chat-md .katex-display {
-    @apply my-2 max-w-full overflow-x-auto overflow-y-hidden [overflow-wrap:normal];
+    @apply my-2 max-w-full [overflow-wrap:normal];
   }
   .chat-md hr { @apply my-3 border-border; }
   .chat-md sup { @apply align-super text-[0.75em] leading-none; }
@@ -441,7 +457,10 @@
     @apply text-inherit dark:text-inherit px-0 py-0;
   }
   [data-testid="document-content"] .chat-md table {
-    @apply text-[12px] leading-[1.45] my-2.5;
+    @apply text-[12px] leading-[1.45];
+  }
+  [data-testid="document-content"] .chat-md :is(.md-scroll-table, .md-scroll-code) {
+    @apply my-2.5;
   }
   [data-testid="document-content"] .chat-md :is(th, td) {
     @apply px-2.5 py-1;
@@ -517,47 +536,35 @@
   margin-bottom: 0;
 }
 
-/* Clean thin scrollbars for overflowing Markdown code blocks and tables and
-   for native <textarea> fields (.meiva-thin-scrollbar), which cannot sit inside
-   a ScrollArea. In Chromium 121+, setting `scrollbar-width` disables
+/* Clean thin scrollbars for native <textarea> fields (.meiva-thin-scrollbar),
+   which cannot sit inside a ScrollArea. Every other scrollable region renders
+   through ScrollArea. In Chromium 121+, setting `scrollbar-width` disables
    `::-webkit-scrollbar` and falls back to native OS scrollbars (with arrow
    buttons on Linux X11), so `scrollbar-width` is scoped exclusively to engines
    without webkit-scrollbar. */
 @supports not selector(::-webkit-scrollbar) {
-  .chat-md pre,
-  .chat-md table,
   .meiva-thin-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklab, var(--muted-foreground) 42%, transparent) transparent;
   }
 }
-.chat-md pre::-webkit-scrollbar,
-.chat-md table::-webkit-scrollbar,
 .meiva-thin-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-.chat-md pre::-webkit-scrollbar-button,
-.chat-md table::-webkit-scrollbar-button,
 .meiva-thin-scrollbar::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
-.chat-md pre::-webkit-scrollbar-track,
-.chat-md table::-webkit-scrollbar-track,
 .meiva-thin-scrollbar::-webkit-scrollbar-track {
   background: transparent;
   margin: 4px;
 }
-.chat-md pre::-webkit-scrollbar-thumb,
-.chat-md table::-webkit-scrollbar-thumb,
 .meiva-thin-scrollbar::-webkit-scrollbar-thumb {
   background-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
   border-radius: 9999px;
 }
-.chat-md pre::-webkit-scrollbar-thumb:hover,
-.chat-md table::-webkit-scrollbar-thumb:hover,
 .meiva-thin-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
 }

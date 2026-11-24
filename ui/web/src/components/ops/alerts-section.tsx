@@ -155,7 +155,7 @@ export default function AlertsSection() {
           // and State, which fit with the detail cell wrapping (md-to-lg tablets
           // keep the same three columns — six fixed columns squeezed the
           // Alert column to ~30px at iPad-portrait widths, QA #989). The shadcn
-          // Table's own overflow-x-auto container stays as a defensive net; with
+          // Table's own horizontal ScrollArea container stays as a defensive net; with
           // every cell wrapping it never overflows.
           // Multi-line wrapping detail cell: whitespace-normal + break-words
           // override the shared TableCell nowrap so long alert names and

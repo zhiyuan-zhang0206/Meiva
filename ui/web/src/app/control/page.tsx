@@ -97,8 +97,8 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
       </header>
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
         <nav aria-label={t("navigation")} className="shrink-0 border-b border-border bg-muted/15 md:w-56 md:border-b-0 md:border-r">
-          <ScrollArea className="md:h-full">
-          <div className={cn(FLEX, "gap-1 overflow-x-auto p-3 md:block md:space-y-5")}>
+          <ScrollArea className="md:h-full" showHorizontalScrollbar>
+          <div className={cn(FLEX, "w-max min-w-full gap-1 p-3 md:block md:w-auto md:space-y-5")}>
             {(["guide", "preferences", "manage", "system"] as const).map((group) => (
               <div key={group} className={cn(FLEX, "gap-1 md:block md:space-y-1")}>
                 {group !== "guide" && <p className="hidden px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:block">{t(group)}</p>}

@@ -25,7 +25,7 @@ import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/
 import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 
 import { useSectionVisible } from "@/app/control/visibility";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -319,7 +319,7 @@ function GatewaySection({ data }: { data: SystemStatus }) {
         {services.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("noServiceData")}</p>
         ) : (
-          <div className="border border-border rounded-md overflow-x-auto">
+          <div className={cn("border border-border rounded-md", OVERFLOW_HIDDEN)}>
             <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
               <TableBody>
                 {services.map((svc) => (

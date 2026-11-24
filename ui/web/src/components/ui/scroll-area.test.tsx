@@ -2,7 +2,7 @@
 // `overflow-anchor: none` on the inner scroll viewport (the element that
 // actually scrolls), so the prop must land on the viewport, not the root.
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NonceProvider } from "@/lib/auth/nonce-context";
@@ -377,5 +377,82 @@ describe("ScrollArea", () => {
 
     expect(innerBar.getAttribute("data-visible")).toBe("true");
     expect(outerBar.getAttribute("data-visible")).toBe("false");
+  });
+  it("renders only a horizontal scrollbar for a horizontal-only region", () => {
+    render(
+      <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar viewportTestId="h-only">
+        <div>content</div>
+      </ScrollArea>,
+    );
+    const orientations = Array.from(document.querySelectorAll('[data-slot="scroll-area-scrollbar"]')).map((bar) =>
+      bar.getAttribute("data-orientation"),
+    );
+    expect(orientations).toEqual(["horizontal"]);
+    const viewport = screen.getByTestId("h-only");
+    expect(viewport.hasAttribute("data-scroll-y")).toBe(false);
+    expect(viewport.style.overflowY).toBe("hidden");
+    expect(viewport.style.overflowX).toBe("scroll");
+  });
+
+  it("marks a vertical viewport with data-scroll-y", () => {
+    render(<ScrollArea viewportTestId="v-area">content</ScrollArea>);
+    expect(screen.getByTestId("v-area").getAttribute("data-scroll-y")).toBe("true");
+  });
+
+  it("lights the outer scrollbar for vertical input over a nested horizontal-only region", () => {
+    vi.useFakeTimers();
+    render(
+      <ScrollArea data-testid="outer-area" viewportTestId="outer-vp" scrollbarActivity="input">
+        <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar viewportTestId="inner-vp">
+          <div data-testid="inner-content">wide</div>
+        </ScrollArea>
+      </ScrollArea>,
+    );
+    const outerBar = screen
+      .getByTestId("outer-area")
+      .querySelector<HTMLElement>(':scope > [data-slot="scroll-area-scrollbar"]')!;
+    const content = screen.getByTestId("inner-content");
+
+    fireEvent.wheel(content, { deltaY: 40 });
+    expect(outerBar.dataset.visible).toBe("true");
+    act(() => { vi.advanceTimersByTime(800); });
+    expect(outerBar.dataset.visible).toBe("false");
+
+    fireEvent.touchMove(content);
+    expect(outerBar.dataset.visible).toBe("true");
+    act(() => { vi.advanceTimersByTime(800); });
+
+    fireEvent.keyDown(content, { key: "PageDown" });
+    expect(outerBar.dataset.visible).toBe("true");
+  });
+
+  it("observes the wrapper's inner child of a horizontal region and follows a replaced child", async () => {
+    const observed = new Set<Element>();
+    class TrackingResizeObserver implements ResizeObserver {
+      disconnect = () => observed.clear();
+      observe(target: Element) {
+        observed.add(target);
+      }
+      unobserve(target: Element) {
+        observed.delete(target);
+      }
+    }
+    globalThis.ResizeObserver = TrackingResizeObserver;
+    const { rerender } = render(
+      <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar viewportTestId="h-vp">
+        <pre data-testid="first">a</pre>
+      </ScrollArea>,
+    );
+    const viewport = screen.getByTestId("h-vp");
+    expect(observed.has(viewport)).toBe(true);
+    expect(observed.has(screen.getByTestId("first"))).toBe(true);
+
+    rerender(
+      <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar viewportTestId="h-vp">
+        <table data-testid="second" />
+      </ScrollArea>,
+    );
+    await waitFor(() => expect(observed.has(screen.getByTestId("second"))).toBe(true));
+    expect(observed.has(viewport)).toBe(true);
   });
 });

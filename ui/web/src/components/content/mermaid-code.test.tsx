@@ -25,7 +25,7 @@ it("routes a fence to SVG and keeps its source copy control", async () => {
   const { container } = renderWithBrowser(
     <MermaidRendererProvider value={renderer}><ChatMarkdown content={fence(source)} /></MermaidRendererProvider>,
   );
-  await waitFor(() => expect(container.querySelector(".overflow-x-auto svg")).not.toBeNull());
+  await waitFor(() => expect(container.querySelector('[data-testid="mermaid-svg"] svg')).not.toBeNull());
   expect(received).toBe(source);
   expect(container.querySelector("pre")).toBeNull();
   expect(screen.getByRole("button", { name: /copy mermaid code/i })).toBeTruthy();
@@ -75,7 +75,7 @@ it("discards a stale render after a streaming edit", async () => {
   rerender(view("graph TD; A-->"));
   complete("<svg/>");
   await waitFor(() => expect(container.querySelector("pre code")?.textContent).toBe("graph TD; A-->"));
-  expect(container.querySelector(".overflow-x-auto svg")).toBeNull();
+  expect(container.querySelector('[data-testid="mermaid-svg"] svg')).toBeNull();
 });
 
 it("rerenders diagrams when the resolved theme changes", async () => {

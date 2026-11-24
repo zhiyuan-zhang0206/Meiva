@@ -235,42 +235,41 @@ export function WorkspaceFileView({ agentId, target }: WorkspaceFileViewProps) {
             </div>
             <Highlight theme={theme} code={data.content} language={language}>
               {({ tokens, getTokenProps }) => (
-                <div
-                  data-testid="workspace-code-content"
-                  className="font-mono text-[12px] leading-relaxed py-2 overflow-x-auto"
-                >
-                  {tokens.map((line, i) => {
-                    const lineNumber = i + 1;
-                    const isHighlighted =
-                      parsedRange !== null &&
-                      lineNumber >= parsedRange.start &&
-                      lineNumber <= parsedRange.end;
-                    const isFirstHighlighted =
-                      parsedRange !== null && lineNumber === parsedRange.start;
+                <ScrollArea showVerticalScrollbar={false} showHorizontalScrollbar viewportTestId="workspace-code-content">
+                  <div className="w-max min-w-full font-mono text-[12px] leading-relaxed py-2">
+                    {tokens.map((line, i) => {
+                      const lineNumber = i + 1;
+                      const isHighlighted =
+                        parsedRange !== null &&
+                        lineNumber >= parsedRange.start &&
+                        lineNumber <= parsedRange.end;
+                      const isFirstHighlighted =
+                        parsedRange !== null && lineNumber === parsedRange.start;
 
-                    return (
-                      <div
-                        key={i}
-                        ref={isFirstHighlighted ? firstHighlightedLineRef : undefined}
-                        data-line-number={lineNumber}
-                        className={cn(
-                          "items-stretch px-2 rounded-sm transition-colors",
-                          FLEX,
-                          isHighlighted && "bg-primary/15 border-l-2 border-primary -ml-2 pl-2",
-                        )}
-                      >
-                        <span className="select-none pr-4 text-right text-muted-foreground/40 w-10 shrink-0 text-[11px]">
-                          {lineNumber}
-                        </span>
-                        <span className="whitespace-pre">
-                          {line.map((token, key) => (
-                            <span key={key} {...getTokenProps({ token })} />
-                          ))}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+                      return (
+                        <div
+                          key={i}
+                          ref={isFirstHighlighted ? firstHighlightedLineRef : undefined}
+                          data-line-number={lineNumber}
+                          className={cn(
+                            "items-stretch px-2 rounded-sm transition-colors",
+                            FLEX,
+                            isHighlighted && "bg-primary/15 border-l-2 border-primary -ml-2 pl-2",
+                          )}
+                        >
+                          <span className="select-none pr-4 text-right text-muted-foreground/40 w-10 shrink-0 text-[11px]">
+                            {lineNumber}
+                          </span>
+                          <span className="whitespace-pre">
+                            {line.map((token, key) => (
+                              <span key={key} {...getTokenProps({ token })} />
+                            ))}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
               )}
             </Highlight>
           </div>

@@ -281,7 +281,7 @@ function ScheduleDetail({
             <div>
               <div className="font-medium text-destructive">{t("lastError")}</div>
               <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-40" showHorizontalScrollbar>
-                <pre className="p-2 font-mono text-[11px] text-destructive">
+                <pre className="w-max min-w-full p-2 font-mono text-[11px] text-destructive">
                   {s.last_error}
                 </pre>
               </ScrollArea>
@@ -289,7 +289,7 @@ function ScheduleDetail({
           )}
           <div>
             <div className="font-medium text-muted-foreground">{t("script")}</div>
-            <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-64" showHorizontalScrollbar>
+            <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-64">
               <div className="p-2">
                 <PythonCode code={s.script} />
               </div>
@@ -300,7 +300,7 @@ function ScheduleDetail({
               Logs {logs.data ? `(${logs.data.source})` : ""}
             </div>
             <ScrollArea className="mt-1 rounded bg-background" viewportClassName="max-h-48" showHorizontalScrollbar>
-              <pre className="p-2 font-mono text-[11px] text-muted-foreground">
+              <pre className="w-max min-w-full p-2 font-mono text-[11px] text-muted-foreground">
                 {logs.data && logs.data.lines.length > 0 ? logs.data.lines.join("\n") : "—"}
               </pre>
             </ScrollArea>

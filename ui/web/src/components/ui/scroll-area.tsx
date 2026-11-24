@@ -8,6 +8,7 @@ import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useNonce } from "@/lib/auth/nonce-context";
 
 const SCROLLBAR_IDLE_DELAY_MS = 800
+const VERTICAL_VIEWPORT = '[data-slot="scroll-area-viewport"][data-scroll-y="true"]'
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "])
 
 function positionAxisThumb(
@@ -46,6 +47,7 @@ function ScrollArea({
   viewportRef: externalViewportRef,
   viewportTestId,
   viewportId,
+  showVerticalScrollbar = true,
   showHorizontalScrollbar = false,
   scrollbarActivity = "scroll",
   children,
@@ -59,6 +61,7 @@ function ScrollArea({
   viewportRef?: React.RefObject<HTMLDivElement | null>;
   viewportTestId?: string;
   viewportId?: string;
+  showVerticalScrollbar?: boolean;
   showHorizontalScrollbar?: boolean;
   scrollbarActivity?: "scroll" | "input";
 }) {
@@ -140,19 +143,54 @@ function ScrollArea({
     viewport.addEventListener("scroll", positionThumb, { passive: true })
     // meiva:note
     // A viewport resize (window resize / panel drag) changes the scroll range
-    // and thumb travel; re-anchor even when no scroll event follows.
+    // and thumb travel; re-anchor even when no scroll event follows. A
+    // horizontal region also watches the wrapper's own child: globals.css
+    // forces Radix's content wrapper to `display: block`, so its width stays
+    // at the viewport width while the real content (a `w-max` <pre>, a table)
+    // widens during streaming; only that inner element's size reveals it. The
+    // inner element can mount or be replaced after this effect runs, so a
+    // MutationObserver on the viewport and the wrapper re-syncs the targets.
     let resizeObserver: ResizeObserver | null = null
+    let mutationObserver: MutationObserver | null = null
     if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(() => positionThumb())
-      resizeObserver.observe(viewport)
-      if (viewport.firstElementChild) resizeObserver.observe(viewport.firstElementChild)
+      const ro = new ResizeObserver(() => positionThumb())
+      resizeObserver = ro
+      const observed = new Set<Element>()
+      const syncTargets = () => {
+        const wrapper = viewport.firstElementChild
+        const targets = new Set<Element>([viewport])
+        if (wrapper) targets.add(wrapper)
+        if (showHorizontalScrollbar && wrapper?.firstElementChild) targets.add(wrapper.firstElementChild)
+        for (const target of observed) {
+          if (targets.has(target)) continue
+          ro.unobserve(target)
+          observed.delete(target)
+        }
+        for (const target of targets) {
+          if (observed.has(target)) continue
+          ro.observe(target)
+          observed.add(target)
+        }
+        return wrapper
+      }
+      const wrapper = syncTargets()
+      if (showHorizontalScrollbar && typeof MutationObserver !== "undefined") {
+        const mo = new MutationObserver(() => {
+          syncTargets()
+          positionThumb()
+        })
+        mo.observe(viewport, { childList: true })
+        if (wrapper) mo.observe(wrapper, { childList: true })
+        mutationObserver = mo
+      }
     }
     positionThumb()
     return () => {
       viewport.removeEventListener("scroll", positionThumb)
       resizeObserver?.disconnect()
+      mutationObserver?.disconnect()
     }
-  }, [positionThumb])
+  }, [positionThumb, showHorizontalScrollbar])
 
   const scrollbarState = {
     "data-visible": isScrollActive || isDraggingScrollbar,
@@ -191,21 +229,22 @@ function ScrollArea({
         data-slot="scroll-area-viewport"
         id={viewportId}
         data-testid={viewportTestId}
+        data-scroll-y={showVerticalScrollbar ? "true" : undefined}
         onWheel={scrollbarActivity === "input" ? (event) => {
           if (!event.ctrlKey && event.deltaY !== 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX) &&
-              event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+              event.target instanceof Element && event.target.closest(VERTICAL_VIEWPORT) === event.currentTarget) {
             showScrollbarUntilIdle()
           }
         } : undefined}
         onTouchMove={scrollbarActivity === "input" ? (event) => {
-          if (event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+          if (event.target instanceof Element && event.target.closest(VERTICAL_VIEWPORT) === event.currentTarget) {
             showScrollbarUntilIdle()
           }
         } : undefined}
         onKeyDown={scrollbarActivity === "input" ? (event) => {
           const target = event.target
           if (!event.defaultPrevented && SCROLL_KEYS.has(event.key) && target instanceof Element &&
-              target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget &&
+              target.closest(VERTICAL_VIEWPORT) === event.currentTarget &&
               !target.closest('input, textarea, select, [contenteditable]') &&
               !(event.key === " " && target.closest('button, [role="button"]'))) {
             showScrollbarUntilIdle()
@@ -218,12 +257,14 @@ function ScrollArea({
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      <ScrollBar
-        className={scrollbarClassName}
-        trackRef={trackRef}
-        thumbRef={setThumbRef}
-        {...scrollbarState}
-      />
+      {showVerticalScrollbar && (
+        <ScrollBar
+          className={scrollbarClassName}
+          trackRef={trackRef}
+          thumbRef={setThumbRef}
+          {...scrollbarState}
+        />
+      )}
       {showHorizontalScrollbar && (
         <ScrollBar
           orientation="horizontal"
