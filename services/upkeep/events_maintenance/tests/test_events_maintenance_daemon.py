@@ -14,6 +14,7 @@ import json
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +172,38 @@ def test_the_pass_does_not_rebuild_observations_the_live_projection_missed(
         )
 
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (0,)
+
+
+def test_the_pass_prices_an_unpriced_ledger_row_at_its_own_time_and_leaves_priced_rows(
+    db_conn: psycopg.Connection,
+    database: Database,
+    pool: ConnectionPool,
+    process_config: ConfigBoot,
+    tmp_path: Path,
+) -> None:
+    columns = (
+        "call_id, occurred_at, machine, cluster, billing, usage_kind, model, provider, calls, "
+        "complete, tokens_in, tokens_out, cache_write_30m, cost_usd, price_snapshot, price_source"
+    )
+    for call_id, cost, source in (("unpriced", None, None), ("priced", Decimal("9"), "live")):
+        db_conn.execute(
+            f"INSERT INTO llm_usage_ledger ({columns}) VALUES "  # noqa: S608
+            "(%s, %s, 'm', 'c', 'api', 'agent', 'gpt-6.1-sol', 'openai', 1, true, 10000, 100, "
+            "3000, %s, '{}'::jsonb, %s)",
+            (call_id, _MIRRORED_AT, cost, source),
+        )
+    db_conn.commit()
+
+    _pass(
+        pool,
+        database,
+        process_config,
+        tmp_path,
+        LoopProgress("dispatch", timeout_s=60.0, clock=system_clock()),
+    )
+
+    rows = dict(db_conn.execute("SELECT call_id, cost_usd FROM llm_usage_ledger"))
+    assert rows == {"unpriced": Decimal("0.0225"), "priced": Decimal("9")}
 
 
 def test_loop_components_report_fresh_loops_as_ok() -> None:

@@ -88,6 +88,13 @@ class LlmUsageMeteringFailed(TypedDict):
     failures: int
 
 
+# meiva:link base/lm/pricing/docs/cache-writes.md
+class LlmUsageUnpriced(TypedDict):
+    model: str
+    cause: Literal["no_price", "no_cache_write_rate"]
+    missing_classes: str
+
+
 class LlmUsageLedgerWriteFailed(TypedDict):
     call_id: str
     reason: Literal["conflict", "database"]
@@ -143,6 +150,12 @@ EVENTS: dict[str, EventSpec] = {
         "llm_usage_ledger_write_failed",
         "synchronous LLM usage commit failed",
         payload=LlmUsageLedgerWriteFailed,
+        tier="anomaly",
+    ),
+    "llm_usage_unpriced": telemetry_event(
+        "llm_usage_unpriced",
+        "a completed LLM call had no price in the catalog (unknown model or a missing cache-write rate)",
+        payload=LlmUsageUnpriced,
         tier="anomaly",
     ),
     "llm_turn_aborted": telemetry_event(

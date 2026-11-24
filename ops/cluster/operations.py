@@ -133,7 +133,7 @@ def harness_probe_op(
                     for model in row.models
                 ],
             )
-            for row in probe_local_harnesses(now=now, environ=environ, report_unpriced=False)
+            for row in probe_local_harnesses(now=now, environ=environ)
         ],
     )
 

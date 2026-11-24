@@ -336,6 +336,12 @@ def test_price_snapshot_absent_for_unpriced_model(
     assert "no-such-model" in warning
     assert "base/lm/pricing/pricing_catalog_archive.json" in warning
     assert "plugin price registry" in warning
+    [alert] = loguru_records.extras(event="llm_usage_unpriced")
+    assert (alert["model"], alert["cause"], alert["missing_classes"]) == (
+        "no-such-model",
+        "no_price",
+        "",
+    )
 
 
 _EVENT_KEYS = (

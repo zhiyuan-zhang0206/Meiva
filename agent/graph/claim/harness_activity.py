@@ -6,6 +6,7 @@ from base.api_contracts.usage import UsageLedgerWriteError
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import Usage
 from base.lm.harness.engine import HarnessTurn
+from base.lm.pricing.cache_writes import cache_write_tokens, default_write_ttl
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
@@ -34,14 +35,20 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
         f"harness:{source}:{agent_id}:{turn.session_id or ''}:{turn.generation}:{turn.turn_id}"
     )
     now = ctx.require_clock().now()
+    ttl = default_write_ttl(catalog.prices.vendor(pricing_model))
     write_error: UsageLedgerWriteError | None = None
     for index, (step_usage, calls) in enumerate(entries):
         try:
+            write_5m, write_1h, write_30m = cache_write_tokens(
+                {"cache_creation": step_usage.cache_creation_input_tokens}, default_ttl=ttl
+            )
             fields = UsageFields(
                 tok_in=step_usage.input_tokens,
                 tok_out=step_usage.output_tokens,
                 tok_cached=step_usage.cache_read_input_tokens or None,
-                cache_write_5m=step_usage.cache_creation_input_tokens,
+                cache_write_5m=write_5m,
+                cache_write_1h=write_1h,
+                cache_write_30m=write_30m,
                 source=source,
                 for_agent_id=agent_id,
                 calls=calls,

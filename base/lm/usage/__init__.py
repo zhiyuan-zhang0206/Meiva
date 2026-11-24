@@ -22,8 +22,8 @@ from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
 from base.lm.content import message_addl_kwargs
-from base.lm.pricing import CacheTokens, CostQuote, quote, tally_tokens
-from base.lm.pricing.cache_writes import cache_write_tokens
+from base.lm.pricing import CacheTokens, CostQuote, quote, rates_at, tally_tokens
+from base.lm.pricing.cache_writes import cache_write_tokens, default_write_ttl
 from base.telemetry import ambient_agent_id
 from base.telemetry.delivery.reporting import report_sink_failure
 
@@ -48,7 +48,7 @@ def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) 
 
 
 def _default_cache_write_ttl(model: str, *, catalog: ModelCatalog) -> Literal["5m", "30m"]:
-    return "30m" if vendor_of_model(model, catalog=catalog) == "openai" else "5m"
+    return default_write_ttl(vendor_of_model(model, catalog=catalog))
 
 
 def _metered_cache_read(usage: Mapping[str, object], cached: int) -> int | None:
@@ -365,12 +365,39 @@ def _usage_snapshot(event: _UsageEvent, priced: CostQuote | None) -> dict[str, f
     if priced is not None:
         return _price_snapshot(priced)
     if not event.unpriced_already_reported:
+        cause, missing = _unpriced_cause(event)
         logger.warning(
-            "[llm usage] model {model!r} is unpriced; add it to "
-            "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
+            "[llm usage] model {model!r} is unpriced ({cause}{missing_text}); declare the rate in "
+            "base/lm/pricing/pricing_catalog_archive.json and the provider plugin price registry, and the "
+            "ledger reprices this call at its own time on the next maintenance pass",
+            event="llm_usage_unpriced",
             model=event.model,
+            cause=cause,
+            missing_classes=missing,
+            missing_text=f": {missing}" if missing else "",
         )
     return {"unpriced": 1}
+
+
+def _unpriced_cause(event: _UsageEvent) -> tuple[str, str]:
+    rates = rates_at(
+        event.model,
+        event.priced_at or _utc_usage_time(event.now),
+        event.in_total,
+        prices=event.catalog.prices,
+    )
+    if rates is None:
+        return "no_price", ""
+    missing = ",".join(
+        name
+        for name, count, rate in (
+            ("5m", event.cache_write_5m, rates.cache_write_5m),
+            ("1h", event.cache_write_1h, rates.cache_write_1h),
+            ("30m", event.cache_write_30m, rates.cache_write_30m),
+        )
+        if count and rate is None
+    )
+    return "no_cache_write_rate", missing
 
 
 def _book_usage(

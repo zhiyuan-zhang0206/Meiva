@@ -112,12 +112,6 @@ class HarnessTurnStalled(TypedDict):
     reason: str
 
 
-class HarnessModelUnpricedProbed(TypedDict):
-    harness: str
-    raw_model: str
-    canonical_model: str
-
-
 EVENTS: dict[str, EventSpec] = {
     # node / process lifecycle
     "node_enter": telemetry_event(
@@ -404,14 +398,6 @@ EVENTS: dict[str, EventSpec] = {
         "unsettled; the session was retired, unanswered inbox messages were returned to pending and "
         "the agent halted until a new message",
         payload=HarnessTurnStalled,
-        tier="anomaly",
-    ),
-    "harness_model_unpriced_probed": telemetry_event(
-        "harness_model_unpriced_probed",
-        "an external harness CLI probe surfaced a model whose canonical ID is not yet in the "
-        "pricing catalog; reported once per (harness, canonical_model) per cooldown window so "
-        "pricing can be added proactively without blocking trials",
-        payload=HarnessModelUnpricedProbed,
         tier="anomaly",
     ),
 }

@@ -59,6 +59,10 @@ from services.upkeep.events_maintenance.blob_vacuum import (
 )
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 from services.upkeep.events_maintenance.health_components import LoopFacts
+from services.upkeep.events_maintenance.ledger_repricing import (
+    load_price_book,
+    reprice_unpriced_ledger,
+)
 from services.upkeep.events_maintenance.passes import events_maintenance_log
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 
@@ -96,8 +100,9 @@ def _pidfile(config: ConfigBoot, *, runtime: Path) -> Path:
 
 # meiva:note
 # One hourly pass: the telemetry mirror replay, the unknown-writer audit, the hourly checkpoint
-# size/row-count telemetry sample, and the blob VACUUM. One `now` drives the time-based steps. Logs
-# what each step did; a no-op pass logs nothing.
+# size/row-count telemetry sample, the blob VACUUM, and the pricing of usage-ledger rows that have no
+# cost yet (`ledger_repricing.py`). One `now` drives the time-based steps. Logs what each step did; a
+# no-op pass logs nothing.
 def run_maintenance(
     pool: ConnectionPool,
     progress: LoopProgress,
@@ -145,6 +150,17 @@ def run_maintenance(
     progress.beat()
     if vacuum_result.ran:
         events_maintenance_log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
+    # meiva:link base/lm/usage/README.md
+    with pool.connection() as conn:
+        repriced = reprice_unpriced_ledger(conn, prices=load_price_book())
+    progress.beat()
+    if repriced.priced:
+        events_maintenance_log.info(
+            "[events-maintenance] priced %d unpriced usage-ledger rows (+%s USD); %d still unpriced",
+            repriced.priced,
+            repriced.added_usd,
+            repriced.still_unpriced,
+        )
     progress.mark_success()
 
 

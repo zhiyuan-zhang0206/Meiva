@@ -3,7 +3,11 @@
 The grant matrix in `groups.py` is the single runner authority. Entries use fixed
 privilege strings and quoted table identifiers. Gateway receives owner-like DML,
 sequence access, routine execution and checkpoint MAINTAIN, without ownership,
-DDL, TRUNCATE, REFERENCES or TRIGGER. Audit and telemetry tables are append-only.
+DDL, TRUNCATE, REFERENCES or TRIGGER. Audit and telemetry tables are append-only. The usage
+ledger is append-only except for one column-scoped gateway grant, `UPDATE (cost_usd, price_snapshot,
+price_source)`, which the events-maintenance pass uses to price a row that has no price yet; the
+table's `llm_usage_ledger_price_only` trigger refuses every other update, so a priced row is
+never rewritten and no other column can change.
 Runner grants follow actual direct writers; admission remains with Gateway where
 the domain requires it. A writer that touches one column of a table gets a
 column-scoped grant rather than the table's whole privilege: the delivery log's

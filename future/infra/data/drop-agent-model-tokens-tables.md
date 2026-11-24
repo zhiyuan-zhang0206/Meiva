@@ -15,8 +15,9 @@ Drop them when all of the following hold:
 1. The release that removed the rollup, the fold and the usage readers is deployed on
    the gateway and every runner, and its verification window is over (no statement
    reads or writes the three tables since the rollout).
-2. `token_totals.py`, `unpriced_backfill*.py`, the `meiva metrics backfill-unpriced`
-   command and their tests are gone: they are the remaining code that names the tables.
+2. The code that named the tables is gone (`token_totals.py`, `unpriced_backfill*.py` and
+   the `meiva metrics backfill-unpriced` command left with the usage-ledger repricing
+   change); grep for the three table names to confirm nothing else remains.
 3. The supported rollback target no longer includes the old rollup.
 
 Then add a timestamped migration that drops the three tables (the total-through

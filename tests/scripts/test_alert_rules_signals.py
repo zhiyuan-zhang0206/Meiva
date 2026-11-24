@@ -90,6 +90,7 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-llm-usage-metering-failed": Signal(
         "llm_usage_metering_failed", "meiva-ops", "0m", "warning"
     ),
+    "meiva-ops-llm-usage-unpriced": Signal("llm_usage_unpriced", "meiva-ops", "0m", "error"),
     "meiva-ops-exec-node-timeout": Signal("exec_node_timeout", "meiva-ops", "0m", "warning"),
     "meiva-ops-exec-subprocess-killed": Signal(
         "exec_subprocess_killed", "meiva-ops", "0m", "warning"

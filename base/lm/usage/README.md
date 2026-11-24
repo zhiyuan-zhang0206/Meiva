@@ -69,6 +69,16 @@ reported model and billing before the readers moved to the ledger, with no
 differences. Its commands are retired. Reports have no retention expiry; the
 Loki `llm_usage` stream is the operational copy and keeps seven days.
 
+## Unpriced calls
+
+A call the catalog cannot price (no price for the model at that time, or no rate for a cache-write class it
+reported) is written to the ledger with its tokens and no cost, and emits one `llm_usage_unpriced` event per
+call (one per harness turn). The Grafana rule `meiva-ops-llm-usage-unpriced` alerts per model with the cause
+and the fix. After a release declares the rate, `services/upkeep/events_maintenance/ledger_repricing.py`
+prices the row at its own `occurred_at` on the next hourly pass: no operator command, no rewrite of a
+priced row (the select, the update and the table's `llm_usage_ledger_price_only` trigger each refuse
+it). See [Cache-write pricing](../pricing/docs/cache-writes.md).
+
 ## Selecting usage scopes
 
 LLM usage is attributed to agents. The independent
