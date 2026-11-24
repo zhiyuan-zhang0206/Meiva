@@ -1,7 +1,7 @@
 # Settings and Insights first paint
 
 Settings mounts only the selected category. General starts with communication
-style and model preferences, followed by everyday notification, writing and
+style and model preferences, followed by everyday writing and
 appearance settings. Advanced has independent Agent settings, Resources & services,
 and Interface details areas. Machine selection belongs only to resources. Legacy
 machine and display-detail anchors select the corresponding Advanced area; everyday

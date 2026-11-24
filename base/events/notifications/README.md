@@ -5,8 +5,8 @@ A system notification has exactly two triggers: an agent **asked a question**, a
 [system notifications are questions and unread output](../../../docs/decisions/engineering/notifications/2026-11-11-notifications-are-questions-and-unread.md).
 
 `base/events/notifications` owns the delivery: a producer plans a push (`triggers.py`, pure), the
-spine applies the user's per-category switch, records the delivery in the same transaction as the
-write that caused it, and publishes one live event every transport consumes.
+spine records the delivery in the same transaction as the write that caused it, and publishes one
+live event every transport consumes.
 
 ## Pushes
 
@@ -55,13 +55,13 @@ listening, so the row is marked announced and an offline client gets it from the
 Re-announcing after a lost mark is at-least-once on purpose: clients deduplicate on
 `notification_id`.
 
-## Categories and policy
+## Categories
 
-`catalog.CORE_CATEGORIES` holds the two categories, both on by default. The only suppression is the
-user's switch (`notifications.categories`, one boolean per category id; Display settings →
-Notifications). It gates an alert or a replace; a retract is always staged, because switching a
-category off must not strand a notification that is already on a screen.
-`GET /api/notifications/categories` returns the categories with the switches applied.
+`catalog.CORE_CATEGORIES` holds the two categories (an id and an importance). Both are always on:
+there is no user setting and no policy that suppresses an alert, a replace or a retract. The
+retired `notifications.categories` key in `user_settings` is deleted by migration and nothing reads
+it, so a `false` stored before the switches were removed has no effect. See
+[the two system notifications are always on](../../../docs/decisions/engineering/notifications/2026-11-24-notifications-always-on.md).
 
 ## Transports
 
@@ -73,7 +73,7 @@ the newest id, so a first-run client adopts a cursor instead of replaying histor
 a gap to the final state of each tag, so only what still exists is shown, and alerts at most once
 per tag. Whether the user is looking at an agent is a client fact (the server cannot know it): the
 bridge does not show an unread notification for the agent open in the visible, focused window.
-The console renders the switches and no delivery feed of its own, so the `notification` role never
+The console renders no delivery feed of its own, so the `notification` role never
 enters a timeline. No transport re-derives its own trigger from agent state. A transport may
-render less (an importance floor, a master switch), never more. See
+render less (an importance floor, the platform's own permission), never more. See
 [app notification delivery](../../../ui/app/docs/notifications.md) for what each platform can do.

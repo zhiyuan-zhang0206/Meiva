@@ -51,8 +51,6 @@ export {
   DEFAULT_DATE_FORMAT,
   USER_SETTING_DEFAULTS,
   type DateFormat,
-  type NotificationCategoriesResponse,
-  type NotificationCategoryItem,
   type OngoingDocument,
   type ToUserDocument,
   type WorkspaceDirListing,

@@ -17,7 +17,6 @@
   "expandWorkingBlockDesc": "Agent 工作时，自动展开当前工作区块。",
   "timelineMaxWidth": "时间线最大宽度",
   "timelineMaxWidthDesc": "对话列的最大像素宽度（{min}px–{max}px）。对话列会填满所在面板直至该上限，更宽时居中留白。默认 {def}px。",
-  "notifications": "通知",
   "confirmations": "确认对话框",
   "confirmTerminate": "终止前确认",
   "confirmTerminateDesc": "终止 agent 时显示确认对话框",
@@ -31,10 +30,6 @@
   "modelPicker": "模型选择器",
   "english": "English",
   "chinese": "中文",
-  "categories": {
-    "coreQuestion": "Agent 提了问题",
-    "coreUnread": "Agent 有未读内容"
-  },
   "theme": "主题",
   "appearance": "外观",
   "appearanceDescription": "跟随系统配色方案，或固定使用亮色 / 暗色模式。",

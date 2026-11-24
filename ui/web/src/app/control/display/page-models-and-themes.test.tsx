@@ -29,7 +29,6 @@ beforeEach(() => {
   transport.getSettings.mockResolvedValue({ settings: [] });
   transport.getModels.mockResolvedValue({ providers: {}, models: {}, default: "" });
   transport.getUiContributions.mockResolvedValue({ themes: [], nav: [], stats: [] });
-  transport.getNotificationCategories.mockResolvedValue({ categories: [] });
 });
 
 describe("DisplaySettingsPage models, themes, language, and colors", () => {

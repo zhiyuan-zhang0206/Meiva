@@ -21,7 +21,6 @@ import type {
   InventoryWriteResult,
   MemoryNoteResponse,
   ModelsResponse,
-  NotificationCategoriesResponse,
   PackageDraftResponse,
   PackageKind,
   ResolvedConfigView,
@@ -284,10 +283,6 @@ export function createControlApi(http: Http) {
 
     getSettings: (): Promise<UserSettingListResponse> => {
       return f("/api/settings").then(ok<UserSettingListResponse>);
-    },
-
-    getNotificationCategories: (): Promise<NotificationCategoriesResponse> => {
-      return f("/api/notifications/categories").then(ok<NotificationCategoriesResponse>);
     },
 
     putSetting: (key: string, value: unknown): Promise<UserSettingRow> => {

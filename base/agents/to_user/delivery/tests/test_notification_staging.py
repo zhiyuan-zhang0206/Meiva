@@ -8,9 +8,8 @@ from psycopg.types.json import Jsonb
 from base.agents.to_user.delivery.store import advance_seen, publish
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.db import create_agent
-from base.events.notifications.catalog import UNREAD_CATEGORY
+from base.events.notifications.catalog import QUESTION_CATEGORY, UNREAD_CATEGORY
 from base.events.notifications.publish import open_question_count, stage_open_questions
-from base.events.notifications.store import SETTINGS_KEY
 
 NOW = datetime(2026, 11, 11, 4, 0, tzinfo=UTC)
 
@@ -111,24 +110,29 @@ def test_the_push_rolls_back_with_the_delivery(db_conn: psycopg.Connection) -> N
     assert _pushes(db_conn, agent_id) == []
 
 
-def test_a_switched_off_category_stages_no_alert_or_replace_but_still_retracts(
+def test_a_stale_switched_off_row_in_user_settings_suppresses_nothing(
     db_conn: psycopg.Connection,
 ) -> None:
     agent_id = _agent(db_conn)
-    first = _say(db_conn, agent_id, "a", "visible")
-    assert len(_pushes(db_conn, agent_id)) == 1
     db_conn.execute(
         "INSERT INTO user_settings (key, value) VALUES (%s, %s) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-        (SETTINGS_KEY, Jsonb({UNREAD_CATEGORY: False})),
+        ("notifications.categories", Jsonb({UNREAD_CATEGORY: False, QUESTION_CATEGORY: False})),
     )
 
-    newest = _say(db_conn, agent_id, "b", "while switched off")
-    assert len(_pushes(db_conn, agent_id)) == 1
+    _say(db_conn, agent_id, "a", "first")
+    newest = _say(db_conn, agent_id, "b", "second")
     advance_seen(db_conn, agent_id, newest)
+    before = open_question_count(db_conn, agent_id)
+    _ask(db_conn, agent_id, "Deploy now?")
+    stage_open_questions(db_conn, agent_id, open_before=before)
 
-    assert [action for action, *_ in _pushes(db_conn, agent_id)] == ["alert", "retract"]
-    assert first < newest
+    assert [(action, tag) for action, tag, *_ in _pushes(db_conn, agent_id)] == [
+        ("alert", f"unread:{agent_id}"),
+        ("replace", f"unread:{agent_id}"),
+        ("retract", f"unread:{agent_id}"),
+        ("alert", f"question:agent:{agent_id}"),
+    ]
 
 
 def test_an_agents_questions_are_one_push_that_updates_silently_and_retracts_when_none_remain(
