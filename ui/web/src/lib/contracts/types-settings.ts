@@ -8,17 +8,6 @@ export interface UserSettingRow {
   readonly updated_at: string;
 }
 
-export interface NotificationCategoryItem {
-  readonly id: string;
-  readonly label: string;
-  readonly description: string;
-  readonly importance: string;
-  readonly enabled: boolean;
-}
-export interface NotificationCategoriesResponse {
-  readonly categories: NotificationCategoryItem[];
-}
-
 export interface UserSettingListResponse {
   readonly settings: readonly UserSettingRow[];
 }

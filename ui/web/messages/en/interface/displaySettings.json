@@ -17,7 +17,6 @@
   "expandWorkingBlockDesc": "Automatically expand the current work block while an agent is working.",
   "timelineMaxWidth": "Timeline max width",
   "timelineMaxWidthDesc": "Max width of the conversation column in pixels ({min}px–{max}px). The column fills its pane up to this ceiling and centers with side gutters when wider. Default {def}px.",
-  "notifications": "Notifications",
   "confirmations": "Confirmations",
   "confirmTerminate": "Confirm before terminate",
   "confirmTerminateDesc": "Show a confirmation dialog when terminating an agent",
@@ -31,10 +30,6 @@
   "modelPicker": "Model picker",
   "english": "English",
   "chinese": "中文",
-  "categories": {
-    "coreQuestion": "Agent asked a question",
-    "coreUnread": "Agent has unread output"
-  },
   "theme": "Theme",
   "appearance": "Appearance",
   "appearanceDescription": "Follow the system color scheme or force light or dark mode.",

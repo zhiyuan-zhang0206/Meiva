@@ -40,7 +40,6 @@ import { normalizeThemeMode } from "@/lib/layout/theme-runtime";
 import { readStoredSetting, useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX } from "@/lib/layout/layout";
 import { ModelPickerSection } from "./_model_picker";
-import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, ToggleRow } from "./_rows";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -99,11 +98,6 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
 
   return (
     <div className="space-y-6">
-      {general && (
-      <SettingsSection id="display-notifications" title={t("notifications")}>
-        <NotificationCategoryRows />
-      </SettingsSection>
-      )}
       {general && (
       <SettingsSection id="display-composer" title={t("composer")}>
         <ToggleRow

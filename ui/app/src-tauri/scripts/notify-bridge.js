@@ -1,6 +1,6 @@
 // meiva:note
 // Renders the gateway's delivered `notification` events on Android and macOS. The
-// delivery decision and the category switches live in the notification spine; this bridge
+// delivery decision lives in the notification spine; this bridge
 // deduplicates by `notification_id` inside one webview session, folds a catch-up gap down to
 // the final state of each notification `tag`, keeps an agent the user is looking at quiet, and
 // turns a native tap into a deep link to the agent.

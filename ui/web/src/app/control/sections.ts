@@ -90,7 +90,6 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "display-features", label: "Features", labelKey: "display-features" },
       { id: "display-agent-list", label: "Agent list display", labelKey: "display-agent-list" },
       { id: "display-timeline", label: "Timeline", labelKey: "display-timeline" },
-      { id: "display-notifications", label: "Notifications", labelKey: "display-notifications" },
       { id: "display-confirmations", label: "Confirmations", labelKey: "display-confirmations" },
       { id: "display-model-picker", label: "Model picker", labelKey: "display-model-picker" },
     ],

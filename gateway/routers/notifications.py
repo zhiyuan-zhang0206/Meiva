@@ -7,23 +7,10 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from base.events.notifications.catalog import CORE_CATEGORIES
-from base.events.notifications.store import latest_id_sync, read_overrides_sync, recent_sync
+from base.events.notifications.store import latest_id_sync, recent_sync
 from gateway.http.config import gateway_state
 
 router = APIRouter()
-
-
-class NotificationCategoryItem(BaseModel):
-    id: str
-    label: str
-    description: str
-    importance: str
-    enabled: bool
-
-
-class NotificationCategoriesResponse(BaseModel):
-    categories: list[NotificationCategoryItem]
 
 
 class NotificationDeliveryItem(BaseModel):
@@ -42,27 +29,6 @@ class NotificationDeliveryItem(BaseModel):
 class NotificationDeliveriesResponse(BaseModel):
     notifications: list[NotificationDeliveryItem]
     latest_id: int
-
-
-# meiva:note
-# The two core categories with the user's switch already applied, so the console renders exactly
-# what the spine will honor.
-# meiva:link base/events/notifications/README.md
-@router.get("/api/notifications/categories")
-async def get_notification_categories(request: Request) -> NotificationCategoriesResponse:
-    switches = await asyncio.to_thread(read_overrides_sync, gateway_state(request).db_pool)
-    return NotificationCategoriesResponse(
-        categories=[
-            NotificationCategoryItem(
-                id=declared.id,
-                label=declared.label,
-                description=declared.description,
-                importance=declared.importance,
-                enabled=switches.get(declared.id, declared.default_enabled),
-            )
-            for declared in CORE_CATEGORIES
-        ]
-    )
 
 
 # meiva:note

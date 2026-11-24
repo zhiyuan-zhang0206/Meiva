@@ -4455,24 +4455,6 @@
         }
       }
     },
-    "/api/notifications/categories": {
-      "get": {
-        "summary": "Get Notification Categories",
-        "operationId": "get_notification_categories_api_notifications_categories_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationCategoriesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/notifications": {
       "get": {
         "summary": "Get Notifications",
@@ -13198,55 +13180,6 @@
         ],
         "title": "NeighborsResponse",
         "description": "GET /api/agents/{id}/neighbors response."
-      },
-      "NotificationCategoriesResponse": {
-        "properties": {
-          "categories": {
-            "items": {
-              "$ref": "#/components/schemas/NotificationCategoryItem"
-            },
-            "type": "array",
-            "title": "Categories"
-          }
-        },
-        "type": "object",
-        "required": [
-          "categories"
-        ],
-        "title": "NotificationCategoriesResponse"
-      },
-      "NotificationCategoryItem": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "label": {
-            "type": "string",
-            "title": "Label"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "importance": {
-            "type": "string",
-            "title": "Importance"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "label",
-          "description",
-          "importance",
-          "enabled"
-        ],
-        "title": "NotificationCategoryItem"
       },
       "NotificationDeliveriesResponse": {
         "properties": {

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypeGuard
 
 import psycopg
 from psycopg.rows import class_row
@@ -10,9 +9,6 @@ from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
 
-SETTINGS_KEY = "notifications.categories"
-
-_SELECT_OVERRIDES = "SELECT value FROM user_settings WHERE key = %s"
 _SELECT_LABEL = "SELECT label FROM agents WHERE id = %s"
 _INSERT = (
     "INSERT INTO notification_events "
@@ -48,30 +44,8 @@ _SELECT_RECENT = (
 _SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) AS id FROM notification_events"
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-def parse_overrides(value: object) -> dict[str, bool]:
-    if value is None:
-        return {}
-    if not _is_object_dict(value):
-        raise TypeError(f"{SETTINGS_KEY} must be a JSON object")
-    switches: dict[str, bool] = {}
-    for key, item in value.items():
-        if not isinstance(item, bool):
-            raise TypeError(f"{SETTINGS_KEY}.{key} must be a bool")
-        switches[key] = item
-    return switches
-
-
 # meiva:note
 # The single column of each read below, by name: `class_row` builds one of these per row.
-@dataclass(frozen=True)
-class _Value:
-    value: object
-
-
 @dataclass(frozen=True)
 class _Label:
     label: str | None
@@ -97,12 +71,6 @@ class UnannouncedRow:
     agent_id: int
 
 
-def read_overrides(conn: psycopg.Connection) -> dict[str, bool]:
-    with conn.cursor(row_factory=class_row(_Value)) as cur:
-        row = cur.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
-    return parse_overrides(None if row is None else row.value)
-
-
 # meiva:note
 # The display name a push carries: the agent's label, or `#<id>` for an agent that has none yet,
 # the same fallback the console shows.
@@ -121,12 +89,6 @@ def insert(conn: psycopg.Connection, params: tuple[object, ...]) -> int:
     if row is None:
         raise RuntimeError("notification insert returned no id")
     return row.id
-
-
-def read_overrides_sync(pool: ConnectionPool) -> dict[str, bool]:
-    with pool.connection() as conn, conn.cursor(row_factory=class_row(_Value)) as cur:
-        row = cur.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
-    return parse_overrides(None if row is None else row.value)
 
 
 def unannounced_sync(pool: ConnectionPool, notification_id: int) -> UnannouncedRow | None:

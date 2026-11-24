@@ -42,7 +42,6 @@ beforeEach(() => {
   transport.getSettings.mockResolvedValue({ settings: [] });
   transport.getModels.mockResolvedValue({ providers: {}, models: {}, default: "" });
   transport.getUiContributions.mockResolvedValue({ themes: [], nav: [], stats: [] });
-  transport.getNotificationCategories.mockResolvedValue({ categories: [] });
 });
 
 async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
@@ -153,48 +152,6 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Confirm before terminate")).toBeTruthy();
     expect(screen.getByText("Confirm before restart")).toBeTruthy();
     expect(screen.getByText("Confirm before force kill")).toBeTruthy();
-  });
-
-  it("renders one switch per delivered category and writes the whole map", async () => {
-    transport.getSettings.mockResolvedValue({
-      settings: [{ key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z" }],
-    });
-    transport.getNotificationCategories.mockResolvedValue({
-      categories: [
-        {
-          id: "core.question",
-          label: "Agent asked a question",
-          description: "An agent asked you a question and is waiting on your answer.",
-          importance: "high",
-          enabled: false,
-        },
-        {
-          id: "core.unread",
-          label: "Agent has unread output",
-          description: "An agent delivered output you have not read yet.",
-          importance: "normal",
-          enabled: true,
-        },
-      ],
-    });
-    transport.putSetting.mockResolvedValue({
-      key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z",
-    });
-    renderPage();
-
-    const label = await screen.findByText("Agent asked a question");
-    const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
-      '[role="switch"]',
-    );
-    if (!toggle) throw new Error("notification category toggle not found");
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-
-    fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(transport.putSetting).toHaveBeenCalledWith("notifications.categories", {
-        "core.question": true,
-      }),
-    );
   });
 
   it("reply suggestions are on by default and the toggle persists the opt-out", async () => {

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -9,24 +8,19 @@ from psycopg_pool import ConnectionPool
 
 from base.events.live.projection import NotificationEmitted
 from base.events.notifications.catalog import category
-from base.events.notifications.policy import enabled_for
 from base.events.notifications.store import (
     agent_label,
     insert,
     mark_announced_sync,
-    read_overrides,
     unannounced_sync,
 )
 from base.events.notifications.triggers import (
-    NotificationAction,
     PushPlan,
     plan_questions_cleared,
     plan_questions_open,
     plan_unread_delivery,
     plan_unread_seen,
 )
-
-_log = logging.getLogger("base.events.notifications")
 
 
 @dataclass(frozen=True)
@@ -41,9 +35,8 @@ class NotificationRecord:
 # The producing transaction stages its own push: the question row or the delivery row commits with
 # its `notification_events` row, so the debt exists before any process could die and a rollback of
 # the business write leaves no push behind. `announced_at` stays NULL until the transport accepts
-# the publication; the gateway outbox sweep converges it. An alert or a replace follows the user's
-# category switch; a retract is always staged, because switching a category off must not strand a
-# notification that is already on someone's screen.
+# the publication; the gateway outbox sweep converges it. Every planned push is staged: no user
+# setting suppresses an alert, a replace or a retract.
 # meiva:link base/events/notifications/README.md
 # meiva:note
 # A tap target is the agent's own page: both kinds of push are about one agent's conversation, and
@@ -55,15 +48,10 @@ def _agent_href(agent_id: int) -> str:
 
 def stage_in_transaction(
     conn: psycopg.Connection, plan: PushPlan, *, agent_id: int
-) -> NotificationRecord | None:
+) -> NotificationRecord:
     declared = category(plan.category)
     if not plan.subject.strip():
         raise ValueError(f"notification {declared.id} needs a subject")
-    if plan.action is not NotificationAction.RETRACT and not enabled_for(
-        declared, read_overrides(conn)
-    ):
-        _log.debug("notification %s suppressed: category switched off", declared.id)
-        return None
     row_id = insert(
         conn,
         (

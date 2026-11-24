@@ -305,7 +305,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
     ("GET", "/api/notifications"): RouteContract(),
-    ("GET", "/api/notifications/categories"): RouteContract(),
     ("GET", "/api/settings"): RouteContract(),
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),

@@ -2,7 +2,7 @@
 
 One bridge serves both platforms: `scripts/notify-bridge.js` is injected into the console webview,
 subscribes to the gateway's `/api/system` broadcast and renders only the `notification` role,
-whose delivery the gateway's spine already decided (the two triggers, the category switches and
+whose delivery the gateway's spine already decided (the two triggers, which are always on, and
 the delivery log are server-side). See
 [the notification spine](../../../base/events/notifications/README.md).
 

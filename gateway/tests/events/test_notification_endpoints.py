@@ -18,20 +18,6 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-# meiva:note
-# The switch list is the two kinds of push the product has, both on by default: every transport
-# honors this view, so a third category that ships on fails here.
-# meiva:link base/events/notifications/README.md
-def test_the_switch_list_is_the_question_and_the_unread_push_both_on(
-    db_conn: psycopg.Connection,
-) -> None:
-    with gateway_test_client() as client:
-        resp = client.get("/api/notifications/categories")
-    assert resp.status_code == 200
-    categories = {item["id"]: item["enabled"] for item in resp.json()["categories"]}
-    assert categories == {"core.question": True, "core.unread": True}
-
-
 def test_a_plugin_can_no_longer_post_its_own_notification(db_conn: psycopg.Connection) -> None:
     agent_id = _agent(db_conn)
     with gateway_test_client() as client:
