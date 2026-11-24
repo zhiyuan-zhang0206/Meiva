@@ -35,7 +35,7 @@ async def admit(
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         spawner="user",
         machine=local_machine.name(),
-        config={"llm_model": "deepseek-flash"},
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         catalog=model_catalog,
         authority=config_authority,
     )
