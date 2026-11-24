@@ -19,6 +19,7 @@ from threading import Lock
 from typing import IO, Protocol
 
 from .plan.host_commands import login_shell
+from .plan.host_failures import HostFailure
 from .plan.operation import OperationIdentity, shell_exports
 from .plan.redaction import redact
 
@@ -92,6 +93,7 @@ class Session:
         self.timers = timers
         self.stamp = f"{now:%Y%m%dT%H%M%S}"
         self.os: dict[str, str] = {}
+        self.deferred: dict[str, HostFailure] = {}
         self._lock = Lock()
         log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = log_dir / f"{now:%Y%m%dT%H%M%S.%fZ}-{half}.log"
@@ -122,6 +124,31 @@ class Session:
         with ThreadPoolExecutor(max_workers=min(len(items), _MAX_PARALLEL)) as pool:
             futures = [pool.submit(_call, item) for item in items]
             return [future.result() for future in futures]
+
+    def defer(self, failure: HostFailure) -> None:
+        if failure.alias in self.deferred:
+            return
+        self.deferred[failure.alias] = failure
+        self.say(f"DEFERRED: {failure.alias} left out at {failure.step!r}: {failure.reason}")
+
+    def live(self, runners: Sequence[str]) -> tuple[str, ...]:
+        return tuple(alias for alias in runners if alias not in self.deferred)
+
+    def gather_hosts[R](
+        self, hosts: Sequence[str], *, gateway: str, step: str, work: Callable[[str], R]
+    ) -> dict[str, R]:
+        answers: dict[str, R] = {}
+        gateway_error: FailedError | None = None
+        for alias, outcome in zip(hosts, self.gather(hosts, work), strict=True):
+            if not isinstance(outcome, FailedError):
+                answers[alias] = outcome
+            elif alias == gateway:
+                gateway_error = outcome
+            else:
+                self.defer(HostFailure(alias, step, str(outcome)))
+        if gateway_error is not None:
+            raise gateway_error
+        return answers
 
     def run_all[I, R](self, items: Sequence[I], work: Callable[[I], R]) -> list[R]:
         results: list[R] = []

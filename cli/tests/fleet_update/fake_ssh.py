@@ -37,8 +37,13 @@
 # - `stop_fails`: dict[alias -> int] (the stop's exit code), `stop_fails_leaves_up`: list[alias]
 #   (the stops that take the daemon down), `recover_fails`: list[alias] (a start that fails), and
 #   `fail`: dict["<kind>|<alias>" -> int] for every other effect kind — `fetch`, `prestage`,
-#   `switch`, `start`, `oneshot`, `refresh`, `evidence`, `pre-verify`, `schedules-verify`,
+#   `switch`, `rollback` (a switch back to `old`), `start`, `oneshot`, `refresh`, `evidence`, `pre-verify`, `schedules-verify`,
 #   `plugins-verify`, `sessions-verify`, `silence-open`, `silence-close`.
+# - `die_at`: dict[alias -> kind] and `dead`: list[alias] — a host that goes dark: the moment it
+#   attempts an effect of its `die_at` kind that command and every later one to it exit 255 with
+#   ssh's connection-timeout text (the 2026-11-24 company-mini shape), and it is listed in `dead`.
+# - `outside`: list[alias] — runners the test expects the window to leave out while they still run;
+#   the gateway's stop is not held back by them (as for a dark host or a failed stop).
 # - `effects`: list[[kind, alias]] — every effect accepted, in order; `run_started_at`: int — the
 #   index into `effects` where the current window started.
 # - `commands`: list[[alias, command]] — every invocation this double received, for order checks.
@@ -86,7 +91,8 @@ class Sim:
         self.s = state
 
     def _runners_up(self) -> bool:
-        return any(h["up"] for a, h in self.s["hosts"].items() if a != "gw")
+        left_out = {*self.s["stop_fails"], *self.s["dead"], *self.s["outside"]}
+        return any(h["up"] for a, h in self.s["hosts"].items() if a != "gw" and a not in left_out)
 
     def _failure(self, kind: str, alias: str) -> int:
         return int(self.s["fail"].get(f"{kind}|{alias}", 0))
@@ -113,10 +119,11 @@ class Sim:
         return rc
 
     def _switch(self, host: State, command: str) -> None:
-        assert not host["up"] and self.s["new"] in command, "switched a running host"
+        target = self.s["old"] if self.s["old"] in command else self.s["new"]
+        assert not host["up"] and target in command, "switched a running host"
         assert self.s["clean"] in shlex.split(command)[2], "no clean-tree check after switch"
         assert "uv sync --frozen --compile-bytecode --reinstall-package meiva" in command
-        host["head"] = self.s["new"]
+        host["head"] = target
 
     def _start(self, kind: str, alias: str, host: State) -> int:
         assert (kind == "oneshot") == (host["os"] == "Darwin"), "a macOS start must be a one-shot"
@@ -130,6 +137,9 @@ class Sim:
 
     def _effect(self, kind: str, alias: str, host: State, command: str) -> int:
         self.s["effects"].append([kind, alias])
+        if self.s["die_at"].get(alias) == kind:
+            self.s["dead"].append(alias)
+            return 255
         if rc := self._failure(kind, alias):
             return rc
         if kind == "prestage":
@@ -138,7 +148,7 @@ class Sim:
             assert self.s["new"] in command, "prestage did not target NEW"
         elif kind == "stop":
             return self._stop(alias, host, command)
-        elif kind == "switch":
+        elif kind in ("switch", "rollback"):
             self._switch(host, command)
         elif kind in ("start", "oneshot"):
             return self._start(kind, alias, host)
@@ -197,6 +207,9 @@ class Sim:
     def handle(self, alias: str, command: str, stdin: str, emit: list[str]) -> int:
         self.s["commands"].append([alias, command])
         host = self.s["hosts"][alias]
+        if alias in self.s["dead"]:
+            emit.append(f"ssh: connect to host {alias} port 22: Connection timed out")
+            return 255
         emit.append(self.s["output"])
         programs = self.s["programs"]
         if " agents " in command:
@@ -258,6 +271,8 @@ class Sim:
             "packages refresh": "refresh",
         }
         kind = next(k for s, k in kinds.items() if s in command)
+        if kind == "switch" and self.s["old"] in command:
+            kind = "rollback"
         if kind == "refresh":
             emit.append("  summary: applied 2, conflict 1")
         return self._effect(kind, alias, host, command)

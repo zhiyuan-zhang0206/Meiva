@@ -67,8 +67,8 @@ def test_independent_waves_fan_out_concurrently_without_breaking_gateway_order(
     _assert_wave_order(cluster)
 
 
-@pytest.mark.parametrize("failing", [("stop", "mac"), ("switch", "lin")])
-def test_run_does_not_start_after_a_failed_down(
+@pytest.mark.parametrize("failing", [("stop", "gw"), ("switch", "gw")])
+def test_run_does_not_enter_up_after_the_gateway_fails_down(
     env: tuple[Cluster, Callable[..., int]],
     capsys: pytest.CaptureFixture[str],
     failing: tuple[str, str],
@@ -79,10 +79,7 @@ def test_run_does_not_start_after_a_failed_down(
     assert failing in cluster.effects
     assert "refresh" not in {k for k, _ in cluster.effects}
     if failing[0] == "stop":
-        assert ("stop", "gw") not in cluster.effects
         assert "switch" not in {k for k, _ in cluster.effects}
-    else:
-        assert not {"start", "oneshot"} & {k for k, _ in cluster.effects}
     output = capsys.readouterr().out
     assert "phase: up" not in output
     assert "Failed phase: down" in output and "rerun `down`" in output
@@ -248,13 +245,12 @@ def test_run_requires_a_target_before_contacting_hosts(
 _STOP_RETRY = "retry `meiva stop` with the same arguments this `down` gave it"
 
 
-def test_the_first_failure_stops_the_half(
+def test_a_failed_gateway_stop_ends_the_half(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
-    cluster.fail[("stop", "mac")] = 1
+    cluster.fail[("stop", "gw")] = 1
     assert run("down") == 1
-    assert ("stop", "gw") not in cluster.effects
     assert "switch" not in {k for k, _ in cluster.effects}
     assert _STOP_RETRY in capsys.readouterr().out
 

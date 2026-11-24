@@ -28,17 +28,28 @@ from .plan.verify_steps import drift_checks, duplicate_names, machine_name
 from .session import FailedError, Session
 
 
+def _machine_name(s: Session, alias: str) -> str:
+    reported = machine_name(s.run(alias, machine_name_command(), effect=False))
+    if reported is None:
+        raise FailedError(f"{alias}: the host printed no machine name")
+    return reported
+
+
 def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
-    outputs = s.run_all(aliases, lambda alias: s.run(alias, machine_name_command(), effect=False))
-    names: dict[str, str] = {}
-    for alias, out in zip(aliases, outputs, strict=True):
-        reported = machine_name(out)
-        if reported is None:
-            raise FailedError(f"{alias}: the host printed no machine name")
-        names[alias] = reported
-    if problem := duplicate_names(names):
+    names = s.run_all(aliases, lambda alias: _machine_name(s, alias))
+    named = dict(zip(aliases, names, strict=True))
+    if problem := duplicate_names(named):
         raise FailedError(problem)
-    return names
+    return named
+
+
+def readable_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
+    outputs = s.gather(aliases, lambda alias: _machine_name(s, alias))
+    return {
+        alias: out
+        for alias, out in zip(aliases, outputs, strict=True)
+        if not isinstance(out, FailedError)
+    }
 
 
 # meiva:note
@@ -126,8 +137,10 @@ def verify(
         skipped.update(dict.fromkeys(hosts, "dry run"))
     else:
         try:
-            names = machine_names(s, hosts)
-            failed_names = frozenset(names[a] for a in hosts if a not in started)
+            names = machine_names(s, tuple(a for a in hosts if a in started))
+            absent = readable_names(s, tuple(a for a in hosts if a not in started))
+            failed_names = frozenset(absent.values())
+            names = {**names, **absent}
             _rows, commit = roster(s, args, names, gateway_stdin, expect_offline=failed_names)
         except FailedError as exc:
             failures += [HostFailure(alias, "roster", str(exc)) for alias in hosts]

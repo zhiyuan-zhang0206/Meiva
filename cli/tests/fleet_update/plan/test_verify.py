@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 import pytest
 
 from cli.fleet_update.plan.host_failures import (
+    RESULT_PREFIX,
     HostFailure,
-    incomplete_summary,
     outcome,
+    partial_summary,
     start_failure,
 )
 from cli.fleet_update.plan.roster import (
@@ -238,13 +239,49 @@ def test_every_listed_host_ends_with_serving_its_failures_or_why_it_was_skipped(
     )
 
 
+def _result(lines: tuple[str, ...]) -> dict[str, object]:
+    assert lines[-1].startswith(RESULT_PREFIX)
+    record = json.loads(lines[-1][len(RESULT_PREFIX) :])
+    assert isinstance(record, dict)
+    return record
+
+
 def test_a_partial_up_is_summarised_one_line_per_failure_then_the_count() -> None:
     failures = (
         HostFailure("lin", "start", "boom"),
         HostFailure("mac", "packages refresh", "red"),
     )
-    assert incomplete_summary(failures) == (
+    lines = partial_summary((), failures, gateway="gw")
+    assert lines[:3] == (
         "PARTIAL: lin failed at 'start': boom",
         "PARTIAL: mac failed at 'packages refresh': red",
         "up incomplete: 2 host(s) failed; the rest are serving. Fix each and rerun `up` (idempotent).",
     )
+    assert _result(lines) == {
+        "status": "partial",
+        "deferred": [],
+        "failed": [
+            {"host": "lin", "step": "start", "reason": "boom"},
+            {"host": "mac", "step": "packages refresh", "reason": "red"},
+        ],
+    }
+
+
+def test_a_deferred_runner_is_named_with_its_step_and_in_the_machine_line() -> None:
+    deferred = (HostFailure("lin", "switch", "lin: exit 255: Connection timed out"),)
+    lines = partial_summary(deferred, (), gateway="gw")
+    assert lines[0] == "DEFERRED: lin left out at 'switch': lin: exit 255: Connection timed out"
+    assert any(line.startswith("deferred: lin was left out") for line in lines)
+    assert not any(line.startswith("up incomplete") for line in lines)
+    assert _result(lines)["deferred"] == [
+        {"host": "lin", "step": "switch", "reason": "lin: exit 255: Connection timed out"}
+    ]
+
+
+def test_a_failed_gateway_says_the_old_version_is_not_started_again() -> None:
+    lines = partial_summary((), (HostFailure("gw", "start", "migration failed"),), gateway="gw")
+    assert any("does not start the old version again" in line for line in lines)
+
+
+def test_a_window_with_nothing_left_out_prints_no_summary() -> None:
+    assert partial_summary((), (), gateway="gw") == ()

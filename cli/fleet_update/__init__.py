@@ -16,7 +16,7 @@ from . import choices
 from .down import down
 from .fleet_gate import resolve_target
 from .inputs import UpdateWindowInputs
-from .plan.host_failures import PARTIAL_FAILURE_EXIT, incomplete_summary
+from .plan.host_failures import PARTIAL_FAILURE_EXIT, HostFailure, partial_summary
 from .plan.operation import OperationIdentity, gate_for
 from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
@@ -48,13 +48,35 @@ def _new_target(s: Session, args: choices.FleetArgs, pinned: str | None) -> str 
     return resolved.sha
 
 
+def _partial(s: Session, args: choices.FleetArgs, failures: list[HostFailure]) -> tuple[str, ...]:
+    return partial_summary(tuple(s.deferred.values()), tuple(failures), gateway=args.gateway)
+
+
+def _refusal(args: choices.FleetArgs, env: Mapping[str, str], now: datetime) -> str | None:
+    # meiva:note
+    # The agent-shell marker is spelled out here; its owner is
+    # `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
+    if "MEIVA_AGENT_ID" in env and args.at is None:
+        return (
+            "run from a plain login shell or an OS-owned job, not an Meiva "
+            "agent's shell (a stop closes it); submit the job and return so the agent can drain"
+        )
+    if args.at is None:
+        return None
+    from .scheduling import validate
+
+    return validate(args, now)
+
+
 # meiva:note
 # One window, from validated `FleetArgs` to exit code. Every ambient fact arrives as a value, read
 # once by the entry point: the repository the NEW commit is resolved in, the environment (the PATH
 # that finds `ssh`, and the agent marker that refuses a run from inside an agent), the time the log
 # and the one-shot job names are stamped with, how often to look again while waiting, and the clock
 # those waits are spent on.
-# Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 a partial `up`.
+# Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 partial: the
+# window finished for the gateway and every healthy host, but a runner was deferred or failed
+# its start (the closing lines and the `fleet-update-result:` JSON line name each one).
 # meiva:link cli/docs/fleet-update.md
 def run_window(
     args: choices.FleetArgs,
@@ -72,28 +94,16 @@ def run_window(
     delivered_to: set[int] | None = None,
 ) -> int:
     # meiva:note
-    # The agent-shell marker is spelled out here; its owner is
-    # `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
-    if "MEIVA_AGENT_ID" in env and args.at is None:
-        print(
-            "refused: run from a plain login shell or an OS-owned job, not an Meiva "
-            "agent's shell (a stop closes it); submit the job and return so the agent can drain"
-        )
-        return 2
-    # meiva:note
     # The window mints one identity and stamps it on every host command (task #6024). The gate
     # verdict comes from the target mode the operator asked for, not from what resolution later
     # finds: `track-branch` ships an unreleased branch and is the one mode that records
     # `overridden`, which is the fact a reader needs when asking why a release gate did not
     # stand in the way. An `up`-only half makes no target decision — its gate was decided by the
     # `down` half that switched the checkouts — so it says so instead of claiming a verdict.
+    if (problem := _refusal(args, env, now)) is not None:
+        print(f"refused: {problem}")
+        return 2
     if args.at is not None:
-        from .scheduling import validate
-
-        problem = validate(args, now)
-        if problem is not None:
-            print(f"refused: {problem}")
-            return 2
         initiator = str(args.source)
     operation = _identity(args, operation_id, initiator)
     s = Session(
@@ -112,13 +122,18 @@ def run_window(
     try:
         resolved_new = _new_target(s, args, pinned_new)
         hosts = [args.gateway, *args.runner]
-        unames = s.run_all(hosts, lambda host: s.run(host, "uname -s", effect=False).split()[-1])
-        s.os = dict(zip(hosts, unames, strict=True))
+        s.os = s.gather_hosts(
+            hosts,
+            gateway=args.gateway,
+            step="preflight",
+            work=lambda host: s.run(host, "uname -s", effect=False).split()[-1],
+        )
         if args.at is not None:
             from .scheduling import prepare_submit
 
             prepare_submit(s, args, schedule_inputs, resolved_new)
             return 0
+        failures: list[HostFailure] = []
         for phase in _halves(args.half):
             s.say(f"phase: {phase}")
             if phase == "down":
@@ -138,19 +153,17 @@ def run_window(
                 )
                 continue
             failures = up(s, args)
-            if failures:
-                for line in incomplete_summary(tuple(failures)):
-                    s.say(line)
-                return PARTIAL_FAILURE_EXIT
+        summary = _partial(s, args, failures)
+        for line in summary:
+            s.say(line)
+        return PARTIAL_FAILURE_EXIT if summary else 0
     except FailedError as exc:
-        s.say(
-            f"FAILED: {exc}\nFailed phase: {phase}. Nothing rolled back. "
-            f"Fix it, then rerun `{phase}` (idempotent)."
-        )
+        s.say(f"FAILED: {exc}\nFailed phase: {phase}. Fix it, then rerun `{phase}` (idempotent).")
+        for line in _partial(s, args, []):
+            s.say(line)
         return 2 if isinstance(exc, RefusedError) else 1
     finally:
         s.log.close()
-    return 0
 
 
 def run_parsed(args: argparse.Namespace, inputs: UpdateWindowInputs) -> int:

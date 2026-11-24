@@ -9,7 +9,9 @@ are spent on. The synchronous window receives those facts as inputs. The separat
 - `session.py` owns the connection to the hosts: the operator's own `ssh`, found on the `PATH` the
   process was started with, and the one redacted log. `FailedError` is a step that cannot
   complete; `RefusedError` is a window that refused before touching anything (exit 2). It also
-  declares the `Timers` port and carries the clock the window's waits are spent on.
+  declares the `Timers` port and carries the clock the window's waits are spent on, and the
+  `deferred` ledger of runners left out of the window (`defer`, `live`, `gather_hosts`): only the
+  gateway's failure ends a wave, a runner's is recorded there.
 - `timers.py` is the process clock behind that port: the entry point builds one and hands it to
   the session, so the roster wait reads `Session.timers` and no module here reads `time` for
   itself.

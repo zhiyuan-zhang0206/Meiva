@@ -16,8 +16,18 @@ which once mangled a record carrying a quoted `$HOME`.
 
 ## The failed stop
 
-Only after a stop fails — which hosts the window took down and must bring back
-([The failed-stop recovery](failed-stop-recovery.md)).
+Only after the gateway's stop or switch fails — which hosts the window took down and must bring
+back ([The failed-stop recovery](failed-stop-recovery.md)). A runner's failed command at any step
+defers that runner instead.
+
+## Deferred runners
+
+A runner whose own state refuses it in the probe (uncommitted changes, a post-checkout hook, an
+unfinished release operation) or whose command fails or times out at any step is deferred, not a
+refusal and not an abort: `down` and `up` go on with the gateway and the other runners and the
+window exits 3 naming it ([One runner never strands the cluster](../fleet-update.md#one-runner-never-strands-the-cluster)).
+Malformed probe evidence and the cluster-wide gates (head disagreement, `.python-version`, the
+helper gate, the kept-root gate, the stored schedules) still refuse the whole window.
 
 ## The kept-root gate
 
@@ -89,7 +99,7 @@ down refuses before touching anything — exit 2, no effects — when a listed h
 
 Before anything stops — under --dry-run too — down asks every host whether the root a kept-root choice leaves running can serve NEW ([The kept-root gate](#the-kept-root-gate)); a root of another generation refuses with exit 2. Then down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table warns with the rows listed, continuing; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
 
-After a failed stop, down recovers the hosts that stop took down: [The failed-stop recovery](failed-stop-recovery.md).
+After a failed gateway stop or switch, down recovers the hosts that were taken down: [The failed-stop recovery](failed-stop-recovery.md). A runner failing at any step is deferred and never keeps the gateway or another healthy host stopped; a gateway start failure is the one failure that keeps the cluster stopped (the new start may have migrated the database).
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up shortens it to a 10-minute post-up settle grace after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 

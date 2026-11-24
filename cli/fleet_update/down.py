@@ -1,14 +1,17 @@
 # meiva:note
 # The down half of a window: refuse what cannot work, name what the stops would end, stop every
-# runner and then the gateway, and switch every checkout to NEW. A failed stop brings back the
-# hosts this run already stopped. Each question a step asks of a host is decided in `plan/`; this
-# module reads the hosts, runs the commands and says the lines those decisions return.
+# runner and then the gateway, and switch every checkout to NEW. Only the gateway is essential: a
+# runner whose command fails at any step is deferred (left out, named in the summary) and the
+# window carries on with the healthy hosts. A failed gateway stop or switch ends the window and
+# brings every host this run stopped back on the commit it ran before. Each question a step asks
+# of a host is decided in `plan/`; this module reads the hosts, runs the commands and says the
+# lines those decisions return.
 # meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from .choices import DownChoices, FleetArgs, forwarded_flags, message_flag, start_flags
 from .fleet_gate import baselines, git_in_repo, probe_helper, probe_host, resolve_target
@@ -21,7 +24,7 @@ from .plan.host_commands import (
     stop_command,
     switch_command,
 )
-from .plan.host_failures import NOT_ATTEMPTED_WITHOUT_GATEWAY
+from .plan.host_failures import NOT_ATTEMPTED_WITHOUT_GATEWAY, HostFailure
 from .plan.host_probe import host_refusals, supports_stop_message
 from .plan.journal import HostEvidence, parse_evidence, stop_completed
 from .plan.old_target import (
@@ -95,6 +98,7 @@ class _Preflight:
     serving: frozenset[str]
     rebuilding: frozenset[str] = frozenset()
     legacy_stop: frozenset[str] = frozenset()
+    heads: Mapping[str, str] = field(default_factory=dict)
 
 
 def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
@@ -102,28 +106,55 @@ def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
     return probe_helper(s, alias, new)
 
 
+def _hosts(s: Session, args: FleetArgs) -> tuple[str, ...]:
+    return start_order(args.gateway, s.live(args.runner))
+
+
+@dataclass(frozen=True)
+class _Verdict:
+    reasons: tuple[str, ...]
+    legacy_stop: bool
+
+
+def _probe_verdict(
+    s: Session, args: FleetArgs, alias: str, facts: Mapping[str, str]
+) -> _Verdict | None:
+    try:
+        reasons = host_refusals(alias, facts)
+        legacy = not reasons and not supports_stop_message(alias, facts)
+    except ValueError as exc:
+        raise RefusedError(f"invalid host probe: {exc}") from exc
+    if reasons and alias != args.gateway:
+        s.defer(HostFailure(alias, "preflight", "; ".join(reasons)))
+        return None
+    return _Verdict(reasons, legacy)
+
+
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
-    hosts = start_order(args.gateway, tuple(args.runner))
-    probed = s.run_all(hosts, lambda alias: probe_host(s, alias))
+    probed = s.gather_hosts(
+        _hosts(s, args),
+        gateway=args.gateway,
+        step="preflight",
+        work=lambda alias: probe_host(s, alias),
+    )
     reasons: list[str] = []
     heads: dict[str, str] = {}
     serving: list[str] = []
     legacy_stop: list[str] = []
-    for alias, (facts, was_serving) in zip(hosts, probed, strict=True):
+    for alias, (facts, was_serving) in probed.items():
+        verdict = _probe_verdict(s, args, alias, facts)
+        if verdict is None:
+            continue
+        reasons += verdict.reasons
         heads[alias] = facts.get("head", "")
-        try:
-            host_reasons = host_refusals(alias, facts)
-            reasons += host_reasons
-            if not host_reasons and not supports_stop_message(alias, facts):
-                legacy_stop.append(alias)
-        except ValueError as exc:
-            raise RefusedError(f"invalid host probe: {exc}") from exc
+        if verdict.legacy_stop:
+            legacy_stop.append(alias)
         if was_serving:
             serving.append(alias)
     old = _old_target(s, args, heads, new)
     if reasons or old.reasons:
-        return _Preflight((*reasons, *old.reasons), frozenset(serving))
+        return _Preflight((*reasons, *old.reasons), frozenset(serving), heads=heads)
     # meiva:note
     # The helper gate reads NEW, so every host must hold it first. This fetch is a
     # non-destructive effect the window deliberately accepts before the gate: the gate's own
@@ -134,10 +165,9 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
             (),
             frozenset(serving),
             legacy_stop=frozenset(legacy_stop),
+            heads=heads,
         )
-    gw_facts = _fetch_and_probe(s, args.gateway, new)
-    runner_facts = s.run_all(tuple(args.runner), lambda alias: _fetch_and_probe(s, alias, new))
-    probes = dict(zip(hosts, (gw_facts, *runner_facts), strict=True))
+    probes = _fetch_gateway_first(s, args, new)
     rebuild = args.rebuild_extras
     table = baselines(s.repo)
     try:
@@ -150,7 +180,21 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
         frozenset(serving),
         rebuilding=rebuilding,
         legacy_stop=frozenset(legacy_stop),
+        heads=heads,
     )
+
+
+def _fetch_gateway_first(s: Session, args: FleetArgs, new: str) -> dict[str, dict[str, str]]:
+    probes = {args.gateway: _fetch_and_probe(s, args.gateway, new)}
+    probes.update(
+        s.gather_hosts(
+            s.live(args.runner),
+            gateway=args.gateway,
+            step="fetch",
+            work=lambda alias: _fetch_and_probe(s, alias, new),
+        )
+    )
+    return probes
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
@@ -188,10 +232,14 @@ def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
         selection=args.selection,
         names=args.named.get(args.selection, ()),
     )
-    hosts = start_order(args.gateway, tuple(args.runner))
-    outputs = s.run_all(hosts, lambda alias: s.run(alias, script, effect=False))
+    outputs = s.gather_hosts(
+        _hosts(s, args),
+        gateway=args.gateway,
+        step="root check",
+        work=lambda alias: s.run(alias, script, effect=False),
+    )
     refusals: list[str] = []
-    for alias, output in zip(hosts, outputs, strict=True):
+    for alias, output in outputs.items():
         check = root_check(alias, output, new=new)
         for note in check.notes:
             s.say(note)
@@ -234,8 +282,8 @@ def _restart_wave(s: Session, args: FleetArgs, to_restart: tuple[str, ...]) -> f
 
 
 # meiva:note
-# A failed stop must not leave the cluster half stopped. `plan.recovery` decides which hosts
-# come back; the start is `meiva start` with the operator's explicit selection, never `--boot`:
+# A failed gateway stop must not leave the cluster half stopped. `plan.recovery` decides which
+# hosts come back (a deferred runner is outside the window and is never touched); the start is `meiva start` with the operator's explicit selection, never `--boot`:
 # a boot attempt spends the boot budget, and on macOS the failing attempt that spends it exits 0
 # (launchd has no attempt limit), so a failed recovery would read as success and never reach
 # `needs manual:`.
@@ -247,9 +295,7 @@ def _recover_after_failed_stop(
     stopped: frozenset[str],
     failed: frozenset[str],
 ) -> None:
-    serving_hosts = tuple(
-        alias for alias in start_order(args.gateway, tuple(args.runner)) if alias in serving
-    )
+    serving_hosts = tuple(alias for alias in _hosts(s, args) if alias in serving)
     evidences = s.gather(serving_hosts, lambda alias: host_evidence(s, alias))
     down: list[str] = []
     to_restart: list[str] = []
@@ -300,27 +346,19 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
     )
     steps = stop_steps(
         gateway=args.gateway,
-        runners=tuple(args.runner),
+        runners=s.live(args.runner),
         rebuilding=pre.rebuilding,
         choices=choices,
     )
     runner_steps, gateway_step = steps[:-1], steps[-1]
     stopped: list[str] = []
-    failed: list[str] = []
-    errors: list[FailedError] = []
     for step, outcome in zip(
         runner_steps, s.gather(runner_steps, lambda step: _stop_one(s, step)), strict=True
     ):
         if isinstance(outcome, FailedError):
-            failed.append(step.alias)
-            errors.append(outcome)
+            s.defer(HostFailure(step.alias, "stop", str(outcome)))
         else:
             stopped.append(step.alias)
-    if errors:
-        if not s.dry_run:
-            _recover_after_failed_stop(s, args, pre.serving, frozenset(stopped), frozenset(failed))
-        summary = "; ".join(str(err) for err in errors)
-        raise FailedError(f"{summary}{_STOP_HINT}") from errors[0]
     try:
         _stop_one(s, gateway_step)
     except FailedError as exc:
@@ -329,6 +367,45 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
                 s, args, pre.serving, frozenset(stopped), frozenset({gateway_step.alias})
             )
         raise FailedError(f"{exc}{_STOP_HINT}") from exc
+
+
+def _abort_after_failed_switch(
+    s: Session, args: FleetArgs, pre: _Preflight, error: FailedError
+) -> FailedError:
+    hosts = _hosts(s, args)
+    s.say("recovery: the gateway could not switch; returning every host to the commit it ran")
+    outcomes = s.gather(hosts, lambda alias: s.run(alias, switch_command(pre.heads[alias])))
+    restored: list[str] = []
+    for alias, outcome in zip(hosts, outcomes, strict=True):
+        if isinstance(outcome, FailedError):
+            s.say(f"recovery: {outcome}")
+        elif alias in pre.serving:
+            restored.append(alias)
+    if restored and args.gateway not in restored:
+        s.say(f"recovery: runners not started: {NOT_ATTEMPTED_WITHOUT_GATEWAY}")
+        restored = []
+    recovered = _restart_wave(s, args, tuple(restored))
+    down = tuple(alias for alias in hosts if alias in pre.serving)
+    for line in recovery_report(down, tuple(alias for alias in down if alias in recovered)):
+        s.say(line)
+    return FailedError(f"{error}; the update is aborted and the old version restored where listed")
+
+
+def _switch_wave(s: Session, args: FleetArgs, pre: _Preflight, new: str) -> None:
+    hosts = _hosts(s, args)
+    outcomes = s.gather(hosts, lambda alias: s.run(alias, switch_command(new)))
+    gateway_error: FailedError | None = None
+    for alias, outcome in zip(hosts, outcomes, strict=True):
+        if not isinstance(outcome, FailedError):
+            continue
+        if alias == args.gateway:
+            gateway_error = outcome
+        else:
+            s.defer(HostFailure(alias, "switch", str(outcome)))
+    if gateway_error is not None:
+        if s.dry_run:
+            raise gateway_error
+        raise _abort_after_failed_switch(s, args, pre, gateway_error) from gateway_error
 
 
 # meiva:link cli/docs/fleet-update.md
@@ -344,8 +421,12 @@ def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight
         raise RefusedError("refused: " + "; ".join(pre.reasons))
     _kept_roots(s, args, new)
     _stored_schedules(s, args, new)
-    hosts = start_order(args.gateway, tuple(args.runner))
-    s.run_all(hosts, lambda alias: s.run(alias, prestage_command(new)))
+    s.gather_hosts(
+        _hosts(s, args),
+        gateway=args.gateway,
+        step="prestage",
+        work=lambda alias: s.run(alias, prestage_command(new)),
+    )
     return pre
 
 
@@ -360,7 +441,6 @@ def down(
     if resolved_new is None:
         raise RefusedError("no target to resolve")
     new = resolved_new
-    hosts = start_order(args.gateway, tuple(args.runner))
     if before_stop is not None:
         before_stop()
     silence_note = f" ({args.message_text})" if args.message_text else ""
@@ -374,9 +454,7 @@ def down(
         ),
     )
     _stop_wave(s, args, pre)
-    s.run_all(
-        hosts,
-        lambda alias: s.run(alias, switch_command(new)),
-    )
+    _switch_wave(s, args, pre, new)
     next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"
-    s.say(f"down complete: every host is stopped on {new[:12]}; {next_step}")
+    left_out = f" except {', '.join(s.deferred)}" if s.deferred else ""
+    s.say(f"down complete: every host{left_out} is stopped on {new[:12]}; {next_step}")
