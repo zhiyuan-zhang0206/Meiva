@@ -51,7 +51,7 @@ change, and the evidence it copied is still queryable, and current, in the
 checkpoints table and the observability stack.
 
 Do not re-create it. A question about what a run did is answered by querying
-that run — `.agents/skills/inspect-a-trace/SKILL.md` is the know-how for doing
+that run — `meiva_builtins/skills/platform/meiva-guide/troubleshooting/SKILL.md` is the know-how for doing
 so across checkpoints, Loki, and Tempo. What generalizes out of a run belongs
 on an axis: a structural fact in the package's `README.md` or `docs/`, a rule in
 `docs/conventions/`, a rejected alternative in `docs/decisions/`.
@@ -165,7 +165,7 @@ Process, rule, and observed-behaviour changes → the doc that owns them:
 | Design philosophy / deliberate omissions | `philosophy.md` + `non-goals.md` |
 | SDK docstrings (`meiva/*.py` public API) | `sdk-docstring-discipline.md` |
 | Lint vs sweeper boundary | `lint-vs-sweeper.md` |
-| Observability surfaces (event fields, span attributes, query recipes) | `.agents/skills/inspect-a-trace/` — the skill IS the reconcile target, since nothing else records what a run looks like |
+| Observability surfaces (event fields, span attributes, query recipes) | `meiva_builtins/skills/platform/meiva-guide/troubleshooting/` — the skill IS the reconcile target, since nothing else records what a run looks like |
 | A bug class that already shipped here | `defensive-patterns.md` — plus a `docs/postmortems/` entry when it clears the entry bar |
 
 A directional decision — one that rejected alternatives — also gets a new

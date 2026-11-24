@@ -17,6 +17,8 @@ sub-skills carry executable procedures and their bundled resources.
 
 - `deploy`: acquire dependencies, initialize, and join a runner.
 - `ops`: cluster lifecycle, settings, tracks, and releases.
+- `troubleshooting`: what happened to an agent, machine or service around a time, read from the
+  observability stack (events, Loki, Tempo, metrics) from any machine before local log files.
 - `operations`: health, incident triage, diagnosis, and recovery.
 - `modification-layers`: route L1 installation, L2 skill edits, L3 native plugin
   development, and L4 kernel contributions; built-in changes are L4.

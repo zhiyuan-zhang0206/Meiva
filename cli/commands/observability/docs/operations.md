@@ -70,4 +70,4 @@ An empty sample cannot certify labels and fails the canary. An absent
 `event_name` label or any mismatch also fails; run it only over
 newly emitted rows, since indexed-era data from before the rollout is immutable.
 
-For bounded trace investigation, use [inspect-a-trace](../../../../.agents/skills/inspect-a-trace/SKILL.md).
+For bounded trace investigation, use [troubleshooting](../../../../meiva_builtins/skills/platform/meiva-guide/troubleshooting/SKILL.md).

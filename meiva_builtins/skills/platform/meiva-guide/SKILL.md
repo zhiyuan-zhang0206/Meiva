@@ -49,6 +49,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Install Meiva, initialize a home, or join a runner | [deploy](deploy/SKILL.md) |
 | Start, stop, update, or configure the cluster; manage releases | [ops](ops/SKILL.md) |
 | Have an authorized Meiva agent update its own cluster through an OS-owned job | [ops](ops/SKILL.md), then [agent-initiated updates](ops/references/agent-update.md) |
+| Troubleshoot: what happened to an agent, machine or service around a time; a stuck or misbehaving agent; follow a trace id (events, Loki, Tempo, metrics from any machine, then local logs) | [troubleshooting](troubleshooting/SKILL.md) |
 | Check health, triage alerts, diagnose failures, or recover infrastructure | [operations](operations/SKILL.md) |
 | Decide where a change belongs and how it takes effect (L1–L4) | [modification-layers](modification-layers/SKILL.md) |
 | Understand skills/plugins or manage installed packages | [packages](packages/SKILL.md) |

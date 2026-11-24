@@ -19,8 +19,8 @@ Two sources, in the order you should reach for them:
 
 | Source | Where | Good for |
 |---|---|---|
-| **Tempo** | the cluster's Tempo query URL — `MEIVA_TELEMETRY_TEMPO_QUERY_URL` when Tempo is remote (see below), else `http://localhost:3200` | finding traces (indexed, cross-agent) and fetching one |
-| **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
+| **Tempo** | from any machine: `gq tempo/api/...` through the gateway ([SKILL.md](../SKILL.md#query-the-stack-from-any-machine)); on the station: `MEIVA_TELEMETRY_TEMPO_QUERY_URL` (the scripts below read it), else `http://localhost:3200` | finding traces (indexed, cross-agent) and fetching one |
+| **Grafana** | `<gateway>/grafana/`, datasource uid `tempo` | letting a human browse |
 
 Traces are telemetry: Tempo keeps them for 7 days and there is no other copy. A span
 the collector could not deliver (its queue is bounded and in memory) is lost, and a
@@ -32,14 +32,10 @@ are stripped at record time (`base/telemetry/tracing.py`) — nothing you do to 
 produce them. Content comes from the checkpoint
 ([find-the-run](find-the-run.md)).
 
-**Tempo may not be on this host.** The LGTM host runs Loki, Prometheus, and
-Grafana natively; Tempo is per-cluster config (`MEIVA_TELEMETRY_TEMPO_ENDPOINT`
-for intake, `MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries — see
-`deploy/lgtm/README.md`), so on a split deployment the query URL is the remote
-Tempo and nothing listens on the local 3200. The scripts inherit
-`MEIVA_TELEMETRY_TEMPO_QUERY_URL`; `MEIVA_TRACE_TEMPO_URL` overrides. To find the
-URL by hand, read it from the running Grafana
-(`GET /api/datasources` — the `tempo` datasource's `url` field).
+**Tempo's address is per-cluster config** (`MEIVA_TELEMETRY_TEMPO_ENDPOINT` for intake,
+`MEIVA_TELEMETRY_TEMPO_QUERY_URL` for queries; see `deploy/lgtm/README.md`) and is a loopback
+URL on the station. The scripts inherit `MEIVA_TELEMETRY_TEMPO_QUERY_URL`
+(`MEIVA_TRACE_TEMPO_URL` overrides); anywhere else use `gq`, which needs no URL.
 
 ## Find: TraceQL
 
@@ -49,7 +45,9 @@ All verified against Tempo 3.0.2.
 |---|---|
 | All traces | `{ resource.service.name = "meiva" }` |
 | One trace | `{ trace:id = "<hex-32>" }` |
-| Spans of one agent | `{ span.traceloop.association.properties.agent_id = "3048" }` |
+| Spans of one agent | `{ span.meiva.agent_id = 3048 }` (int) or `{ span.traceloop.association.properties.agent_id = "3048" }` |
+| Spans on one machine | `{ resource.meiva.machine = "company-mini" }` |
+| Claude Code / Codex native spans of one agent | `{ resource.service.name = "claude-code" && resource.meiva.agent_id = "3048" }` (`codex-app-server` for Codex; resource attribute is a string) |
 | All of one agent's turn roots | `{ span.session.id = "3048" }` |
 | One specific turn | `{ span.session.id = "3048" && span.meiva.turn = 17 }` |
 | Spans in one langgraph node | `{ span.traceloop.association.properties.langgraph_node = "after_exec" }` |
@@ -72,6 +70,10 @@ span before querying auto-instrumentation attributes, since a library upgrade
 can rename them.
 
 ## Fetch
+
+The three scripts below live in a Meiva source checkout, `.agents/skills/inspect-a-trace/scripts/`
+(`<scripts>` here), and run with that checkout's `.venv`. Away from a checkout,
+`gq tempo/api/traces/<hex-32>` fetches the same whole trace.
 
 ```bash
 # find first — search returns trace ids

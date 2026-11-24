@@ -120,7 +120,7 @@ levels cannot cover the need.
 **Optional deep dive.** The dataset's transcript is usually enough. When a
 finding hinges on something a transcript cannot show — where the time went, why
 an exec died, what the agent's history looked like before a compaction — read
-the run itself: `meiva.help(meiva.skills.inspect_a_trace)` is the correlation
+the run itself: `meiva.help(meiva.skills.meiva_guide.troubleshooting)` is the correlation
 know-how across the checkpoints table, the Loki event river, and the Tempo
 spans, complementing `evaluate.debrief()` with evidence the agent's own account
 does not carry; it costs a few queries, so reach for it per finding, not per
