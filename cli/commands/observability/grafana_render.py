@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva lgtm render` — the meiva-ops dashboard render, from the metric registries.
+# `meiva observability render` — the meiva-ops dashboard render, from the metric registries.
 #
 # `base.telemetry.metrics.grafana_dashboard` renders the dashboard from the registered
 # `MetricSpec` set and `base.packages.dashboard_supply` collects the plugin side (checkout plugins
@@ -121,7 +121,7 @@ def cmd_grafana_render(
     if not target.parent.is_dir():
         print(
             f"no native Grafana provisioning tree at {target.parent} — this host does not "
-            "run the LGTM observability stack (`meiva lgtm on` or converge installs it)",
+            "run the LGTM observability stack (`meiva observability on` or converge installs it)",
             file=sys.stderr,
         )
         return 1
@@ -150,7 +150,7 @@ def cmd_grafana_render(
             print(f"{target} is absent — the render would create it", file=sys.stderr)
         else:
             _report_diff(target, current, rendered)
-        print("run `meiva lgtm render --force` to write the render", file=sys.stderr)
+        print("run `meiva observability render --force` to write the render", file=sys.stderr)
         return 1
 
     write_text_atomic(

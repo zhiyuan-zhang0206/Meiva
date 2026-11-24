@@ -92,11 +92,11 @@ summaries cover the same information.
 - `meiva-ops-main.json` — the only dashboard, rendered from the metric
   registries since task #3697: `base/telemetry/metrics/grafana_dashboard.py` renders the
   registries into this file's shape (every panel registry-covered, slice
-  S2), `meiva lgtm render` previews (diff) or force-writes the host
+  S2), `meiva observability render` previews (diff) or force-writes the host
   provisioning copy, and converge (every `meiva start`) regenerates its
   provisioning copy from the same render (slice S3) and replaces a differing
   file unconditionally — derived state, no user-edit guard, so a file written
-  by `meiva lgtm render --force` cannot freeze it — plugin installs/uninstalls
+  by `meiva observability render --force` cannot freeze it — plugin installs/uninstalls
   and MetricSpec changes move the panels with no hand mirror here; the
   checked-in copy is the render's reference output.
 - Deleted 2026-08-23 (a dashboard file removed from this directory is
@@ -214,7 +214,7 @@ of mass-editing targets.
    instant over `[$__range]`; every count wraps in `sum(...)`.
 4. `output` selects the surfaces: `["grafana"]`, `["inspector"]`, or both.
 5. **No hand edit**: converge generates `meiva-ops-main.json` from the metric
-   registries (task #3697 S3) and `meiva lgtm render` previews the result —
+   registries (task #3697 S3) and `meiva observability render` previews the result —
    the panel lands under the row named after the plugin (every
    metric-shipping plugin owns a row; ids >= 1000 are renderer-allocated).
    `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered

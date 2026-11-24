@@ -99,7 +99,7 @@ def load_repo_plugin_specs(plugins_dir: Path = REPO_PLUGINS_DIR) -> PluginSpecs:
 
 # meiva:note
 # Cache-by-name leaves only a first concurrent load exposed, and nothing reaches one: the supplier
-# runs from the CLI (`meiva lgtm render`, the converge provisioning step), a single-threaded
+# runs from the CLI (`meiva observability render`, the converge provisioning step), a single-threaded
 # command process, and a `metrics.py` declares `MetricSpec` values rather than Pydantic models, so
 # no annotation is resolved through this entry. A server-side supplier appearing later would need
 # the lock the two face readers hold.
@@ -243,7 +243,7 @@ def render_dashboard_json(
 ) -> tuple[str, tuple[str, ...]]:
     """Render the complete meiva-ops dashboard JSON from the live spec suppliers.
 
-    The one render path shared by the operator command (``meiva lgtm render``)
+    The one render path shared by the operator command (``meiva observability render``)
     and the converge provisioning step (task #3697 S3). ``repo_only`` skips
     the installed-plugin registry read; otherwise the enabled installed
     plugins load from the cluster database. A plugin that fails to load is

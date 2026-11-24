@@ -96,7 +96,7 @@ def _pre_rename_folder(folder: Mapping[str, object]) -> bool:
 # Layers three and four: Grafana serves the dashboard from the `Meiva` folder and no pre-rename
 # folder survives.
 #
-# An unreachable Grafana is one problem and stops there, even on a host that ran `meiva lgtm
+# An unreachable Grafana is one problem and stops there, even on a host that ran `meiva observability
 # off` while its roles still declare the station: the declaration says the host serves the
 # dashboard, so a stopped backend is that claim unmet.
 def grafana_problems(

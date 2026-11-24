@@ -9,7 +9,7 @@ explicit; see [CLI argument discipline](../../../../docs/conventions/engineering
 
 Every verb that starts or converges services takes the same explicit selection:
 `meiva start`, `meiva restart` over the service tree, standalone `meiva converge` and
-`meiva lgtm on|off`. What a start actually launched is a fact of the running tree,
+`meiva observability on|off`. What a start actually launched is a fact of the running tree,
 read from the root's unit manifest (`launched_services` in
 `services/supervision/meiva_root_glue/manifests.py`) only by the observers: health
 probes and `meiva status`. The OS boot job carries the selected services on its own

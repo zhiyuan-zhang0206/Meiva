@@ -47,7 +47,7 @@ which also records what each verb fixes by its own meaning). It covers every lif
   (macOS starts through a LaunchAgent). They never answer a choice for the
   operator. Nothing is inferred from a diff, the environment or an earlier run:
   `meiva start` persists no selection and a bare start is a usage error;
-  `meiva lgtm on|off` and standalone `meiva converge` take the same selection.
+  `meiva observability on|off` and standalone `meiva converge` take the same selection.
 - **Callers forward verbatim.** fleet update passes the operator's choices to
   each host's `meiva stop` / `meiva start` unchanged; internal callers pass
   keyword-only arguments that have no default.

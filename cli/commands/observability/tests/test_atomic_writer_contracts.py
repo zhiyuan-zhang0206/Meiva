@@ -1,5 +1,5 @@
 # meiva:note
-# What the writers under the observability commands promise on disk: `meiva lgtm render` publishes a
+# What the writers under the observability commands promise on disk: `meiva observability render` publishes a
 # world-readable UTF-8 file without leaving temporaries, and a rendered file is published owner-only
 # with its hash recorded only after the write succeeded.
 

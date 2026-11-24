@@ -78,7 +78,7 @@ Why, against the other candidates:
 - Deployment lives in `deploy/lgtm/` (README there is authoritative):
   Loki 3.7.6, Prometheus 3.13.2, Grafana 13.1.3 run as **native launchd
   services on the LGTM host** (macmini, pinned in
-  `deploy/lgtm/native/versions.yml`), lifecycle-owned by `meiva lgtm on/off`
+  `deploy/lgtm/native/versions.yml`), lifecycle-owned by `meiva observability on/off`
   and `deploy/lgtm/start.sh` / `stop.sh`; backend listeners bind loopback
   only; Grafana :3003 is the anonymous read-only surface.
 - **Tempo has no macOS binary**, so it runs on the linux host

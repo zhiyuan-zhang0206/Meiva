@@ -26,7 +26,7 @@ any lifecycle CLI; every choice is specified explicitly. Terms follow the SDK:
   the macOS LaunchAgent start. They never answer a choice.
 - Nothing is derived from an earlier run:
   - The service selection is not persisted.
-  - `meiva lgtm on|off` and standalone `meiva converge` take the selection on their
+  - `meiva observability on|off` and standalone `meiva converge` take the selection on their
     command line.
   - The fleet keep decision is deleted.
 - Callers forward the operator's choices verbatim. The fleet update checks names and

@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva lgtm render` against a real home: the target is `lgtm/native/config/dashboards/` under
+# `meiva observability render` against a real home: the target is `lgtm/native/config/dashboards/` under
 # `tmp_path`, the render is the real metric-registry render (checkout plugins only), and the
 # database factory is the operator one the command is given.
 

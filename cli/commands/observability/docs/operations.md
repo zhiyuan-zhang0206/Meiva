@@ -12,9 +12,9 @@ Current delivery, retention and failure contracts belong to their component owne
 
 ## Change backend selection
 
-On the observability station, `meiva lgtm status` and `meiva status` report root-owned
+On the observability station, `meiva observability status` and `meiva status` report root-owned
 readiness. Configuration or service-selection changes require a normal stop
-before start; stored observation data survives. `meiva lgtm on` and `meiva lgtm off`
+before start; stored observation data survives. `meiva observability on` and `meiva observability off`
 take the operator's explicit service selection, like `meiva start`; it must include the
 four backends for `on` and must not name them for `off`.
 Inspect the rendered configuration and pinned versions through the backend owner

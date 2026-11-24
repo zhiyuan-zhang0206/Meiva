@@ -4,7 +4,7 @@ The fresh executable prelude drops loguru's default handler, so a CLI process th
 opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
 migration files that will not be applied. `meiva start`, `meiva restart`
-and `meiva lgtm on|off` (every in-process `cmd_start`)
+and `meiva observability on|off` (every in-process `cmd_start`)
 open the sinks `base.telemetry.process_logging.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
@@ -106,10 +106,10 @@ def test_the_sinks_a_start_opens_keep_a_loguru_warning_in_stderr_and_the_log(
     ("argv", "name"),
     [
         (["restart"], "cli-restart"),
-        (["lgtm", "on", "--all-services"], "cli-lgtm"),
-        (["lgtm", "off", "--all-services"], "cli-lgtm"),
+        (["observability", "on", "--all-services"], "cli-observability"),
+        (["observability", "off", "--all-services"], "cli-observability"),
         (["status"], None),
-        (["lgtm", "status"], None),
+        (["observability", "status"], None),
     ],
 )
 def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
@@ -245,7 +245,7 @@ def test_main_hands_stop_the_explicit_caller_child_owner(tmp_path: Path) -> None
     assert owners == [shared]
 
 
-@pytest.mark.parametrize("verb", [["start"], ["lgtm", "on"], ["lgtm", "off"]])
+@pytest.mark.parametrize("verb", [["start"], ["observability", "on"], ["obs", "off"]])
 def test_inspection_parser_cannot_launch_without_a_child_owner(verb: list[str]) -> None:
     args = build_parser().parse_args([*verb, "--all-services"])
     with pytest.raises(ValueError, match="caller-owned child retention"):

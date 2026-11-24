@@ -12,7 +12,7 @@ The observability station owns its native services by home path. Default
 ports preserve the single-station layout; isolated homes require explicit,
 non-overlapping native listen ports. Provider identity has two equivalent forms:
 
-- **`$MEIVA_HOME/lgtm-host` marker** (legacy): `meiva lgtm on` writes the marker and
+- **`$MEIVA_HOME/lgtm-host` marker** (legacy): `meiva observability on` writes the marker and
   enables the four backend services through normal `meiva start`, whose converge
   installs any missing pinned native binaries.
 - **`observability-station` unit capability** (declarative): a machine that
@@ -28,7 +28,7 @@ With either form present, Loki, Prometheus, Tempo, and Grafana are ordinary `mei
 services on Darwin arm64 and Linux amd64: the ops roster defines their commands
 and readiness, and every converge prepares the binaries and rendered
 configuration of the selected backends without registering any OS job. A probe
-never restarts a backend. `meiva lgtm status` and `meiva status` show each backend's
+never restarts a backend. `meiva observability status` and `meiva status` show each backend's
 root-owned readiness verdict. A home with neither form never installs or runs
 these backends.
 
@@ -61,7 +61,7 @@ Grafana writes its database, installed plugins, and logs outside the release
 tree. After an interrupted install, converge can publish an intact staged or
 backed-up tree for the current pin before contacting the mirror. It updates the
 version and platform markers before clearing abandoned Grafana work directories.
-`meiva lgtm status` reports the release integrity on the station and
+`meiva observability status` reports the release integrity on the station and
 exits nonzero when it detects drift.
 
 Native templates in `native/config/` are rendered on every converge into
@@ -97,7 +97,7 @@ The four backends are `meiva-root` services of the home that owns them, started
 and stopped only by that home's `meiva start` and `meiva stop` (see Start, stop, and
 rollback below). Converge registers no launchd job, systemd unit, or other OS
 job for them, and nothing enumerates or retires another home's processes.
-`meiva lgtm on` does not configure boot orchestration; the application root's boot
+`meiva observability on` does not configure boot orchestration; the application root's boot
 job is separate.
 
 Host-scoped ports default to the existing values:
@@ -251,10 +251,10 @@ the window before changing anything.
 ```bash
 meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
                                # planned shutdown before changing the root generation
-meiva lgtm on --all-services   # mark the station and start the named selection (it must include the backends)
-meiva lgtm status              # root-owned protocol readiness
+meiva observability on --all-services   # mark the station and start the named selection (it must include the backends)
+meiva observability status              # root-owned protocol readiness
 meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --keep-no-services --stop-infra --mode smooth --timeout 300
-meiva lgtm off --disable-service loki --disable-service prometheus --disable-service tempo --disable-service grafana
+meiva observability off --disable-service loki --disable-service prometheus --disable-service tempo --disable-service grafana
                                # retract the station and start without the backends; data persists
 ```
 

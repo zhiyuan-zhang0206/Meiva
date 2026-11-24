@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva lgtm on|off`: the station marker, then the operator's own start selection.
+# `meiva observability on|off`: the station marker, then the operator's own start selection.
 #
 # The marker is a file in the home, so its presence is asserted on disk. The start the toggle drives
 # is real: a root that already runs the requested generation is reused, and that generation covers
