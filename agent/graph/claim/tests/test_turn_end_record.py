@@ -53,6 +53,8 @@ from base.lm.harness import (
     FileSessionRegistry,
     HarnessInput,
     HarnessTurn,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
@@ -425,3 +427,127 @@ async def test_locked_ledger_preserves_every_report_and_finishes_the_turn(
     ]
     with psycopg.connect(db_url) as conn:
         assert conn.execute("SELECT count(*) FROM llm_usage_ledger").fetchone() == (0,)
+
+
+_MARKED = "MEIVA_HIDE_FROM_USER\nWorking on it."
+_DISPLAYED = "MEIVA_DISPLAY_TO_USER\nHere is the answer."
+_UNMARKED = "Now the functions."
+
+
+def _text(text: str) -> AssistantText:
+    return AssistantText(turn_id="t1", text=text)
+
+
+def _tool(name: str = "Read", *, parent: str | None = None) -> tuple[ToolUse, ToolResult]:
+    use = ToolUse(
+        turn_id="t1", tool_use_id=f"{name}-1", name=name, tool_input={}, parent_tool_use_id=parent
+    )
+    result = ToolResult(
+        turn_id="t1",
+        tool_use_id=use.tool_use_id,
+        is_error=False,
+        content="ok",
+        parent_tool_use_id=parent,
+    )
+    return use, result
+
+
+def _sink(
+    tmp_path: Path, live_events: LiveEvents, harness: Harness, *, non_human_wake: bool, mode: str
+) -> ReadTimelineSink:
+    ctx = MeivaContext(
+        agent=AgentSlices.resolve({"user_delivery_mode": mode}, default_reader=defaults()),
+        harness=harness,
+        meiva_home=tmp_path,
+        environ={"HOME": str(tmp_path)},
+    )
+    return ReadTimelineSink(
+        ctx, 100, live_events.publisher, non_human_wake=non_human_wake, session_id=lambda: None
+    )
+
+
+async def _verdict(sink: ReadTimelineSink, events: tuple[BridgeEvent, ...]) -> bool:
+    for event in events:
+        await sink.on_event(event)
+    return sink.take_invalid_reply()
+
+
+_ALL_HARNESSES = [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY]
+
+
+@pytest.mark.parametrize("harness", _ALL_HARNESSES)
+@pytest.mark.parametrize("final", [_UNMARKED, _MARKED, _DISPLAYED])
+async def test_a_reply_to_a_non_human_wake_is_never_corrected(
+    tmp_path: Path, live_events: LiveEvents, harness: Harness, final: str
+) -> None:
+    sink = _sink(tmp_path, live_events, harness, non_human_wake=True, mode="prefix")
+    use, result = _tool()
+    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(final))) is False
+
+
+@pytest.mark.parametrize("harness", _ALL_HARNESSES)
+async def test_unmarked_narration_before_a_tool_call_is_not_corrected_when_the_final_reply_is_marked(
+    tmp_path: Path, live_events: LiveEvents, harness: Harness
+) -> None:
+    for final in (_MARKED, _DISPLAYED):
+        sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
+        use, result = _tool()
+        events = (_text(_UNMARKED), use, result, _text(_UNMARKED), use, result, _text(final))
+        assert await _verdict(sink, events) is False
+
+
+@pytest.mark.parametrize("harness", _ALL_HARNESSES)
+async def test_an_unmarked_final_reply_to_a_human_is_corrected(
+    tmp_path: Path, live_events: LiveEvents, harness: Harness
+) -> None:
+    sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
+    use, result = _tool()
+    assert await _verdict(sink, (_text(_MARKED), use, result, _text("The answer."))) is True
+    assert sink.take_invalid_reply() is False
+
+
+async def test_an_unmarked_block_followed_by_a_marked_one_is_not_corrected(
+    tmp_path: Path, live_events: LiveEvents
+) -> None:
+    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+    assert await _verdict(sink, (_text(_UNMARKED), _text(_DISPLAYED))) is False
+
+
+async def test_unmarked_narration_that_ends_the_turn_on_a_tool_call_is_not_corrected(
+    tmp_path: Path, live_events: LiveEvents
+) -> None:
+    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+    use, _ = _tool()
+    assert await _verdict(sink, (_text(_UNMARKED), use)) is False
+
+
+async def test_a_tool_call_of_a_sub_agent_does_not_clear_the_unmarked_final_reply(
+    tmp_path: Path, live_events: LiveEvents
+) -> None:
+    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+    use, result = _tool(parent="parent-call")
+    assert await _verdict(sink, (_text(_UNMARKED), use, result)) is True
+
+
+async def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable(
+    tmp_path: Path, live_events: LiveEvents
+) -> None:
+    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=True, mode="prefix")
+    use, result = _tool()
+    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is False
+
+    async def commit() -> None:
+        return None
+
+    await sink.append_inbound(commit, human_input=True)
+    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is True
+    await sink.append_inbound(commit, human_input=True)
+    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(_DISPLAYED))) is False
+
+
+@pytest.mark.parametrize("mode", ["naive", "sdk"])
+async def test_modes_without_a_visibility_prefix_never_correct(
+    tmp_path: Path, live_events: LiveEvents, mode: str
+) -> None:
+    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode=mode)
+    assert await _verdict(sink, (_text("The answer."),)) is False

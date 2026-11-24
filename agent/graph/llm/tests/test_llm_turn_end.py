@@ -176,6 +176,20 @@ async def test_relaxed_visibility_prefixes_halt_without_correction(
     assert len(command_messages(result)) == 1
 
 
+async def test_an_unmarked_reply_to_a_non_human_wake_halts_without_correction(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    model = ScriptedModel(scripts=[[end_turn_chunk("Unmarked.")]])
+    bg_state = AgentState(
+        messages=[HumanMessage(content="[agent:8] done")], halted=False, non_human_wake=True
+    )
+    runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate)
+    result = await llm_node(bg_state, runtime, _config_with_thread(), rng=_rng())
+    assert result.goto == "claim"
+    assert command_update(result)["halted"] is True
+    assert len(command_messages(result)) == 1
+
+
 @pytest.mark.parametrize(
     ("retry_text", "note_count"),
     [("MEIVA_DISPLAY_TO_USER\nHere is the answer.", 0), ("Still unmarked.", 1)],

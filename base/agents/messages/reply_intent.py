@@ -23,9 +23,9 @@ REPLY_VISIBILITY_RULE = (
     f"Text under {HIDE_FROM_USER} is folded into Details, which the user can expand and read."
 )
 REPLY_VISIBILITY_CORRECTION = (
-    "Your previous output contained text with a missing or invalid visibility prefix. "
+    "Your final reply to the user's message had a missing or invalid visibility prefix. "
     "That text was folded into Details. "
-    f"{REPLY_VISIBILITY_RULE} If it was a user-facing reply, resend it with the display prefix."
+    f"{REPLY_VISIBILITY_RULE} If it was meant for the user, resend it with the display prefix."
 )
 
 

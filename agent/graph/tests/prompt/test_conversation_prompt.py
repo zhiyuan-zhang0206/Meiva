@@ -168,6 +168,12 @@ def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
         assert HIDE_FROM_USER in section
         assert "folded into Details, which the user can expand and read" in section
         assert "human and background wakes alike" in section
+        assert "Tool calls, tool results and reasoning do not need a prefix" not in section
+        assert (
+            "A tool call with no accompanying text, tool results and reasoning need no prefix; "
+            "but any text you write, even one short remark right before a tool call, must "
+            f"start with {HIDE_FROM_USER} (or {DISPLAY_TO_USER} for a user-facing message)"
+        ) in section
 
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
@@ -354,7 +360,7 @@ def test_build_harness_system_prompt_leaves_non_claude_harnesses_unchanged() -> 
 _FAST_ACK_MODE_PHRASES: dict[str, tuple[str, str, str]] = {
     "prefix": (
         f"emit one brief `{DISPLAY_TO_USER}`",
-        f"use `{HIDE_FROM_USER}` for all tool calls",
+        f"start every text block you write, including a one-line remark before a tool call, with `{HIDE_FROM_USER}`",
         f"only then use `{DISPLAY_TO_USER}`",
     ),
     "sdk": (

@@ -36,10 +36,13 @@ no non-blank body is valid and projects to an empty Details item without
 triggering a correction; a leading incomplete fragment that can still form
 either marker is withheld while streaming (`""`, hidden) but remains invalid if
 finalized. Other missing or malformed markers preserve the raw text in Details.
-Invalid blocks still trigger a `reply_visibility` system note for the model. The native driver puts tool
-response corrections after the tool results, and retries a malformed terminal
-reply once. The external harness driver sends the correction as a separate turn
-with a distinct idempotency key and at most one retry.
+A `reply_visibility` system note for the model corrects only the closing text block of a turn a human is
+waiting on: text without a marker is folded into Details exactly like a hidden block, so a block the agent's own
+tool call follows (narration between calls) and any reply to a non-human wake (agent message, system note,
+heartbeat) never triggers one. A later marked block replaces an earlier unmarked one as the closing text. The
+native driver retries a malformed terminal reply once. The external harness driver sends the correction as a
+separate turn with a distinct idempotency key and at most one retry; a human input that arrives during the run
+makes it a human run.
 
 `meiva_explicit_visibility` marks new checkpoint output. Native chat SSE carries the corresponding `explicit_visibility` field.
 External harness activity snapshots carry the projected body and `user_facing`. Historical output without the marker retains
