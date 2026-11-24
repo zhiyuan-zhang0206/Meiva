@@ -69,8 +69,22 @@ Each batch commits independently. Re-running the same interval skips imported
 or dual-written IDs. Existing prices survive intact. Historical rows with no
 price can use the versioned archive at the stored time and carry
 `historical_catalog` as provenance. The batch size defaults to 1,000 reports
-to limit transaction duration. Compare counts, tokens and USD by UTC day,
-model and billing before cutting readers over.
+to limit transaction duration.
+
+Before cutting readers over, run `meiva metrics usage-ledger-reconcile --start
+YYYY-MM-DD --end YYYY-MM-DD` for the same UTC interval. It compares retained
+telemetry and ledger totals by UTC day, reported model and billing in one
+read-only snapshot. Run large backfills one UTC day at a time. The JSON report
+lists source events, repeated IDs, totals from each side, and record differences
+by `call_id`. A record difference reports a missing side or lists the fields that
+differ. USD values in the totals are decimal strings. `historical_price_usd`
+identifies the part reconstructed from the catalog. `live_writers` counts priced
+live rows by the machine stored in the ledger. A process is reported only when
+matching telemetry from the same machine, cluster and usage timestamp identifies
+one process after the row was recorded. Otherwise the process is `null`. The
+command exits 1 for any record or group difference. A report persisted across UTC midnight or
+telemetry still in transit can produce a boundary difference. Compare adjacent
+days together when investigating it.
 
 ## Selecting usage scopes
 
