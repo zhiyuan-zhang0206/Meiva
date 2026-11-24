@@ -6,7 +6,7 @@ are read from `audit_events` (`base/events/reads/audit_rows.py`) and telemetry a
 log rows from `telemetry_events` (`gateway/events/telemetry_rows.py`), both in
 Postgres and both permanent. A request that spans both is answered by one
 merge, newest first. `telemetry_events` stores only the events a reader queries by name and
-every event at warning level or above, so a trace's full chain is in Loki (84 hours) or the
+every event at warning level or above, so a trace's full chain is in Loki (7 days) or the
 JSONL event mirror.
 
 Filters compose (AND): `category` / `event_name` / `tier` / `agent_id` /
@@ -171,7 +171,7 @@ def get_events(
       - `trace_id=<hex>`: the events of one turn that share the id and that
         Postgres stores. `telemetry_events` keeps only the events a reader queries
         by name (`persist=True` in the registry) and every event at warning level or
-        above, so this is not the whole chain: read the rest from Loki (84-hour
+        above, so this is not the whole chain: read the rest from Loki (7-day
         window) or the JSONL event mirror.
       - `machine=<name>`: the host dimension.
       - `level=<debug|info|warning|error|critical>`: exact match,

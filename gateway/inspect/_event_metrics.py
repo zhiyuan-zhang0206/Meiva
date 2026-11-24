@@ -1,7 +1,7 @@
 """Inspector event metrics over the event record — the LogQL templates, evaluated on Postgres.
 
 Metric specs write one LogQL template for the Grafana panel and the inspector panel alike. The
-inspector no longer asks Loki (whose copy keeps 84 hours): this module reads the same templates
+inspector no longer asks Loki (whose copy keeps 7 days): this module reads the same templates
 and answers them from `telemetry_events` and `audit_events`, over the inspector's fixed window in
 hourly steps. Only the vocabulary the registry's builders write is understood:
 

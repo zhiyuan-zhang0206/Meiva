@@ -1,7 +1,7 @@
 """Reads of the telemetry and log record — `telemetry_events` (Postgres) in the event row shape.
 
 `category=telemetry` and `category=log` events are recorded in Postgres by the emitter
-(`base/telemetry/event_store.py`); Loki holds only an observation copy that expires after 84 hours.
+(`base/telemetry/event_store.py`); Loki holds only an observation copy that expires after 7 days.
 Every reader that needs their history reads here: `/api/events`, the per-agent events query, the
 run timeline and the inspector metrics. Filters mean what they meant on the Loki reader, and rows
 come back in the same dict shape `audit_rows.query_events` returns, so one merge serves both.
