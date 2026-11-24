@@ -57,7 +57,13 @@ def _query(target: str) -> dict[str, list[str]]:
 def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    body = _report([_agent(7, cost=3.456, label="ops"), _agent(8, cost=0.5)])
+    ledger_totals = {
+        "cost_usd_api": 3.456,
+        "cost_usd_subscription": 1.25,
+        "usage_incomplete_reports": 2,
+        "usage_unpriced_calls": 3,
+    }
+    body = _report([_agent(7, cost=4.706, label="ops") | ledger_totals, _agent(8, cost=0.5)])
     with serving({AGENTS: Reply(body=body)}) as gateway:
         code = cmd_metrics_agents(
             access_to(gateway.url), days=None, since_compact=False, as_json=False
@@ -67,7 +73,10 @@ def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
     out = capsys.readouterr().out.splitlines()
     assert out[0].split() == [
         "agent",
-        "cost_usd",
+        "api_usd",
+        "virtual_usd",
+        "incomplete",
+        "unpriced",
         "calls",
         "tokens_in",
         "tokens_out",
@@ -81,6 +90,9 @@ def test_metrics_agents_without_a_window_sends_none_and_prints_the_table(
     assert out[1].split() == [
         "7",
         "3.46",
+        "1.25",
+        "2",
+        "3",
         "40",
         "1000",
         "200",
@@ -171,21 +183,23 @@ def test_stats_prints_the_totals_and_the_plugin_cards(capsys: pytest.CaptureFixt
             "updated_by": None,
         }
     ]
-    with serving({DASHBOARD: Reply(body=_dashboard(cards))}) as gateway:
+    dashboard = _dashboard(cards) | {"usage_unpriced_calls": 3, "usage_incomplete_reports": 2}
+    with serving({DASHBOARD: Reply(body=dashboard)}) as gateway:
         assert cmd_stats(access_to(gateway.url), hours=None, as_json=False) == 0
     assert [r.target for r in gateway.requests] == ["/api/stats/dashboard"]
     out = capsys.readouterr().out.splitlines()
-    assert out[:7] == [
+    assert out[:8] == [
         "window:        last 24 hour(s)",
         "live agents:   12",
         "tokens:        in 1000, out 200, cache read 500, cache hit 50.0%",
-        "cost (usd):    api 12.50 (openai unknown, anthropic 4.25, google 1.15), subscription 3.00",
+        "cost (usd):    api 12.50 (openai unknown, anthropic 4.25, google 1.15), subscription (virtual) 3.00",
+        "usage coverage: 3 calls without price, 2 incomplete reports",
         "alerts:        2 unresolved (1 critical, 1 error, 0 warning)",
         "diagnostics:   2 active (4 events: 1 errors, 3 anomalies), 1 archived (sha abc1234)",
         "",
     ]
-    assert out[7].split() == ["plugin", "id", "status", "value", "updated", "detail"]
-    assert out[8].split() == [
+    assert out[8].split() == ["plugin", "id", "status", "value", "updated", "detail"]
+    assert out[9].split() == [
         "meiva_usage",
         "deepseek-balance",
         "ok",

@@ -262,6 +262,8 @@ def _compute_stats_dashboard(
         ),
         cost_usd=totals.cost_usd,
         subscription_cost_usd=totals.subscription_cost_usd,
+        usage_unpriced_calls=totals.unpriced_calls,
+        usage_incomplete_reports=totals.incomplete_reports,
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
         google_cost_usd=google_cost_usd,

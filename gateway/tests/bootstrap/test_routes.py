@@ -20,11 +20,16 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.api_contracts.agent_contract import harness_billing_of_source
 from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from gateway.tests.auth.gateway_config import gateway_test_client
+
+
+def _reported_count(value: object) -> int | None:
+    return value if type(value) is int else None
 
 
 class _EventRows:
@@ -58,6 +63,35 @@ class _EventRows:
                 (uid, when, agent_id, event, level, attributes),
             )
             return
+        if event == "llm_usage" and category == "telemetry":
+            fields = payload or {}
+            source = fields.get("source")
+            cost = fields.get("cost_usd")
+            self._db.execute(
+                """
+                INSERT INTO llm_usage_ledger
+                    (call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind,
+                     model, calls, complete, tokens_in, tokens_out, cache_read, cost_usd,
+                     price_source, price_snapshot)
+                VALUES (%s, %s, %s, 'test', %s, %s, %s, 'test', %s, %s, %s, %s, %s, %s, %s, %s, '{}')
+                """,
+                (
+                    f"api:{uid}",
+                    when,
+                    agent_id,
+                    cluster or cluster_label(meiva_home()),
+                    source,
+                    harness_billing_of_source(source if isinstance(source, str) else None).value,
+                    fields.get("model", ""),
+                    fields.get("calls", 1),
+                    fields.get("complete", True),
+                    _reported_count(fields.get("in_total")),
+                    _reported_count(fields.get("out_total")),
+                    _reported_count(fields.get("cache_read")),
+                    cost,
+                    "live" if cost is not None else None,
+                ),
+            )
         self._db.execute(
             "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
             "category, event_name, level, source, attributes, deployed_sha) VALUES (%s, %s, %s, 'test', %s, "
@@ -654,7 +688,7 @@ def test_dashboard_counts_the_home_cluster_and_unlabelled_rows_only(
     assert body["tokens"]["input"] == 0
 
 
-def test_dashboard_leaves_out_values_that_are_not_numbers(
+def test_dashboard_sums_known_counts_in_partially_reported_usage(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     event_rows.add(event="llm_usage", payload={"in_total": 10, "cost_usd": 0.5})

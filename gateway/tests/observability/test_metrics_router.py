@@ -51,6 +51,26 @@ def _insert_event(
         attributes=payload or {},
     )
 
+    if event == "llm_usage":
+        db.execute(
+            """
+            INSERT INTO llm_usage_ledger
+                (call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind,
+                 model, calls, complete, tokens_in, tokens_out, cache_read, tokens_reasoning,
+                 cost_usd, price_source, price_snapshot)
+            SELECT 'api:' || event_uid, ts, agent_id, machine, cluster, attributes->>'source',
+                CASE WHEN attributes->>'source' IN ('claude_code','codex','antigravity')
+                     THEN 'subscription' ELSE 'api' END,
+                'test', COALESCE(attributes->>'model', ''), COALESCE((attributes->>'calls')::bigint, 1),
+                COALESCE((attributes->>'complete')::boolean, TRUE), (attributes->>'in_total')::bigint,
+                (attributes->>'out_total')::bigint, (attributes->>'cache_read')::bigint,
+                (attributes->>'reasoning')::bigint, (attributes->>'cost_usd')::numeric,
+                CASE WHEN attributes->>'cost_usd' IS NOT NULL THEN 'live' END, '{}'
+            FROM telemetry_events WHERE event_name = 'llm_usage'
+            ON CONFLICT (call_id) DO NOTHING
+            """
+        )
+
 
 def test_metrics_empty_db_returns_envelope_with_all_units(db_conn: psycopg.Connection) -> None:
     db_conn.commit()
@@ -197,6 +217,9 @@ def test_metrics_agents_empty(db_conn: psycopg.Connection) -> None:
 def _assert_expensive_agent_metrics(row: dict[str, Any]) -> None:
     assert row["label"] == "agent-two"
     assert row["cost_usd"] == 30.0
+    assert row["cost_usd_api"] == 0
+    assert row["cost_usd_subscription"] == 30.0
+    assert row["usage_incomplete_reports"] == 1
     assert row["llm_calls"] == 1
     assert row["exec_ok"] == 1
     assert row["exec_failed"] == 0
@@ -241,6 +264,8 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection) -> None:
             "out_total": 1_000_000,
             "cache_read": 0,
             "model": "claude-opus-4-8",
+            "source": "claude_code",
+            "complete": False,
             "cost_usd": 30.0,
         },
     )

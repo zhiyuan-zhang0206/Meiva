@@ -2,7 +2,7 @@
 
 The digest's units reduce the window's telemetry and log rows to a handful of aggregates (counts,
 sums, distributions, per-key counters, position buckets). Each aggregate is computed by a few
-statements over `telemetry_events` in one connection; nothing materializes the rows. Every
+statements over `telemetry_events` in one connection; nothing materializes the rows. Usage statements read the usage ledger. Every
 statement shares one scope: category telemetry or log (the table holds nothing else), the window
 `[now - days, now]`, an optional single agent, and, with `since_compact`, each agent's rows
 narrowed to those at or after its latest compact halt (service rows, which have no agent, are
@@ -25,7 +25,6 @@ from typing import NamedTuple, TypedDict
 
 import psycopg
 
-from base.api_contracts.agent_contract import HARNESS_BILLING, HarnessBilling
 from base.db.rows import query_all
 from base.events.contract import (
     AGENT_SPAWNED_KEYS,
@@ -33,7 +32,6 @@ from base.events.contract import (
     EXEC_FAILED_KEYS,
     EXEC_KEYS,
     HALT_KEYS,
-    LLM_USAGE_KEYS,
     PLUGIN_ACTIVATION_KEYS,
     TURN_END_KEYS,
 )
@@ -134,7 +132,9 @@ class _CostRow:
     agent_id: int | None
     model: str
     recorded: Decimal
+    subscription: Decimal
     missing: int
+    incomplete: int
 
 
 # meiva:note
@@ -209,6 +209,8 @@ class _Scope:
         end: datetime,
         agent_id: int | None,
         cutoffs: dict[int, datetime],
+        *,
+        usage: bool = False,
     ) -> None:
         self.params: dict[str, object] = {
             "start": start,
@@ -218,8 +220,10 @@ class _Scope:
             "cut_times": list(cutoffs.values()),
             "fail": EXEC_FAILURE_EVENTS,
         }
-        self.from_sql = "telemetry_events t"
-        self.where_sql = "t.ts >= %(start)s AND t.ts <= %(end)s"
+        self.from_sql = "llm_usage_ledger t" if usage else "telemetry_events t"
+        timestamp = "t.occurred_at" if usage else "t.ts"
+        end_operator = "<" if usage else "<="
+        self.where_sql = f"{timestamp} >= %(start)s AND {timestamp} {end_operator} %(end)s"
         if agent_id is not None:
             self.where_sql += " AND t.agent_id = %(agent)s"
         if cutoffs:
@@ -227,7 +231,9 @@ class _Scope:
                 " LEFT JOIN unnest(%(cut_agents)s::bigint[], %(cut_times)s::timestamptz[])"
                 " AS c(agent_id, cutoff) ON c.agent_id = t.agent_id"
             )
-            self.where_sql += " AND (t.agent_id IS NULL OR t.ts >= COALESCE(c.cutoff, '-infinity'))"
+            self.where_sql += (
+                f" AND (t.agent_id IS NULL OR {timestamp} >= COALESCE(c.cutoff, '-infinity'))"
+            )
 
     # meiva:note
     # `SELECT <select> FROM <scope> WHERE <scope> [AND extra] <tail>` as `row_class` rows.
@@ -341,14 +347,12 @@ def _llm_sums(
     sums = scope.run(
         conn,
         _LlmSumRow,
-        f"t.agent_id AS agent_id, COALESCE({LLM_USAGE_KEYS['model']}, '') AS model, "
-        f"count(*) AS calls, "
-        f"COALESCE(sum({_n(LLM_USAGE_KEYS['in_total'])}), 0)::bigint AS tin, "
-        f"COALESCE(sum({_n(LLM_USAGE_KEYS['out_total'])}), 0)::bigint AS tout, "
-        f"COALESCE(sum({_n(LLM_USAGE_KEYS['cache_read'])}), 0)::bigint AS cached, "
-        f"COALESCE(sum({_n(LLM_USAGE_KEYS['reasoning'])}), 0)::bigint AS reasoning",
-        "t.event_name = 'llm_usage'",
-        "GROUP BY t.agent_id, 2",
+        "t.agent_id, t.model, sum(t.calls)::bigint AS calls, "
+        "COALESCE(sum(t.tokens_in), 0)::bigint AS tin, "
+        "COALESCE(sum(t.tokens_out), 0)::bigint AS tout, "
+        "COALESCE(sum(t.cache_read), 0)::bigint AS cached, "
+        "COALESCE(sum(t.tokens_reasoning), 0)::bigint AS reasoning",
+        tail="GROUP BY t.agent_id, t.model",
     )
     per_agent: dict[int | None, dict[str, tuple[int, int, int, int, int]]] = {}
     for row in sums:
@@ -367,6 +371,8 @@ class LlmCostSums(NamedTuple):
 
     cost: float
     unpriced: int
+    subscription: float = 0
+    incomplete: int = 0
 
 
 def _llm_cache_input(scope: _Scope, conn: psycopg.Connection) -> dict[int | None, int]:
@@ -374,44 +380,29 @@ def _llm_cache_input(scope: _Scope, conn: psycopg.Connection) -> dict[int | None
     rows = scope.run(
         conn,
         _CacheInputRow,
-        f"t.agent_id AS agent_id, COALESCE(sum({_n(LLM_USAGE_KEYS['in_total'])}), 0)::bigint AS tin",
-        f"t.event_name = 'llm_usage' AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL",
+        "t.agent_id, COALESCE(sum(t.tokens_in), 0)::bigint AS tin",
+        "t.cache_read IS NOT NULL",
         "GROUP BY t.agent_id",
     )
     return {row.agent_id: row.tin for row in rows}
 
 
-SUBSCRIPTION_LLM_SOURCES = tuple(
-    sorted(h.value for h, b in HARNESS_BILLING.items() if b is HarnessBilling.SUBSCRIPTION)
-)
-_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_LLM_SOURCES)
-
-
 def _llm_cost_sums(
     scope: _Scope, conn: psycopg.Connection
 ) -> dict[int | None, dict[str, LlmCostSums]]:
-    """Recorded costs and explicitly unpriced calls per agent and model."""
-    cost = _n(LLM_USAGE_KEYS["cost_usd"])
-    unpriced = _n(LLM_USAGE_KEYS["unpriced"], "integer")
-    cost_expr = (
-        f"COALESCE(sum({cost}) FILTER (WHERE COALESCE({LLM_USAGE_KEYS['source']}, '') "
-        f"NOT IN ({_SUBSCRIPTION_SOURCES_SQL})), 0)"
-        if scope.params["agent"] is None
-        else f"COALESCE(sum({cost}), 0)"
-    )
     sums = scope.run(
         conn,
         _CostRow,
-        f"t.agent_id AS agent_id, COALESCE({LLM_USAGE_KEYS['model']}, '') AS model, "
-        f"{cost_expr} AS recorded, "
-        f"count(*) FILTER (WHERE {cost} IS NULL AND {unpriced} = 1) AS missing",
-        "t.event_name = 'llm_usage'",
-        "GROUP BY t.agent_id, 2",
+        "t.agent_id, t.model, COALESCE(sum(t.cost_usd), 0) AS recorded, "
+        "COALESCE(sum(t.cost_usd) FILTER (WHERE t.billing = 'subscription'), 0) AS subscription, "
+        "COALESCE(sum(t.calls) FILTER (WHERE t.cost_usd IS NULL), 0)::bigint AS missing, "
+        "count(*) FILTER (WHERE NOT t.complete) AS incomplete",
+        tail="GROUP BY t.agent_id, t.model",
     )
     result: dict[int | None, dict[str, LlmCostSums]] = {}
     for row in sums:
         result.setdefault(row.agent_id, {})[row.model] = LlmCostSums(
-            float(row.recorded), row.missing
+            float(row.recorded), row.missing, float(row.subscription), row.incomplete
         )
     return result
 
@@ -424,12 +415,10 @@ def _llm_position(scope: _Scope, conn: psycopg.Connection) -> dict[str, tuple[in
         "COALESCE(sum(tin), 0)::bigint AS tin FROM ("
         "SELECT CASE WHEN 3 * ordinal < total THEN 'early' WHEN 3 * ordinal < 2 * total "
         "THEN 'mid' ELSE 'late' END AS bucket, cached, tin FROM ("
-        "SELECT row_number() OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) - 1 AS ordinal, "
+        "SELECT row_number() OVER (PARTITION BY t.agent_id ORDER BY t.occurred_at, t.call_id) - 1 AS ordinal, "
         "count(*) OVER (PARTITION BY t.agent_id) AS total, "
-        f"COALESCE({_n(LLM_USAGE_KEYS['cache_read'])}, 0) AS cached, "
-        f"COALESCE({_n(LLM_USAGE_KEYS['in_total'])}, 0) AS tin "
-        f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.event_name = 'llm_usage' "
-        f"AND {_n(LLM_USAGE_KEYS['cache_read'])} IS NOT NULL) r) s "
+        "COALESCE(t.cache_read, 0) AS cached, COALESCE(t.tokens_in, 0) AS tin "
+        f"FROM {scope.from_sql} WHERE {scope.where_sql} AND t.cache_read IS NOT NULL) r) s "
         "GROUP BY bucket"
     )
     ranked = query_all(conn, _PositionRow, query.encode(), scope.params)
@@ -488,7 +477,8 @@ def read_window(
     scope = _Scope(start, end, agent_id, cutoffs)
 
     per_agent = _per_agent_counters(scope, conn)
-    llm_per_agent = _llm_sums(scope, conn)
+    usage = _Scope(start, end, agent_id, cutoffs, usage=True)
+    llm_per_agent = _llm_sums(usage, conn)
     spawners = {
         row.name: row.n
         for row in scope.run(
@@ -519,9 +509,9 @@ def read_window(
         "failure_types": _failure_types(scope, conn),
         "lengths": _lengths(scope, conn),
         "llm_per_agent": llm_per_agent,
-        "llm_cache_input": _llm_cache_input(scope, conn),
-        "llm_costs": _llm_cost_sums(scope, conn),
-        "llm_position": _llm_position(scope, conn),
+        "llm_cache_input": _llm_cache_input(usage, conn),
+        "llm_costs": _llm_cost_sums(usage, conn),
+        "llm_position": _llm_position(usage, conn),
         "spawners": spawners,
         "plugin_acts": plugin_acts,
     }
@@ -539,9 +529,10 @@ def read_agent_window(
     start = end - timedelta(days=days)
     cutoffs = _cutoffs(conn, start, end, None) if since_compact else {}
     scope = _Scope(start, end, None, cutoffs)
+    usage = _Scope(start, end, None, cutoffs, usage=True)
     return {
         "per_agent": _per_agent_counters(scope, conn),
-        "llm_per_agent": _llm_sums(scope, conn),
-        "llm_cache_input": _llm_cache_input(scope, conn),
-        "llm_costs": _llm_cost_sums(scope, conn),
+        "llm_per_agent": _llm_sums(usage, conn),
+        "llm_cache_input": _llm_cache_input(usage, conn),
+        "llm_costs": _llm_cost_sums(usage, conn),
     }

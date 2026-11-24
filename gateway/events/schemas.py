@@ -190,6 +190,10 @@ class AgentMetricsItem(BaseModel):
     label: str | None
     events: NonNegativeInt
     cost_usd: float = Field(ge=0)
+    cost_usd_api: float = Field(default=0, ge=0)
+    cost_usd_subscription: float = Field(default=0, ge=0)
+    usage_incomplete_reports: NonNegativeInt = 0
+    usage_unpriced_calls: NonNegativeInt = 0
     llm_calls: NonNegativeInt
     tokens_in: NonNegativeInt
     tokens_out: NonNegativeInt

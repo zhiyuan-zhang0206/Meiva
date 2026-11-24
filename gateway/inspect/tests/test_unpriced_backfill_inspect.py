@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import psycopg
-import pytest
 
 from base.db.rows import IdRow, query_one
 from base.telemetry.delivery.mirror import event_id as mirror_event_id
 from base.telemetry.event_store import event_uid
-from base.telemetry.metrics import observed_metrics
 from gateway.inspect._metrics import read_snapshot
-from services.upkeep.events_maintenance import unpriced_backfill
+from services.upkeep.events_maintenance.unpriced_backfill import load_price_book
+from services.upkeep.events_maintenance.usage_ledger_backfill import backfill_usage_ledger
 
 _CUTOVER = datetime(2026, 9, 17, 0, 0, tzinfo=UTC)
 
@@ -47,21 +46,9 @@ def _seed_usage(
         "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
         (event_uid(sid), occurred_at, agent_id, json.dumps(attrs)),
     )
-    obs = observed_metrics.observe_row(
-        {
-            "id": sid,
-            "agent_id": agent_id,
-            "ts": occurred_at,
-            "category": "telemetry",
-            "event_name": "llm_usage",
-            "attributes": attrs,
-        }
-    )
-    assert obs is not None
-    assert observed_metrics.write_observations([obs], db=conn) == 1
 
 
-def test_inspector_snapshot_unpriced_drops_to_zero_after_backfill(
+def test_inspector_reads_historical_usage_after_ledger_backfill(
     db_conn: psycopg.Connection,
 ) -> None:
     db_conn.autocommit = True
@@ -104,14 +91,17 @@ def test_inspector_snapshot_unpriced_drops_to_zero_after_backfill(
         _CUTOVER,
     )
     assert before.cost is not None
-    assert before.cost.unpriced_calls == 1
-    assert before.cost.unpriced_calls_subscription == 1
-    assert before.cost.cost_usd_subscription == pytest.approx(0.4321)
+    assert before.cost.llm_calls == 0
+    assert before.cost.cost_usd_subscription == 0
 
-    report = unpriced_backfill.run_unpriced_backfill(
-        db_conn, today=date(2026, 11, 22), dry_run=False
+    report = backfill_usage_ledger(
+        db_conn,
+        start=datetime(2026, 11, 20, tzinfo=UTC),
+        end=datetime(2026, 11, 22, tzinfo=UTC),
+        batch_size=2,
+        prices=load_price_book(),
     )
-    assert report.observations_priced == 1
+    assert (report.scanned, report.inserted, report.catalog_priced) == (2, 2, 1)
 
     after = read_snapshot(
         db_conn,
@@ -122,6 +112,9 @@ def test_inspector_snapshot_unpriced_drops_to_zero_after_backfill(
         _CUTOVER,
     )
     assert after.cost is not None
+    assert after.cost.llm_calls == 2
+    assert after.cost.tokens_in == 200_000
+    assert after.cost.cost_usd_api == 0
     assert after.cost.unpriced_calls == 0
     assert after.cost.unpriced_calls_subscription == 0
     assert after.cost.unpriced_calls_api == 0

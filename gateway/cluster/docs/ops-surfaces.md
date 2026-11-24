@@ -53,13 +53,13 @@ are mounted. `hours` is the aggregation window, whitelisted to
 |---|---|
 | `live_count` | Postgres `agents_meta` (not windowed) |
 | `alerts` (`unresolved`, `critical`, `error`, `warning`) | Postgres `alerts` (`status = 'unresolved'`, excluding synthetic `alert_pipeline_watchdog` rows — NOT windowed; single source of truth shared with `/api/alerts`, the header badge, and Insights Alerts) |
-| windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, `google_cost_usd` | `telemetry_events` (Postgres) |
+| windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, `google_cost_usd` | `llm_usage_ledger` (Postgres) |
 | `diagnostics` (`active_classes`, `archived_classes`, `active_events`, `archived_events`, `errors`, `warnings`, `deployed_sha`) | `telemetry_events` grouped by `(level, event_name, source, process)` under strict diagnostic admission (`error`/`critical` plus explicitly declared `tier="anomaly"` warnings), auto-archived across `deployed_sha` releases and 1h quiet window |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), only rows of cards an enabled plugin declares in `contributions.ui.stats` / `statsFace` (an orphan row is not served; the console still joins the rest by `(plugin, id)`); NOT windowed — a plugin value is a point in time |
 
 Every request computes its window in one pooled connection with an 8-second
 statement timeout (a timeout is a retriable 503): one grouped scan of the window's
-`llm_usage` rows (`gateway/cluster/monitor/stats_events.py`) gives the
+`llm_usage_ledger` rows (`gateway/cluster/monitor/stats_events.py`) gives the
 token sums, the metered API cost, the subscription-covered cost and per-model metered
 API cost slices, one count of unresolved `alerts` rows (`ops/alerts.py`) gives the
 live alert summary, and one grouped count of admitted diagnostic rows
@@ -67,12 +67,10 @@ live alert summary, and one grouped count of admitted diagnostic rows
 the diagnostic summary. `openai_cost_usd`, `anthropic_cost_usd`, and `google_cost_usd` resolve each model's
 vendor through the gateway `ModelCatalog` (`None` only when catalog startup failed,
 preserving `200` for the rest of the dashboard). The window is the requested one
-(up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd`
-sum is the usage-time quote snapshot, not historical tokens repriced against today's
-registry. The two cost sums are disjoint halves of the same rows, split by the billing
-mode of each row's `source`: `cost_usd` is the fee an API call incurred, `subscription_cost_usd`
-the list value a call under `SUBSCRIPTION_HARNESSES` would have cost and the subscription
-covered. Both are served every time — the console renders `$0.00` rather than hiding a zero
+(up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage_ledger.cost_usd`
+sum is the usage-time quote snapshot. Billing mode splits the totals. `cost_usd`
+reports API list-price USD. `subscription_cost_usd` reports the same list prices
+as virtual USD for subscription usage. Both are served every time — the console renders `$0.00` rather than hiding a zero
 half, because "no subscription call in this window" is an answer the reader asked for.
 Every read is scoped to the current home-derived cluster label (rows with no label included).
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -8,7 +7,6 @@ import psycopg
 import pytest
 
 from gateway.routers.fleet.fleet_tokens import agent_tokens
-from services.upkeep.events_maintenance import rollup, token_totals
 
 _NOW = datetime(2026, 6, 30, 15, 30, tzinfo=UTC)
 
@@ -16,8 +14,6 @@ _NOW = datetime(2026, 6, 30, 15, 30, tzinfo=UTC)
 @pytest.fixture
 def db(db_conn: psycopg.Connection) -> psycopg.Connection:
     db_conn.autocommit = True
-    db_conn.execute("DELETE FROM agent_model_tokens_total")
-    db_conn.execute("DELETE FROM agent_model_tokens_total_through")
     return db_conn
 
 
@@ -31,24 +27,18 @@ def _usage(
     db: psycopg.Connection, agent: int, at: datetime, tokens_in: int, tokens_out: int
 ) -> None:
     db.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-        "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'm', 'c', 'p', "
-        "'telemetry', 'llm_usage', 'info', 'test', %s::jsonb)",
-        (
-            uuid.uuid4().int % (1 << 62),
-            at,
-            agent,
-            json.dumps({"in_total": tokens_in, "out_total": tokens_out, "model": "m"}),
-        ),
+        """INSERT INTO llm_usage_ledger
+           (call_id, occurred_at, agent_id, machine, cluster, billing, usage_kind, model,
+            calls, complete, tokens_in, tokens_out, price_snapshot)
+           VALUES (%s, %s, %s, 'm', 'c', 'api', 'test', 'm', 1, TRUE, %s, %s, '{}')""",
+        (str(uuid.uuid4()), at, agent, tokens_in, tokens_out),
     )
 
 
 def _brute(db: psycopg.Connection, agent: int, start: datetime | None) -> tuple[float, float]:
     row = db.execute(
-        "SELECT COALESCE(sum((attributes->>'in_total')::float8), 0), "
-        "COALESCE(sum((attributes->>'out_total')::float8), 0) FROM telemetry_events "
-        "WHERE agent_id = %s AND event_name = 'llm_usage' AND ts <= %s AND (%s::timestamptz IS NULL "
-        "OR ts >= %s)",
+        "SELECT COALESCE(sum(tokens_in), 0), COALESCE(sum(tokens_out), 0) FROM llm_usage_ledger "
+        "WHERE agent_id = %s AND occurred_at < %s AND (%s::timestamptz IS NULL OR occurred_at >= %s)",
         (agent, _NOW, start, start),
     ).fetchone()
     assert row is not None
@@ -61,14 +51,7 @@ def agent(db: psycopg.Connection) -> int:
     for age_hours in range(1, 24 * 40, 7):
         _usage(db, agent, _NOW - timedelta(hours=age_hours), 100 + age_hours, 10 + age_hours % 13)
     _usage(db, agent, _NOW - timedelta(minutes=5), 7, 3)
-    yesterday = (_NOW - timedelta(days=1)).date()
-    rollup.roll_days(db, yesterday - timedelta(days=45), yesterday)
-    token_totals.fold_totals(db, today=_NOW.date())
-    assert token_totals.folded_through(db) < yesterday - timedelta(days=5)
-    folded = db.execute(
-        "SELECT count(*) FROM agent_model_tokens_total WHERE agent_id = %s", (agent,)
-    )
-    assert folded.fetchone() == (1,)
+    _usage(db, agent, _NOW, 222, 111)
     return agent
 
 

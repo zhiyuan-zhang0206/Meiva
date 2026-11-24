@@ -1,4 +1,4 @@
-"""The metrics aggregate over `telemetry_events` — golden output lock.
+"""The metrics aggregate over `telemetry_events` and `llm_usage_ledger`.
 
 `base.telemetry.metrics.aggregate.fetch_aggregate` + `build_report_from_aggregate` +
 `agent_rollups` are the ONLY metrics path: the window is reduced in SQL and nothing materializes
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import random
 import re
+from datetime import timedelta
 from typing import Any
 
 import psycopg
@@ -64,8 +65,40 @@ def _add(
     payload: dict[str, Any] | None = None,
     ts_offset_days: float = 0,
 ) -> None:
-    fake.add(
-        event=event, agent_id=agent_id, payload=payload or {}, ts_offset_hours=ts_offset_days * 24
+    attrs = payload or {}
+    fake.add(event=event, agent_id=agent_id, payload=attrs, ts_offset_hours=ts_offset_days * 24)
+    if event == "llm_usage":
+        _add_ledger_usage(fake, agent_id, attrs, ts_offset_days=ts_offset_days)
+
+
+def _add_ledger_usage(
+    fake: TelemetryStream,
+    agent_id: int | None,
+    attrs: dict[str, Any],
+    *,
+    ts_offset_days: float,
+) -> None:
+    cost = attrs.get("cost_usd")
+    fake.db.execute(
+        """INSERT INTO llm_usage_ledger
+           (call_id, occurred_at, agent_id, machine, cluster, billing, usage_kind, model,
+            calls, complete, tokens_in, tokens_out, tokens_reasoning, cache_read,
+            cache_write_5m, cache_write_1h, cost_usd, price_snapshot, price_source)
+           VALUES (gen_random_uuid()::text, %s, %s, 'm', 'c', 'api', 'agent', %s,
+                   1, true, %s, %s, %s, %s, %s, %s, %s, '{}'::jsonb, %s)""",
+        (
+            fake.now - timedelta(days=ts_offset_days, microseconds=1),
+            agent_id,
+            attrs["model"],
+            attrs.get("in_total"),
+            attrs.get("out_total"),
+            attrs.get("reasoning"),
+            attrs.get("cache_read"),
+            attrs.get("cache_write_5m"),
+            attrs.get("cache_write_1h"),
+            cost,
+            "live" if cost is not None else None,
+        ),
     )
 
 
@@ -108,18 +141,15 @@ def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
 def _write_full_thread_scenario(fake: TelemetryStream, aid: int) -> None:
     _add(fake, event="code", agent_id=aid, payload={"body": "print(1)"})
     _add(fake, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
-    _add(
-        fake,
-        event="llm_usage",
-        agent_id=aid,
-        payload={
-            "in_total": 1000,
-            "out_total": 200,
-            "cache_read": 800,
-            "model": "mimo-v2.5-pro",
-            "cost_usd": 0.0003,
-        },
-    )
+    usage = {
+        "in_total": 1000,
+        "out_total": 200,
+        "cache_read": 800,
+        "model": "mimo-v2.5-pro",
+        "cost_usd": 0.0003,
+    }
+    fake.add(event="llm_usage", agent_id=aid, payload={**usage, "in_total": 9999, "cost_usd": 99})
+    _add_ledger_usage(fake, aid, usage, ts_offset_days=0)
     _add(fake, event="turn_end", agent_id=aid, payload={"ok": True, "duration_seconds": 4.0})
     _add(fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
     _add(fake, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
@@ -129,7 +159,7 @@ def _assert_full_thread_text_digest(text: str) -> None:
     assert "6 events / 1 agents" in _norm(text)
     assert "exec: 1 ok / 0 failed  (success 100.0%)" in text
     assert "llm: 1 calls  in=1000 out=200 cached=800 reason=0" in text
-    assert "cache hit overall: 80.0%   cost: $0.0003" in text
+    assert "cache hit overall: 80.0%   API USD $0.0003   subscription (virtual) USD $0.0" in text
     assert "turn duration (s):" in text
     assert "agents: 1 distinct  1 spawns (1 subagents)  1 idle halts" in text
 

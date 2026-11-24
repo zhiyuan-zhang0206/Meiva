@@ -30,6 +30,8 @@ function makeStats(overrides: Partial<StatsDashboard> = {}): StatsDashboard {
     tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
     cost_usd: 25.4,
     subscription_cost_usd: 0,
+    usage_unpriced_calls: 0,
+    usage_incomplete_reports: 0,
     openai_cost_usd: 12.34,
     anthropic_cost_usd: 5.67,
     google_cost_usd: 1.15,

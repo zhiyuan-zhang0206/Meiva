@@ -6,22 +6,15 @@ The live inspector's heartbeat block — the four display states (a pause, a que
 a projected check-in, nothing) and the daemon predicate each one mirrors — has its own
 node: [Inspector heartbeat projection](heartbeat.md).
 
-Statistics read persisted compact metric observations and day summaries from
-Postgres. Cache-hit rates divide reported cache reads by `tokens_cache_input`,
-the input from calls with cache metering. Unmetered decision and embedding
-calls remain in usage and cost totals, but not in the cache-rate denominator.
-Nonzero input without metering yields a null rate (the UI renders N/A).
-Cost and unpriced counts are split by the billing mode of the loop that ran each
-call — `llm_usage.source` names it, and `HARNESS_BILLING` says whether that loop
-pays per token: `cost_usd_api` / `unpriced_calls_api` are the metered calls the
-account is owed for, `cost_usd_subscription` / `unpriced_calls_subscription` the
-list value a subscription covered. The totals stay alongside the split, and a
-projection written before the split existed reads as all-API, which is what those
-rows were.
-A null stored denominator identifies a legacy observation/day and preserves
-its historical input denominator; new unmetered calls contribute zero. Pre-cutover full days preserve the existing cost/turn ledgers without
-adding the same observed day twice. Exact duration observations feed quantiles;
-older ledger-only histograms retain their declared integer-second precision.
+Statistics read LLM usage and price snapshots from the Postgres usage ledger.
+The response carries API list-price USD, virtual subscription USD, calls without
+a price and incomplete usage reports. Cache-hit rates divide reported cache
+reads by input from reports that include cache metering. A window with nonzero
+input and no cache metering returns a null cache-hit rate.
+
+Turn and activity fields use persisted observations and day summaries.
+Pre-cutover full days use the original turn ledger. Exact observations feed
+duration quantiles, and historical histograms carry integer-second precision.
 The panel renders the observed metrics only: coverage verdicts (availability,
 duration precision, retained sources, last-observed) go to the background log
 instead, with unexpected gaps emitted as the `inspect_metrics_coverage_gap` event

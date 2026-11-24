@@ -1,13 +1,3 @@
-# meiva:note
-# The stats dashboard's window totals, read from `telemetry_events`.
-#
-# One scan of the window's `llm_usage` rows gives the token sums, the metered API cost, the
-# subscription-covered cost and the per-model metered API slices. The two cost sums are disjoint
-# halves of the same rows, split by the billing mode of the row's `source` harness: an API row's
-# fee is money the account is billed, a subscription row's usage-time price is the list value the
-# subscription covered. Subscription rows still contribute to the token totals. The cluster filter
-# accepts the home cluster's label and rows with no label, as every dashboard read does.
-# Diagnostic classes live in `gateway.cluster.monitor.diagnostics`.
 # meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations
@@ -19,12 +9,7 @@ from typing import NamedTuple
 
 import psycopg
 
-from base.api_contracts.agent_contract import SUBSCRIPTION_HARNESSES
 from base.db.rows import query_all
-from base.events.contract import LLM_USAGE_KEYS
-from base.telemetry.metrics.event_sql import numeric
-
-_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_HARNESSES)
 
 
 def set_statement_timeout[RowT](
@@ -34,7 +19,7 @@ def set_statement_timeout[RowT](
 
 
 # meiva:note
-# One model's `llm_usage` sums over the window; psycopg hands back `Decimal` for a numeric sum and
+# One model's ledger totals over the window; psycopg hands back `Decimal` for a numeric sum and
 # a `float` when the payload value was stored as a double, so each is read through `Decimal(...)`.
 @dataclass(frozen=True)
 class _ModelUsageRow:
@@ -45,6 +30,8 @@ class _ModelUsageRow:
     cache_input: Decimal | float
     cost_usd: Decimal | float
     subscription_cost_usd: Decimal | float
+    unpriced_calls: int
+    incomplete_reports: int
 
 
 class WindowTotals(NamedTuple):
@@ -55,39 +42,33 @@ class WindowTotals(NamedTuple):
     cost_usd: float
     subscription_cost_usd: float
     api_cost_by_model: tuple[tuple[str, Decimal], ...]
+    unpriced_calls: int = 0
+    incomplete_reports: int = 0
 
 
 # meiva:note
-# Cost is the usage-time snapshot each row carries, never today's registry price. Grouping by
+# Cost uses the usage-time snapshot each row carries. Grouping by
 # `model` returns one row per distinct model in the window so callers resolve vendor slices
 # through `ModelCatalog` without duplicating provider prefixes in SQL.
 # meiva:link gateway/cluster/docs/ops-surfaces.md
 def window_totals(
     conn: psycopg.Connection, *, cluster: str, start: datetime, end: datetime
 ) -> WindowTotals:
-    api_source = f"COALESCE({LLM_USAGE_KEYS['source']}, '') NOT IN ({_SUBSCRIPTION_SOURCES_SQL})"
-    subscription_source = (
-        f"COALESCE({LLM_USAGE_KEYS['source']}, '') IN ({_SUBSCRIPTION_SOURCES_SQL})"
-    )
-    query = f"""
-        SELECT
-          COALESCE({LLM_USAGE_KEYS["model"]}, '') AS model,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}), 0) AS in_total,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["out_total"])}), 0) AS out_total,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["cache_read"])}), 0) AS cache_read,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (
-              WHERE {numeric(LLM_USAGE_KEYS["cache_read"])} IS NOT NULL), 0) AS cache_input,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {api_source}), 0)
-            AS cost_usd,
-          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (
-              WHERE {subscription_source}), 0) AS subscription_cost_usd
-        FROM telemetry_events
-        WHERE event_name = 'llm_usage'
-          AND category = 'telemetry'
-          AND (cluster = %s OR cluster = '')
-          AND ts > %s AND ts <= %s
-        GROUP BY 1
-    """  # noqa: S608
+    query = """
+        SELECT model,
+          COALESCE(sum(tokens_in), 0) AS in_total,
+          COALESCE(sum(tokens_out), 0) AS out_total,
+          COALESCE(sum(cache_read), 0) AS cache_read,
+          COALESCE(sum(tokens_in) FILTER (WHERE cache_read IS NOT NULL), 0) AS cache_input,
+          COALESCE(sum(cost_usd) FILTER (WHERE billing = 'api'), 0) AS cost_usd,
+          COALESCE(sum(cost_usd) FILTER (WHERE billing = 'subscription'), 0) AS subscription_cost_usd,
+          COALESCE(sum(calls) FILTER (WHERE cost_usd IS NULL), 0)::bigint AS unpriced_calls,
+          count(*) FILTER (WHERE NOT complete) AS incomplete_reports
+        FROM llm_usage_ledger
+        WHERE (cluster = %s OR cluster = '')
+          AND occurred_at >= %s AND occurred_at < %s
+        GROUP BY model
+    """
     rows = query_all(conn, _ModelUsageRow, query, (cluster, start, end))  # pyright: ignore[reportArgumentType]
     in_total = sum((Decimal(row.in_total) for row in rows), Decimal(0))
     out_total = sum((Decimal(row.out_total) for row in rows), Decimal(0))
@@ -108,4 +89,6 @@ def window_totals(
         cost_usd=float(total_cost),
         subscription_cost_usd=float(subscription_cost),
         api_cost_by_model=api_costs,
+        unpriced_calls=sum(row.unpriced_calls for row in rows),
+        incomplete_reports=sum(row.incomplete_reports for row in rows),
     )

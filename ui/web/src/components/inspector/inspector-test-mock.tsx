@@ -201,6 +201,7 @@ export function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentI
       unpriced_calls: 1,
       unpriced_calls_api: 1,
       unpriced_calls_subscription: 0,
+      incomplete_usage_reports: 0,
       llm_calls: 142,
       tokens_in: 1_200_000,
       tokens_out: 84_000,

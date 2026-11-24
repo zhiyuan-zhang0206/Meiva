@@ -48,6 +48,9 @@ class LlmTurnsData(TypedDict):
     cache_hit_pct_by_position: dict[str, float | None]
     cost_usd: float
     cost_unpriced_calls: int
+    cost_usd_api: float
+    cost_usd_subscription: float
+    usage_incomplete_reports: int
     turn_duration_s: Pctiles
     turn_ok: int
     turn_total: int
@@ -168,10 +171,16 @@ def render_llm_turns(data: LlmTurnsData) -> str:
     text = (
         f"llm: {data['llm_calls']} calls  in={data['tokens_in']} out={data['tokens_out']} "
         f"cached={data['tokens_cached']} reason={data['tokens_reasoning']}\n"
-        f"  cache hit overall: {cache_label}   cost: ${data['cost_usd']}"
+        f"  cache hit overall: {cache_label}   API USD ${data['cost_usd_api']}   "
+        f"subscription (virtual) USD ${data['cost_usd_subscription']}"
         + (
             f"  ({data['cost_unpriced_calls']} calls unpriced, excluded)"
             if data["cost_unpriced_calls"]
+            else ""
+        )
+        + (
+            f"  ({data['usage_incomplete_reports']} incomplete usage reports)"
+            if data["usage_incomplete_reports"]
             else ""
         )
         + "\n  cache hit by turn position:\n"
