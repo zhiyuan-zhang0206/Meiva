@@ -4,12 +4,14 @@
 # a partial context fails at first use instead of guessing one.
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
 from base.agents.context import MeivaContext
+from base.host.env.harness_binaries import GIT_SHIM_DIR
 from meiva.sdk_surface import process_context
 from meiva.shell.sessions import process_environ, session_host
 
@@ -59,3 +61,10 @@ def test_the_session_host_forwards_the_mapping_it_is_handed() -> None:
     assert "VIRTUAL_ENV" in host.forwarded
     assert Path(host.forwarded["MEIVA_PYTHON"]).name == "meiva_python.sh"
     assert host.forwarded["MEIVA_PYTHON_EXECUTABLE"] == sys.executable
+
+
+def test_the_session_host_puts_the_git_shim_first() -> None:
+    host = session_host({"PATH": "/only-the-caller/bin"})
+    entries = host.forwarded["PATH"].split(os.pathsep)
+    assert entries[0] == str(GIT_SHIM_DIR.resolve())
+    assert "/only-the-caller/bin" in entries

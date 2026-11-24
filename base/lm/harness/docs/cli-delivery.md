@@ -30,6 +30,63 @@ installed in the pinned interpreter's environment. The launcher leaves
 its usual import behavior. Scripts that need sibling modules must make those
 imports available explicitly.
 
+## Zero-trace `git push` guard
+
+Some remotes must carry no trace of the platform. `MEIVA_ZERO_TRACE_GIT_REMOTES`
+(`GeneralSettings.zero_trace_git_remotes`, host scope, empty by default) names them, and
+every harness session and managed `meiva.shell` session starts with
+`base/host/env/harness/bin/git` first on `PATH` (`harness_binaries.with_git_shim`, applied
+in `wiring.session_environ` and `meiva.shell.sessions.session_host`). The setting is a host
+scope alias, so the Claude allowlist (`session_child_env_keys()`) carries it and Codex and
+Antigravity pass the whole environment through.
+
+The shim is a thin POSIX `sh` script. It finds the real `git` on `PATH` without its own
+directory (it never re-enters itself), then runs it unchanged unless the setting is
+non-empty **and** an argument is literally `push`. Only then does it start
+`"$MEIVA_PYTHON"` on `git_zero_trace_guard.py`, a standard-library script. The guard:
+
+1. Skips git's global options, including those that take a value (`-C <dir>`, `-c k=v`,
+   `--git-dir`, `--work-tree`, `--namespace`, `--super-prefix`, `--config-env`,
+   `--attr-source`, in `--opt=value` and `--opt value` form), to find the real subcommand.
+   `git commit -m "push fix"` is not a push and runs untouched. Those options are replayed
+   into every helper `git` the guard runs, so it reads the repository the user's command
+   would.
+2. Lets every deletion through: `--delete`, `-d`, and an empty-source refspec (`:<branch>`).
+   A mixed `git push origin :old new` still judges `new`.
+3. Resolves the target the way git does (an explicit repository or `--repo`, then
+   `branch.<current>.pushRemote`, `remote.pushDefault`, `branch.<current>.remote`, `origin`)
+   and its push URLs (`git remote get-url --push --all`, with `insteadOf` rewriting applied;
+   a direct URL is used as given). A target that matches no entry is not checked.
+4. For a matching target, judges each remote ref the push would write — a refspec's
+   destination (`HEAD` is the current branch, `src:dst` is `dst`, `refs/heads/` is
+   dropped), or with no refspec the `remote.<name>.push`/`push.default` choice, `--all`,
+   `--branches`, `--mirror` and `--tags` — and every commit message the push would add
+   (`git log <tips> --not --remotes=<remote>`, newest 500).
+   A remote ref name is refused when it contains `meiva`, `meizel` or `antigravity`
+   (any case), or this agent's exact id as a delimited token
+   (`(?:^|[-_/.#])<id>(?:$|[-_/.])`, so `fix-4367` passes for agent 8720). The id is
+   `MEIVA_AGENT_ID`, else the agent whose registration file under
+   `<MEIVA_HOME>/harness/registrations/` holds the sha256 of `MEIVA_HARNESS_HANDLE`; no
+   database is read, and without an id only the platform words apply. A commit is refused
+   when its message has `Co-authored-by: ... meiva|claude`, `Generated with ... Claude Code`,
+   or a `.meiva/` path.
+5. Blocks with exit code 1 and a message naming each hit and the command that fixes it
+   (`git branch -m`, `git commit --amend`, `git rebase -i`); otherwise it `exec`s the real
+   `git`.
+
+**Pattern syntax.** `MEIVA_ZERO_TRACE_GIT_REMOTES` is a comma-separated list. An entry is a
+case-insensitive shell glob (`*`, `?`, `[...]`) that may match anywhere inside the URL. It is
+tried against the URL as written and against a `host/path` form (scheme, user and port
+removed, the scp-like colon turned into a slash). `example-corp/` therefore matches
+`https://github.com/example-corp/app.git` and `git@github.com:example-corp/app.git`;
+`github.com[:/]example-corp/` matches the written form of both.
+
+**What it is not.** The guard stops an agent's accident, not an adversary: a git alias for
+`push`, an absolute path to the real binary, or a tool that links libgit2 is not seen. A remote
+with no fetched tracking refs makes the commit scan read up to 500 recent commits instead of
+only the new ones; `git fetch <remote>` narrows it. A fault inside the guard is printed and
+the real `git` still runs, so a broken guard never blocks cleaning up a pushed branch.
+
 The same binary directory list feeds the probe in `base/agents/birth/harness.py`
 and the `launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three
 agree on where the CLIs live.

@@ -565,6 +565,7 @@
     "workspace_hygiene_remind_cooldown_seconds": "daemon",
     "workspace_in_system_prompt": "agent",
     "xiaomi_api_key": "lm",
+    "zero_trace_git_remotes": "general",
     "zhipu_api_key": "lm"
   },
   "field_aliases": {
@@ -954,6 +955,7 @@
     "workspace_hygiene_remind_cooldown_seconds": "MEIVA_WORKSPACE_HYGIENE_REMIND_COOLDOWN_SECONDS",
     "workspace_in_system_prompt": "MEIVA_WORKSPACE_IN_SYSTEM_PROMPT",
     "xiaomi_api_key": "MIMO_API_KEY",
+    "zero_trace_git_remotes": "MEIVA_ZERO_TRACE_GIT_REMOTES",
     "zhipu_api_key": "GLM_API_KEY"
   },
   "field_scopes": {
@@ -1343,6 +1345,7 @@
     "workspace_hygiene_remind_cooldown_seconds": "cluster-pinned",
     "workspace_in_system_prompt": "cluster-pinned",
     "xiaomi_api_key": "cluster-pinned",
+    "zero_trace_git_remotes": "host",
     "zhipu_api_key": "cluster-pinned"
   },
   "field_capabilities": {
@@ -1732,6 +1735,7 @@
     "workspace_hygiene_remind_cooldown_seconds": "agent-runner",
     "workspace_in_system_prompt": "agent-runner",
     "xiaomi_api_key": "agent-runner",
+    "zero_trace_git_remotes": "common",
     "zhipu_api_key": "agent-runner"
   },
   "per_agent_fields": [

@@ -34,6 +34,7 @@ HARNESS_BIN_DIRS = (
 )
 
 NONINTERACTIVE_BASH_SCRIPT = Path(__file__).parent / "harness" / "noninteractive_bash.sh"
+GIT_SHIM_DIR = Path(__file__).parent / "harness" / "bin"
 
 
 def noninteractive_bash_path() -> str:
@@ -46,6 +47,12 @@ def meiva_python_env(executable: str) -> dict[str, str]:
         MEIVA_PYTHON_ENV: str(script.resolve()),
         MEIVA_PYTHON_EXECUTABLE_ENV: executable,
     }
+
+
+def with_git_shim(path: str | None) -> str:
+    shim = str(GIT_SHIM_DIR.resolve())
+    entries = [entry for entry in (path or "").split(os.pathsep) if entry and entry != shim]
+    return os.pathsep.join([shim, *entries])
 
 
 _SYSTEM_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")

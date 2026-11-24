@@ -48,6 +48,16 @@ def test_the_registration_handle_reaches_the_cli() -> None:
     assert env["MEIVA_PYTHON_EXECUTABLE"] == "/opt/meiva/.venv/bin/python"
 
 
+def test_the_zero_trace_git_remotes_setting_reaches_the_cli() -> None:
+    env = build_env(
+        {"MEIVA_ZERO_TRACE_GIT_REMOTES": "example-corp/", "UNRELATED_HOST_KEY": "x"},
+        AuthConfig(),
+        host={"UNRELATED_HOST_KEY": "x"},
+    )
+    assert env["MEIVA_ZERO_TRACE_GIT_REMOTES"] == "example-corp/"
+    assert env["UNRELATED_HOST_KEY"] == ""
+
+
 def test_api_key_mode_passes_exactly_one_secret() -> None:
     env = build_env(
         {"CLAUDE_CODE_OAUTH_TOKEN": "tok"},
