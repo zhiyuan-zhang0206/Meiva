@@ -80,7 +80,7 @@
       "name": "main-red-watch",
       "class": "product",
       "default_enabled": true,
-      "description": "Every thirty minutes, read the newest post-merge runs of main (release-gate every six hours, the nightly verdict once a day) and track confirmed reds via deduplicated GitHub Issues (label main-red) with P0 lead notifications; infrastructure failures are recorded and never become an issue. Each completed round emits main_red_watch_round, whose rounds counter is the heartbeat the Grafana rule meiva-ops-main-red-watch-silent watches.",
+      "description": "Every thirty minutes, read the newest post-merge runs of main (release-gate every six hours, the nightly verdict once a day) and track confirmed reds via deduplicated GitHub Issues (label main-red) with P0 lead notifications; infrastructure failures are recorded and never become an issue. Each completed round emits main_red_watch_round, whose rounds counter is the heartbeat the alert rule meiva-ops-main-red-watch-silent watches.",
       "script": "jobs/watch/main-red-watch-schedule.py",
       "command": "python jobs/watch/main-red-watch-schedule.py",
       "trigger_kind": "cron",

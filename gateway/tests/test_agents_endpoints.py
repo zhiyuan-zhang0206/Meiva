@@ -13,6 +13,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
 from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.events.loki_stub import LokiStub
 from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runner_ops
 
 pytestmark = pytest.mark.usefixtures("gateway_local_runner")
@@ -646,7 +647,10 @@ def test_result_surfaces_allow_non_isolated_and_unmarked_callers(
     db_conn.commit()
     path = path_template.format(agent_id=target_id)
 
-    with gateway_test_client() as client:
+    with (
+        LokiStub() as loki,
+        gateway_test_client(fields={"telemetry_loki_url": loki.url}) as client,
+    ):
         ordinary = _result_read(client, method, path, caller=f"agent:{caller_id}")
         unmarked = _result_read(client, method, path)
 

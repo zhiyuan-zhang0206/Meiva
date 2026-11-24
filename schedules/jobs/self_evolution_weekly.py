@@ -3,7 +3,7 @@
 # gateway's `/api/events` and wake the self-evolution agent when the volume clears its bar.
 #
 # The count is the audit record's (`category=audit`, permanent and one store), not the telemetry
-# and log stream: Loki keeps that for exactly the week this reads, and most of its lines are
+# and log stream: it is kept for exactly the week this reads, and most of its lines are
 # background state samples, not agent activity.
 #
 # The count carries `with_total=1`: since the 2026-08-18 contract change `meta.total` is opt-in,
