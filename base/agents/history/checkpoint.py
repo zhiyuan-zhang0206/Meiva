@@ -665,7 +665,7 @@ def load_checkpoint_messages_by_trace(
 
     Returns (None, []) when no checkpoint carries the trace id — the trace
     predates the link. The caller renders this as
-    "pruned" rather than an error: the span metadata in the mirror/events
+    "pruned" rather than an error: the span metadata in Tempo/events
     still exists, only the content is gone.
 
     Raises:

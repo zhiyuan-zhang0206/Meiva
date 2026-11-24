@@ -134,7 +134,6 @@ def watched_agents() -> tuple[WatchedAgent, ...]:
             duty="cluster operation: rollout, alerting, disk and database floor",
             patrol_minutes=240.0,
             keeps_sessions=True,
-            schedules=("trace-ship-tempo",),
         ),
     )
 

@@ -58,7 +58,6 @@ class CollectorValues:
     tempo_endpoint: str
     loki_base: str
     prom_base: str
-    retention_days: int
     self_metrics_port: int
     local_ingress_endpoint: str
     data_plane_receivers: str
@@ -80,7 +79,6 @@ def render_collector_config(template: str, values: CollectorValues) -> str:
         "TEMPO_ENDPOINT": values.tempo_endpoint,
         "LOKI_BASE": values.loki_base,
         "PROM_BASE": values.prom_base,
-        "RETENTION_DAYS": str(values.retention_days),
         "SELF_METRICS_HOST": SELF_METRICS_HOST,
         "SELF_METRICS_PORT": str(values.self_metrics_port),
         "OTLP_RECEIVER_ENDPOINT": values.local_ingress_endpoint,

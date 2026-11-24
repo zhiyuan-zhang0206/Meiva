@@ -53,7 +53,7 @@ def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_clust
 
     assert set(mapping_at(config, "receivers")) >= {"otlp", "host_metrics", "prometheus/otelcol"}
     assert "otlp/remote" not in mapping_at(config, "receivers")
-    assert set(mapping_at(config, "exporters")) == {*RELAY_EXPORTERS, "file/traces"}
+    assert set(mapping_at(config, "exporters")) == set(RELAY_EXPORTERS)
     bearer = _bearer(collector_unit)
     for exporter_id in RELAY_EXPORTERS:
         exporter = mapping_at(config, "exporters", exporter_id)
@@ -88,7 +88,7 @@ def test_a_gateway_or_station_accepts_remote_relays_only_on_its_reachable_addres
     assert "bearertokenauth/cluster" in sequence_at(config, "service", "extensions")
     pipelines = mapping_at(config, "service", "pipelines")
     assert sequence_at(pipelines, "traces/remote", "exporters") == ["otlphttp/tempo"]
-    assert sequence_at(pipelines, "traces", "exporters") == ["otlphttp/tempo", "file/traces"]
+    assert sequence_at(pipelines, "traces", "exporters") == ["otlphttp/tempo"]
     for signal in ("logs", "metrics", "traces"):
         assert "otlp/remote" not in sequence_at(pipelines, signal, "receivers")
         assert sequence_at(pipelines, f"{signal}/remote", "receivers") == ["otlp/remote"]
@@ -260,7 +260,7 @@ def test_a_unit_that_consumes_a_remote_observatory_relays_every_signal_to_its_si
     rendered = str(config)
     for loopback_backend in ("127.0.0.1:3100", "127.0.0.1:9090", "127.0.0.1:14318"):
         assert loopback_backend not in rendered
-    assert "file/traces" in mapping_at(config, "exporters")
+    assert "file/traces" not in mapping_at(config, "exporters")
     assert _http(config) == {"endpoint": "127.0.0.1:4318"}
 
 

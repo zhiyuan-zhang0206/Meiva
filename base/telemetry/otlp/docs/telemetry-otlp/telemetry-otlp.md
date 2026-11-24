@@ -1,11 +1,11 @@
-# OTLP export backend & trace ship to Tempo
+# OTLP export backend
 
 ## What it is
 
 `base/telemetry/otlp/telemetry_otlp.py` is the agent-side write half of the OTel + Tempo +
 Loki + Prometheus + Grafana stack (2026-08-11 decision). The local OTel
-Collector sidecar (`meiva-otel-collector`, task #1266) delivers the three signals
-and mirrors traces to local JSONL for recovery shipping. Which homes may export
+Collector sidecar (`meiva-otel-collector`, task #1266) delivers the three signals.
+Which homes may export
 or collect, and the `cluster` Resource boundary that isolates co-located homes,
 are specified in [Telemetry cluster isolation](cluster-isolation.md).
 
@@ -18,13 +18,8 @@ are specified in [Telemetry cluster isolation](cluster-isolation.md).
   exec children stay off unless an operator supplies an explicit endpoint. Their request-file handshake is not an export
   authority.
 - `base/telemetry/tracing.py` — spans → OTLP/HTTP (protobuf, content-stripped) to
-  the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON
-  mirror. Producer timeout, circuit-breaker, shedding, and synchronous-flush
+  the sidecar's `/v1/traces`, which relays to Tempo. Producer timeout, circuit-breaker, shedding, and synchronous-flush
   bounds live in [OTLP export backpressure](export-backpressure.md).
-- `meiva trace ship` (`cli/commands/observability/trace.py`) — recovery replay that bypasses
-  the local sidecar (replaying through it would loop the mirror watermark).
-  Gateway/single-box units dial loopback Tempo; pure runners dial the gateway
-  collector's authenticated receiver with the telemetry token.
 - The sidecar also **scrapes** the traditional SRE layer — host, Postgres,
   Redis — into the same metrics fan-out:
   [Infrastructure metrics](infra-metrics/infra-metrics.md).
@@ -41,19 +36,12 @@ are specified in [Telemetry cluster isolation](cluster-isolation.md).
   Prometheus series through the [explicit OTLP metrics mapping](metrics-mapping.md).
   The source collector adds the roster machine label.
 - **Traces** — exported with the cluster Resource to the sidecar's `/v1/traces`
-  (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar's
-  file exporter mirrors each batch to `$MEIVA_HOME/traces/spans.jsonl`
-  (rotated `spans-<ISO>.jsonl`). Recovery replay is `meiva trace ship`: it
-  POSTs each mirror line as OTLP/HTTP protobuf to the role-correct recovery
-  target: gateway/single-box → `{MEIVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces`
-  without auth; pure runner → gateway private address on the OTLP ingress
-  port (`MEIVA_TELEMETRY_OTLP_PORT`, default 4318) with
-  `Authorization: Bearer <telemetry token>`. It refuses while the OTLP flag
-  is off (one kill switch for the
-  whole OTLP surface — with the sidecar architecture that also stops
-  recording). Incremental (per-file byte-offset watermark
-  `traces/.ship-watermark.json`) or windowed (`--since` / `--until`);
-  ingestion is idempotent by span id. Tempo is the only target.
+  (OTLP/HTTP protobuf, content-stripped before leaving the process); the sidecar
+  relays them to Tempo (gateway/single-box → `{MEIVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces`;
+  pure runner → the gateway collector's authenticated ingress). Traces are
+  telemetry: lossy by design, with no local copy and no replay
+  ([delivery topology](delivery-topology.md)). `MEIVA_TELEMETRY_OTLP_ENABLED`
+  off stops the whole OTLP surface, recording included.
 - **Failure isolation** — the producer queue, network deadlines, trace circuit,
   drop accounting, initialization retries, and exec-child flush ceilings are
   specified in [OTLP export backpressure](export-backpressure.md).
@@ -78,8 +66,6 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `services/supervision/roster/spec.py`
   (`meiva-otel-collector`) + `services/supervision/healthchecks/otel_collector.py`.
-- `base/telemetry/tracing.py` + `cli/commands/observability/trace.py` + `cli/parsers/observability.py` — the
-  mirror `meiva trace ship` replays, and the ship command.
 
 ## Entry points
 
@@ -93,8 +79,6 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   real remaining time.
 - `base/telemetry/pipeline_build.py:build_pipeline` — constructs the concrete writer
   and passes its backend export callback to `_write_batch`.
-- `cli/commands/observability/trace.py:cmd_trace_ship` — `meiva trace ship
-  [--since/--until] [--dry-run]`
 
 ## Notes
 

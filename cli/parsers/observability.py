@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva` host-level observability verbs — `observability` (alias `obs`) and `trace`.
+# `meiva` host-level observability verbs — `observability` (alias `obs`).
 #
 # Handlers stay thin and lazy-import their `cmd_*` implementations so building
 # the parser never loads Settings.
@@ -25,13 +25,6 @@ class _ObservabilityVerb:
 class _RenderOptions:
     force: bool
     repo_only: bool
-
-
-@dataclass(frozen=True)
-class _TraceShipOptions:
-    since: str | None
-    until: str | None
-    dry_run: bool
 
 
 def _h_observability(
@@ -87,24 +80,6 @@ def _h_observability(
         platform=runtime.host.platform,
         machine=runtime.machine,
         observability=LgtmSettings.from_fields(delivered_config(runtime.config).get_field),
-    )
-
-
-def _h_trace_ship(args: argparse.Namespace) -> int:
-    from base.paths import traces_dir
-    from cli.commands.observability.trace import cmd_trace_ship
-    from cli.database.runtime import runtime_of
-
-    opts = options(args, _TraceShipOptions)
-    runtime = runtime_of(args)
-    return cmd_trace_ship(
-        since=opts.since,
-        until=opts.until,
-        dry_run=opts.dry_run,
-        machine=runtime.machine,
-        traces_dir=traces_dir(runtime.home),
-        config=runtime.config,
-        home=runtime.home,
     )
 
 
@@ -164,32 +139,3 @@ def add_observability_parser(
         "plugins only (for a preview on a host without a reachable database)",
     )
     render_p.set_defaults(func=_h_observability)
-
-
-def add_trace_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # meiva:note
-    # `meiva trace ship` replays the local OTel trace mirror to Tempo over OTLP.
-    trace_p = sub.add_parser("trace", help="trace mirror subcommands")
-    trace_sub = trace_p.add_subparsers(dest="trace_cmd", required=True)
-    trace_ship_p = trace_sub.add_parser(
-        "ship",
-        help="replay the local $MEIVA_HOME/traces mirror to Tempo over OTLP "
-        "(incremental from a per-file watermark; --since/--until re-ships a window)",
-    )
-    trace_ship_p.add_argument(
-        "--since",
-        default=None,
-        help="ship files dated on/after this day (YYYY-MM-DD); ignores watermark",
-    )
-    trace_ship_p.add_argument(
-        "--until",
-        default=None,
-        help="ship files dated on/before this day (YYYY-MM-DD); ignores watermark",
-    )
-    trace_ship_p.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="count what would ship without POSTing",
-    )
-    trace_ship_p.set_defaults(func=_h_trace_ship)

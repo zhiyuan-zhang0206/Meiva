@@ -155,9 +155,9 @@ first and ask "what changed that made it worth doing".
   bring in a metrics pipeline. See
   self-rolling-release design record in git).
   (Distributed *tracing* is no longer on this list: `base/telemetry/tracing.py` records
-  vendor-neutral OTLP/JSON spans to a local mirror — Traceloop/OpenLLMetry
-  auto-instruments the LLM/tool path; `meiva trace ship` replays the mirror to a
-  self-hosted viewer out-of-band. That is span recording, not a metrics pipeline;
+  vendor-neutral OTLP spans to the local collector, which relays them to a
+  self-hosted viewer — Traceloop/OpenLLMetry
+  auto-instruments the LLM/tool path. That is span recording, not a metrics pipeline;
   the metrics/dashboard/anomaly rejection above still stands.)
 
 - **Grouping `base/` / `scripts/` files into subpackages by folder shape alone**

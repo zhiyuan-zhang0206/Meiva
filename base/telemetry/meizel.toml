@@ -1,4 +1,4 @@
-exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitter.py", "event_store.py", "lgtm_local.py", "loki_index_labels.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "tests", "trace_mirror.py", "tracing.py"]
+exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitter.py", "event_store.py", "lgtm_local.py", "loki_index_labels.py", "metrics", "observability.py", "otlp", "pipeline_build.py", "process_logging.py", "station_endpoint.py", "tests", "tracing.py"]
 
 [uses]
 "__init__.py" = ["delivery", "emitter.py", "pipeline_build.py"]
@@ -12,9 +12,8 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 "otlp" = ["delivery", "emitter.py", "observability.py"]
 "pipeline_build.py" = ["delivery", "event_store.py", "metrics", "observability.py", "otlp"]
 "process_logging.py" = ["delivery", "emitter.py"]
-"tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "process_logging.py", "station_endpoint.py", "trace_mirror.py", "tracing.py"]
-"trace_mirror.py" = ["delivery"]
-"tracing.py" = ["delivery", "observability.py", "otlp", "trace_mirror.py"]
+"tests" = ["__init__.py", "audit_events.py", "delivery", "emitter.py", "event_store.py", "metrics", "observability.py", "otlp", "process_logging.py", "station_endpoint.py", "tracing.py"]
+"tracing.py" = ["delivery", "observability.py", "otlp"]
 
 [purity]
 "loki_index_labels.py" = "strict"

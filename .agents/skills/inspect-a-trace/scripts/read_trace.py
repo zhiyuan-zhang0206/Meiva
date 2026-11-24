@@ -6,7 +6,7 @@ a text summary on stdout.
 
     {
       "trace_id": "<hex-32>",
-      "source": "mirror" | "tempo",
+      "source": "tempo",
       "agent_id": "<session.id>" | null,
       "checkpoint_id": "<meiva.checkpoint_id>" | null  (null on post-#1964 traces; resolve via --with-content),
       "workflow_name": str | null,

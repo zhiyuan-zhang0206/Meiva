@@ -321,7 +321,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them); host-level, no agent_id: one batch mixes every agent's events | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
 | `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
-| `trace_recording` | current trace disk-watermark state per machine (disabled=1 while data disk exceeds trace_disk_watermark, 0 when healthy or recovered) | noise | disabled | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |
 | `converge_sealed_input_changed` | a render wrote a file a live root has sealed as a unit input, so that unit can no longer be spawned until a new generation or an explicit re-admission (task #6403) | anomaly | writer, units, paths, liveness | — | events | — |

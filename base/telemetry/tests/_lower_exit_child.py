@@ -62,7 +62,7 @@ def loaded() -> None:
             now=system_clock().now,
             machine=MachineFacts.of(name="exit-test", role={"agent-runner"}),
             home=meiva_home(),
-            config=TraceConfig(True, False, f"http://127.0.0.1:{port}", 3, 2048, 1.0, True),
+            config=TraceConfig(True, False, f"http://127.0.0.1:{port}", True),
             readiness=PROCESS_RECORDING,
         )
         owner = tracing.state["retry_owner"]

@@ -51,7 +51,6 @@ _EXPECTED_UIDS = {
     "meiva-ops-root-health-stale",
     "meiva-ops-checkpoint-blobs-freshness",
     "meiva-ops-checkpoint-blobs-growth",
-    "meiva-ops-trace-disk-watermark",
     "meiva-ops-inbound-consumed-unknown",
     "meiva-ops-llm-billing-quota",
     "meiva-ops-gateway-latency-route-warning",
@@ -98,7 +97,6 @@ def test_low_cost_rules_use_the_slow_group() -> None:
     groups = _load_groups()
     group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
     for uid in (
-        "meiva-ops-trace-disk-watermark",
         "meiva-ops-llm-rate-limit",
         "meiva-ops-llm-billing-quota",
         "meiva-ops-gateway-latency-route-warning",
@@ -388,17 +386,6 @@ def test_unit_one_gauges_render_with_the_ratio_suffix() -> None:
         "meiva_turn_end_duration_seconds_count",
         "meiva_turn_end_duration_seconds_sum",
     }
-
-
-def test_trace_watermark_rule_reads_recording_disabled_gauge() -> None:
-    rules = {r["uid"]: r for r in load_rules()}
-    rule = rules["meiva-ops-trace-disk-watermark"]
-    assert rule_query_exprs(rule, "loki") == []
-    assert rule_query_exprs(rule, "prometheus") == [
-        "max by (machine) (meiva_trace_recording_disabled_ratio)"
-    ]
-    assert threshold_params(rule) == [[0]]
-    assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 
 def test_inbound_consumed_unknown_rule_counts_the_event_over_15m() -> None:

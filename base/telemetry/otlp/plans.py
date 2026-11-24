@@ -28,7 +28,6 @@ METRIC_DISPOSITION: dict[str, dict[str, Literal["counter", "histogram", "gauge"]
         "process_lost": "gauge",
         "stalled": "gauge",
     },
-    "trace_recording": {"disabled": "gauge"},
     "turn_end": {"duration_seconds": "histogram"},
 }
 

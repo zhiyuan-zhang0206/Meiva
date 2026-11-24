@@ -21,7 +21,7 @@ def inactive(scenario: str) -> None:
             now=system_clock().now,
             machine=MachineFacts.of(name="", role=()),
             home=meiva_home(),
-            config=TraceConfig(False, False, "http://127.0.0.1:1", 1, 1, 0.9, False),
+            config=TraceConfig(False, False, "http://127.0.0.1:1", False),
             readiness=PROCESS_RECORDING,
         )
     assert not PROCESS_RECORDING.ready

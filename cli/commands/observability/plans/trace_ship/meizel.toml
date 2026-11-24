@@ -1,6 +1,0 @@
-exports = ["files.py", "target.py"]
-
-[purity]
-"__init__.py" = "strict"
-"files.py" = "strict"
-"target.py" = "strict"

@@ -2,11 +2,11 @@
 (.agents/skills/inspect-a-trace/scripts/{fetch,read}_trace.py).
 
 Locks the PR #637 follow-up nits: a malformed sibling span must not abort
-the whole mirror scan, --trace-id validation must match its error text, and
-unpadded base64 ids (legacy OTLP JSON) must decode. Pure logic only — no
-network, no Tempo; the mirror walk uses tmp_path files.
+the whole scan, --trace-id validation must match its error text, and
+unpadded base64 ids (legacy OTLP JSON) must decode. Pure logic plus loopback
+HTTP stubs — no real Tempo.
 
-`_mirror_dir` / `_cluster_secret` / `_gateway_get` resolve `$MEIVA_HOME` via
+`_cluster_secret` / `_gateway_get` resolve `$MEIVA_HOME` via
 `base.paths.home.resolve_meiva_home` (the variable, else `~/.meiva`), the
 same resolution every other Meiva process uses.
 
@@ -17,8 +17,8 @@ setitem(os.environ, ...)` is used below instead of `monkeypatch.setenv` /
 `delenv` so `no_os_environ.py`'s real Settings-singleton-no-op check
 stays meaningful for tests that DO exercise Settings.
 
-`_common.py::source_root` tests: `read_trace.py` / `fetch_trace.py` each need to
-locate the `base` package before they can import
+`_common.py::source_root` tests: `read_trace.py` needs to
+locate the `base` package before it can import
 `base.paths.home.resolve_meiva_home` — a bootstrap problem
 `resolve_meiva_home` itself cannot solve, so `_common.py` mirrors its rule. The
 walk-up-from-`__file__` branch (the dev checkout, or a converged
@@ -42,9 +42,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -131,20 +131,6 @@ def test_id_to_hex_refuses_malformed_values(bad: str) -> None:
         ft._id_to_hex(bad)
 
 
-# --- _mirror_day ---
-
-
-def test_mirror_day_parses_rotated_names() -> None:
-    assert ft._mirror_day(Path("spans-2026-08-25T16-14-01.621-size.jsonl")) == date(2026, 8, 25)
-    assert ft._mirror_day(Path("spans-2026-08-25T16-14-01.621-time.jsonl")) == date(2026, 8, 25)
-    assert ft._mirror_day(Path("spans.jsonl")) is None
-
-
-def test_mirror_day_returns_none_for_unparsable_dates() -> None:
-    assert ft._mirror_day(Path("spans-2026-13-99T00-00-00.000-size.jsonl")) is None
-    assert ft._mirror_day(Path("spans-hello.jsonl")) is None
-
-
 # --- _spans_from_envelope: malformed siblings must not abort the scan ---
 
 
@@ -187,18 +173,37 @@ def test_other_trace_spans_are_filtered_out() -> None:
     assert [s["span_id"] for s in spans] == [_SPAN_A]
 
 
-# --- cmd_fetch --trace-id validation ---
+# --- cmd_fetch: --trace-id validation and the Tempo round trip ---
 
 
-def _fetch_args(trace_id: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        trace_id=trace_id,
-        source="mirror",
-        out="trace_raw.json",
-        days=2,
-        mirror_dir=None,
-        tempo_url="http://localhost:3200",
-    )
+@contextmanager
+def _serve_tempo(traces: dict[str, dict[str, Any]]) -> Generator[str]:
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            trace = traces.get(self.path.removeprefix("/api/traces/"))
+            body = json.dumps(trace if trace is not None else {}).encode()
+            self.send_response(200 if trace is not None else 404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def _fetch_args(trace_id: str, *, tempo_url: str = "http://localhost:3200") -> SimpleNamespace:
+    return SimpleNamespace(trace_id=trace_id, out="trace_raw.json", tempo_url=tempo_url)
 
 
 def test_cmd_fetch_rejects_wrong_length_ids(capsys: pytest.CaptureFixture[str]) -> None:
@@ -207,82 +212,27 @@ def test_cmd_fetch_rejects_wrong_length_ids(capsys: pytest.CaptureFixture[str]) 
         assert "--trace-id must be a 31- or 32-char hex id" in capsys.readouterr().out
 
 
-def test_cmd_fetch_accepts_31_and_32_char_ids_and_zfills(
+def test_cmd_fetch_writes_the_tempo_trace_and_zfills_a_31_char_id(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     zfilled_id = "0" + "a" * 31
-    (tmp_path / "spans.jsonl").write_text(
-        json.dumps(_envelope(_span(_SPAN_A, trace_id=zfilled_id))) + "\n",
-        encoding="utf-8",
-    )
+    batches = {"batches": _envelope(_span(_SPAN_A, trace_id=zfilled_id))["resourceSpans"]}
     out_file = tmp_path / "out.json"
-    hit_args = _fetch_args("a" * 31)
-    hit_args.mirror_dir = str(tmp_path)
-    hit_args.out = str(out_file)
-    miss_args = _fetch_args("b" * 32)
-    miss_args.mirror_dir = str(tmp_path)
-    miss_args.out = str(tmp_path / "miss.json")
 
-    assert ft.cmd_fetch(hit_args) == 0
-    assert ft.cmd_fetch(miss_args) == 1
+    with _serve_tempo({zfilled_id: batches}) as tempo_url:
+        hit_args = _fetch_args("a" * 31, tempo_url=tempo_url)
+        hit_args.out = str(out_file)
+        miss_args = _fetch_args("b" * 32, tempo_url=tempo_url)
+        miss_args.out = str(tmp_path / "miss.json")
+
+        assert ft.cmd_fetch(hit_args) == 0
+        with pytest.raises(urllib.error.HTTPError):
+            ft.cmd_fetch(miss_args)
     capsys.readouterr()
-    assert json.loads(out_file.read_text(encoding="utf-8"))["trace_id"] == zfilled_id
-
-
-# --- fetch_from_mirror: cross-rotation merge + malformed lines ---
-
-
-def test_fetch_from_mirror_merges_across_rotation_and_skips_bad_lines(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    active = tmp_path / "spans.jsonl"
-    # Relative date: the retention window slides with the wall clock — a hard
-    # coded date becomes a CI time bomb (2026-09-24 for 2026-08-25 + days=30).
-    rotated_day = datetime.now(UTC).date() - timedelta(days=1)
-    rotated = tmp_path / f"spans-{rotated_day}T16-14-01.621-size.jsonl"
-    legacy_unpadded = ft._trace_id_b64(_TRACE).rstrip("=")
-    active.write_text(
-        chr(10).join(
-            [
-                json.dumps(_envelope(_span(_SPAN_A), _span(_SPAN_B, trace_id=_OTHER))),
-                json.dumps(_envelope(_span(_SPAN_D, trace_id=legacy_unpadded))),
-                "not-json-at-all",
-            ]
-        )
-        + chr(10),
-        encoding="utf-8",
-    )
-    rotated.write_text(
-        json.dumps(
-            _envelope(
-                _span(_SPAN_A),  # duplicate of A: same span_id, deduped
-                _span(_SPAN_C),
-                _span("", trace_id=""),  # malformed sibling — must not abort
-            )
-        )
-        + chr(10),
-        encoding="utf-8",
-    )
-    args = SimpleNamespace(mirror_dir=str(tmp_path), days=30)
-
-    spans = ft.fetch_from_mirror(args, _TRACE)
-    capsys.readouterr()
-
-    assert sorted(s["span_id"] for s in spans) == sorted([_SPAN_A, _SPAN_C, _SPAN_D])
-
-
-# --- _mirror_dir: the resolved home's trace mirror ---
-
-
-def test_mirror_dir_respects_explicit_override(tmp_path: Path) -> None:
-    override = tmp_path / "custom-traces"
-    args = SimpleNamespace(mirror_dir=str(override))
-
-    assert ft._mirror_dir(args) == override
-
-
-def test_mirror_dir_uses_resolve_meiva_home() -> None:
-    assert ft._mirror_dir(SimpleNamespace(mirror_dir=None)) == ft.resolve_meiva_home() / "traces"
+    written = json.loads(out_file.read_text(encoding="utf-8"))
+    assert written["trace_id"] == zfilled_id
+    assert written["source"] == "tempo"
+    assert [s["span_id"] for s in written["spans"]] == [_SPAN_A]
 
 
 # --- _cluster_secret: the machine token, then the explicit env var, then the home's .env ---

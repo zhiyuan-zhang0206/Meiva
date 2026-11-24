@@ -89,5 +89,6 @@
   "meiva-ops-root-diagnostic-task-telemetry",
   "meiva-ops-root-unit-inputs-changed",
   "meiva-ops-root-unit-left-behind-stuck",
-  "meiva-ops-root-unit-unowned-alive"
+  "meiva-ops-root-unit-unowned-alive",
+  "meiva-ops-trace-disk-watermark"
 ]

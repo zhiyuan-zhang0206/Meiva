@@ -176,7 +176,7 @@ def pending(scenario: str) -> None:
             # expose tracing's private SDK lock. Failure releases it before observing stop.
             with blocked_sdk_import():
                 tracing.start_arm_thread(
-                    TraceConfig(True, False, endpoint, 3, 2048, 0.9, True),
+                    TraceConfig(True, False, endpoint, True),
                     MachineFacts.of(name="tracing-test", role={"agent-runner"}),
                     meiva_home(),
                     readiness=PROCESS_RECORDING,

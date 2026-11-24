@@ -21,4 +21,4 @@ token. The remote receiver exists only on a gateway with an exact
 non-loopback `MEIVA_MACHINE_HOST`; combined single-box hosts collapse to the local
 receiver.
 
-Parent node: [OTLP export backend & trace ship to Tempo](telemetry-otlp.md).
+Parent node: [OTLP export backend](telemetry-otlp.md).

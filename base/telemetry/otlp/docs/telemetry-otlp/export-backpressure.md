@@ -46,7 +46,7 @@ and retries on the backend's next initialization opportunity; trace setup uses
 one daemon retry loop on the same cadence. Successful trace recovery reports the
 preceding consecutive failures and cumulative circuit drops.
 
-Parent node: [OTLP export backend and trace ship](telemetry-otlp.md).
+Parent node: [OTLP export backend](telemetry-otlp.md).
 
 ## Queue loss
 

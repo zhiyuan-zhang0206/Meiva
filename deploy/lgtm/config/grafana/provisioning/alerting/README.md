@@ -2,7 +2,7 @@
 
 Grafana Alerting rules for the Meiva event system, provisioned as code. Since
 the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
-R1-R2, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
+R1-R2, R5-R6, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
 rule, and the root-health round freshness rule query **Prometheus** (the
@@ -174,7 +174,6 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
-| `meiva-ops-trace-disk-watermark` | `meiva-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
 | `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
 | `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
@@ -286,9 +285,7 @@ IM channels retired on 2026-11-08 and the ingest no longer reads it.
 Severity follows the alert-system vocabulary (Task #1224):
 critical/warning/error — none of the three is gated. Thresholds are
 calibrated against live data (2026-08-04, see header comment in
-`rules.yml`). R7 (trace-disk-watermark) is a chronic-condition alert: any
-degradation event in the trailing 24h keeps it firing, so one episode = one
-onset and one recovery record instead of one per event.
+`rules.yml`).
 
 R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
@@ -314,7 +311,7 @@ count(quantile_over_time(0.95,
 
 ### Migration notes (Postgres → LGTM, 2026-08-12)
 
-- **R1/R2/R5/R7** — same semantics, Loki `count_over_time` /
+- **R1/R2/R5** — same semantics, Loki `count_over_time` /
   `sum_over_time` + `| json` filters. R2 unwraps `attributes_n` (SUM of the
   real per-row drop counts, the same contract the Ops panel reads); R5's
   freshness discriminator is the numeric comparison
@@ -332,7 +329,7 @@ count(quantile_over_time(0.95,
   flows the query returns no data (NoData → OK).
 - **R4/R6 data-source caveat** — every rule reads Loki/Prometheus now; if
   the OTLP export path fails (as it did 2026-08-12), new events stop
-  landing and R1-R5, R7, R13 go quiet with them — R6 exists exactly to scream
+  landing and R1-R5, R13 go quiet with them — R6 exists exactly to scream
   about that outage class, and the health-probe chain covers the rest.
 
 ## Sync to the live Grafana

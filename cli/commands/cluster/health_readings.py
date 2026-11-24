@@ -259,12 +259,11 @@ def read_service_failures(command: CommandRuntime, launched: LaunchRecord) -> tu
 # meiva:note
 # Used fraction of the data volume, statvfs-family, or None when unmeasurable.
 #
-# Uses `shutil.disk_usage`, the same measurement the trace disk-watermark guard
-# (`MEIVA_TRACE_DISK_WATERMARK`, `base/telemetry/trace_mirror.py`) and the macmini resource
-# watcher make, so the probe fires at the line the owner is already told about. df(1) was the
+# Uses `shutil.disk_usage`, the same measurement the macmini resource watcher makes, so the probe
+# fires at the line the owner is already told about. df(1) was the
 # original measure, but its offset to the statvfs family is unstable in both directions
 # (2026-08-24: ~0.8 points higher; 2026-09-14: ~2-4 points lower), and a df-calibrated 0.90
-# fires at about statvfs 0.938, later than the trace auto-degrade this alert exists to
+# fires at about statvfs 0.938, later than the line this alert exists to
 # precede (metric canon 2026-09-14: judge disk waterlines in the statvfs family only).
 def disk_usage_fraction(volume: Path) -> float | None:
     try:

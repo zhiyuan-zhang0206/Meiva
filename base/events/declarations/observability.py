@@ -130,13 +130,6 @@ class LogPayload(TypedDict):
     msg: str
 
 
-# meiva:note
-# Current trace disk-watermark state per machine: disabled=1 while trace recording is auto-disabled
-# because the traces data disk exceeds trace_disk_watermark, and 0 when recording is permitted.
-class TraceRecording(TypedDict):
-    disabled: int
-
-
 EVENTS: dict[str, EventSpec] = {
     "loki_write_path_probe_failed": telemetry_event(
         "loki_write_path_probe_failed",
@@ -230,13 +223,5 @@ EVENTS: dict[str, EventSpec] = {
         "a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is "
         "not provisioned this pass",
         tier="anomaly",
-    ),
-    "trace_recording": telemetry_event(
-        "trace_recording",
-        "current trace disk-watermark state per machine (disabled=1 while data disk exceeds "
-        "trace_disk_watermark, 0 when healthy or recovered)",
-        payload=TraceRecording,
-        tier="noise",
-        site="services/supervision/meiva_root_glue/diagnostics.py:RootHealthRounds._emit_trace_recording_state",
     ),
 }

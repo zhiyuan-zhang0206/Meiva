@@ -53,20 +53,7 @@ class ObservabilitySettings(TempoSettings):
         title="Enable trace export",
         default=True,
         alias="MEIVA_TRACE_ENABLED",
-        description="Export OTel spans to the local OTel Collector sidecar (which fans out to Tempo and writes the JSONL mirror under $MEIVA_HOME/traces/ via its file exporter). Disable to skip span export entirely — with the sidecar architecture recording IS the export, so the mirror stops too (one kill switch for the whole OTLP surface).",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    trace_retention_days: int = Field(
-        title="Trace retention (days)",
-        default=3,
-        alias="MEIVA_TRACE_RETENTION_DAYS",
-        description="Delete local trace-mirror files older than this many days (pruned on each agent start; the collector file exporter also rotates by max_days from the same setting, baked into its config at converge). A window not replayed in time is gone.",
+        description="Export OTel spans to the local OTel Collector sidecar (which relays to Tempo). Disable to skip span export entirely — with the sidecar architecture recording IS the export (one kill switch for the whole OTLP surface).",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -122,34 +109,7 @@ class ObservabilitySettings(TempoSettings):
         title="Remove model content from traces",
         default=True,
         alias="MEIVA_TRACE_STRIP_CONTENT",
-        description="Strip LLM content attributes (gen_ai.task.input/output, traceloop.entity.input/output, messages, system_instructions, ...) from recorded spans. Metadata-only spans: names, langgraph paths, checkpoint refs, agent_id, durations, status, trace_id. Content stays out of the mirror; it is fetched on demand from checkpoints by trace id.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    trace_max_dir_mb: int = Field(
-        title="Trace directory size limit (MiB)",
-        default=2048,
-        alias="MEIVA_TRACE_MAX_DIR_MB",
-        description="Hard cap on the local trace-mirror directory size (MB). When exceeded on an agent start, oldest mirror files are deleted until the directory fits. Bounds disk even when retention_days is wide or the collector rotation is misconfigured.",
-        json_schema_extra={
-            "help_text": "Set 0 to disable the directory size cap.",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    trace_disk_watermark: float = Field(
-        title="Disk usage threshold for pausing traces",
-        default=0.9,
-        alias="MEIVA_TRACE_DISK_WATERMARK",
-        description="Data-disk usage fraction (0..1) at which trace recording auto-degrades: the agent skips enabling span recording (and logs a warning event) so the mirror can never fill the disk. 1.0 or above disables the guard.",
+        description="Strip LLM content attributes (gen_ai.task.input/output, traceloop.entity.input/output, messages, system_instructions, ...) from recorded spans. Metadata-only spans: names, langgraph paths, checkpoint refs, agent_id, durations, status, trace_id. Content stays out of Tempo; it is fetched on demand from checkpoints by trace id.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,
@@ -171,8 +131,7 @@ class ObservabilitySettings(TempoSettings):
             "stop receiving data and their read surfaces (fleet-graph token totals/"
             "scores, stats-dashboard cost, inspect event history, Grafana) freeze "
             "at the last data. The mirror prevents data loss, but visibility stops. "
-            "`meiva trace ship` refuses while off (one kill switch for the whole OTLP "
-            "surface). There is no Postgres fallback. Applies "
+            "There is no Postgres fallback. Applies "
             "on the next process start."
         ),
         json_schema_extra={
@@ -240,8 +199,7 @@ class ObservabilitySettings(TempoSettings):
             "Normally points at the local sidecar, "
             "on every machine — agents never dial a backend directly; the "
             "gateway sidecar fans out to loopback backends while a pure runner "
-            "sidecar relays to the gateway's authenticated OTLP receiver. "
-            "`meiva trace ship` bypasses the local sidecar to avoid re-mirroring."
+            "sidecar relays to the gateway's authenticated OTLP receiver."
         ),
         json_schema_extra={
             "restart_required": "all",
