@@ -149,7 +149,7 @@ class _MetricsBackfillUnpricedOptions:
 
 
 @dataclass(frozen=True)
-class _UsageLedgerBackfillOptions:
+class _UsageLedgerWindowOptions:
     start: date
     end: date
     batch_size: int
@@ -195,8 +195,18 @@ def _h_usage_ledger_backfill(args: argparse.Namespace) -> int:
     from cli.commands.management.metrics_backfill import cmd_backfill_usage_ledger
     from cli.database import database_factory_of
 
-    opts = options(args, _UsageLedgerBackfillOptions)
+    opts = options(args, _UsageLedgerWindowOptions)
     return cmd_backfill_usage_ledger(
+        database_factory_of(args), start=opts.start, end=opts.end, batch_size=opts.batch_size
+    )
+
+
+def _h_usage_ledger_reconcile(args: argparse.Namespace) -> int:
+    from cli.commands.management.metrics_backfill import cmd_reconcile_usage_ledger
+    from cli.database import database_factory_of
+
+    opts = options(args, _UsageLedgerWindowOptions)
+    return cmd_reconcile_usage_ledger(
         database_factory_of(args), start=opts.start, end=opts.end, batch_size=opts.batch_size
     )
 
@@ -251,19 +261,29 @@ def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     backfill_p.add_argument("--json", action="store_true", help="print the backfill report as JSON")
     backfill_p.set_defaults(func=_h_metrics_backfill_unpriced)
 
-    ledger_backfill = metrics_sub.add_parser(
-        "backfill-usage-ledger", help="import retained usage reports into the business ledger"
-    )
-    ledger_backfill.add_argument(
-        "--start", required=True, type=date.fromisoformat, help="first UTC day"
-    )
-    ledger_backfill.add_argument(
-        "--end", required=True, type=date.fromisoformat, help="exclusive UTC day"
-    )
-    ledger_backfill.add_argument(
-        "--batch-size", default=1000, type=int, help="maximum reports per transaction"
-    )
-    ledger_backfill.set_defaults(func=_h_usage_ledger_backfill)
+    for name, help_text, handler in (
+        (
+            "backfill-usage-ledger",
+            "import retained usage reports into the business ledger",
+            _h_usage_ledger_backfill,
+        ),
+        (
+            "usage-ledger-reconcile",
+            "compare ledger and telemetry usage by UTC day, model and billing",
+            _h_usage_ledger_reconcile,
+        ),
+    ):
+        ledger_parser = metrics_sub.add_parser(name, help=help_text)
+        ledger_parser.add_argument(
+            "--start", required=True, type=date.fromisoformat, help="first UTC day"
+        )
+        ledger_parser.add_argument(
+            "--end", required=True, type=date.fromisoformat, help="exclusive UTC day"
+        )
+        ledger_parser.add_argument(
+            "--batch-size", default=1000, type=int, help="maximum source reports per page"
+        )
+        ledger_parser.set_defaults(func=handler)
 
 
 def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
