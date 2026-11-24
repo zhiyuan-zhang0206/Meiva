@@ -1,4 +1,4 @@
-exports = ["catalog.py", "convergence.py"]
+exports = ["catalog.py", "convergence.py", "git_zero_trace_guard.py"]
 
 [uses]
 "__init__.py" = ["catalog.py", "convergence.py"]
@@ -6,3 +6,6 @@ exports = ["catalog.py", "convergence.py"]
 
 [purity]
 "catalog.py" = "strict"
+
+[roots]
+"git_zero_trace_guard.py" = { kinds = ["argv", "environ", "home"], why = "the script entry of the `git` shim: it is the process's composition root, so it reads its own command line, the environment the shim handed it and the user's home (the default MEIVA_HOME) once in `main` and the module-level entry, and every decision below takes them as values" }

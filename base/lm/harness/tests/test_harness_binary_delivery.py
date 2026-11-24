@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.env.harness_binaries import GIT_SHIM_DIR
 from base.lm.harness import wiring
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import resolved_binary as codex_binary
@@ -49,6 +50,16 @@ def test_a_session_environment_carries_the_dirs_a_harness_installs_into(
 
     assert str(Path.home() / ".local/bin") in entries
     assert "/usr/bin" in entries
+
+
+def test_a_session_environment_puts_the_git_shim_first(tmp_path: Path) -> None:
+    environment = wiring.session_environ({"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+    entries = environment["PATH"].split(os.pathsep)
+    assert entries[0] == str(GIT_SHIM_DIR.resolve())
+    assert entries.count(entries[0]) == 1
+    assert "/usr/bin" in entries
+    again = wiring.session_environ(environment)
+    assert again["PATH"].split(os.pathsep).count(entries[0]) == 1
 
 
 def test_a_given_environment_is_never_dropped(tmp_path: Path) -> None:

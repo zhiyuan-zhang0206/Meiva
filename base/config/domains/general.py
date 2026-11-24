@@ -30,6 +30,20 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    zero_trace_git_remotes: str = Field(
+        title="Zero-trace git remotes",
+        default="",
+        alias="MEIVA_ZERO_TRACE_GIT_REMOTES",
+        description="Comma-separated patterns naming the git remotes that must carry no platform trace. A `git push` from an agent session whose target push URL matches one entry is refused when a remote branch name it writes contains the agent's own id or `meiva`/`meizel`/`antigravity`, or when a commit it adds has an AI attribution trailer or a `.meiva/` path in its message; deleting a remote branch is never refused. Each entry is a case-insensitive shell glob (`*`, `?`, `[...]`) matched anywhere inside the URL, tried against the URL as written and against `host/path` (scheme, user and port dropped, the scp-like colon turned into a slash), so `example-corp/` covers both `https://github.com/example-corp/app.git` and `git@github.com:example-corp/app.git`. Empty (the default) leaves every push unchecked. Delivered to every harness session and `meiva.shell` session through the `git` shim at the head of their PATH.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     self_evolution_coverage_alert_floor: float = Field(
         title="Minimum self-evolution scan coverage",
         default=0.5,

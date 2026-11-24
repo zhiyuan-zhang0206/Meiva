@@ -1,0 +1,51 @@
+#!/bin/sh
+# The agent-facing `git`: finds the real git (this directory is skipped, never re-entered) and lets it
+# run untouched unless the call is a `git push` on a host that configures MEIVA_ZERO_TRACE_GIT_REMOTES, in
+# which case the guard next to this directory's parent decides first. See git_zero_trace_guard.py.
+self_dir=${0%/*}
+[ "$self_dir" = "$0" ] && self_dir=.
+
+real_git=
+clean_path=
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+    [ -n "$dir" ] || dir=.
+    if [ -d "$dir" ] && [ "$dir" -ef "$self_dir" ]; then
+        continue
+    fi
+    clean_path=${clean_path:+$clean_path:}$dir
+    if [ -z "$real_git" ] && [ -x "$dir/git" ] && [ ! -d "$dir/git" ]; then
+        real_git=$dir/git
+    fi
+done
+IFS=$old_ifs
+
+if [ -z "$real_git" ]; then
+    echo "git: command not found (the Meiva git shim found no other git on PATH)" >&2
+    exit 127
+fi
+PATH=$clean_path
+export PATH
+
+[ -n "${MEIVA_ZERO_TRACE_GIT_REMOTES:-}" ] || exec "$real_git" "$@"
+push_seen=
+for arg in "$@"; do
+    if [ "$arg" = push ]; then
+        push_seen=1
+        break
+    fi
+done
+[ -n "$push_seen" ] || exec "$real_git" "$@"
+
+guard_python=
+if [ -n "${MEIVA_PYTHON:-}" ] && [ -x "$MEIVA_PYTHON" ]; then
+    guard_python=$MEIVA_PYTHON
+else
+    guard_python=$(command -v python3 2>/dev/null) || guard_python=
+fi
+if [ -z "$guard_python" ]; then
+    echo "git: refusing this push: MEIVA_ZERO_TRACE_GIT_REMOTES is set but neither MEIVA_PYTHON nor python3 is usable to run the zero-trace guard" >&2
+    exit 1
+fi
+exec "$guard_python" "$self_dir/../git_zero_trace_guard.py" "$real_git" "$@"

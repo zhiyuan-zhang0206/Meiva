@@ -20,3 +20,9 @@ def test_every_credential_variable_the_cli_reads_is_covered() -> None:
 def test_api_key_mode_passes_the_key_through() -> None:
     env = build_env({"OPENAI_API_KEY": SAMPLE_KEY}, api_key_mode=True)
     assert env["OPENAI_API_KEY"] == SAMPLE_KEY
+
+
+def test_the_zero_trace_git_remotes_setting_and_the_git_shim_path_reach_the_cli() -> None:
+    env = build_env({"MEIVA_ZERO_TRACE_GIT_REMOTES": "example-corp/", "PATH": "/shim:/bin"})
+    assert env["MEIVA_ZERO_TRACE_GIT_REMOTES"] == "example-corp/"
+    assert env["PATH"] == "/shim:/bin"

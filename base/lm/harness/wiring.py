@@ -17,6 +17,7 @@ from base.host.env.harness_binaries import (
     meiva_python_env,
     noninteractive_bash_path,
     resolve_harness_binary,
+    with_git_shim,
     with_harness_path,
 )
 from base.host.env.registry import process_environment
@@ -75,7 +76,8 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
         base["PATH"] = venv_bin
     base.update(meiva_python_env(sys.executable))
     base["SHELL"] = noninteractive_bash_path()
-    return with_harness_path(base)
+    delivered = with_harness_path(base)
+    return {**delivered, "PATH": with_git_shim(delivered["PATH"])}
 
 
 # meiva:note
