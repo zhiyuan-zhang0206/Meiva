@@ -23,8 +23,6 @@ _PINS: dict[str, Pin] = {
     "meiva-ops-host-disk-free-low": Pin("warning", "5m", "lt", 20, "host_disk_free"),
     "meiva-ops-host-disk-free-critical": Pin("critical", "2m", "lt", 10, "host_disk_free"),
     "meiva-ops-host-disk-draining": Pin("warning", "10m", "lt", 6, "host_disk_draining"),
-    "meiva-ops-host-swap-used-high": Pin("warning", "10m", "gt", 8, "host_swap"),
-    "meiva-ops-host-swap-used-critical": Pin("critical", "5m", "gt", 15, "host_swap"),
     "meiva-ops-pgbouncer-write-stall": Pin("critical", "3m", "gt", 0, "pgbouncer_write_stall"),
     "meiva-ops-otelcol-receiver-refused": Pin(
         "warning", "10m", "gt", 0, "otelcol_receiver_refused"
@@ -87,13 +85,6 @@ def test_the_stall_rule_keeps_the_sentinels_judgement() -> None:
     assert "> 300000" in expr
     assert "pgbouncer_transactions_per_second" in expr
     assert "< 20" in expr
-
-
-def test_both_swap_tiers_read_the_paging_scrapers_used_bytes() -> None:
-    warning = rule_query_exprs(_rules()["meiva-ops-host-swap-used-high"], "prometheus")
-    critical = rule_query_exprs(_rules()["meiva-ops-host-swap-used-critical"], "prometheus")
-    assert warning == critical
-    assert 'system_paging_usage_bytes{machine!="", state="used"}' in warning[0]
 
 
 def test_the_intake_refusal_rule_reads_one_counter_so_series_cannot_collide() -> None:

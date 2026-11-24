@@ -587,11 +587,6 @@ def test_a_unit_that_does_not_own_the_data_plane_scrapes_only_its_host(
     assert "logs/pgbouncer" not in mapping_at(config, "service", "pipelines")
     assert "signal_to_metrics/pgbouncer" not in mapping_at(config, "connectors")
     assert "host_metrics" in mapping_at(config, "receivers")
-    assert mapping_at(config, "receivers", "host_metrics", "scrapers", "paging", "metrics") == {
-        "system.paging.usage": {"enabled": True},
-        "system.paging.operations": {"enabled": True},
-        "system.paging.faults": {"enabled": False},
-    }
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol"]
 
 

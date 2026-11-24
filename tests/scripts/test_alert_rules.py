@@ -66,8 +66,6 @@ _EXPECTED_UIDS = {
     "meiva-ops-host-disk-free-low",
     "meiva-ops-host-disk-free-critical",
     "meiva-ops-host-disk-draining",
-    "meiva-ops-host-swap-used-high",
-    "meiva-ops-host-swap-used-critical",
     "meiva-ops-pgbouncer-write-stall",
     "meiva-ops-otelcol-receiver-refused",
     "meiva-ops-pg-connection-saturation",

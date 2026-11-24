@@ -62,19 +62,6 @@ $HARNESS_OTLP_RECEIVER
         metrics:
           system.memory.utilization:
             enabled: true
-      # Swap/pageout gauges. macOS keeps swap as a self-growing pool of files on
-      # the data volume, so swap used (and the page-out rate) is the memory
-      # signal the Grafana host rules read; this replaces the ssh-sampling swap
-      # watchers on the Macs. Per-fault counters are left off: they are high
-      # rate and nothing reads them.
-      paging:
-        metrics:
-          system.paging.usage:
-            enabled: true
-          system.paging.operations:
-            enabled: true
-          system.paging.faults:
-            enabled: false
       disk:
       filesystem:
         metrics:

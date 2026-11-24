@@ -9,11 +9,7 @@ Meiva code participates and a box with no agents running still reports.
 
 - `host_metrics`, on every **collector-bearing** machine, every 30 s — cpu (utilization ratio
   only; the per-core cumulative `system.cpu.time` is disabled), load, memory,
-  paging, disk, filesystem, network. Paging exports `system_paging_usage_bytes`
-  (swap `state` used/free) and the cumulative `system_paging_operations_total`
-  (`direction` page_in/page_out, `type`); per-fault counters are disabled.
-  macOS swap is a self-growing pool of files on the data volume, so the Grafana
-  host rules read swap used and the page-out rate from these.
+  disk, filesystem, network.
 - `prometheus/otelcol`, on every **collector-bearing** machine, every 30 s from the collector's
   loopback self-metrics endpoint — exporter queue size/capacity, enqueue
   failure counters and process uptime. Its port is per-unit configurable via
