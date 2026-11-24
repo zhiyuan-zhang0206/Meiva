@@ -135,7 +135,6 @@ describe("read endpoints reach their gateway route", () => {
     ["getCommands scopes to an agent", "/api/commands?agent_id=7", (a) => a.getCommands(7)],
     ["getStatsDashboard", "/api/stats/dashboard?hours=24", (a) => a.getStatsDashboard(24)],
     ["getStatsDashboard passes a non-default window", "/api/stats/dashboard?hours=168", (a) => a.getStatsDashboard(168)],
-    ["getDiagnostics", "/api/stats/diagnostics?hours=6", (a) => a.getDiagnostics(6)],
     ["getConfig", "/api/config", (a) => a.getConfig()],
     ["getConfig for a machine", "/api/config?machine=runner-1", (a) => a.getConfig("runner-1")],
     ["getResolvedConfig for a model", "/api/config/resolved?model=claude-opus-5", (a) => a.getResolvedConfig("claude-opus-5")],
@@ -166,24 +165,6 @@ describe("read endpoints reach their gateway route", () => {
     });
     const rows = await api().listAgents();
     expect(rows.agents.map((row) => row.status)).toEqual(["running", "idling", "terminated"]);
-  });
-
-  it("getDiagnosticSamples addresses one class by its full identity and unwraps the samples", async () => {
-    answer = () => ({ kind: "json", body: { samples: [{ id: 1 }] } });
-    const samples = await api().getDiagnosticSamples(
-      { level: "error", event_name: "turn failed", source: "runner", process: "" },
-      24,
-    );
-    expect(samples).toEqual([{ id: 1 }]);
-    const url = new URL(requests()[0].path, "http://gateway");
-    expect(url.pathname).toBe("/api/stats/diagnostics/samples");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      level: "error",
-      event_name: "turn failed",
-      source: "runner",
-      process: "",
-      hours: "24",
-    });
   });
 
   it.each(["getTimeline", "getTokenUsage", "getPendingMessages"] as const)(

@@ -1,5 +1,5 @@
 # meiva:note
-# How a `GET /api/events` or `GET /api/agents/{id}/events` request becomes a store read.
+# How a `GET /api/events` request becomes a store read.
 #
 # Every case passes the request values and a `now`, and asserts the plan. The route, the stores
 # and the wire shape are exercised against real rows in `gateway/tests/events`.
@@ -12,11 +12,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from gateway.events.events_plan import (
-    AgentEventsRequest,
     EventsRequest,
     InvalidEventsQueryError,
     page_depth,
-    plan_agent_events,
     plan_events,
 )
 
@@ -139,49 +137,3 @@ def test_one_store_pages_directly_and_two_stores_each_give_the_newest_rows() -> 
     assert page_depth(plan(category="telemetry", limit=5, offset=10)) == (5, 10)
     assert page_depth(plan(category="audit", limit=5, offset=10)) == (5, 10)
     assert page_depth(plan(limit=5, offset=10)) == (15, 0)
-
-
-def agent_plan(**changes: object):
-    base = AgentEventsRequest(
-        agent_id=42, event=None, level=None, from_=None, to=None, limit=None, offset=0
-    )
-    return plan_agent_events(replace(base, **changes), now=NOW, default_limit=100)
-
-
-def test_an_agent_history_reads_telemetry_and_log_rows_of_that_agent() -> None:
-    query = agent_plan()
-    assert query.agent_id == 42
-    assert query.categories == ["telemetry", "log"]
-    assert query.event_names is None
-    assert query.from_ == NOW - timedelta(hours=24)
-    assert (query.limit, query.offset) == (100, 0)
-
-
-def test_an_agent_history_filters_by_event_and_exact_level() -> None:
-    query = agent_plan(event="llm_usage", level="WARNING")
-    assert query.event_names == ["llm_usage"]
-    # meiva:note
-    # exact match, not a minimum; the store folds the case
-    assert query.level == "WARNING"
-
-
-def test_an_agent_history_window_and_page_pass_through() -> None:
-    query = agent_plan(
-        from_=datetime(2026, 8, 1, tzinfo=UTC),
-        to=datetime(2026, 8, 2, tzinfo=UTC),
-        limit=5,
-        offset=10,
-    )
-    assert query.from_ == datetime(2026, 8, 1, tzinfo=UTC)
-    assert query.to == datetime(2026, 8, 2, tzinfo=UTC)
-    assert (query.limit, query.offset) == (5, 10)
-    assert (
-        plan_agent_events(
-            AgentEventsRequest(
-                agent_id=1, event=None, level=None, from_=None, to=None, limit=None, offset=0
-            ),
-            now=NOW,
-            default_limit=7,
-        ).limit
-        == 7
-    )

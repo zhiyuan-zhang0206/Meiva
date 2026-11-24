@@ -1,17 +1,10 @@
 # meiva:note
 # Wire models of the cluster surface: system + cluster status and the
-# machine pause/resume/delete admin responses, the stats-dashboard aggregate, and
-# the `GET /api/ops/monitor` series (the Insights Ops panel).
+# machine pause/resume/delete admin responses and the stats-dashboard aggregate.
 #
 # `MachineStatus` (the roster row the CLI also decodes) lives in
 # `base.api_contracts.status` so `cli` can decode the roster without importing
 # up into `gateway`; the models below are the gateway-only status surface.
-#
-# The ops-monitor shapes mirror `gateway.cluster.monitor.ops_series.fetch_ops_series`
-# output one-for-one (the router builds the report dict there, then validates it
-# here). Every series array is positionally aligned with `meta.bucket_starts` via
-# its `bucket` index; missing buckets are zero-filled by the query core, so a
-# panel can render the arrays directly.
 #
 # FastAPI registers these unchanged, so the OpenAPI codegen is byte-identical to
 # the wire before.
@@ -26,7 +19,6 @@ from pydantic import (
     ConfigDict,
     Field,
     NonNegativeInt,
-    PositiveInt,
 )
 
 from base.api_contracts.status import MachineStatus
@@ -237,20 +229,6 @@ class StatsAlerts(BaseModel):
 
 
 # meiva:note
-# Windowed developer error diagnostics summary (Sentry-style), separate from live Grafana alerts.
-class StatsDiagnostics(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    active_classes: NonNegativeInt = 0
-    archived_classes: NonNegativeInt = 0
-    active_events: NonNegativeInt = 0
-    archived_events: NonNegativeInt = 0
-    errors: NonNegativeInt = 0
-    warnings: NonNegativeInt = 0
-    deployed_sha: str | None = None
-
-
-# meiva:note
 # GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.
 # All windowed fields aggregate over the applied_window_hours horizon; `live_count`, `alerts`
 # and `plugin_stats` are point-in-time live state.
@@ -262,11 +240,9 @@ class StatsDashboard(BaseModel):
             "description": (
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
                 "Point-in-time fields (`live_count`, `alerts`, `plugin_stats`) report live cluster state.\n"
-                "Windowed fields (`tokens`, cost slices, `diagnostics`) aggregate over `applied_window_hours`.\n\n"
+                "Windowed fields (`tokens`, cost slices) aggregate over `applied_window_hours`.\n\n"
                 "- `alerts`: live unresolved Grafana alerts from `alerts` (excluding synthetic watchdog rows), "
-                "using the same single source of truth as `/api/alerts`.\n"
-                "- `diagnostics`: Sentry-style error/anomaly classes from `telemetry_events`, automatically "
-                "archived on release cutover (`deployed_sha`) or after `diagnostic_quiet_seconds`."
+                "using the same single source of truth as `/api/alerts`."
             )
         },
     )
@@ -283,188 +259,5 @@ class StatsDashboard(BaseModel):
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     google_cost_usd: float | None = Field(default=None, ge=0)
     alerts: StatsAlerts
-    diagnostics: StatsDiagnostics
     plugin_stats: list[PluginStat]
     as_of: datetime | None = None
-
-
-DiagnosticLevel = Literal["warning", "error", "critical"]
-DiagnosticArchiveReason = Literal["deployed_sha", "quiet"]
-
-
-# meiva:note
-# One diagnostic error/anomaly class over the window, tallied across `telemetry_events`.
-# `archived_by` is computed on every read: "deployed_sha" when no row matched the running
-# commit SHA, "quiet" when the latest current-SHA row is older than `diagnostic_quiet_seconds`,
-# or None while active.
-class DiagnosticClassRow(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    level: DiagnosticLevel
-    event_name: str
-    source: str
-    process: str
-    category: Literal["telemetry", "log"]
-    count: PositiveInt
-    current_sha_count: NonNegativeInt
-    first_seen: datetime
-    last_seen: datetime
-    last_deployed_sha: str | None = None
-    regressed: bool = False
-    archived_by: DiagnosticArchiveReason | None = None
-
-
-class DiagnosticsResponse(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    window_hours: StatsWindowHours
-    deployed_sha: str | None
-    classes: list[DiagnosticClassRow]
-    total_classes: NonNegativeInt
-    total_events: NonNegativeInt
-    as_of: datetime
-
-
-class DiagnosticSample(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    ts: datetime
-    agent_id: int | None
-    machine: str
-    trace_id: str | None
-    deployed_sha: str | None = None
-    message: str | None
-    attributes: dict[str, object]
-
-
-class DiagnosticSamples(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    samples: list[DiagnosticSample]
-
-
-# NonNegativeInt / None-able percentile fields
-
-
-class OpsMonitorMeta(BaseModel):
-    """Window + provenance of one `/api/ops/monitor` response."""
-
-    model_config = ConfigDict(frozen=True)
-
-    window: str  # "1h" | "6h" | "24h" | "7d"
-    bucket_seconds: int = Field(ge=1)
-    generated_at: str  # ISO-8601 UTC
-    bucket_starts: list[str]  # ISO-8601 UTC, oldest first, aligned to date_bin origin
-
-
-class SseDropBucket(BaseModel):
-    """One bucket's SSE/event-log backlog footprint — dropped records by cause."""
-
-    model_config = ConfigDict(frozen=True)
-
-    bucket: int
-    queue_full: int = Field(ge=0)  # agent SSE publisher shed: local queue full
-    publish_error: int = Field(ge=0)  # agent SSE publisher shed: redis publish failed/slow
-    event_log_drop: int = Field(ge=0)  # log sink shed: queue full
-
-
-class SseTotals(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    queue_full: int = Field(ge=0)
-    publish_error: int = Field(ge=0)
-    event_log_drop: int = Field(ge=0)
-
-
-class SseReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    series: list[SseDropBucket]
-    totals: SseTotals
-
-
-class LlmBucket(BaseModel):
-    """One bucket's LLM call profile. Latency percentiles are over rows that
-    carry `latency_ms` (pre-instrumentation rows are NULL and ignored);
-    `tps` = Σ(in+out+reasoning) tokens / Σ latency seconds (NULL when no
-    latency data). `errors` counts llm_provider_error and llm_turn_aborted events."""
-
-    model_config = ConfigDict(frozen=True)
-
-    bucket: int
-    calls: int = Field(ge=0)
-    latency_p50_ms: float | None
-    latency_p95_ms: float | None
-    latency_max_ms: float | None
-    tokens_in: int = Field(ge=0)
-    tokens_out: int = Field(ge=0)
-    tps: float | None
-    errors: int = Field(ge=0)
-
-
-class LlmTotals(BaseModel):
-    """Whole-window LLM profile — same fields as one LlmBucket, no bucket."""
-
-    model_config = ConfigDict(frozen=True)
-
-    calls: int = Field(ge=0)
-    latency_p50_ms: float | None
-    latency_p95_ms: float | None
-    latency_max_ms: float | None
-    tokens_in: int = Field(ge=0)
-    tokens_out: int = Field(ge=0)
-    tps: float | None
-    errors: int = Field(ge=0)
-
-
-class LlmReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    series: list[LlmBucket]
-    totals: LlmTotals
-
-
-class RestartBucket(BaseModel):
-    """One bucket's service start count (service_started)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    bucket: int
-    service_starts: int = Field(ge=0)
-
-
-class ServiceRestartRow(BaseModel):
-    """One service's boot count within the window — `name` is the daemon
-    identity passed to `init_gateway_process` (gateway / agent-host / watchdog /
-    delivery_watchdog / labeler / memory_indexer / heartbeat / ...)."""
-
-    model_config = ConfigDict(frozen=True)
-
-    name: str
-    starts: int = Field(ge=0)
-    last_start: str | None  # ISO-8601 UTC
-
-
-class RestartTotals(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    service_starts: int = Field(ge=0)
-
-
-class RestartReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    series: list[RestartBucket]
-    services: list[ServiceRestartRow]
-    totals: RestartTotals
-
-
-class OpsMonitorReport(BaseModel):
-    """GET /api/ops/monitor response — the whole panel in one round trip."""
-
-    model_config = ConfigDict(frozen=True)
-
-    meta: OpsMonitorMeta
-    sse: SseReport
-    llm: LlmReport
-    restarts: RestartReport

@@ -123,7 +123,7 @@ def test_no_rule_code_holds_an_exemption_of_its_own() -> None:
 # new allowance cannot arrive inside a change that looks local. Bump a number only with its entry.
 def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(open_repository(ROOT))
-    assert len(policy.external) == 33
+    assert len(policy.external) == 32
     assert len(policy.dynamic_attrs) == 33
     assert len(policy.loads) == 23
 

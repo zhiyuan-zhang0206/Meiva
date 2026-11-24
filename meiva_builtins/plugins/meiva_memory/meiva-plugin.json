@@ -21,8 +21,7 @@
       "meiva_memory_recall_injected_notes",
       "meiva_memory_recall_empty_rate",
       "meiva_memory_recall_deadline_skip_rate",
-      "meiva_memory_recall_deadline_skips",
-      "meiva_memory_recall_agent_runs"
+      "meiva_memory_recall_deadline_skips"
     ],
     "config": {
       "schema": "default_config.py"

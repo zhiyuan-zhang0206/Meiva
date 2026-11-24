@@ -139,21 +139,17 @@ function richGraph(): WireFleetGraph {
   return {
     nodes,
     edges,
-    telemetry_stale: false,
     snapshot_at: null,
   };
 }
 
 // meiva:note
-// The wire shape the endpoint returns: a fixture states the nodes and edges it cares about, and the
-// two telemetry fields default here.
+// The wire shape the endpoint returns: a fixture states the nodes and edges it cares about, and
+// `snapshot_at` defaults here.
 function graph(
-  partial: Omit<WireFleetGraph, "telemetry_stale" | "snapshot_at"> & {
-    telemetry_stale?: boolean;
-    snapshot_at?: string | null;
-  },
+  partial: Omit<WireFleetGraph, "snapshot_at"> & { snapshot_at?: string | null },
 ): WireFleetGraph {
-  return { telemetry_stale: false, snapshot_at: null, ...partial };
+  return { snapshot_at: null, ...partial };
 }
 
 beforeEach(() => {

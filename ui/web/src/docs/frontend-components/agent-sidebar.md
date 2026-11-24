@@ -39,8 +39,7 @@ below:
   `Cost (API)`, `Cost (subscription)`, `OpenAI API`, `Anthropic API`, and
   `Google API`.
   Unresolved Grafana alerts live solely on the footer bell badge (hidden at zero)
-  and `/insights#alerts`, and internal telemetry diagnostics stay off the popover
-  (user ruling 2026-11-22).
+  and `/insights#alerts`; the popover carries no diagnostics (user ruling 2026-11-22).
   The two cost cards are the same disjoint split the Inspector shows, by the
   billing mode of the harness that ran each call: `Cost (API)` is the fee the
   account is billed (subscription harnesses excluded, so monthly API credit

@@ -13,8 +13,7 @@ Payload schemas and event declarations live in the domain modules of
 
 Derived views live here and nowhere else: ``category_for_kind``,
 ``telemetry_events``, ``family_events``,
-``payload_keys``, event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family
-and the ops grid constants.
+``payload_keys``, event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family.
 """
 
 from __future__ import annotations
@@ -24,8 +23,6 @@ from typing import get_type_hints
 
 from base.events.loader import load_events
 from base.events.vocabulary import LLM_ERROR_FAMILY as LLM_ERROR_FAMILY
-from base.events.vocabulary import OPS_BUCKET_S as OPS_BUCKET_S
-from base.events.vocabulary import OPS_GRID_ORIGIN as OPS_GRID_ORIGIN
 from base.events.vocabulary import Category as Category
 from base.events.vocabulary import EventGroupBy as EventGroupBy
 from base.events.vocabulary import EventSpec as EventSpec
@@ -103,23 +100,16 @@ def _sql_keys(event_name: str) -> dict[str, str]:
 
 LLM_USAGE_KEYS = _sql_keys("llm_usage")
 TURN_END_KEYS = _sql_keys("turn_end")
-EXEC_KEYS = _sql_keys("exec")
-CODE_KEYS = _sql_keys("code")
-EXEC_FAILED_KEYS = _sql_keys("exec_failed")
 HALT_KEYS = _sql_keys("halt")
-SSE_DROP_KEYS = _sql_keys("sse_drop")
 EVENT_LOG_DROP_KEYS = _sql_keys("event_log_drop")
 DELIVERY_STALLED_KEYS = _sql_keys("delivery_stalled")
 FRONTEND_INTERACTION_KEYS = _sql_keys("frontend_interaction")
 SDK_CALL_KEYS = _sql_keys("sdk_call")
-SERVICE_STARTED_KEYS = _sql_keys("service_started")
-AGENT_SPAWNED_KEYS = _sql_keys("agent_spawned")
 NODE_EXIT_KEYS = _sql_keys("node_exit")
 HEARTBEAT_PAUSED_KEYS = _sql_keys("heartbeat_paused")
 PASSIVE_RECALL_KEYS = _sql_keys("passive_recall")
 GATEWAY_LATENCY_KEYS = _sql_keys("gateway_latency")
 LOG_KEYS = _sql_keys("log")
-PLUGIN_ACTIVATION_KEYS = _sql_keys("plugin_activation")
 
 
 def registered_payload_keys() -> frozenset[str]:

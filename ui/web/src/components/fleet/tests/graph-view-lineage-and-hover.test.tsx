@@ -83,7 +83,6 @@ function neverSettles(): Promise<WireFleetGraph> {
 const EMPTY_GRAPH: WireFleetGraph = {
   nodes: [],
   edges: [],
-  telemetry_stale: false,
   snapshot_at: null,
 };
 
@@ -149,7 +148,6 @@ describe("GraphView lineage, hover, and empty states", () => {
       graph: {
         nodes: [node(1, { status: "terminated" }), node(2, { status: "terminated" })],
         edges: [edge(1, 2, "spawn")],
-        telemetry_stale: false,
         snapshot_at: null,
       },
     });
@@ -171,7 +169,6 @@ describe("GraphView lineage, hover, and empty states", () => {
             node(3, { label: "child", status: "idling", spawner: "agent:2" }),
           ],
           edges: [],
-          telemetry_stale: false,
           snapshot_at: null,
         },
         roster: {
@@ -203,7 +200,6 @@ describe("GraphView lineage, hover, and empty states", () => {
         graph: {
           nodes: [node(1), node(2)],
           edges: withTelemetry ? [edge(1, 2, "spawn", { weight: 4 })] : [],
-          telemetry_stale: false,
           snapshot_at: null,
         },
         roster: {
@@ -244,7 +240,6 @@ describe("GraphView lineage, hover, and empty states", () => {
     transport.getFleetGraph.mockResolvedValue({
       nodes: [node(1), node(3, { spawner: "agent:2" })],
       edges: [],
-      telemetry_stale: false,
       snapshot_at: null,
     });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -265,28 +260,12 @@ describe("GraphView lineage, hover, and empty states", () => {
       graph: {
         nodes: [node(1), node(2)],
         edges: [edge(1, 2, "spawn")],
-        telemetry_stale: false,
         snapshot_at: null,
       },
     });
 
     await waitFor(() => expect(queryNodeLabel(1)).not.toBeNull());
     expect(screen.queryByRole("status")).toBeNull();
-  });
-
-  it("renders no telemetry-degraded copy (task #3893)", async () => {
-    renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, {
-      graph: {
-        nodes: [node(1), node(2)],
-        edges: [edge(1, 2, "spawn")],
-        telemetry_stale: true,
-        snapshot_at: null,
-      },
-    });
-
-    await waitFor(() => expect(queryNodeLabel(1)).not.toBeNull());
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.queryByText(/telemetry/i)).toBeNull();
   });
 
   it("merges multiple lineage kinds per pair into one edge (no duplicate React keys)", async () => {
@@ -302,7 +281,6 @@ describe("GraphView lineage, hover, and empty states", () => {
             edge(1, 3, "fork"),
             edge(1, 3, "message"),
           ],
-          telemetry_stale: false,
           snapshot_at: null,
         },
       },
@@ -325,7 +303,6 @@ describe("GraphView lineage, hover, and empty states", () => {
       graph: {
         nodes: [node(1, { label: "alpha", node_score: 12_345_678 }), node(2)],
         edges: [edge(1, 2, "spawn")],
-        telemetry_stale: false,
         snapshot_at: null,
       },
     });

@@ -33,9 +33,7 @@ def test_log_record_limit_keeps_the_table_on_a_bounded_range_query() -> None:
     assert all("maxLines" not in target for target in targets)
 
 
-@pytest.mark.parametrize(
-    "override", [{"grafana_max_lines": 0}, {"query_type": "promql"}, {"output": ["inspector"]}]
-)
+@pytest.mark.parametrize("override", [{"grafana_max_lines": 0}, {"query_type": "promql"}])
 def test_log_record_limit_rejects_invalid_or_unhandled_surfaces(
     override: dict[str, object],
 ) -> None:

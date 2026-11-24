@@ -149,7 +149,7 @@ class EventCountsResponse(BaseModel):
 
 
 class MetricsMeta(BaseModel):
-    """`/api/metrics` / `/api/metrics/agents` report header — window +
+    """`/api/metrics/agents` report header — window +
     provenance. `since_compact` echoes the request's filter: True = each
     agent's events were narrowed to those at or after its latest compact
     halt before aggregating."""
@@ -157,22 +157,10 @@ class MetricsMeta(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     window_days: int
-    agent_filter: int | None
     generated_at: str  # ISO-8601 UTC; frontend renders in local time
     total_events: NonNegativeInt
     distinct_agents: NonNegativeInt
     since_compact: bool = False
-
-
-# meiva:note
-# GET /api/metrics response — aggregate report over events for the settings Metrics tab.
-# `metrics` is a free-form map (one key per registered metric unit, e.g. "exec" / "llm_turns" /
-# "agent_activity") so the schema does not couple to the metric registry.
-class MetricsReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    meta: MetricsMeta
-    metrics: dict[str, object]
 
 
 class AgentMetricsItem(BaseModel):
@@ -182,7 +170,7 @@ class AgentMetricsItem(BaseModel):
     `cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.
     `cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero
     input has no cache metering. `exec_failed` is every exec outcome other than plain
-    `exec` — same exec-ok/exec-failed split as the metrics report."""
+    `exec`."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -208,8 +196,7 @@ class AgentMetricsItem(BaseModel):
 class AgentMetricsReport(BaseModel):
     """GET /api/metrics/agents response — the per-agent breakdown behind the
     metrics page's Agents panel, sorted by cost descending (ties by agent_id).
-    Same window semantics as `/api/metrics`; `meta.since_compact` echoes the
-    optional since-last-compact filter."""
+    `meta.since_compact` echoes the optional since-last-compact filter."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -19,15 +19,8 @@ EXPECTED = {
         "telemetry",
         len(HARNESS_ORDER),
     ),
-    "meiva_obs_agent_llm_cost_usd": ("timeseries", ["inspector"], "llm_usage", "telemetry", 1),
-    "meiva_obs_llm_error_rate": (
-        "timeseries",
-        ["grafana", "inspector"],
-        "llm_usage",
-        "telemetry",
-        2,
-    ),
-    "meiva_obs_turn_ok_rate": ("timeseries", ["grafana", "inspector"], "turn_end", "telemetry", 1),
+    "meiva_obs_llm_error_rate": ("timeseries", ["grafana"], "llm_usage", "telemetry", 2),
+    "meiva_obs_turn_ok_rate": ("timeseries", ["grafana"], "turn_end", "telemetry", 1),
     "meiva_obs_turn_duration_s": ("timeseries", ["grafana"], "turn_end", "telemetry", 2),
     "meiva_obs_compaction_summary_history_ratio": (
         "timeseries",
@@ -75,13 +68,6 @@ EXPECTED = {
         "stat",
         ["grafana"],
         "delivery_stranded_wake",
-        "telemetry",
-        1,
-    ),
-    "meiva_obs_agent_delivery_stalled_count": (
-        "timeseries",
-        ["inspector"],
-        "delivery_stalled",
         "telemetry",
         1,
     ),
@@ -160,9 +146,7 @@ def test_logql_queries_have_event_stream_and_json() -> None:
             assert "| json" in expr, name
             assert "{event_name}" not in expr and "{category}" not in expr, name
             assert "| event_name" not in expr, f"{name}: event_name filter after | json:\n{expr}"
-            assert "| agent_id" not in expr.replace("| {{agent_id}}", ""), (
-                f"{name}: agent_id filter after | json:\n{expr}"
-            )
+            assert "| agent_id" not in expr, f"{name}: agent_id filter after | json:\n{expr}"
 
 
 def test_logql_template_validation_rejects_drift() -> None:
@@ -187,11 +171,10 @@ def test_logql_template_validation_rejects_drift() -> None:
 
 def test_cost_queries_unwrap_cost_usd() -> None:
     specs = {m.name: m for m in _pack()}
-    for name in ("meiva_obs_llm_cost_usd", "meiva_obs_agent_llm_cost_usd"):
-        query = specs[name].query
-        assert "unwrap attributes_cost_usd" in query, name
-        assert "CASE" not in query, name
-        assert "attributes->>'model'" not in query, name
+    query = specs["meiva_obs_llm_cost_usd"].query
+    assert "unwrap attributes_cost_usd" in query
+    assert "CASE" not in query
+    assert "attributes->>'model'" not in query
 
 
 def test_exec_breakdown_covers_every_outcome() -> None:
@@ -304,15 +287,6 @@ def test_agent_llm_usage_table_columns() -> None:
     for expr in exprs:
         assert "agent_id!=" in expr
         assert "$__range" in expr
-
-
-def test_inspector_agent_queries_render_agent_id() -> None:
-    for name in ("meiva_obs_agent_llm_cost_usd", "meiva_obs_agent_delivery_stalled_count"):
-        spec = next(m for m in _pack() if m.name == name)
-        rendered = render_query(spec, agent_id=1234)
-        assert 'agent_id="1234"' in rendered
-        assert "{{agent_id}}" not in rendered
-        validate_logql(rendered, name)
 
 
 def test_soft_compaction_share_excludes_manual_and_unattributed_history() -> None:

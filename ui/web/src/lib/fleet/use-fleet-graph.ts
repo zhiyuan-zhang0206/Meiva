@@ -15,7 +15,6 @@ import type { FleetGraph, GraphEventType, WireFleetGraph } from "../contracts/ty
 const EMPTY_GRAPH: FleetGraph = {
   nodes: [],
   edges: [],
-  telemetry_stale: false,
   snapshot_at: null,
 };
 

@@ -166,25 +166,8 @@ export type PendingInbound = Schemas["PendingInbound"];
 export type StatsDashboard = Schemas["StatsDashboard"];
 export type StatsTokens = Schemas["StatsTokens"];
 export type StatsAlerts = Schemas["StatsAlerts"];
-export type StatsDiagnostics = Schemas["StatsDiagnostics"];
 export type PluginStat = Schemas["PluginStat"];
 
-// meiva:note
-// Sentry-style error diagnostics grouped by (level, event_name, source, process), decoupled from
-// live Grafana alerts and automatically archived on release cutover or after the quiet window.
-export type DiagnosticClassRow = Schemas["DiagnosticClassRow"];
-export type DiagnosticsResponse = Schemas["DiagnosticsResponse"];
-export type DiagnosticSample = Schemas["DiagnosticSample"];
-
-// --- Metrics (settings Metrics tab) ---
-//
-// The envelope (meta + the `metrics` map) comes from the generated schema,
-// but `metrics` is `Record<string, unknown>` there by design: the backend
-// types it as a free-form dict so adding a `@metric` unit is one function with
-// no schema churn. The per-unit data shapes below mirror the `data` dicts the
-// units in base/telemetry/metrics/report.py emit; consumers narrow `report.metrics[key]` to
-// the matching interface. Adding a unit that reuses these shapes needs no TS
-// change beyond a new key access.
 export type AlertsWindow = "1h" | "6h" | "24h" | "7d";
 
 // meiva:note

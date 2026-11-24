@@ -10,8 +10,7 @@ class PluginMetricError(Exception):
 
 
 class InvalidMetricQuery(PluginMetricError):  # noqa: N818
-    """The query template failed SQL safety validation, or the metric's
-    output surfaces contradict its query ({{agent_id}} + grafana)."""
+    """The query template failed SQL safety validation."""
 
 
 # Keywords allowed anywhere in the template (upper-compared). Anything else

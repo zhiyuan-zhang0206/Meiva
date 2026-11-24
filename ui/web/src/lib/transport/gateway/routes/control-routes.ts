@@ -1,4 +1,4 @@
-import type { AlertsWindow, DiagnosticClassRow } from "../../../contracts/types";
+import type { AlertsWindow } from "../../../contracts/types";
 import { withQuery } from "./route-query";
 
 export function agentQuestionsPath(agentId: number): string {
@@ -14,20 +14,6 @@ export function fleetGraphPath(opts?: { hours?: number; decayLambda?: number }):
 
 export function memoryNotePath(path: string): string {
   return `/api/memory/note?${new URLSearchParams({ path }).toString()}`;
-}
-
-export function diagnosticSamplesPath(
-  cls: Pick<DiagnosticClassRow, "level" | "event_name" | "source" | "process">,
-  hours: number,
-): string {
-  const q = new URLSearchParams({
-    level: cls.level,
-    event_name: cls.event_name,
-    source: cls.source,
-    process: cls.process,
-    hours: String(hours),
-  });
-  return `/api/stats/diagnostics/samples?${q.toString()}`;
 }
 
 export function alertsPath(params: {

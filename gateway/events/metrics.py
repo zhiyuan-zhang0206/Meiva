@@ -1,12 +1,9 @@
-"""Aggregate metrics report over events (category=telemetry/log) for the settings Metrics tab.
+"""Per-agent metrics report — `GET /api/metrics/agents`, behind `meiva metrics agents`.
 
-`/api/metrics` mirrors `scripts/metrics.py`: both run the same `base.telemetry.metrics`
-aggregates over the `telemetry_events` table, so the CLI digest and the API never drift. The
-fetch reduces the window in SQL (`base.telemetry.metrics.aggregate.fetch_aggregate`; a few
-statements in one connection, nothing materialized per row). `/api/metrics/agents` is the
-per-agent breakdown of the same window (one headline-counter row per agent). Both are
-window-selected + manual-refresh, so no caching — each call re-aggregates from the append-only
-table, under a statement timeout (503 on timeout).
+One headline-counter row per agent over a window. The window is reduced in SQL
+(`base.telemetry.metrics.aggregate.fetch_agent_rollups`; a few statements in one connection,
+nothing materialized per row), window-selected and re-aggregated on every call (no caching),
+under a statement timeout (503 on timeout).
 """
 
 from __future__ import annotations
@@ -18,12 +15,8 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.db.rows import query_all
-from base.telemetry.metrics.aggregate import (
-    build_report_from_aggregate,
-    fetch_agent_rollups,
-    fetch_aggregate,
-)
-from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
+from base.telemetry.metrics.aggregate import fetch_agent_rollups
+from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
 
 router = APIRouter()
@@ -37,39 +30,6 @@ _READ_TIMEOUT = "SET LOCAL statement_timeout = '20s'"
 class _AgentLabelRow:
     id: int
     label: str | None
-
-
-@router.get("/api/metrics")
-def get_metrics(
-    request: Request,
-    # `days`'s range stays a protective constant (import-time Query bound;
-    # task #3696 exception inventory); the default *window* is
-    # display.metrics_default_window_days.
-    days: Annotated[int | None, Query(ge=1, le=30)] = None,
-    agent: Annotated[int | None, Query()] = None,
-    since_compact: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
-) -> MetricsReport:
-    """Aggregate report over the last `days` of events (all agents, or a
-    single one via `agent`). Omitted `days` returns the configured default
-    (``display.metrics_default_window_days`` - 1 out of the box); the 30-day cap
-    stays a protective constant (it bounds the scan).
-    `since_compact=true` additionally narrows each agent's events to those at
-    or after its latest compact halt (echoed in `meta.since_compact`).
-    `meta.total_events` counts every telemetry/log event in the window —
-    including service-level rows (agent_id NULL) from every process, a scope
-    widened by the W9 events-table switch (it was agent-kernel lines only
-    before); audit events are excluded."""
-    if days is None:
-        days = int(gateway_config(request).display.metrics_default_window_days)
-    now = gateway_clock(request).now()
-    try:
-        with gateway_state(request).db_pool.connection() as conn:
-            conn.execute(_READ_TIMEOUT)
-            agg = fetch_aggregate(conn, days, agent, now=now, since_compact=since_compact)
-    except psycopg.errors.QueryCanceled as exc:
-        raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
-    _, data = build_report_from_aggregate(agg, days, agent, now=now, since_compact=since_compact)
-    return MetricsReport.model_validate(data)
 
 
 @router.get("/api/metrics/agents")
@@ -87,7 +47,7 @@ def get_metrics_agents(
     agent's events to those at or after its latest compact halt. Service-level
     events (no agent_id) count toward `meta.total_events` but produce no row —
     and the count covers every telemetry/log event in the window (all
-    processes), the W9-widened scope documented on `get_metrics`."""
+    processes)."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
     now = gateway_clock(request).now()
@@ -116,7 +76,6 @@ def get_metrics_agents(
     items.sort(key=lambda item: (-item.cost_usd, item.agent_id))
     meta = MetricsMeta(
         window_days=days,
-        agent_filter=None,
         generated_at=now.isoformat(),
         total_events=total_events,
         distinct_agents=len(rollups),

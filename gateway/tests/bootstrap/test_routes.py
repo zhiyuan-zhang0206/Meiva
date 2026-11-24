@@ -151,14 +151,6 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
         "anthropic_cost_usd": body["anthropic_cost_usd"],
         "google_cost_usd": body["google_cost_usd"],
         "alerts": body["alerts"],
-        "diagnostics": {
-            "active_classes": body["diagnostics"]["active_classes"],
-            "archived_classes": body["diagnostics"]["archived_classes"],
-            "active_events": body["diagnostics"]["active_events"],
-            "archived_events": body["diagnostics"]["archived_events"],
-            "errors": body["diagnostics"]["errors"],
-            "warnings": body["diagnostics"]["warnings"],
-        },
     } == {
         "live_count": 0,
         "window_hours": 24,
@@ -169,34 +161,7 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
         "anthropic_cost_usd": 0,
         "google_cost_usd": 0,
         "alerts": {"unresolved": 0, "critical": 0, "error": 0, "warning": 0},
-        "diagnostics": {
-            "active_classes": 0,
-            "archived_classes": 0,
-            "active_events": 0,
-            "archived_events": 0,
-            "errors": 0,
-            "warnings": 0,
-        },
     }
-
-
-def test_dashboard_diagnostics_folds_critical_and_admits_declared_anomalies_only(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    event_rows.add(event="turn_end", level="warning")
-    event_rows.add(event="delivery_stalled", level="warning")
-    event_rows.add(event="turn_end", level="error")
-    event_rows.add(event="turn_end", level="critical")
-    event_rows.add(event="turn_end", level="info")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    diag = body["diagnostics"]
-    assert diag["warnings"] == 1
-    assert diag["errors"] == 2
-    assert diag["active_classes"] == 3
-    assert diag["active_events"] == 3
-    assert body["alerts"] == {"unresolved": 0, "critical": 0, "error": 0, "warning": 0}
 
 
 def _insert_live_alert(
@@ -252,28 +217,6 @@ def test_dashboard_alerts_match_grafana_live_alerts_ssot(
         alerts_api = client.get("/api/alerts").json()
     assert dashboard["alerts"] == {"unresolved": 3, "critical": 1, "error": 1, "warning": 1}
     assert dashboard["alerts"]["unresolved"] == alerts_api["meta"]["unresolved_count"]
-
-
-def test_dashboard_diagnostics_archives_prior_deployed_sha(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    current_sha = LOADED_IMAGE.sha or "currentsha1234"
-    old_sha = "0000000000000000"
-    event_rows.add(event="old_only_err", level="error", deployed_sha=old_sha)
-    event_rows.add(event="old_only_err", level="error", deployed_sha=old_sha)
-    event_rows.add(event="curr_err", level="error", deployed_sha=current_sha)
-    event_rows.add(event="regressed_err", level="error", deployed_sha=old_sha)
-    event_rows.add(event="regressed_err", level="error", deployed_sha=current_sha)
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    diag = body["diagnostics"]
-    assert diag["active_classes"] == 2
-    assert diag["archived_classes"] == 1
-    assert diag["active_events"] == 2
-    assert diag["archived_events"] == 3
-    assert diag["errors"] == 2
-    assert diag["warnings"] == 0
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
@@ -548,36 +491,6 @@ def test_dashboard_default_24h_window_filters_old_rows(
     assert body["tokens"]["output"] == 5
 
 
-def test_dashboard_warn_err_counts_by_level(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
-    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
-    event_rows.add(event="some_error", level="error", agent_id=aid)
-    # exec_failed logs at INFO (agent trial-and-error) — must not count
-    event_rows.add(event="exec_failed", level="info", agent_id=aid)
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["diagnostics"]["warnings"] == 2
-    assert body["diagnostics"]["errors"] == 1
-
-
-def test_dashboard_audit_warning_not_counted(
-    db_conn: psycopg.Connection, event_rows: _EventRows
-) -> None:
-    aid = _insert_agent(db_conn, status="running")
-    event_rows.add(event="delivery_stalled", level="warning", agent_id=aid)
-    event_rows.add(event="spawn", level="warning", agent_id=aid, category="audit")
-    event_rows.add(event="spawn", level="error", agent_id=aid, category="audit")
-    db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["diagnostics"]["warnings"] == 1
-    assert body["diagnostics"]["errors"] == 0
-
-
 def _assert_provider_costs(
     body: dict[str, float], *, openai: float, anthropic: float, google: float
 ) -> None:
@@ -586,10 +499,6 @@ def _assert_provider_costs(
     assert math.isclose(body["google_cost_usd"], google)
 
 
-# meiva:note
-# The 3-hour-old warning below sits inside the 6-hour window and still reads resolved: the window
-# says where to look, the quiet rule says what still needs attention.
-# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
 def test_dashboard_hours_param_selects_window(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
@@ -626,13 +535,10 @@ def test_dashboard_hours_param_selects_window(
     assert narrow["window_hours"] == 1
     assert narrow["tokens"]["input"] == 10
     assert narrow["tokens"]["output"] == 5
-    assert narrow["diagnostics"]["warnings"] == 0
     _assert_provider_costs(narrow, openai=0.0, anthropic=0.1, google=0.0)
     assert wide["window_hours"] == 6
     assert wide["tokens"]["input"] == 110
     assert wide["tokens"]["output"] == 55
-    assert wide["diagnostics"]["warnings"] == 0
-    assert wide["diagnostics"]["archived_events"] == 1
     _assert_provider_costs(wide, openai=1.0, anthropic=0.1, google=0.0)
 
 
@@ -684,7 +590,6 @@ def test_dashboard_counts_the_home_cluster_and_unlabelled_rows_only(
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["diagnostics"]["errors"] == 2
     assert body["tokens"]["input"] == 0
 
 

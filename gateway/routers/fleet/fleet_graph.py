@@ -14,10 +14,6 @@
 #   in Postgres from `audit_events`, the permanent audit record
 #   (base/events/reads/audit_rows.py), in the same phase as the nodes.
 #
-# A successful graph also passes through the gateway-latency heartbeat guard
-# (`telemetry_staleness`, over `telemetry_events`). An old or missing heartbeat
-# retains and caches the fetched graph, marked separately as telemetry-degraded.
-#
 # A failed or timed-out Postgres read is not answered from a cached copy: the
 # exception propagates to the gateway's unhandled-exception handler (a logged 500).
 
@@ -39,24 +35,15 @@ from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
 from gateway.http.config import (
-    GatewayAppState,
     gateway_clock,
     gateway_config,
     gateway_state,
-    state_as,
 )
-from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet.fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
 router = APIRouter()
-
-
-# meiva:note
-# The telemetry staleness tracker the app root builds; the fleet graph route is its only reader.
-class FleetGraphAppState(GatewayAppState):
-    telemetry_staleness: TelemetryStaleness
 
 
 # meiva:note
@@ -91,34 +78,16 @@ def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
 
 
 # meiva:note
-# Cache a successful graph while reporting heartbeat health separately.
+# Cache a successful graph for the short poll window.
 def _finalize_graph_response(
-    pool: ConnectionPool,
     *,
     bus: EventBus,
-    staleness: TelemetryStaleness,
     clock: Clock,
     key: str,
     nodes: list[FleetGraphNode],
     edges: list[FleetGraphEdge],
 ) -> FleetGraphResponse:
-    try:
-        telemetry_stale = staleness.check_and_report(pool, now=clock.now())
-    except Exception:
-        logger.opt(exception=True).warning(
-            "fleet_graph telemetry staleness guard raised; reporting telemetry_stale=False"
-        )
-        telemetry_stale = False
-
-    response = FleetGraphResponse(
-        nodes=nodes,
-        edges=edges,
-        telemetry_stale=telemetry_stale,
-        snapshot_at=clock.now(),
-    )
-    # meiva:note
-    # Heartbeat lag is observability health, not a reason to discard an
-    # otherwise successful complete snapshot.
+    response = FleetGraphResponse(nodes=nodes, edges=edges, snapshot_at=clock.now())
     try:
         with bus.sync_redis(decode_responses=True) as redis:
             redis.set(key, response.model_dump_json(), ex=_CACHE_TTL_SECONDS)
@@ -285,9 +254,7 @@ def get_fleet_graph(
     nodes = _build_nodes(pg_data.node_rows, pg_data.tokens)
 
     return _finalize_graph_response(
-        gateway_state(request).db_pool,
         bus=bus,
-        staleness=state_as(request, FleetGraphAppState).telemetry_staleness,
         clock=clock,
         key=key,
         nodes=nodes,

@@ -1,4 +1,4 @@
-"""meiva_memory Grafana + inspector metrics — declared, not registered.
+"""meiva_memory Grafana metrics — declared, not registered.
 
 The processes that serve metrics import this module and take its ``contribute()``
 declaration; the plugin name comes from the registry entry. Query templates target the unified event stream in Loki
@@ -92,7 +92,7 @@ METRICS: tuple[MetricSpec, ...] = (
         query=_passive_recall_average("search_ms"),
         query_type="logql",
         target_names=["avg search ms"],
-        output=["grafana", "inspector"],
+        output=["grafana"],
         order=4,
     ),
     MetricSpec(
@@ -110,7 +110,7 @@ METRICS: tuple[MetricSpec, ...] = (
         query=_passive_recall_average("injected"),
         query_type="logql",
         target_names=["avg injected"],
-        output=["grafana", "inspector"],
+        output=["grafana"],
         order=5,
     ),
     MetricSpec(
@@ -132,7 +132,7 @@ METRICS: tuple[MetricSpec, ...] = (
         ),
         query_type="logql",
         target_names=["empty %"],
-        output=["grafana", "inspector"],
+        output=["grafana"],
         order=1,
     ),
     MetricSpec(
@@ -181,31 +181,9 @@ METRICS: tuple[MetricSpec, ...] = (
         output=["grafana"],
         order=3,
     ),
-    MetricSpec(
-        name="meiva_memory_recall_agent_runs",
-        title="Agent recall runs",
-        description=(
-            "Inspector-only: the same runs query parameterized by agent. The "
-            '{{agent_id}} placeholder is rendered by the gateway as agent_id="<n>"; '
-            "metrics carrying the placeholder must not also be emitted to Grafana "
-            "panels."
-        ),
-        event_name="passive_recall",
-        category="telemetry",
-        unit="ops",
-        panel="timeseries",
-        query=event_count(
-            f"{_COMPLETED} | {{{{agent_id}}}}",
-            "$__interval",
-            matchers="event_name={event_name}",
-        ),
-        query_type="logql",
-        target_names=["runs"],
-        output=["inspector"],
-    ),
 )
 
 
 def contribute() -> PluginContributions:
-    """What this plugin declares for the metric surfaces (Grafana dashboard, agent inspector)."""
+    """What this plugin declares for the metric surfaces (Grafana dashboard)."""
     return PluginContributions(metrics=METRICS)

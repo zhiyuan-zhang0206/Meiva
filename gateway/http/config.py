@@ -236,18 +236,9 @@ class GatewayConfig:
     # (a nested checkout) deadlocks a pool this small, which is what a test sets it to.
     db_pool_max_size: int = 8
     # meiva:note
-    # The sidebar Status popover, the alert-class list and the ops monitor read a window of
-    # `telemetry_events`; a read past this many milliseconds is cancelled and answered as a
-    # retriable 503.
+    # The sidebar Status popover reads a window of the usage ledger; a read past this many
+    # milliseconds is cancelled and answered as a retriable 503.
     stats_statement_timeout_ms: int = 8000
-    # meiva:note
-    # Rows of the diagnostics class list, and newest events shown for one class.
-    diagnostics_limit: int = 200
-    diagnostic_samples_limit: int = 5
-    # meiva:note
-    # Quiet-window fallback inside the current release: a diagnostic class that stops recurring
-    # for this duration auto-archives without waiting for the next deploy.
-    diagnostic_quiet_seconds: float = 3600.0
     # meiva:note
     # First-contact per-host budget for a remote inventory_read in the aggregate fan-out, so
     # one offline host doesn't stall the whole matrix on the default deadline.

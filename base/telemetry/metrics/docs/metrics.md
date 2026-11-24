@@ -2,35 +2,29 @@
 
 ## What is it
 
-`base/telemetry/metrics/report.py` is the core of metric calculation over the unified `events` stream (`category IN ('telemetry','log')`). A single windowed query fetches N days of events, then runs a set of pluggable metric units (pure function `list[EventRow] -> MetricSection`, registered with `@metric_unit`). Adding a metric = one decorated function; no SQL is written beyond that single windowed fetch.
+`base/telemetry/metrics/` holds two things: the metric definitions that render the Grafana
+dashboard (`plugin_metrics.py`, `core/`, `grafana_dashboard.py`; Prometheus/Loki are the evaluators),
+and one Postgres read, the per-agent rollups behind `GET /api/metrics/agents` and
+`meiva metrics agents`.
 
-## Core Responsibilities
+## Per-agent rollups
 
-### Projected read
-- `query_events(cur, days, agent_id)` — **within SQL** extracts each field of the payload jsonb into typed scalar columns (`EventRow` NamedTuple). For the large `body` field of **exec output**, only the length is taken (`body_len`); the projection's one full-text pull is `halt_body` (halt rows, for compact/idle detection). `sdk_usage` is a runtime event-count metric, not a scan of code text (the old `code_body` full-text pull was removed with the sdk_usage rewrite). Raw jsonb is never pulled (one week ~128MB), also saving psycopg's per-row json parse — the main cost on the read path. Units read `e.in_total` rather than `e.payload[...]`.
-- `fetch_events(days, agent_id)` / `build_report(...)` — assembly entry points.
-
-### Metric units
-Currently 4: `exec`, `llm_turns`, `agent_activity`, `plugin_activation` — the list `_sections_from_aggregate` returns in `base/telemetry/metrics/aggregate.py`. Each is a `MetricSection` containing both a text block (human-/agent-readable ASCII digest) and a `data` fragment (machine-readable shape).
-
-- `plugin_activation` counts **plugin injection surfaces that fired**: one `plugin_activation` event per firing (`base/packages/plugins/activation.py`), keyed by the same `<plugin>/<surface>/<identifier>` triple `meiva plugins inspect` lists as a registered contribution, plus the model in force. A contribution registered but never counted here is philosophy §6's removal evidence.
-- `pctiles()` returns a typed `Pctiles` (`TypedDict`: `n`/`p50`/`p90`/`max`/`mean`), consumed by `render_pctiles` with the same shape.
-
-### Two consumers share the same core
-- `scripts/metrics.py` CLI — renders text + dumps JSON.
-- gateway `/api/metrics` (`gateway/events/metrics.py`) — returns `data` to the frontend Metrics page. Both consumers fetch the window with `aggregate.fetch_aggregate` (`aggregate_sql`: a few statements over `telemetry_events` in one connection, nothing materialized per row); `/api/metrics/agents` runs only the per-agent counters and `llm_usage` sums (`fetch_agent_rollups`). Inspector statistics read persisted observations with cumulative or time-based windows.
+`aggregate.fetch_agent_rollups` (`aggregate_sql.read_agent_window`) runs a few statements in one
+connection: the per-agent counters (events, turn and exec outcomes) over `telemetry_events`, and the
+`llm_usage` sums over the usage ledger (`llm_usage_ledger`). Nothing is materialized per row. The
+whole-fleet digest (`/api/metrics`, the `exec` / `llm_turns` / `agent_activity` /
+`plugin_activation` sections) and the per-agent `/api/agents/{id}/inspect/metrics` surface were
+removed with the other `telemetry_events` readers that had no consumer.
 
 ## Notes
 
-- Cache-hit rates use the same calls in numerator and denominator: only calls with numeric `cache_read` metering. A reported zero remains a measured miss; absent metering contributes no cache-rate input. Nonzero usage without metering yields null/N/A while calls, tokens and cost stay complete within the observed window. The early/mid/late cache buckets likewise consider only metered calls.
+- Cache-hit rates use the same calls in numerator and denominator: only calls with numeric `cache_read` metering. A reported zero remains a measured miss; absent metering contributes no cache-rate input. Nonzero usage without metering yields null/N/A while calls, tokens and cost stay complete within the observed window.
 
-- `/api/metrics` and `/api/metrics/agents` sum usage-time `cost_usd` snapshots, including cache-write costs and the served Standard/Fast rates. Recorded zero is priced; `unpriced=1` is counted without fabricating a cost. Only older rows lacking both fields retain the legacy token-based price calculation. Token totals and monetary totals are reduced independently within the same agent/window/since-compact scope.
-- Unlike the reverted `base/agent_perf` (agent-level profiling, introduced in #50, reverted in #76) — this is a system-level, event-driven metric, the only existing metrics module.
-- Helper pure functions: `group_by_agent` / `filter_since_compact` (only after the most recent compact) / `pctiles` / `agent_rollup` / `render_bar` / `render_pctiles` etc.
+- `/api/metrics/agents` sums usage-time `cost_usd` snapshots, including cache-write costs and the served Standard/Fast rates. Recorded zero is priced; `unpriced=1` is counted without fabricating a cost. Token totals and monetary totals are reduced independently within the same agent/window/since-compact scope.
 
 ## Key Dependencies
 
-- [Database Layer](../../../../agent/db/docs/db.md) — Postgres pool (`telemetry_events` holds the telemetry and log stream; the aggregate reads it)
+- [Database Layer](../../../../agent/db/docs/db.md) — Postgres pool (`telemetry_events` holds the telemetry and log stream; the per-agent counters read it)
 - [Logging](../../../log/docs/log.md) — the event stream is written by the unified emitter (`base/telemetry/emitter.py`), fed by `base/log/process.py`
 
 ## SDK event collection

@@ -21,7 +21,7 @@ The same containment applies at other plugin load sites, each
 reporting through one reporter: a plugin's `provider.py`
 (`base/packages/plugin_providers.py`), `services.py` (`services/supervision/roster/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
-(`gateway/inspect/_plugin_metrics.py`). The config face `default_config.py` is read by two more processes through
+(`base/packages/dashboard_supply.py`). The config face `default_config.py` is read by two more processes through
 `base/packages/plugins/config_face.py` (never importing `plugin.py`): `meiva plugins update`
 (`plugin_config_admin.update_all_disk_images`; a failing face is an `error` entry on its result, off the
 reporter) and the gateway/ops overlay validation (`config_registration.overlay_config_classes`, the enabled

@@ -8,7 +8,6 @@ re-exports the vocabulary and derives the views.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Literal, TypedDict, Unpack
 
 Category = Literal["audit", "telemetry", "log"]
@@ -32,15 +31,7 @@ EventGroupBy = Literal["event_name", "machine", "level", "agent_id", "category"]
 # remain one registry entry while its audit rows are business and its telemetry
 # rows are noise.
 
-# The ops-monitor bucket grid (the Insights Ops panel): 60s buckets on a fixed
-# meiva:note
-# origin, shared by the LGTM reader (gateway/cluster/monitor/ops_series.py) and the
-# frontend's expectation that bucket boundaries never shift with the query
-# time. OPS_BUCKET_S is the finest window step; coarser windows are multiples.
-OPS_BUCKET_S = 60
-OPS_GRID_ORIGIN = datetime(2000, 1, 1, tzinfo=UTC)
-
-# The LLM failure family — one declaration; the ops panels / rollups that used
+# The LLM failure family — one declaration; the rollups that used
 # to carry three hand-copied `_LLM_ERROR_EVENTS` tuples read `family_events`.
 LLM_ERROR_FAMILY = "LLM_ERROR"
 

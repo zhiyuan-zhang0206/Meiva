@@ -13,15 +13,6 @@ function openStatus() {
 }
 
 const ZERO_ALERTS = { unresolved: 0, critical: 0, error: 0, warning: 0 };
-const ZERO_DIAGNOSTICS = {
-  active_classes: 0,
-  archived_classes: 0,
-  active_events: 0,
-  archived_events: 0,
-  errors: 0,
-  warnings: 0,
-  deployed_sha: null,
-};
 
 function makeStats(overrides: Partial<StatsDashboard> = {}): StatsDashboard {
   return {
@@ -36,7 +27,6 @@ function makeStats(overrides: Partial<StatsDashboard> = {}): StatsDashboard {
     anthropic_cost_usd: 5.67,
     google_cost_usd: 1.15,
     alerts: ZERO_ALERTS,
-    diagnostics: ZERO_DIAGNOSTICS,
     plugin_stats: [],
     ...overrides,
   };
@@ -61,15 +51,6 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = makeStats({
       alerts: { unresolved: 3, critical: 1, error: 1, warning: 1 },
-      diagnostics: {
-        active_classes: 2,
-        archived_classes: 5,
-        active_events: 41,
-        archived_events: 100,
-        errors: 30,
-        warnings: 11,
-        deployed_sha: "abc1234567890",
-      },
     });
     wrap(<AgentSidebar {...handlers} />);
     openStatus();

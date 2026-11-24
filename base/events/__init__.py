@@ -1,8 +1,6 @@
 from base.events.contract import (
     EVENTS,
     LLM_ERROR_FAMILY,
-    OPS_BUCKET_S,
-    OPS_GRID_ORIGIN,
     TIER_BY_EVENT,
     Category,
     EventSpec,
@@ -17,8 +15,6 @@ from base.events.contract import (
 __all__ = [
     "EVENTS",
     "LLM_ERROR_FAMILY",
-    "OPS_BUCKET_S",
-    "OPS_GRID_ORIGIN",
     "TIER_BY_EVENT",
     "Category",
     "EventSpec",

@@ -1,21 +1,14 @@
 """Plugin metric registration — plugins declare metrics over the event stream.
 
-Two output surfaces (user-approved design, 2026-08-04, event-system W13):
-
-- ``grafana``: the ops dashboard
-  (``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``)
-  is becoming a render of the registry — ``base.telemetry.metrics.grafana_dashboard`` turns
-  the specs into the dashboard JSON and ``meiva observability render`` previews / writes
-  it (task #3697; slice S3 flips converge onto the render). Until then the
-  JSON stays the deployment source, and
-  ``tests/components/plugins/test_grafana_dashboard_render.py`` locks the render against
-  it.
-- ``inspector`` (W13b): the gateway builds the registry in process (loads
-  every plugin's ``metrics.py`` declaration + the core definition
-  modules — task #180 PR D) and serves per-agent panels under
-  ``/api/agents/{id}/inspect/metrics``. Query templates may carry the
-  ``{{agent_id}}`` placeholder, which the gateway renders per dialect
-  (``agent_id="<n>"`` for LogQL, ``agent_id = <n>`` for SQL).
+One output surface, ``grafana``: the ops dashboard
+(``deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json``)
+is becoming a render of the registry — ``base.telemetry.metrics.grafana_dashboard`` turns
+the specs into the dashboard JSON and ``meiva observability render`` previews / writes
+it (task #3697; slice S3 flips converge onto the render). Until then the
+JSON stays the deployment source, and
+``tests/components/plugins/test_grafana_dashboard_render.py`` locks the render against
+it. (The per-agent ``inspector`` surface — `/api/agents/{id}/inspect/metrics` and its
+``{{agent_id}}`` placeholder — was removed with the ``telemetry_events`` readers.)
 
 A plugin declares its metrics as data: its ``metrics.py`` exports ``contribute()``, a pure
 function returning a ``PluginContributions`` with ``metrics``. The data registry
@@ -226,11 +219,8 @@ def validate_spec_sql(spec: MetricSpec) -> None:
     the static-SQL whitelist, LogQL contract, or PromQL sanity check, by dialect. Shared by
     ``build_data_registry`` and ``validate_core_metric`` (Task #882) — core
     metrics go through the same safety checks as plugin metrics. SQL
-    templates carry no placeholders anymore (task #180 PR C), so the old
-    ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder
-    rejection; the LogQL dialect keeps its ``{{agent_id}}`` inspector idiom
-    (render-only, per-agent). PromQL has neither event-stream requirements
-    nor template substitutions."""
+    templates carry no placeholders anymore (task #180 PR C). PromQL has neither
+    event-stream requirements nor template substitutions."""
     if spec.query_type == "logql":
         for template in [spec.query, *(spec.targets or [])]:
             validate_logql_template(template, spec.name, raw_view=spec.panel == "logs")
@@ -270,9 +260,8 @@ def sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _render_template(template: str, spec: MetricSpec, agent_id: int | None) -> str:
-    """Substitute ``{event_name}`` / ``{category}`` and, when ``agent_id``
-    is given, ``{{agent_id}}``. The literal quoting follows the dialect:
+def _render_template(template: str, spec: MetricSpec) -> str:
+    """Substitute ``{event_name}`` / ``{category}``. The literal quoting follows the dialect:
     SQL wants single quotes, LogQL wants double quotes; PromQL is static."""
     if spec.query_type == "promql":
         return template
@@ -286,11 +275,6 @@ def _render_template(template: str, spec: MetricSpec, agent_id: int | None) -> s
     # literals); the sql validator rejects the bare value either way.
     if spec.query_type == "logql":
         rendered = rendered.replace("{category_re}", spec.category)
-    if agent_id is not None:
-        if spec.query_type == "logql":
-            rendered = rendered.replace("{{agent_id}}", f'agent_id="{int(agent_id)}"')
-        else:
-            rendered = rendered.replace("{{agent_id}}", f"agent_id = {int(agent_id)}")
     return rendered
 
 
@@ -299,31 +283,27 @@ def _logql_literal(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _render_part(template: str, spec: MetricSpec, agent_id: int | None) -> str:
-    rendered = _render_template(template, spec, agent_id)
+def _render_part(template: str, spec: MetricSpec) -> str:
+    rendered = _render_template(template, spec)
     if spec.time_basis == "per_minute":
         rendered += f" / {bucket_minutes(template)}"
     return rendered
 
 
-def render_query(spec: MetricSpec, agent_id: int | None = None) -> str:
-    """Render the primary template (``query``) for one surface.
+def render_query(spec: MetricSpec) -> str:
+    """Render the primary template (``query``).
 
     ``{event_name}`` / ``{category}`` are substituted with single-quoted literals
-    (the generator writes static JSON — no parameter binding available).
-    ``{{agent_id}}`` stays verbatim unless ``agent_id`` is passed (the
-    inspector surface renders it to ``agent_id = <n>``). A ``per_minute``
+    (the generator writes static JSON — no parameter binding available). A ``per_minute``
     spec's bucket divisor is appended here.
     """
-    return _render_part(spec.query, spec, agent_id)
+    return _render_part(spec.query, spec)
 
 
-def render_targets(spec: MetricSpec, agent_id: int | None = None) -> list[str]:
+def render_targets(spec: MetricSpec) -> list[str]:
     """Render every template on the spec (``query`` first, then each
     ``targets`` entry) — one Grafana target per series group."""
-    return [render_query(spec, agent_id)] + [
-        _render_part(t, spec, agent_id) for t in (spec.targets or [])
-    ]
+    return [render_query(spec)] + [_render_part(t, spec) for t in (spec.targets or [])]
 
 
 def render_title(spec: MetricSpec) -> str:

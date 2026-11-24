@@ -45,25 +45,6 @@ class CheckpointTableSizes(TypedDict):
     writes_live: int
 
 
-class TelemetryReadStale(TypedDict):
-    """`telemetry_read_stale` payload — gateway/lgtm/telemetry_staleness.py."""
-
-    source: str
-    signal: str
-    threshold_s: int
-    age_s: float | None
-    action: str
-    reason: str
-
-
-class TelemetryReadRecovered(TypedDict):
-    """`telemetry_read_recovered` payload — gateway/lgtm/telemetry_staleness.py."""
-
-    source: str
-    signal: str
-    stale_duration_s: float
-
-
 class OtlpBackendDisabled(TypedDict):
     """`otlp_backend_disabled` payload — base/telemetry/otlp/telemetry_otlp.py."""
 
@@ -151,19 +132,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site="base/telemetry/loss.py:loss_event constructs Event directly",
         persist=True,
-    ),
-    "telemetry_read_stale": telemetry_event(
-        "telemetry_read_stale",
-        "read-side telemetry staleness detected — heartbeat older than threshold",
-        payload=TelemetryReadStale,
-        tier="anomaly",
-        site="gateway/lgtm/telemetry_staleness.py:_emit",
-    ),
-    "telemetry_read_recovered": telemetry_event(
-        "telemetry_read_recovered",
-        "read-side telemetry heartbeat recovered",
-        payload=TelemetryReadRecovered,
-        site="gateway/lgtm/telemetry_staleness.py:_emit",
     ),
     "otlp_backend_disabled": telemetry_event(
         "otlp_backend_disabled",

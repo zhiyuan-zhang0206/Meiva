@@ -28,7 +28,7 @@ def _load_core() -> list[MetricSpec]:
 
 def test_shipped_plugin_metrics_are_logql() -> None:
     specs = registered_metrics()
-    assert len(specs) == 7
+    assert len(specs) == 6
     names = {spec.name for spec in specs}
     assert {
         "meiva_memory_recall_search_latency_ms",
@@ -48,19 +48,9 @@ def test_rendered_queries_target_the_event_stream() -> None:
             assert "| event_name" not in template, (
                 f"{spec.name} filters event_name after | json:\n{template}"
             )
-            assert "| agent_id" not in template.replace("| {{agent_id}}", ""), (
+            assert "| agent_id" not in template, (
                 f"{spec.name} filters agent_id after | json:\n{template}"
             )
-
-
-def test_agent_placeholder_renders_per_agent() -> None:
-    parameterized = [spec for spec in registered_metrics() if "{{agent_id}}" in render_query(spec)]
-    assert parameterized
-    for spec in parameterized:
-        assert "grafana" not in spec.output
-        agent_render = render_query(spec, agent_id=123)
-        assert "{{agent_id}}" not in agent_render
-        assert 'agent_id="123"' in agent_render
 
 
 def test_dashboard_json_matches_registrations() -> None:

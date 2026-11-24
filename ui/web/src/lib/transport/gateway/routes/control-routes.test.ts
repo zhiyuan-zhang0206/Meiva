@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./config-routes";
-import { diagnosticSamplesPath, alertsPath, fleetGraphPath, memoryNotePath, agentQuestionsPath } from "./control-routes";
+import { alertsPath, fleetGraphPath, memoryNotePath, agentQuestionsPath } from "./control-routes";
 
 describe("config routes", () => {
   it("getConfig appends ?machine= only when a machine is given", () => {
@@ -23,22 +23,6 @@ describe("config routes", () => {
 });
 
 describe("control routes", () => {
-  it("addresses one diagnostic class by its full identity", () => {
-    const path = diagnosticSamplesPath(
-      { level: "error", event_name: "turn failed", source: "runner", process: "" },
-      24,
-    );
-    const url = new URL(path, "http://gateway");
-    expect(url.pathname).toBe("/api/stats/diagnostics/samples");
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      level: "error",
-      event_name: "turn failed",
-      source: "runner",
-      process: "",
-      hours: "24",
-    });
-  });
-
   it("alerts list only the filters that are set", () => {
     expect(alertsPath({})).toBe("/api/alerts");
     expect(alertsPath({ window: "24h", status: "unresolved", severity: "error", limit: 200 }))
