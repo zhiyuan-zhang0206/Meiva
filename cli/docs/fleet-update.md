@@ -42,7 +42,9 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
    captured stdout/stderr on failure — failing fast if
    either cache warm exits non-zero — and converge external agent harness CLIs
    (`claude`, `codex`, `agy`, `dsh`) on `agent-runner` hosts so neither `switch` nor
-   `meiva start` spends the outage downloading packages or harness binaries.
+   `meiva start` spends the outage downloading packages or harness binaries. On a gateway
+   host it also builds NEW's frontend while the cluster serves, when only `ui/web` source
+   changed ([frontend prebuild](#frontend-prebuild)).
 5. Open the window's Grafana silence on the gateway host.
 6. `meiva stop --yes` with the operator's flags across all runners in parallel,
    waiting for every in-flight runner stop to finish before stopping the gateway
@@ -55,6 +57,39 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
    cannot write through), `uv sync --frozen --compile-bytecode --reinstall-package meiva`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the
    operator's to move (not delete), never the update's.
+
+## Frontend prebuild
+
+`next build` takes ~30 s, and `meiva start` ran it inside the outage whenever `ui/web` changed.
+Prestage now builds NEW's frontend beforehand on a host that serves one (gateway role), but only
+when `ui/web` changed and every input the staged tree borrows from the serving checkout is
+unchanged: `ui/web/package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `scripts/patches`
+(the serving `node_modules` is copied for the build), and `uv.lock` / `.python-version` (NEW's
+Python runs on the serving venv). It checks NEW out as a git worktree at `$MEIVA_HOME/frontend-prebuild`,
+copies the serving `node_modules` (a real copy: Turbopack rejects a symlinked one) and the warm
+`.next/cache`, and builds with the host's own `NEXT_PUBLIC_*` values
+(`services.supervision.roster.frontend_prebuild`). The `switch` then moves the finished `.next` into
+`ui/web/` right after the checkout (one rename on the same filesystem), and `meiva start`'s
+`frontend_build ensure` finds `.next/meiva-build-key` current and skips the build.
+
+The prebuild is a cache warm, never a gate: any failure prints `frontend prebuild failed` and the
+window carries on, and `ensure` rebuilds a missing or mismatching `.next` itself because the key
+names every build input (source digest, node version, baked values; it holds no path). A
+lockfile, workspace or patch change skips the prebuild: the start installs, then builds. A host whose `.env` does not say `MEIVA_MACHINE_SERVE_GATEWAY` true skips it before checking anything out. Adopting the staged build replaces the serving `.next`, so a recovery switch back to OLD rebuilds the frontend at that start (30-45 s) instead of reusing OLD's build. The stage
+(a worktree and a `node_modules` copy, about 1 GB) is left in place after the switch so the outage
+does not spend seconds deleting it; the next prestage removes it first. Verified on a real build:
+only `.next/required-server-files.{json,js}` embed the build directory, and `next start` does not
+read those paths, so a `.next` built in the stage serves from `ui/web/`
+([frontend build reuse](../../base/cluster/docs/frontend-build.md)).
+
+## Step timings
+
+The log carries no timestamps, so each step of the window ends with a `timing: <step> N.Ns` line
+(preflight, kept-root check, stored-schedule verify, prestage, silence open, stop wave, switch
+wave, gateway start, runner starts, verify). The stored-schedule verify dry-imports every stored
+schedule script in its own interpreter; it runs half the host's CPUs of them at once (~85 s for 242
+scripts one after another), and it is the step that dominated the window before the stop and
+again after the start.
 
 ## One runner never strands the cluster
 

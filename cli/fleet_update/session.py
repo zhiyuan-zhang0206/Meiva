@@ -65,6 +65,20 @@ class Timers(Protocol):
     def sleep(self, seconds: float) -> None: ...
 
 
+class _Timed:
+    def __init__(self, session: Session, step: str) -> None:
+        self._session = session
+        self._step = step
+        self._started = 0.0
+
+    def __enter__(self) -> None:
+        self._started = self._session.timers.monotonic()
+
+    def __exit__(self, *exc: object) -> None:
+        elapsed = self._session.timers.monotonic() - self._started
+        self._session.say(f"timing: {self._step} {elapsed:.1f}s")
+
+
 class Session:
     def __init__(
         self,
@@ -124,6 +138,9 @@ class Session:
         with ThreadPoolExecutor(max_workers=min(len(items), _MAX_PARALLEL)) as pool:
             futures = [pool.submit(_call, item) for item in items]
             return [future.result() for future in futures]
+
+    def timed(self, step: str) -> _Timed:
+        return _Timed(self, step)
 
     def defer(self, failure: HostFailure) -> None:
         if failure.alias in self.deferred:

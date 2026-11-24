@@ -54,6 +54,14 @@ start builds and then records.
   and prevents `pnpm`'s pre-script hook from spawning an unfrozen install that
   would dirty `node_modules` timestamps against `.next/cache/turbopack`.
 
+## Prebuild during a fleet update
+
+The key holds no path, so a build made elsewhere is as good as one made in place. A fleet update
+builds NEW's `ui/web` in a git worktree beside the serving checkout while the cluster serves, and
+moves the finished `.next` (key included) into place at the switch; `ensure` then reuses it. See
+[frontend prebuild](../../../cli/docs/fleet-update.md#frontend-prebuild). The key is recorded only
+after a successful build, so a failed or partial prebuild is never adopted.
+
 ## Forcing a rebuild
 
 Delete `ui/web/.next` (or just `ui/web/.next/meiva-build-key`). The next start

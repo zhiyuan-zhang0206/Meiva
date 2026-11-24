@@ -449,7 +449,10 @@ How to apply: when a stamp or hash gates an installation, verify the
 installation state it is meant to represent — here, `node_modules/.modules.yaml`
 presence, absence of foreign package-manager markers (`.package-lock.json`,
 `.yarn-integrity`), plus installed versions of direct dependencies vs
-`ui/web/pnpm-lock.yaml`, falling back to a clean reinstall on any drift. And
+`ui/web/pnpm-lock.yaml`, falling back to a clean reinstall on any drift. A repair must
+also remove the evidence it was triggered by: `pnpm install` never deletes a foreign marker, so
+without clearing it after the install succeeded a marker left once reported drift (and paid a
+no-op install) on every later start. And
 when prod behavior and clean builds disagree, diff the dependency state the
 build consumed before reaching for cache theories: deterministic minifiers
 produce identical output from identical input.

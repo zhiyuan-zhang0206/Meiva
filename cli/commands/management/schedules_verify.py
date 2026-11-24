@@ -23,9 +23,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +66,10 @@ from .sweep_outcome import (
 _VERIFY_CHILD_TIMEOUT_S = 90.0
 
 _API_TIMEOUT_S = 15.0
+
+
+def children_for(cpus: int | None) -> int:
+    return max(1, (cpus or 2) // 2)
 
 
 # meiva:note
@@ -209,10 +215,24 @@ def _read_rows(source: RowsFromFile | RowsFromGateway) -> tuple[StoredSchedule, 
     return tuple(StoredSchedule(*row) for row in rows)
 
 
+def check_rows(
+    rows: Sequence[StoredSchedule], *, check: Callable[[str], str | None], children: int
+) -> tuple[tuple[StoredSchedule, str | None], ...]:
+    def verdict(row: StoredSchedule) -> str | None:
+        return check(row.script) if needs_check(row.script) else None
+
+    with ThreadPoolExecutor(max_workers=max(1, children)) as pool:
+        return tuple(zip(rows, pool.map(verdict, rows), strict=True))
+
+
 # meiva:note
 # Run the dry-import and call-signature sweep over every in-store script and print its lines.
 def _sweep(
-    source: RowsFromFile | RowsFromGateway | GatewayUnresolved, *, stamp: str, python: str
+    source: RowsFromFile | RowsFromGateway | GatewayUnresolved,
+    *,
+    stamp: str,
+    python: str,
+    children: int,
 ) -> SweepOutcome:
     if isinstance(source, GatewayUnresolved):
         outcome = unreadable(stamp, source.error_type, source.message)
@@ -225,11 +245,14 @@ def _sweep(
         except Exception as exc:
             outcome = unreadable(stamp, type(exc).__name__, str(exc))
         else:
-            results = tuple(
-                (row, check_script(row.script, python=python) if needs_check(row.script) else None)
-                for row in rows
+            outcome = summarize(
+                stamp,
+                check_rows(
+                    rows,
+                    check=lambda script: check_script(script, python=python),
+                    children=children,
+                ),
             )
-            outcome = summarize(stamp, results)
     for line in outcome.lines:
         print(line)
     return outcome
@@ -255,15 +278,20 @@ def cmd_schedules_verify(
     now: datetime,
     producer: Callable[[], EventPipeline],
     python: str,
+    children: int,
 ) -> int:
     match source:
         case CheckFile(path):
             return _verify_file(path, python=python)
         case RowsFromFile():
             notify = False
-            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"), python=python)
+            outcome = _sweep(
+                source, stamp=now.isoformat(timespec="seconds"), python=python, children=children
+            )
         case RowsFromGateway() | GatewayUnresolved():
-            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"), python=python)
+            outcome = _sweep(
+                source, stamp=now.isoformat(timespec="seconds"), python=python, children=children
+            )
         case _:
             assert_never(source)
     if notify and outcome.owes_signal:
@@ -330,4 +358,5 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
         now=stamped_instant(runtime),
         producer=producer_of(args),
         python=runtime.host.platform.executable,
+        children=children_for(os.cpu_count()),
     )

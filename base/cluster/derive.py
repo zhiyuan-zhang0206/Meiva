@@ -166,14 +166,19 @@ def session_name(service: str) -> str:
 # Single source for both build paths — the canonical ServiceSpec (cli/commands/_repo.py) AND the
 # frontend healthcheck respawn (services/supervision/healthchecks/frontend.py) — so a watchdog
 # restart can never bake a different (stale) gateway port than `meiva start` did.
+def fe_build_env_vars(*, gateway_port: int, browser_origins: Sequence[str]) -> dict[str, str]:
+    env = {"NEXT_PUBLIC_GATEWAY_PORT": str(gateway_port)}
+    if browser_origins:
+        # meiva:note
+        # The normal build and watchdog rebuild must carry the same browser entries.
+        # Keep this host setting separate from the runner/control-plane gateway URL.
+        env["NEXT_PUBLIC_BROWSER_ORIGINS"] = ",".join(browser_origins)
+    return env
+
+
 def fe_build_env(*, gateway_port: int, browser_origins: Sequence[str]) -> str:
-    gateway_env = f"NEXT_PUBLIC_GATEWAY_PORT={gateway_port}"
-    if not browser_origins:
-        return gateway_env
-    # meiva:note
-    # The normal build and watchdog rebuild must carry the same browser entries.
-    # Keep this host setting separate from the runner/control-plane gateway URL.
-    return f"{gateway_env} NEXT_PUBLIC_BROWSER_ORIGINS={shlex.quote(','.join(browser_origins))}"
+    env = fe_build_env_vars(gateway_port=gateway_port, browser_origins=browser_origins)
+    return " ".join(f"{name}={shlex.quote(value)}" for name, value in env.items())
 
 
 def frontend_service_cmd(

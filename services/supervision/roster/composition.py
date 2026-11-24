@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -38,6 +39,19 @@ from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY
 _GATEWAY_LIFESPAN_ALLOWANCE_S = 10.0
 
 _TEMPO_STOP_CEILING_S = 45.0
+
+
+@dataclass(frozen=True)
+class FrontendBuildInputs:
+    gateway_port: int
+    browser_origins: tuple[str, ...]
+
+
+def frontend_build_inputs() -> FrontendBuildInputs:
+    return FrontendBuildInputs(
+        gateway_port=whole(setting("gateway_port"), "gateway_port"),
+        browser_origins=texts(setting("browser_origins"), "browser_origins"),
+    )
 
 
 # meiva:note
@@ -154,8 +168,9 @@ def build_services(
     embedding_revision = optional_text(
         setting("embeddinggemma_revision"), "embeddinggemma_revision"
     )
-    gateway_port = whole(setting("gateway_port"), "gateway_port")
-    browser_origins = texts(setting("browser_origins"), "browser_origins")
+    frontend_inputs = frontend_build_inputs()
+    gateway_port = frontend_inputs.gateway_port
+    browser_origins = frontend_inputs.browser_origins
     browser_cdp_port = whole(setting("browser_cdp_port"), "browser_cdp_port")
     browser_profile = profile_dir(home)
     telemetry_otlp_port = whole(setting("telemetry_otlp_port"), "telemetry_otlp_port")

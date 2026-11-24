@@ -89,11 +89,12 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     runners = s.live(args.runner)
     hosts = start_order(args.gateway, runners)
     started: set[str] = set()
-    gateway_failure = _start_one(s, args, args.gateway, window)
-    if gateway_failure is None:
-        started.add(args.gateway)
-        if not args.dry_run:
-            gateway_failure = _check_gateway_bootstrap(s, args.gateway)
+    with s.timed("gateway start"):
+        gateway_failure = _start_one(s, args, args.gateway, window)
+        if gateway_failure is None:
+            started.add(args.gateway)
+            if not args.dry_run:
+                gateway_failure = _check_gateway_bootstrap(s, args.gateway)
     if gateway_failure is not None:
         failures.append(gateway_failure)
         s.say(f"PARTIAL: {gateway_failure.line()}")
@@ -104,20 +105,22 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
         )
         runner_outcomes = [HostFailure(alias, "start", reason) for alias in runners]
     else:
-        runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
+        with s.timed("runner starts"):
+            runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
     for alias, failure in zip(runners, runner_outcomes, strict=True):
         if failure is not None:
             failures.append(failure)
             s.say(f"PARTIAL: {failure.line()}")
         else:
             started.add(alias)
-    verified, skipped, commit = verify(
-        s,
-        args,
-        hosts=hosts,
-        started=frozenset(started),
-        gateway_stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
-    )
+    with s.timed("verify"):
+        verified, skipped, commit = verify(
+            s,
+            args,
+            hosts=hosts,
+            started=frozenset(started),
+            gateway_stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
+        )
     failures += verified
     # meiva:note
     # The planned-outage silence is shortened to its post-`up` settle grace here even on a

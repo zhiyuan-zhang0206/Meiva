@@ -36,6 +36,7 @@ def _check_rows(rows_file: str) -> None:
                 notify=False,
                 now=datetime.now(UTC),
                 producer=producer,
+                children=1,
             )
         )
     finally:

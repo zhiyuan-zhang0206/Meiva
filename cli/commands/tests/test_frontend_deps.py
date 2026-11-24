@@ -178,6 +178,38 @@ def test_reinstalls_when_foreign_package_manager_marker_present(
     assert fake_pnpm_install.installs() == [(repo / "ui" / "web").resolve()]
 
 
+@pytest.mark.parametrize("marker", [".package-lock.json", ".yarn-integrity"])
+def test_a_foreign_marker_costs_one_reinstall_not_one_per_start(
+    tmp_path: Path, fake_pnpm_install: FakePnpm, marker: str
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    modules = repo / "ui" / "web" / "node_modules"
+    fake_pnpm_install.ensure(repo)
+    (modules / marker).write_text("{}")
+    fake_pnpm_install.forget()
+
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == [(repo / "ui" / "web").resolve()]
+    assert not (modules / marker).exists()
+    fake_pnpm_install.forget()
+
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
+
+
+def test_a_failed_install_keeps_the_foreign_marker(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    modules = repo / "ui" / "web" / "node_modules"
+    modules.mkdir()
+    (modules / ".package-lock.json").write_text("{}")
+    with pytest.raises(subprocess.CalledProcessError):
+        _repo.ensure_frontend_deps(
+            repo, environ=_ENVIRONMENT, install_argv=("/bin/sh", "-c", "exit 1")
+        )
+    assert (modules / ".package-lock.json").exists()
+    assert not (modules / ".meiva-lock-hash").exists()
+
+
 def test_reinstalls_when_pnpm_modules_metadata_missing(
     tmp_path: Path, fake_pnpm_install: FakePnpm
 ) -> None:
@@ -276,5 +308,21 @@ def test_skips_across_commits_and_source_edits_when_lock_and_workspace_unchanged
         capture_output=True,
     )
 
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
+
+
+def test_a_foreign_marker_that_is_a_directory_is_cleared_too(
+    tmp_path: Path, fake_pnpm_install: FakePnpm
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    modules = repo / "ui" / "web" / "node_modules"
+    fake_pnpm_install.ensure(repo)
+    (modules / ".package-lock.json").mkdir()
+    (modules / ".package-lock.json" / "inner").write_text("x")
+    fake_pnpm_install.forget()
+    fake_pnpm_install.ensure(repo)
+    assert not (modules / ".package-lock.json").exists()
+    fake_pnpm_install.forget()
     fake_pnpm_install.ensure(repo)
     assert fake_pnpm_install.installs() == []

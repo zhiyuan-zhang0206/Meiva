@@ -416,3 +416,24 @@ def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
     finally:
         child.kill()
         child.wait(timeout=5)
+
+
+def test_keeping_the_observability_units_leaves_them_running_and_stops_the_rest(
+    rooted: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+) -> None:
+    kept = ("loki", "prometheus", "tempo", "grafana", "otel-collector")
+    tree = [UnitRow(unit) for unit in ("agent-host", "frontend", *kept, "browser", "pty-sessions")]
+    with scripted_root(rooted.home, tree) as root:
+        rc = do_stop(
+            stop_request(preserve=frozenset(kept), keep_browser=True),
+            stop_environment(rooted, operator_database, operator_pipeline),
+            retained_children=[],
+        )
+    assert rc == 0
+    asked = {unit for _verb, unit in verbs(root.calls)}
+    assert asked == {"agent-host", "frontend", "browser", "pty-sessions"}
+    assert {unit: row.state for unit, row in root.units.items() if unit in kept} == dict.fromkeys(
+        kept, "running"
+    )
