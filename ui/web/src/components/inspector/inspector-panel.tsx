@@ -152,7 +152,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
             {liveData && <ConfigOverlaySection inspect={liveData} />}
             <ContextSection agentId={agentId} />
             <CostActivitySection
-              agentId={agentId}
               inspect={windowedData}
               failed={windowedQuery.error != null}
               pending={windowedQuery.isPending}

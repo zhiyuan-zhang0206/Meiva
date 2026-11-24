@@ -149,34 +149,27 @@ class EventCountsResponse(BaseModel):
 
 
 class MetricsMeta(BaseModel):
-    """`/api/metrics/agents` report header — window +
-    provenance. `since_compact` echoes the request's filter: True = each
-    agent's events were narrowed to those at or after its latest compact
-    halt before aggregating."""
+    """`/api/metrics/agents` report header — window + provenance."""
 
     model_config = ConfigDict(frozen=True)
 
     window_days: int
     generated_at: str  # ISO-8601 UTC; frontend renders in local time
-    total_events: NonNegativeInt
     distinct_agents: NonNegativeInt
-    since_compact: bool = False
 
 
 class AgentMetricsItem(BaseModel):
-    """One agent's row in the fleet metrics breakdown — headline counters
-    aggregated over its events within the report window. `label` is the
+    """One agent's row in the fleet metrics breakdown — headline usage
+    aggregated over the report window. `label` is the
     agent's display name (None = unset; frontend falls back to "#id").
     `cost_usd` sums recorded usage-time price snapshots; unpriced calls contribute 0.
     `cache_hit_pct` uses only calls reporting cache usage, and is null when nonzero
-    input has no cache metering. `exec_failed` is every exec outcome other than plain
-    `exec`."""
+    input has no cache metering."""
 
     model_config = ConfigDict(frozen=True)
 
     agent_id: int
     label: str | None
-    events: NonNegativeInt
     cost_usd: float = Field(ge=0)
     cost_usd_api: float = Field(default=0, ge=0)
     cost_usd_subscription: float = Field(default=0, ge=0)
@@ -187,16 +180,11 @@ class AgentMetricsItem(BaseModel):
     tokens_out: NonNegativeInt
     tokens_cached: NonNegativeInt
     cache_hit_pct: float | None = Field(ge=0, le=100)
-    turn_ok: NonNegativeInt
-    turn_total: NonNegativeInt
-    exec_ok: NonNegativeInt
-    exec_failed: NonNegativeInt
 
 
 class AgentMetricsReport(BaseModel):
     """GET /api/metrics/agents response — the per-agent breakdown behind the
-    metrics page's Agents panel, sorted by cost descending (ties by agent_id).
-    `meta.since_compact` echoes the optional since-last-compact filter."""
+    metrics page's Agents panel, sorted by cost descending (ties by agent_id)."""
 
     model_config = ConfigDict(frozen=True)
 
