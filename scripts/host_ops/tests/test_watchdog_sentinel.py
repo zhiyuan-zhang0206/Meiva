@@ -1,12 +1,14 @@
 # meiva:note
 # The retained observer submits through the existing agent queue and never mints a receipt on failure.
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
 
 import pytest
 
-from scripts.host_ops.watchdog_sentinel import Endpoints, Sentinel, age_from_payload
+from cli.fleet_update import fleet_alert_silence
+from scripts.host_ops.watchdog_sentinel import WINDOW_MARKER, Endpoints, Sentinel, age_from_payload
 
 
 class Recorder:
@@ -181,3 +183,70 @@ def test_overlapping_ticks_submit_once(tmp_path: Path) -> None:
 
     assert len(recorder.sent) == 1
     assert first.read_state()["last_sent"] == 1000
+
+
+def _window(home: Path, until: datetime) -> None:
+    fleet_alert_silence.write_window_end(home, until)
+
+
+def test_the_sentinel_and_the_fleet_update_name_the_same_window_marker() -> None:
+    assert WINDOW_MARKER == fleet_alert_silence.WINDOW_MARKER
+
+
+def test_a_planned_update_window_holds_every_judgement_until_it_ends(tmp_path: Path) -> None:
+    recorder = Recorder()
+    recorder.age = None
+    sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints())
+    sentinel.write_state({"first_seen": 500})
+    _window(tmp_path, datetime.fromtimestamp(2000, UTC))
+
+    assert sentinel.tick(now=1000) == 0
+    assert sentinel.tick(now=1999) == 0
+    assert recorder.sent == []
+    assert "held planned update window" in sentinel.log_path.read_text()
+    assert sentinel.read_state() == {"first_seen": 500}
+
+    assert sentinel.tick(now=2000) == 0
+    [message] = recorder.sent
+    assert "heartbeat series disappeared" in message
+
+
+def test_a_window_holds_the_query_failure_leg_too(tmp_path: Path) -> None:
+    recorder = Recorder()
+
+    def read_age() -> float | None:
+        raise ConnectionRefusedError("Prometheus stopped by the update")
+
+    sentinel = Sentinel(home=tmp_path, endpoints=Endpoints(read_age, recorder.send))
+    _window(tmp_path, datetime.fromtimestamp(2000, UTC))
+    assert sentinel.tick(now=1000) == 0
+    assert recorder.sent == []
+    assert sentinel.tick(now=2001) == 1
+    assert "could not query Prometheus" in recorder.sent[0]
+
+
+def test_a_settled_window_ends_the_hold_at_the_settle_grace(tmp_path: Path) -> None:
+    opened = datetime(2026, 11, 24, 3, 0, tzinfo=UTC)
+    _window(tmp_path, opened + timedelta(hours=4))
+    fleet_alert_silence.settle_window_end(tmp_path, now=opened + timedelta(minutes=40))
+    recorder = Recorder()
+    recorder.age = 99999
+    sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints(), silence_seconds=60)
+    sentinel.write_state({"first_seen": 1})
+    settled = (opened + timedelta(minutes=40) + fleet_alert_silence.SETTLE_WINDOW).timestamp()
+    assert sentinel.tick(now=settled - 1) == 0
+    assert recorder.sent == []
+    assert sentinel.tick(now=settled) == 0
+    assert len(recorder.sent) == 1
+
+
+@pytest.mark.parametrize("content", [None, "", "not a timestamp\n"])
+def test_no_or_unreadable_window_marker_holds_nothing(tmp_path: Path, content: str | None) -> None:
+    if content is not None:
+        (tmp_path / WINDOW_MARKER).parent.mkdir(parents=True)
+        (tmp_path / WINDOW_MARKER).write_text(content)
+    recorder = Recorder()
+    recorder.age = 900
+    sentinel = Sentinel(home=tmp_path, endpoints=recorder.endpoints(), silence_seconds=60)
+    assert sentinel.tick(now=1000) == 0
+    assert len(recorder.sent) == 1

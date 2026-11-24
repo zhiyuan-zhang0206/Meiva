@@ -220,3 +220,29 @@ def test_the_credential_comes_from_the_alerts_settings(
     fake, base = grafana
     assert _run(tmp_path, base + "/", "pw", "close") == "SILENCE closed 0\n"
     assert fake.calls == [("GET", silence.SILENCES)]
+
+
+def test_open_records_the_window_end_for_the_host_sentinel_and_close_settles_it(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / silence.WINDOW_MARKER
+    silence.settle_window_end(tmp_path, now=_NOW)
+    assert not marker.exists()
+
+    silence.write_window_end(tmp_path, _NOW + timedelta(hours=4))
+    assert marker.read_text() == "2026-10-04T08:00:00+00:00\n"
+    closed_at = _NOW + timedelta(minutes=30)
+    silence.settle_window_end(tmp_path, now=closed_at)
+    assert datetime.fromisoformat(marker.read_text().strip()) == closed_at + silence.SETTLE_WINDOW
+
+
+def test_main_keeps_the_window_marker_even_without_a_grafana_credential(tmp_path: Path) -> None:
+    marker = tmp_path / silence.WINDOW_MARKER
+    out = _run(tmp_path, "http://127.0.0.1:9", None, "open", "--hours", "2", "--comment", "w")
+    assert out.startswith("SILENCE skipped")
+    opened_until = datetime.fromisoformat(marker.read_text().strip())
+    assert timedelta(hours=1, minutes=59) < opened_until - datetime.now(UTC) <= timedelta(hours=2)
+
+    _run(tmp_path, "http://127.0.0.1:9", None, "close")
+    settled_until = datetime.fromisoformat(marker.read_text().strip())
+    assert settled_until - datetime.now(UTC) <= silence.SETTLE_WINDOW

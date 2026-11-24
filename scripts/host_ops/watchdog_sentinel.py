@@ -26,6 +26,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from datetime import datetime
 from functools import partial
 from http.client import HTTPException, HTTPResponse
 from pathlib import Path
@@ -42,6 +43,8 @@ DEFAULT_SILENCE_SECONDS = 1800.0
 # should not become a hundred notifications, and an outage that is still there in the morning
 # should not be a state nobody remembers.
 DEFAULT_REPEAT_HOURS = 6.0
+
+WINDOW_MARKER = Path("ops") / "alert-window-until"
 
 # meiva:note
 # The installed CLI wakes the named owner through the existing agent message path.
@@ -141,6 +144,7 @@ class Sentinel:
         endpoints: Endpoints | None = None,
     ) -> None:
         self.home = home
+        self.window_path = home / WINDOW_MARKER
         self.state_path = state_path or home / "ops" / "watchdog-sentinel.state"
         self.log_path = log_path or home / "ops" / "watchdog-sentinel.log"
         self.diagnostic_path = self.log_path.with_suffix(".diagnostics.log")
@@ -185,6 +189,13 @@ class Sentinel:
         staged = self.state_path.with_suffix(".tmp")
         staged.write_text(json.dumps(state), encoding="utf-8")
         staged.replace(self.state_path)
+
+    def window_end(self) -> float | None:
+        try:
+            text = self.window_path.read_text(encoding="utf-8").strip()
+            return datetime.fromisoformat(text).timestamp()
+        except (OSError, ValueError):
+            return None
 
     def note(self, line: str, *, path: Path | None = None) -> None:
         target = self.log_path if path is None else path
@@ -250,6 +261,11 @@ class Sentinel:
             return self._tick(time.time() if now is None else now)
 
     def _tick(self, stamp: float) -> int:
+        ends = self.window_end()
+        if ends is not None and stamp < ends:
+            until = datetime.fromtimestamp(ends).astimezone().isoformat(timespec="seconds")
+            self.note(f"held planned update window until {until}")
+            return 0
         wiring = self.endpoints()
         state = self.read_state()
         try:

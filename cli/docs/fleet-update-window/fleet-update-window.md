@@ -84,6 +84,13 @@ Alertmanager unsilences them. A silence that cannot open only warns; a failed `u
 leaves the silence to its original expiry. `--dry-run` prints the command without
 opening.
 
+The same two verbs keep the window's end in `<home>/ops/alert-window-until` (one UTC
+ISO timestamp: `down` writes the silence's expiry, `up` shortens it to the same settle
+grace) so the host sentinel, which runs outside Grafana and cannot read a silence while
+Grafana is stopped, stays quiet until then ([watchdog sentinel](../../../scripts/host_ops/docs/watchdog-sentinel.md)).
+The marker is written before the silence is attempted, so a host without a Grafana
+credential still holds the sentinel.
+
 ## The log and the macOS start
 
 Every printed or logged line passes the secret redaction patterns first

@@ -137,6 +137,8 @@ agent is gone. `read_trace.py --with-content` (inspect-a-trace scripts) calls th
 ## The Postgres `events` archive is gone
 
 The `events` table was frozen at the LGTM cutover (2026-08-12, task #1197) and
-dropped with the archive cleanup (task #1281/#1823). Historical reads go to the
-Loki archive stream ([event-stream](event-stream.md)); the cold pg_dump archive
-(task #1823) holds the pre-drop copy.
+dropped with the archive cleanup (task #1281/#1823). It was imported into Loki's
+`{stream="archive"}`, but that stream no longer holds readable lines (its chunks are gone, only
+index entries remained, and the retention exception for it was removed on 2026-11-24), so
+there is no queryable history before the Loki retention window. Only the cold pg_dump archive
+(task #1823) holds the pre-drop copy; its location is not recorded.
