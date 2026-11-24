@@ -82,8 +82,8 @@ from opentelemetry.trace import Tracer
 
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.daemon import health_schema
+from base.daemon.http_transport import KeepAlive, ServedRoute, start_daemon_http
 from base.daemon.http_transport import RouteHandler as RouteHandler
-from base.daemon.http_transport import ServedRoute, start_daemon_http
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.loop_health import LoopProgress as LoopProgress
 from base.host.boundary.untyped import object_of
@@ -214,6 +214,10 @@ def _healthz_payload(
 #   server passes the digests of its write generation's machine API
 #   tokens when its API is authenticated, so a LAN peer cannot drive
 #   /ops without one; the server compares digests only.
+# - `keep_alive`: when set, a client may reuse one connection for several requests
+#   (HTTP/1.1 keep-alive). Unset, every response carries `Connection: close`, which
+#   is what the one-shot loopback probes of `/healthz` expect. The ops server sets it
+#   so the gateway's repeated `Range` reads of one file share a connection.
 async def start_health_server(
     name: str,
     port: int,
@@ -229,6 +233,7 @@ async def start_health_server(
     auth_digests: frozenset[str] | None = None,
     image: LoadedCommit,
     tracer: Tracer | None = None,
+    keep_alive: KeepAlive | None = None,
 ) -> asyncio.Server:
     started_at = time.time()
     pid = os.getpid()
@@ -260,6 +265,7 @@ async def start_health_server(
         body_slots=body_slots,
         auth_digests=auth_digests,
         tracer=tracer,
+        keep_alive=keep_alive,
     )
 
 

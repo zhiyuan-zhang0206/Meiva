@@ -29,7 +29,7 @@ from base.agents.to_user import (
     validator_headers,
 )
 from base.config.domains.to_user import FileAccess
-from base.daemon.http_transport import RouteAnswer
+from base.daemon.http_transport import FileBody, RouteAnswer
 from base.paths import WORKSPACES_DIR_NAME, workspace_path, workspaces_path
 
 MAX_WORKSPACE_FILE_BYTES = 1024 * 1024
@@ -420,23 +420,29 @@ def read_workspace_file_content(
     )
 
 
-def read_workspace_file_raw(
+# meiva:link gateway/agents/docs/to-user-resources.md
+def open_workspace_file_raw(
     reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
     max_bytes: int,
-) -> bytes:
+) -> bytes | FileBody:
+    refusal = f"Referenced file exceeds the {max_bytes}-byte resource limit"
     target = resolve_existing_workspace_file(reach, agent_id, raw_path, custom_cwd=custom_cwd)
-    stat = target.stat()
-    if stat.st_size > max_bytes:
-        raise WorkspaceFileError(
-            413, f"Referenced file exceeds the {max_bytes}-byte resource limit"
-        )
-    return read_at_most(
-        target, max_bytes, f"Referenced file exceeds the {max_bytes}-byte resource limit"
-    )
+    with contextlib.ExitStack() as owned:
+        handle = owned.enter_context(target.open("rb"))
+        size = os.fstat(handle.fileno()).st_size
+        if size > max_bytes:
+            raise WorkspaceFileError(413, refusal)
+        if size == 0:
+            raw = handle.read(max_bytes + 1)
+            if len(raw) > max_bytes:
+                raise WorkspaceFileError(413, refusal)
+            return raw
+        _ = owned.pop_all()
+        return FileBody(handle, size)
 
 
 # meiva:note
@@ -447,12 +453,6 @@ def read_workspace_file_raw(
 MAX_LISTING_ENTRIES = 1000
 MAX_LISTING_SCAN = 20_000
 type EntryKind = Literal["dir", "file"]
-
-# meiva:note
-# One forwarded `Range` answer carries at most 8 MiB: a media element asks `bytes=0-` and then
-# follows the `Content-Range` it receives, so a bounded slice starts playback and seeking without
-# the runner reading or the gateway relaying a whole file per request.
-MAX_RANGE_ANSWER_BYTES = 8 * 1024 * 1024
 
 
 def resolve_workspace_dir(
@@ -556,11 +556,12 @@ def list_workspace_dir(
 
 # meiva:note
 # One byte range of a workspace file: `206` with its slice, or `416` with no body when the range
-# starts past the end. `content_range` is the `Content-Range` header value either way.
+# starts past the end. `content_range` is the `Content-Range` header value either way. The slice
+# is a `FileBody` positioned at its first byte, streamed by the transport.
 @dataclass(frozen=True)
 class ByteRangeAnswer:
     status: int
-    content: bytes
+    content: bytes | FileBody
     content_range: str
 
 
@@ -571,17 +572,19 @@ class _RangeNotSatisfiableError(Exception):
 
 
 # meiva:note
-# One `bytes=` range as inclusive offsets clamped to the file. Anything else (another unit, a
-# list of ranges, a malformed spec) answers None, and the caller serves the whole file as HTTP
+# One `bytes=` range as inclusive offsets clamped to the file, and whether it was open-ended
+# (`bytes=N-`: no end named, so the server picks how far to answer). Anything else (another unit,
+# a list of ranges, a malformed spec) answers None, and the caller serves the whole file as HTTP
 # lets a server ignore a Range it does not support.
-def _parse_byte_range(header: str, size: int) -> tuple[int, int] | None:
+def _parse_byte_range(header: str, size: int) -> tuple[int, int, bool] | None:
     unit, _, spec = header.strip().partition("=")
     first, dash, last = spec.strip().partition("-")
     first, last = first.strip(), last.strip()
     if unit.strip().lower() != "bytes" or "," in spec or not dash:
         return None
     if not first:
-        return _suffix_range(last, size)
+        span = _suffix_range(last, size)
+        return None if span is None else (*span, False)
     if not first.isdigit() or (last and not last.isdigit()):
         return None
     start = int(first)
@@ -589,7 +592,7 @@ def _parse_byte_range(header: str, size: int) -> tuple[int, int] | None:
         return None
     if start >= size:
         raise _RangeNotSatisfiableError
-    return start, min(int(last), size - 1) if last else size - 1
+    return start, min(int(last), size - 1) if last else size - 1, not last
 
 
 # meiva:note
@@ -602,6 +605,7 @@ def _suffix_range(last: str, size: int) -> tuple[int, int] | None:
     return max(size - int(last), 0), size - 1
 
 
+# meiva:link gateway/agents/docs/to-user-resources.md
 def read_workspace_file_range(
     reach: FileReach,
     agent_id: int,
@@ -609,28 +613,28 @@ def read_workspace_file_range(
     *,
     byte_range: str,
     max_bytes: int,
+    open_range_bytes: int,
     custom_cwd: str | None = None,
 ) -> ByteRangeAnswer | None:
     target = resolve_existing_workspace_file(reach, agent_id, raw_path, custom_cwd=custom_cwd)
-    size = target.stat().st_size
-    try:
-        span = _parse_byte_range(byte_range, size)
-    except _RangeNotSatisfiableError:
-        return ByteRangeAnswer(status=416, content=b"", content_range=f"bytes */{size}")
-    if span is None:
-        return None
-    start = span[0]
-    length = min(span[1] - start + 1, max_bytes, MAX_RANGE_ANSWER_BYTES)
-    with target.open("rb") as handle:
+    with contextlib.ExitStack() as owned:
+        handle = owned.enter_context(target.open("rb"))
+        size = os.fstat(handle.fileno()).st_size
+        try:
+            span = _parse_byte_range(byte_range, size)
+        except _RangeNotSatisfiableError:
+            return ByteRangeAnswer(status=416, content=b"", content_range=f"bytes */{size}")
+        if span is None:
+            return None
+        start, end, open_ended = span
+        length = min(end - start + 1, max_bytes, open_range_bytes if open_ended else max_bytes)
         _ = handle.seek(start)
-        content = handle.read(length)
-    if not content:
-        return ByteRangeAnswer(status=416, content=b"", content_range=f"bytes */{size}")
-    return ByteRangeAnswer(
-        status=206,
-        content=content,
-        content_range=f"bytes {start}-{start + len(content) - 1}/{size}",
-    )
+        _ = owned.pop_all()
+        return ByteRangeAnswer(
+            status=206,
+            content=FileBody(handle, length),
+            content_range=f"bytes {start}-{start + length - 1}/{size}",
+        )
 
 
 def _json(payload: BaseModel) -> RouteAnswer:
@@ -676,6 +680,7 @@ def answer_workspace_file(
             request.path,
             byte_range=request.byte_range,
             max_bytes=limits.resource_bytes,
+            open_range_bytes=limits.open_range_bytes,
             custom_cwd=custom_cwd,
         )
         if answer is not None:
@@ -685,7 +690,7 @@ def answer_workspace_file(
                 "application/octet-stream",
                 {**headers, "Content-Range": answer.content_range},
             )
-    raw = read_workspace_file_raw(
+    raw = open_workspace_file_raw(
         reach,
         request.agent_id,
         request.path,

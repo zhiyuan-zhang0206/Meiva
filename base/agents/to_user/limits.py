@@ -15,22 +15,25 @@ from base.host.env.agent_slices import AgentSlices
 
 
 # meiva:note
-# The four `settings.to_user` fields this value carries, named as the domain model states them.
+# The five `settings.to_user` fields this value carries, named as the domain model states them.
 class ToUserLimitFields(Protocol):
     max_document_bytes: int
     max_references: int
     max_chain_depth: int
     max_resource_bytes: int
+    max_open_range_bytes: int
 
 
 # meiva:note
-# One configuration's four read-side caps.
+# One configuration's read-side caps: the four document bounds, and how long a slice one
+# open-ended `Range` read is answered with.
 @dataclass(frozen=True, slots=True)
 class ToUserLimits:
     document_bytes: int
     references: int
     chain_depth: int
     resource_bytes: int
+    open_range_bytes: int
 
 
 # meiva:note
@@ -41,6 +44,7 @@ def to_user_limits(fields: ToUserLimitFields) -> ToUserLimits:
         references=fields.max_references,
         chain_depth=fields.max_chain_depth,
         resource_bytes=fields.max_resource_bytes,
+        open_range_bytes=fields.max_open_range_bytes,
     )
 
 
@@ -53,6 +57,7 @@ def to_user_limits_from_read_model(model: ConfigAuthority) -> ToUserLimits:
         references=model.service_field_value("max_references"),
         chain_depth=model.service_field_value("max_chain_depth"),
         resource_bytes=model.service_field_value("max_resource_bytes"),
+        open_range_bytes=model.service_field_value("max_open_range_bytes"),
     )
 
 
@@ -66,4 +71,5 @@ def to_user_limits_from_agent(agent: AgentSlices) -> ToUserLimits:
         references=agent.read("to_user", "max_references"),
         chain_depth=agent.read("to_user", "max_chain_depth"),
         resource_bytes=agent.read("to_user", "max_resource_bytes"),
+        open_range_bytes=agent.read("to_user", "max_open_range_bytes"),
     )

@@ -183,6 +183,7 @@ class ConfigAuthority:
             "llm_invoke_retry_attempts",
             "max_chain_depth",
             "max_document_bytes",
+            "max_open_range_bytes",
             "max_references",
             "max_resource_bytes",
             "max_workspace_bytes",
