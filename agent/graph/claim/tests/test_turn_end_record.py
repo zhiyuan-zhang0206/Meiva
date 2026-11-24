@@ -165,6 +165,35 @@ def test_nothing_held_and_nothing_declared_costs_one_read(loguru_records: LogRec
     assert _records(loguru_records) == []
 
 
+@pytest.mark.parametrize(
+    ("model", "written", "other"),
+    (
+        ("gpt-6.1-sol", "cache_write_30m", "cache_write_5m"),
+        ("claude-opus-5-5", "cache_write_5m", "cache_write_30m"),
+    ),
+)
+def test_a_harness_cache_creation_count_lands_in_the_class_its_vendor_reports(
+    model: str, written: str, other: str, loguru_records: LogRecords
+) -> None:
+    ctx = runtime(silent_engine()).context
+    turn = HarnessTurn(
+        turn_id="t1",
+        text="done",
+        usage=Usage(10_000, 100, 3_000, 2_000),
+        cost_usd=None,
+        subtype="success",
+        is_error=False,
+        interrupted=False,
+    )
+    log_turn_usage(ctx, 7684, model, turn)
+    [row] = loguru_records.events("llm_usage")
+    assert row["extra"][written] == 3_000
+    assert row["extra"].get(other, 0) == 0  # pyright: ignore[reportAny]
+    assert "unpriced" not in row["extra"]
+    assert row["extra"]["cost_usd"] > 0
+    assert not loguru_records.events("llm_usage_unpriced")
+
+
 def test_incomplete_harness_usage_is_marked_on_the_usage_report(loguru_records: LogRecords) -> None:
     ctx = runtime(silent_engine()).context
     turn = HarnessTurn(

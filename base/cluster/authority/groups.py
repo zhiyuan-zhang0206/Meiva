@@ -22,6 +22,9 @@ CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
 GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events", "llm_usage_ledger")
 
+# meiva:link base/cluster/authority/docs/group-grants.md
+GATEWAY_LEDGER_PRICE_COLUMNS = "cost_usd, price_snapshot, price_source"
+
 
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
@@ -103,6 +106,12 @@ def _grant_gateway(conn: Conn, owner: str, gateway: str) -> None:
         _grant(conn, "GRANT MAINTAIN ON {} TO {}", table, gateway)
     for table in GATEWAY_APPEND_ONLY_TABLES:
         _grant(conn, "REVOKE UPDATE, DELETE ON {} FROM {}", table, gateway)
+    _grant(
+        conn,
+        f"GRANT UPDATE ({GATEWAY_LEDGER_PRICE_COLUMNS}) ON {{}} TO {{}}",
+        "llm_usage_ledger",
+        gateway,
+    )
     default = "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT "
     _grant(conn, default + "SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}", owner, gateway)
     _grant(conn, default + "USAGE, SELECT, UPDATE ON SEQUENCES TO {}", owner, gateway)

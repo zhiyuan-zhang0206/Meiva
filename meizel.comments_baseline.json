@@ -3904,7 +3904,6 @@
   "services/upkeep/events_maintenance/tests/test_events_maintenance_failure_budget.py": 2,
   "services/upkeep/events_maintenance/tests/test_events_maintenance_pass_owner.py": 2,
   "services/upkeep/events_maintenance/tests/test_registry_gauge.py": 3,
-  "services/upkeep/events_maintenance/token_totals.py": 7,
   "services/upkeep/ttl_reaper/cadence.py": 2,
   "services/upkeep/ttl_reaper/config.py": 1,
   "services/upkeep/ttl_reaper/daemon.py": 13,

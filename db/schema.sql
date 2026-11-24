@@ -1729,6 +1729,38 @@ BEGIN
 END
 $$;
 
+CREATE INDEX llm_usage_ledger_unpriced
+    ON llm_usage_ledger (occurred_at, call_id) WHERE cost_usd IS NULL;
+
+CREATE FUNCTION llm_usage_ledger_price_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.cost_usd IS NOT NULL
+       OR NEW.cost_usd IS NULL
+       OR (to_jsonb(NEW) - 'cost_usd' - 'price_snapshot' - 'price_source')
+          IS DISTINCT FROM (to_jsonb(OLD) - 'cost_usd' - 'price_snapshot' - 'price_source') THEN
+        RAISE EXCEPTION 'llm_usage_ledger: a row changes only from unpriced to priced (call %)', OLD.call_id
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER llm_usage_ledger_price_only
+    BEFORE UPDATE ON llm_usage_ledger
+    FOR EACH ROW EXECUTE FUNCTION llm_usage_ledger_price_only();
+
+COMMENT ON INDEX llm_usage_ledger_unpriced IS
+    'The rows the events-maintenance pass still has to price; empty when every row has a cost.';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
+        GRANT UPDATE (cost_usd, price_snapshot, price_source) ON llm_usage_ledger TO meiva_gateway;
+    END IF;
+END
+$$;
+
 -- ─────────────── telemetry_events ───────────────
 -- Durable record of category=telemetry and category=log events. Loki keeps an
 -- observation copy for Grafana and short windows; its 7-day retention is not
@@ -1982,6 +2014,7 @@ INSERT INTO schema_migrations (name) VALUES ('20261103T142200_schedule-owner-pro
 INSERT INTO schema_migrations (name) VALUES ('20261116T190521_declarative-schedules');
 INSERT INTO schema_migrations (name) VALUES ('20261117T100900_drop-schedule-daemon-trigger');
 INSERT INTO schema_migrations (name) VALUES ('20261123T184513_llm-usage-ledger');
+INSERT INTO schema_migrations (name) VALUES ('20261124T094903_llm-usage-ledger-price-only');
 
 -- Keyed-operation receipts never expire into fresh effects (questions, publications' seen cursor,
 -- reply-suggestion feedback).

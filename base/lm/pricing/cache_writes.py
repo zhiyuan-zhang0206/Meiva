@@ -1,7 +1,33 @@
 """Normalize provider cache-creation usage without counting tokens twice."""
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Literal
+
+CacheWriteClass = Literal["5m", "1h", "30m"]
+
+# meiva:link base/lm/pricing/docs/cache-writes.md
+VENDOR_CACHE_WRITES: Mapping[str, frozenset[CacheWriteClass]] = MappingProxyType(
+    {
+        "alibaba": frozenset(),
+        "anthropic": frozenset({"5m", "1h"}),
+        "deepseek": frozenset(),
+        "google": frozenset(),
+        "moonshot": frozenset({"5m", "1h"}),
+        "openai": frozenset({"30m"}),
+        "typesafe": frozenset(),
+        "xiaomi": frozenset(),
+        "zhipu": frozenset(),
+    }
+)
+
+
+def default_write_ttl(vendor: str | None) -> Literal["5m", "30m"]:
+    return (
+        "30m"
+        if vendor is not None and VENDOR_CACHE_WRITES.get(vendor) == frozenset({"30m"})
+        else "5m"
+    )
 
 
 def _count(details: Mapping[str, object], key: str) -> int:

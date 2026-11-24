@@ -7,9 +7,8 @@ never add these sums to an older ledger of the same observations.
 
 The emitter queue may already have lost records. Neither a successful write nor
 a completed replay scan establishes complete collection. Recorded usage-time
-prices are immutable and never repriced; only blank unpriced rows (`unpriced_calls > 0`
-with `cost_usd = 0`) may be idempotently backfilled at `occurred_at` once versioned
-pricing enters `pricing_catalog_archive.json` (`services/upkeep/events_maintenance/unpriced_backfill.py`).
+prices are immutable and never repriced; a call priced late is priced in the usage ledger
+(`services/upkeep/events_maintenance/ledger_repricing.py`), not here.
 """
 
 from __future__ import annotations

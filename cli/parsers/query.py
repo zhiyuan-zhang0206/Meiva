@@ -141,12 +141,6 @@ class _MetricsAgentsOptions:
 
 
 @dataclass(frozen=True)
-class _MetricsBackfillUnpricedOptions:
-    apply: bool
-    json: bool
-
-
-@dataclass(frozen=True)
 class _StatsOptions:
     hours: int | None
     json: bool
@@ -165,22 +159,6 @@ def _h_metrics_agents(args: argparse.Namespace) -> int:
     )
 
 
-def _h_metrics_backfill_unpriced(args: argparse.Namespace) -> int:
-    from datetime import UTC
-
-    from cli.commands.management.metrics_backfill import cmd_metrics_backfill_unpriced
-    from cli.database import database_factory_of
-    from cli.database.runtime import runtime_of
-
-    opts = options(args, _MetricsBackfillUnpricedOptions)
-    return cmd_metrics_backfill_unpriced(
-        database_factory_of(args),
-        today=runtime_of(args).clock.now().astimezone(UTC).date(),
-        apply=opts.apply,
-        as_json=opts.json,
-    )
-
-
 def _h_stats(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.management.query.metrics import cmd_stats
@@ -194,8 +172,7 @@ def _h_stats(args: argparse.Namespace) -> int:
 
 def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # meiva:note
-    # `meiva metrics agents` reads the per-agent cost and token breakdown;
-    # `meiva metrics backfill-unpriced` inspects or applies idempotent historical NULL-cost backfill.
+    # `meiva metrics agents` reads the per-agent cost and token breakdown.
     metrics_p = sub.add_parser("metrics", help="per-agent cost and token breakdown")
     metrics_sub = metrics_p.add_subparsers(dest="metrics_cmd", required=True)
     agents_p = metrics_sub.add_parser(
@@ -204,27 +181,6 @@ def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
     agents_p.add_argument("--days", type=int, help="window in days, 1..30; default: the gateway's")
     agents_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
     agents_p.set_defaults(func=_h_metrics_agents)
-
-    backfill_p = metrics_sub.add_parser(
-        "backfill-unpriced",
-        help="idempotently price historical cost_usd IS NULL rows at occurred_at and recompute rollups",
-    )
-    mode = backfill_p.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--dry-run",
-        dest="apply",
-        action="store_false",
-        default=False,
-        help="report what would be backfilled without writing (default)",
-    )
-    mode.add_argument(
-        "--apply",
-        dest="apply",
-        action="store_true",
-        help="apply the idempotent backfill and recompute affected rollups",
-    )
-    backfill_p.add_argument("--json", action="store_true", help="print the backfill report as JSON")
-    backfill_p.set_defaults(func=_h_metrics_backfill_unpriced)
 
 
 def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

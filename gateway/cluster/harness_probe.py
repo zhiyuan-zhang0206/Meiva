@@ -7,10 +7,6 @@ from collections.abc import Awaitable, Callable, Collection
 from fastapi import HTTPException
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
-from base.agents.birth.unpriced_probe_alert import (
-    UnpricedProbeReporter,
-    report_unpriced_probed_models,
-)
 from base.api_contracts.agent_contract import Harness
 from base.cluster import machines
 from base.cluster.machine import MachineIdentityReader
@@ -27,11 +23,10 @@ from ops.rpc_schemas import HarnessProbeResult
 # expiring a snapshot never starts a machine probe; only refresh does that.
 # meiva:link base/agents/docs/harness/availability.md
 class HarnessProbeCache:
-    def __init__(self, *, unpriced_reporter: UnpricedProbeReporter | None = None) -> None:
+    def __init__(self) -> None:
         self._rows: dict[str, list[HarnessAvailability]] = {}
         self._lock = threading.Lock()
         self._refreshes: dict[str, asyncio.Future[list[HarnessAvailability]]] = {}
-        self._unpriced_reporter = unpriced_reporter or UnpricedProbeReporter()
 
     def get(self, machine: str) -> list[HarnessAvailability] | None:
         with self._lock:
@@ -40,7 +35,6 @@ class HarnessProbeCache:
     def store(self, machine: str, rows: list[HarnessAvailability]) -> None:
         with self._lock:
             self._rows[machine] = rows
-        _ = report_unpriced_probed_models(rows, reporter=self._unpriced_reporter)
 
     async def refresh(
         self, machine: str, probe: Callable[[], Awaitable[list[HarnessAvailability]]]

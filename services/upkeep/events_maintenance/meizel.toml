@@ -1,19 +1,18 @@
-exports = ["daemon.py", "token_totals.py", "unpriced_backfill.py"]
+exports = ["daemon.py", "ledger_repricing.py"]
 
 [uses]
 "alert_reconciler.py" = ["config.py"]
-"daemon.py" = ["alert_reconciler.py", "audit_identity.py", "blob_vacuum.py", "config.py", "health_components.py", "loop_roster.py", "passes.py", "registry_gauge.py", "telemetry_replay.py"]
+"daemon.py" = ["alert_reconciler.py", "audit_identity.py", "blob_vacuum.py", "config.py", "health_components.py", "ledger_repricing.py", "loop_roster.py", "passes.py", "registry_gauge.py", "telemetry_replay.py"]
+"ledger_repricing.py" = ["ledger_repricing_plan.py"]
 "passes.py" = ["pass_policy.py"]
-"tests" = ["alert_reconciler.py", "audit_identity.py", "blob_vacuum.py", "config.py", "daemon.py", "health_components.py", "loop_roster.py", "pass_policy.py", "passes.py", "registry_gauge.py", "telemetry_replay.py", "token_totals.py", "unpriced_backfill.py"]
-"token_totals.py" = ["config.py"]
-"unpriced_backfill.py" = ["token_totals.py", "unpriced_backfill_plan.py"]
+"tests" = ["alert_reconciler.py", "audit_identity.py", "blob_vacuum.py", "config.py", "daemon.py", "health_components.py", "ledger_repricing.py", "ledger_repricing_plan.py", "loop_roster.py", "pass_policy.py", "passes.py", "registry_gauge.py", "telemetry_replay.py"]
 
 [purity]
 "__init__.py" = "strict"
 "health_components.py" = "strict"
 "loop_roster.py" = "strict"
 "pass_policy.py" = "strict"
-"unpriced_backfill_plan.py" = "strict"
+"ledger_repricing_plan.py" = "strict"
 
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "pid", "platform", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and the host name and builds the random generator its event bus draws retry jitter from before composing its resources; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }
