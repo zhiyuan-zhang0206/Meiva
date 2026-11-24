@@ -16,7 +16,7 @@ Spawn a planner agent with a top-tier model. It must produce a concrete plan: fi
 
 planner_id = meiva.agents.spawn(
     prompt="Design a plan for: <your task>. Output: file tree, key decisions, implementation checklist.",
-    config_overlay={"llm_model": "claude-opus-5"},
+    config_overlay={"llm_model": "claude-opus-5", "reasoning_effort": "high"},
     label="planner"
 )
 ```
@@ -32,7 +32,7 @@ worker_ids = []
 for i, file_spec in enumerate(file_specs):
     wid = meiva.agents.spawn(
         prompt=f"Implement this file per the plan:\n{plan}\n\nYour file: {file_spec}",
-        config_overlay={"llm_model": "deepseek-flash"},
+        config_overlay={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
         label=f"worker-{i}"
     )
     worker_ids.append(wid)
@@ -48,13 +48,13 @@ Phase 3 — Check (mixed models):
 
 reviewer_id = meiva.agents.spawn(
     prompt=f"Review this code for correctness, edge cases, and code quality:\n{combined_output}",
-    config_overlay={"llm_model": "claude-sonnet-5"},
+    config_overlay={"llm_model": "claude-sonnet-5", "reasoning_effort": "high"},
     label="reviewer"
 )
 
 checker_id = meiva.agents.spawn(
     prompt=f"Verify this code meets the spec and would run correctly. Flag anything broken:\n{combined_output}",
-    config_overlay={"llm_model": "deepseek-flash"},
+    config_overlay={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
     label="checker"
 )
 ```
@@ -66,7 +66,7 @@ Spawn a reflector with a top-tier model. Give it the full output — plan, imple
 
 reflector_id = meiva.agents.spawn(
     prompt=f"Reflect on this project: what worked, what didn't, what patterns to reuse.\n\nPlan:\n{plan}\n\nCode:\n{combined_output}\n\nReview:\n{review}\n\nCheck:\n{check}",
-    config_overlay={"llm_model": "claude-opus-5"},
+    config_overlay={"llm_model": "claude-opus-5", "reasoning_effort": "high"},
     label="reflector"
 )
 ```
@@ -80,7 +80,7 @@ Write the final output as a Markdown (.md) report in your workspace and share a 
 - A summary table of which model was used for each phase and why
 
 Requirements:
-- Each phase must use a different config_overlay with the appropriate llm_model
+- Each phase must use a different config_overlay with the appropriate llm_model and reasoning_effort
 - Workers in Phase 2 must run in parallel
 - The whole demo should complete autonomously — no human intervention between phases
 ```
