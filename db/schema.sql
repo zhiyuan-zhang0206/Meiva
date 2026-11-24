@@ -460,75 +460,6 @@ COMMENT ON COLUMN inbound_messages.content_hash IS
 COMMENT ON COLUMN inbound_messages.source_assertion_match IS
     'Whether an agent:N source assertion matches a verified agent_token:M credential; NULL when either side is unknown. Informational only.';
 
--- Compact observed measurements, never a complete billing ledger. The telemetry
--- queue can shed records before any sink; freshness does not prove completeness.
-CREATE TABLE agent_metric_collection (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
-    started_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
-);
-INSERT INTO agent_metric_collection (singleton) VALUES (TRUE);
-
-CREATE TABLE agent_metric_observations (
-    event_id NUMERIC(20, 0) PRIMARY KEY CHECK (event_id >= 0),
-    agent_id BIGINT NOT NULL REFERENCES agents(id),
-    occurred_at TIMESTAMPTZ NOT NULL,
-    observed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    kind TEXT NOT NULL CHECK (kind IN ('usage', 'turn', 'exec', 'activity')),
-    model TEXT,
-    usage_calls BIGINT NOT NULL DEFAULT 0 CHECK (usage_calls >= 0),
-    unpriced_calls BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls >= 0),
-    tokens_in BIGINT NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
-    tokens_out BIGINT NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
-    tokens_cached BIGINT NOT NULL DEFAULT 0 CHECK (tokens_cached >= 0),
-    tokens_cache_input BIGINT CHECK (tokens_cache_input >= 0),
-    tokens_reasoning BIGINT NOT NULL DEFAULT 0 CHECK (tokens_reasoning >= 0),
-    turn_total BIGINT NOT NULL DEFAULT 0 CHECK (turn_total >= 0),
-    turn_ok BIGINT NOT NULL DEFAULT 0 CHECK (turn_ok >= 0),
-    exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
-    exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
-    cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
-    cost_usd_subscription NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd_subscription >= 0 AND cost_usd_subscription <> 'NaN'::numeric),
-    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls_subscription >= 0),
-    turn_duration_seconds DOUBLE PRECISION CHECK (turn_duration_seconds >= 0 AND turn_duration_seconds < 'Infinity'::float8),
-    active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (active_seconds >= 0 AND active_seconds < 'Infinity'::float8),
-    exec_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (exec_seconds >= 0 AND exec_seconds < 'Infinity'::float8)
-);
-CREATE INDEX agent_metric_observations_window_idx
-    ON agent_metric_observations (agent_id, occurred_at);
-
-CREATE TABLE agent_metric_days (
-    agent_id BIGINT NOT NULL REFERENCES agents(id),
-    day DATE NOT NULL,
-    usage_calls BIGINT NOT NULL DEFAULT 0 CHECK (usage_calls >= 0),
-    unpriced_calls BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls >= 0),
-    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls_subscription >= 0),
-    tokens_in BIGINT NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
-    tokens_out BIGINT NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
-    tokens_cached BIGINT NOT NULL DEFAULT 0 CHECK (tokens_cached >= 0),
-    tokens_cache_input BIGINT CHECK (tokens_cache_input >= 0),
-    tokens_reasoning BIGINT NOT NULL DEFAULT 0 CHECK (tokens_reasoning >= 0),
-    turn_total BIGINT NOT NULL DEFAULT 0 CHECK (turn_total >= 0),
-    turn_ok BIGINT NOT NULL DEFAULT 0 CHECK (turn_ok >= 0),
-    exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
-    exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
-    cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
-    cost_usd_subscription NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd_subscription >= 0 AND cost_usd_subscription <> 'NaN'::numeric),
-    turn_duration_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
-    turn_duration_min DOUBLE PRECISION,
-    turn_duration_max DOUBLE PRECISION,
-    active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-    exec_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-    last_observed_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (agent_id, day)
-);
-
--- Runner-local source cursors advance in the same transaction as repaired facts.
-CREATE TABLE agent_metric_file_cursors (
-    source_key TEXT PRIMARY KEY,
-    identity TEXT NOT NULL,
-    position BIGINT NOT NULL CHECK (position >= 0)
-);
-
 -- Actual metadata transitions define nonterminated time from this epoch onward.
 -- No reconstruction from lossy lifecycle telemetry, nor invented pre-cutover time.
 CREATE TABLE agent_lifecycle_intervals (
@@ -540,10 +471,6 @@ CREATE TABLE agent_lifecycle_intervals (
 );
 CREATE UNIQUE INDEX agent_lifecycle_intervals_open_idx
     ON agent_lifecycle_intervals (agent_id) WHERE ended_at IS NULL;
-INSERT INTO agent_lifecycle_intervals (agent_id, started_at)
-SELECT id, agent_metric_collection.started_at
-FROM agents_meta CROSS JOIN agent_metric_collection
-WHERE status <> 'terminated';
 
 CREATE FUNCTION record_agent_lifecycle_interval() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
@@ -570,10 +497,7 @@ CREATE TRIGGER agents_meta_lifecycle_interval
 
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT, INSERT ON agent_metric_observations TO meiva_runner;
-        GRANT SELECT, INSERT, UPDATE ON agent_metric_days, agent_lifecycle_intervals TO meiva_runner;
-        GRANT SELECT ON agent_metric_collection TO meiva_runner;
-        GRANT SELECT, INSERT, UPDATE ON agent_metric_file_cursors TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_lifecycle_intervals TO meiva_runner;
     END IF;
 END $$;
 
@@ -1676,185 +1600,6 @@ BEGIN
 END
 $$;
 
--- ─────────────── telemetry_events ───────────────
--- Durable record of category=telemetry and category=log events. Loki keeps an
--- observation copy for Grafana and short windows; its 7-day retention is not
--- a record. Rows are appended by the emitter's drain thread in batches.
---
--- Same columns as audit_events plus the two the audit table does not need:
--- category and cluster. event_uid is the surrogate id the stream already
--- carries for the event (base.telemetry.emitter.event_id) as a signed 64-bit
--- integer. The table is partitioned by month on ts so old months can be
--- dropped one partition at a time later; there is no retention policy and no
--- delete path today. A partitioned table's unique key must contain the
--- partition key, so identity is (event_uid, ts); ts is part of the id's input,
--- so a redelivered event always repeats both.
--- imported_from is set on rows backfilled from the pre-cutover stores and is
--- NULL on every live row.
-CREATE TABLE telemetry_events (
-    id              BIGINT GENERATED ALWAYS AS IDENTITY,
-    event_uid       BIGINT NOT NULL,
-    ts              TIMESTAMPTZ NOT NULL,
-    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    trace_id        TEXT,
-    span_id         TEXT,
-    agent_id        BIGINT,
-    machine         TEXT NOT NULL,
-    cluster         TEXT NOT NULL,
-    process         TEXT NOT NULL,
-    category        TEXT NOT NULL CHECK (category IN ('telemetry', 'log')),
-    event_name      TEXT NOT NULL,
-    level           TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warning', 'error', 'critical')),
-    source          TEXT NOT NULL,
-    target_agent_id BIGINT,
-    attributes      JSONB NOT NULL DEFAULT '{}'::jsonb,
-    imported_from   TEXT,
-    deployed_sha    TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (event_uid, ts)
-) PARTITION BY RANGE (ts);
-
-CREATE INDEX telemetry_events_agent_ts ON telemetry_events (agent_id, ts);
-CREATE INDEX telemetry_events_name_ts ON telemetry_events (event_name, ts);
-CREATE INDEX telemetry_events_trace ON telemetry_events (trace_id) WHERE trace_id IS NOT NULL;
-
--- Warning, error and critical rows are a small share of telemetry_events, and the stats
--- dashboard and the event-class resolution pass count exactly those over windows of minutes
--- to a week (migration 20261003T000100_telemetry-events-anomaly-index).
-CREATE INDEX IF NOT EXISTS telemetry_events_anomaly_ts
-    ON telemetry_events (ts)
-    INCLUDE (cluster, category, level, event_name, source, process)
-    WHERE level IN ('warning', 'error', 'critical');
-
--- A window's rows counted per agent and per event name come from the index alone (migration
--- 20261003T010000_telemetry-events-metrics-index); it also serves every plain ts range scan.
-CREATE INDEX IF NOT EXISTS telemetry_events_ts_agent_name
-    ON telemetry_events (ts)
-    INCLUDE (agent_id, event_name);
-
-COMMENT ON TABLE telemetry_events IS
-    'Append-only record of category=telemetry and category=log events, partitioned by month on ts; Loki holds only an observation copy. No UPDATE, DELETE or TRUNCATE; old months leave by dropping a partition.';
-
-CREATE FUNCTION reject_telemetry_events_rewrite() RETURNS trigger AS $$
-BEGIN
-    RAISE EXCEPTION 'telemetry_events is append-only; % is forbidden', TG_OP;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER telemetry_events_append_only
-    BEFORE UPDATE OR DELETE ON telemetry_events
-    FOR EACH ROW EXECUTE FUNCTION reject_telemetry_events_rewrite();
-CREATE TRIGGER telemetry_events_no_truncate
-    BEFORE TRUNCATE ON telemetry_events
-    FOR EACH STATEMENT EXECUTE FUNCTION reject_telemetry_events_rewrite();
-
--- Trace to agent evidence for rows whose own agent_id is NULL (the emitter
--- dropped it from 2026-10-09; see migration 20261018T142500). Seeded outside
--- the schema: it is derived data, and an empty table simply means no inference.
-CREATE TABLE telemetry_owner_inference (
-    trace_id   TEXT PRIMARY KEY,
-    agent_id   BIGINT NOT NULL,
-    evidence   TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
-);
-
-COMMENT ON TABLE telemetry_owner_inference IS
-    'Trace to agent evidence for rows whose own agent_id is NULL. Derived, append-mostly, and never a substitute for the row''s own agent_id; read through telemetry_events_attributed.';
-
--- The read face of that evidence: every telemetry_events column, agent_id
--- resolved from the row itself first, and agent_id_source saying which value a
--- reader got. Never rewrites the append-only row.
-CREATE VIEW telemetry_events_attributed AS
-SELECT e.id,
-       e.event_uid,
-       e.ts,
-       e.recorded_at,
-       e.trace_id,
-       e.span_id,
-       coalesce(e.agent_id, m.agent_id) AS agent_id,
-       CASE
-           WHEN e.agent_id IS NOT NULL THEN 'observed'
-           WHEN m.agent_id IS NOT NULL THEN 'inferred'
-           ELSE 'unattributed'
-       END AS agent_id_source,
-       e.machine,
-       e.cluster,
-       e.process,
-       e.category,
-       e.event_name,
-       e.level,
-       e.source,
-       e.target_agent_id,
-       e.attributes,
-       e.imported_from
-FROM telemetry_events e
-LEFT JOIN telemetry_owner_inference m ON m.trace_id = e.trace_id;
-
-COMMENT ON VIEW telemetry_events_attributed IS
-    'telemetry_events with agent_id resolved from telemetry_owner_inference when the row has none; agent_id_source separates the observed value from the inferred one (docs/decisions/observability/telemetry/2026-10-18-historical-agent-attribution-via-view.md).';
-
--- Readers reach both objects through the cluster's group roles. Stated here as
--- well as in the migration because default privileges only cover objects the
--- owner creates after they are set: an environment whose group roles already
--- existed would otherwise end up with an object nobody can read.
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT ON telemetry_owner_inference, telemetry_events_attributed TO meiva_runner;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
-        GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry_owner_inference TO meiva_gateway;
-        GRANT SELECT ON telemetry_events_attributed TO meiva_gateway;
-    END IF;
-END $$;
-
-
--- Monthly partitions (UTC boundaries) from p_months_back months before the current
--- month through p_months_ahead months ahead, created idempotently. The application logins
--- have no DDL, so the writer calls this SECURITY DEFINER function when the
--- month changes. A DEFAULT partition catches an event outside every month so a
--- write never fails; rows left there block creating the month that covers them,
--- so the function's failure is loud, not silent.
-CREATE FUNCTION public.ensure_telemetry_event_partitions(
-    p_months_ahead INT DEFAULT 3, p_months_back INT DEFAULT 1)
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-DECLARE
-    month_start TIMESTAMPTZ;
-    offset_months INT;
-BEGIN
-    EXECUTE 'create table if not exists public.telemetry_events_default '
-            'partition of public.telemetry_events default';
-    FOR offset_months IN -p_months_back..p_months_ahead LOOP
-        month_start := (date_trunc('month', now() AT TIME ZONE 'UTC')
-                        + make_interval(months => offset_months)) AT TIME ZONE 'UTC';
-        EXECUTE format(
-            'create table if not exists %s partition of public.telemetry_events '
-            'for values from (%L) to (%L)',
-            'public.telemetry_events_' || to_char(month_start AT TIME ZONE 'UTC', 'YYYYMM'),
-            month_start,
-            month_start + interval '1 month'
-        );
-    END LOOP;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) FROM PUBLIC;
-SELECT public.ensure_telemetry_event_partitions(3);
-
--- Application surface: both groups read and append, as for audit_events (see
--- there for why the gateway group's UPDATE and DELETE are revoked and the
--- role-existence gate).
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT, INSERT ON telemetry_events TO meiva_runner;
-        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO meiva_runner;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
-        REVOKE UPDATE, DELETE ON telemetry_events FROM meiva_gateway;
-    END IF;
-END $$;
-
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -1899,6 +1644,11 @@ INSERT INTO schema_migrations (name) VALUES ('20261107T103500_drop-agent-imperso
 -- The cost split's columns are already in this file's table definitions above, so a
 -- fresh database never replays the migration that adds them to an older one.
 INSERT INTO schema_migrations (name) VALUES ('20261108T122000_split-llm-cost-by-billing-mode');
+-- Two older migrations read or alter the observation projection and `telemetry_events`, which
+-- this file no longer has (dropped by 20261124T180256_drop-telemetry-event-tables); a fresh
+-- database has neither the tables nor rows to backfill, so it must not replay them.
+INSERT INTO schema_migrations (name) VALUES ('20261107T100700_backfill-agent-model-and-birth-config');
+INSERT INTO schema_migrations (name) VALUES ('20261122T042800_drop-event-dismissals-and-add-telemetry-deployed-sha');
 -- The seen-cursor migration backfills from the publications' read_at, which this file no
 -- longer has, so a fresh database must not replay it.
 INSERT INTO schema_migrations (name) VALUES ('20261110T153500_agent-user-seen');
@@ -2202,8 +1952,8 @@ END $$;
 -- The state of a condition, as opposed to the record of a check. One row per open
 -- episode of `(source, subject, condition)`: a detector that sees the same thing
 -- again touches the open row instead of appending another event, and a reconciler
--- closes it when the condition stops. `telemetry_events` stays the append-only
--- evidence; this table only answers "is it still happening". Written through
+-- closes it when the condition stops. This table only answers "is it still happening";
+-- the reports themselves are in the event stream. Written through
 -- `base/events/signals` (`open_or_touch` / `resolve`), which exists so the two
 -- writes have one home; nothing else in the code base writes these rows.
 CREATE TABLE IF NOT EXISTS signal_state (
@@ -2215,12 +1965,8 @@ CREATE TABLE IF NOT EXISTS signal_state (
     opened_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- The newest report; a resolver judges staleness from here, never from `opened_at`.
     last_seen       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    -- How many reports this episode absorbed. The reports themselves are in `telemetry_events`.
+    -- How many reports this episode absorbed.
     count           BIGINT NOT NULL DEFAULT 1,
-    -- Event ids without a foreign key: `telemetry_events` is the high-rate append-only
-    -- table, and a key would put its insert behind this one.
-    first_event_id  BIGINT,
-    last_event_id   BIGINT,
     -- NULL means open. Closing is what makes the next report a new episode, not a touch.
     resolved_at     TIMESTAMPTZ,
     resolve_reason  TEXT,
@@ -2231,7 +1977,7 @@ CREATE TABLE IF NOT EXISTS signal_state (
 );
 
 COMMENT ON TABLE signal_state IS
-    'One row per open episode of a condition, touched while it persists and closed when it stops. telemetry_events stays the evidence; this table answers whether the condition is still true.';
+    'One row per open episode of a condition, touched while it persists and closed when it stops. The reports themselves are in the event stream; this table answers whether the condition is still true.';
 
 COMMENT ON COLUMN signal_state.condition IS
     'Stable name of the condition within (source, subject). Unique among the open rows of that pair, so a repeated report touches this episode instead of adding another.';

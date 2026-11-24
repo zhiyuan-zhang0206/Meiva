@@ -60,38 +60,6 @@ echo "-> apply baseline db/schema.sql"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 echo "  ok"
 
-# A schema-owner run proves the DDL parses, not that a service can read it.
-# The catalog check runs on any connection; the read below additionally needs
-# SET ROLE (superuser or membership), so it stays guarded — but never silently:
-# the ACL check above it fails on its own when a grant is missing.
-echo "-> a service role holds SELECT on the attribution view and its evidence table"
-psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -o /dev/null <<'SQL'
-DO $$
-BEGIN
-    IF NOT (has_table_privilege('meiva_runner', 'public.telemetry_events_attributed', 'SELECT')
-            AND has_table_privilege('meiva_runner', 'public.telemetry_owner_inference', 'SELECT')
-            AND has_table_privilege('meiva_gateway', 'public.telemetry_events_attributed', 'SELECT')) THEN
-        RAISE EXCEPTION 'a service role cannot read the attribution view (empty ACL?)';
-    END IF;
-END $$;
-SQL
-echo "  ok"
-echo "-> a service role read really returns rows"
-if [ "$(psql -d "$TEST_DB" -At -c "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")" = "t" ]; then
-    psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -o /dev/null <<'SQL'
-SET ROLE meiva_runner;
-SELECT count(*) FROM telemetry_events_attributed;
-SELECT count(*) FROM telemetry_owner_inference;
-RESET ROLE;
-SET ROLE meiva_gateway;
-SELECT count(*) FROM telemetry_events_attributed;
-RESET ROLE;
-SQL
-    echo "  ok"
-else
-    echo "  skipped: SET ROLE needs a superuser (the ACL check above still ran)"
-fi
-
 echo "-> retired deploy storage is absent and the version-gate row survives"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -144,39 +112,6 @@ BEGIN
     END LOOP;
     IF (SELECT count(*) FROM audit_events) <> 1 THEN
         RAISE EXCEPTION 'audit_events lost its row';
-    END IF;
-END $$;
-SQL
-echo "  ok"
-
-echo "-> telemetry_events is append-only and partitioned: INSERT lands in its month, UPDATE / DELETE / TRUNCATE are rejected"
-psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
-SELECT ensure_telemetry_event_partitions(3);
-INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, event_name, level, source)
-    VALUES (1, now(), 'smoke-machine', 'smoke', 'smoke', 'telemetry', 'llm_usage', 'info', 'system');
-DO $$
-DECLARE
-    statement TEXT;
-BEGIN
-    IF (SELECT tableoid::regclass::text FROM telemetry_events WHERE event_uid = 1) = 'telemetry_events_default' THEN
-        RAISE EXCEPTION 'the current month has no partition';
-    END IF;
-    FOREACH statement IN ARRAY ARRAY[
-        'UPDATE telemetry_events SET level = ''error''',
-        'DELETE FROM telemetry_events',
-        'TRUNCATE telemetry_events'
-    ] LOOP
-        BEGIN
-            EXECUTE statement;
-            RAISE EXCEPTION 'telemetry_events accepted: %', statement;
-        EXCEPTION WHEN raise_exception THEN
-            IF SQLERRM NOT LIKE 'telemetry_events is append-only%' THEN
-                RAISE;
-            END IF;
-        END;
-    END LOOP;
-    IF (SELECT count(*) FROM telemetry_events) <> 1 THEN
-        RAISE EXCEPTION 'telemetry_events lost its row';
     END IF;
 END $$;
 SQL

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -7,7 +8,6 @@ from typing import Any
 import psycopg
 
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.events.event_rows import telemetry_event
 
 
 @contextmanager
@@ -27,49 +27,49 @@ def _insert_agent(db: psycopg.Connection, *, spawner: str = "user") -> int:
     return row[0]
 
 
-def _insert_event(
+def _insert_usage(
     db: psycopg.Connection,
     *,
-    event: str,
     agent_id: int | None = None,
-    payload: dict[str, object] | None = None,
+    payload: dict[str, object],
     ts_offset_days: float = 0,
 ) -> None:
-    telemetry_event(
-        db,
-        event,
-        minutes_ago=ts_offset_days * 24 * 60,
-        category="log" if event == "log" else "telemetry",
-        agent_id=agent_id,
-        attributes=payload or {},
+    source = payload.get("source")
+    db.execute(
+        """
+        INSERT INTO llm_usage_ledger
+            (call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind,
+             model, calls, complete, tokens_in, tokens_out, cache_read, tokens_reasoning,
+             cost_usd, price_source, price_snapshot)
+        VALUES (%s, now() - (%s * interval '1 day'), %s, 'm1', 'c', %s,
+                CASE WHEN %s IN ('claude_code','codex','antigravity') THEN 'subscription'
+                     ELSE 'api' END,
+                'test', %s, %s, %s, %s, %s, %s, %s, %s, %s, '{}')
+        """,
+        (
+            str(uuid.uuid4()),
+            ts_offset_days,
+            agent_id,
+            source,
+            source,
+            payload.get("model", ""),
+            payload.get("calls", 1),
+            payload.get("complete", True),
+            payload.get("in_total"),
+            payload.get("out_total"),
+            payload.get("cache_read"),
+            payload.get("reasoning"),
+            payload.get("cost_usd"),
+            "live" if payload.get("cost_usd") is not None else None,
+        ),
     )
-
-    if event == "llm_usage":
-        db.execute(
-            """
-            INSERT INTO llm_usage_ledger
-                (call_id, occurred_at, agent_id, machine, cluster, source, billing, usage_kind,
-                 model, calls, complete, tokens_in, tokens_out, cache_read, tokens_reasoning,
-                 cost_usd, price_source, price_snapshot)
-            SELECT 'api:' || event_uid, ts, agent_id, machine, cluster, attributes->>'source',
-                CASE WHEN attributes->>'source' IN ('claude_code','codex','antigravity')
-                     THEN 'subscription' ELSE 'api' END,
-                'test', COALESCE(attributes->>'model', ''), COALESCE((attributes->>'calls')::bigint, 1),
-                COALESCE((attributes->>'complete')::boolean, TRUE), (attributes->>'in_total')::bigint,
-                (attributes->>'out_total')::bigint, (attributes->>'cache_read')::bigint,
-                (attributes->>'reasoning')::bigint, (attributes->>'cost_usd')::numeric,
-                CASE WHEN attributes->>'cost_usd' IS NOT NULL THEN 'live' END, '{}'
-            FROM telemetry_events WHERE event_name = 'llm_usage'
-            ON CONFLICT (call_id) DO NOTHING
-            """
-        )
 
 
 def test_metrics_agents_makes_no_row_for_service_usage(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     usage: dict[str, object] = {"in_total": 10, "out_total": 1, "model": "deepseek-v4-pro"}
-    _insert_event(db_conn, event="llm_usage", agent_id=aid, payload=usage)
-    _insert_event(db_conn, event="llm_usage", agent_id=None, payload=usage)
+    _insert_usage(db_conn, agent_id=aid, payload=usage)
+    _insert_usage(db_conn, agent_id=None, payload=usage)
     db_conn.commit()
     with _metrics_client() as client:
         body = client.get("/api/metrics/agents").json()
@@ -80,8 +80,8 @@ def test_metrics_agents_makes_no_row_for_service_usage(db_conn: psycopg.Connecti
 def test_metrics_agents_window_filters_old_rows(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     usage: dict[str, object] = {"in_total": 10, "out_total": 1, "model": "deepseek-v4-pro"}
-    _insert_event(db_conn, event="llm_usage", agent_id=aid, payload=usage, ts_offset_days=3)
-    _insert_event(db_conn, event="llm_usage", agent_id=aid, payload=usage, ts_offset_days=0)
+    _insert_usage(db_conn, agent_id=aid, payload=usage, ts_offset_days=3)
+    _insert_usage(db_conn, agent_id=aid, payload=usage, ts_offset_days=0)
     db_conn.commit()
     with _metrics_client() as client:
         one_day = client.get("/api/metrics/agents?days=1").json()
@@ -135,9 +135,8 @@ def _assert_cheap_agent_metrics(row: dict[str, Any]) -> None:
 def test_metrics_agents_multi_agent(db_conn: psycopg.Connection) -> None:
     a1 = _insert_agent(db_conn, spawner="one")
     a2 = _insert_agent(db_conn, spawner="two")
-    _insert_event(
+    _insert_usage(
         db_conn,
-        event="llm_usage",
         agent_id=a1,
         payload={
             "in_total": 1000,
@@ -147,9 +146,8 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection) -> None:
             "unpriced": 1,
         },
     )
-    _insert_event(
+    _insert_usage(
         db_conn,
-        event="llm_usage",
         agent_id=a2,
         payload={
             "in_total": 1_000_000,

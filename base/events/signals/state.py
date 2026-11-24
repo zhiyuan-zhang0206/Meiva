@@ -50,8 +50,7 @@ class ResolveReason(StrEnum):
 # meiva:note
 # One row of `signal_state` as callers read it: identity, the newest reading, and how the
 # episode ended (or that it has not). `count` is how many reports it absorbed; the reports
-# themselves live only in the event stream's seven-day store (`first_event_id` and
-# `last_event_id` name them while they last).
+# themselves live only in the event stream's seven-day store.
 @dataclass(frozen=True)
 class Episode:
     id: int
@@ -62,8 +61,6 @@ class Episode:
     opened_at: datetime
     last_seen: datetime
     count: int
-    first_event_id: int | None
-    last_event_id: int | None
     resolved_at: datetime | None
     resolve_reason: str | None
     evidence_ref: str | None
@@ -82,15 +79,14 @@ class Episode:
 # later migration arrives here without a second list to keep in step.
 _TOUCH = """
 INSERT INTO signal_state
-    (source, subject, condition, severity, first_event_id, last_event_id)
+    (source, subject, condition, severity)
 VALUES
-    (%(source)s, %(subject)s, %(condition)s, %(severity)s, %(event_id)s, %(event_id)s)
+    (%(source)s, %(subject)s, %(condition)s, %(severity)s)
 ON CONFLICT (source, subject, condition) WHERE resolved_at IS NULL
 DO UPDATE SET
     last_seen = now(),
     count = signal_state.count + 1,
-    severity = EXCLUDED.severity,
-    last_event_id = COALESCE(EXCLUDED.last_event_id, signal_state.last_event_id)
+    severity = EXCLUDED.severity
 RETURNING *
 """
 
@@ -124,8 +120,6 @@ class _EpisodeRow:
     opened_at: datetime
     last_seen: datetime
     count: int
-    first_event_id: int | None
-    last_event_id: int | None
     resolved_at: datetime | None
     resolve_reason: str | None
     evidence_ref: str | None
@@ -146,8 +140,6 @@ def _episode(row: _EpisodeRow) -> Episode:
         opened_at=row.opened_at,
         last_seen=row.last_seen,
         count=row.count,
-        first_event_id=row.first_event_id,
-        last_event_id=row.last_event_id,
         resolved_at=row.resolved_at,
         resolve_reason=row.resolve_reason,
         evidence_ref=row.evidence_ref,
@@ -166,9 +158,7 @@ def _one(
 
 
 # meiva:note
-# The one write a detector makes: report the condition. `event_id` is optional because a caller
-# may touch a signal for a reading it did not record as an event -- but when it passes one, that
-# event becomes the newest evidence and the first one is kept as the episode's origin.
+# The one write a detector makes: report the condition.
 def open_or_touch(
     conn: psycopg.Connection[TupleRow],
     *,
@@ -176,14 +166,12 @@ def open_or_touch(
     subject: str,
     condition: str,
     severity: SignalSeverity,
-    event_id: int | None = None,
 ) -> Episode:
     params: dict[str, object] = {
         "source": source,
         "subject": subject,
         "condition": condition,
         "severity": str(severity),
-        "event_id": event_id,
     }
     episode = _one(conn, _TOUCH, params)
     if episode is None:

@@ -35,8 +35,12 @@ every process, a second copy on local disk, and a replay pass that existed to re
   the cluster alert reads.
 - `audit_events` is untouched: it is written in the producer's business transaction and Loki gets a
   projection of it.
-- The tables stay in the schema until the contract stage ([note](../../../../future/infra/data/telemetry-events-drop.md)).
-  No migration ships with this change.
+- The tables are dropped by the contract step, migration `20261124T180256_drop-telemetry-event-tables`
+  (a separate release after this one): `telemetry_events` with its partitions, triggers and
+  `ensure_telemetry_event_partitions`, the view `telemetry_events_attributed`,
+  `telemetry_owner_inference`, the four `agent_metric_*` tables, and `signal_state`'s
+  `first_event_id` / `last_event_id` (they named stream ids that expire after seven days).
+  Operators archive `telemetry_events` with `pg_dump` first.
 
 ## Alternatives rejected
 

@@ -2245,7 +2245,7 @@
   "gateway/tests/bootstrap/test_server.py": 15,
   "gateway/tests/bootstrap/test_server_shutdown.py": 14,
   "gateway/tests/bootstrap/test_web_login_password.py": 13,
-  "gateway/tests/events/event_rows.py": 3,
+  "gateway/tests/events/event_rows.py": 2,
   "gateway/tests/events/sse_support.py": 6,
   "gateway/tests/events/test_events_api.py": 5,
   "gateway/tests/events/test_events_counts.py": 1,

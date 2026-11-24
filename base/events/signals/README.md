@@ -25,7 +25,6 @@ rows, and there is no second way to change a state.
 | `severity` | `info` / `warning` / `error`, repeated as a CHECK in the database |
 | `opened_at` / `last_seen` | when the episode started, when it was last reported |
 | `count` | how many reports this episode absorbed |
-| `first_event_id` / `last_event_id` | the reports, as event stream ids (Loki rows expire after seven days, so they dangle), no foreign key |
 | `resolved_at` / `resolve_reason` / `evidence_ref` | how and why it closed, and what convinced the closer |
 | `acked_by` / `acked_at` | a human read it — **not** a close |
 
@@ -42,7 +41,7 @@ whole.
 ```python
 episode = open_or_touch(
     conn, source="macmini", subject="otlp-collector", condition="export_refused",
-    severity=SignalSeverity.WARNING, event_id=event_id,
+    severity=SignalSeverity.WARNING,
 )
 
 closed = resolve(
@@ -53,7 +52,7 @@ closed = resolve(
 
 `open_or_touch` is one statement: `INSERT ... ON CONFLICT (source, subject, condition)
 WHERE resolved_at IS NULL DO UPDATE SET last_seen = now(), count = count + 1,
-last_event_id = ...`. The conflict target repeats the index predicate because PostgreSQL
+severity = ...`. The conflict target repeats the index predicate because PostgreSQL
 only infers a partial index when the statement names it.
 
 `resolve` touches only the open row. Resolving an already-closed episode, or one that never

@@ -4,8 +4,8 @@
 # drift between hard-coded `payload->>'X'` keys in SQL and emit site field names,
 # these tests are the only defense.
 #
-# Runs on meiva_test DB (real SQL): the window's telemetry rows are INSERTed into
-# `telemetry_events` (audit rows into `audit_events`), and the `agents` table's
+# Runs on meiva_test DB (real SQL): the window's usage rows are INSERTed into
+# `llm_usage_ledger` (audit rows into `audit_events`), and the `agents` table's
 # live_count is populated via INSERT of real rows.
 # meiva:link gateway/cluster/docs/ops-surfaces.md
 
@@ -23,7 +23,6 @@ import pytest
 from base.api_contracts.agent_contract import harness_billing_of_source
 from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
-from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -49,12 +48,10 @@ class _EventRows:
         ts: datetime | None = None,
         category: str = "telemetry",
         cluster: str | None = None,
-        deployed_sha: str | None = None,
     ) -> None:
         when = ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours)
         uid = uuid.uuid4().int % (1 << 62)
         attributes = json.dumps(payload or {})
-        sha = (LOADED_IMAGE.sha or "") if deployed_sha is None else deployed_sha
         if category == "audit":
             self._db.execute(
                 "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
@@ -92,22 +89,6 @@ class _EventRows:
                     "live" if cost is not None else None,
                 ),
             )
-        self._db.execute(
-            "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-            "category, event_name, level, source, attributes, deployed_sha) VALUES (%s, %s, %s, 'test', %s, "
-            "'test', %s, %s, %s, 'test', %s::jsonb, %s)",
-            (
-                uid,
-                when,
-                agent_id,
-                cluster or cluster_label(meiva_home()),
-                category,
-                event,
-                level,
-                attributes,
-                sha,
-            ),
-        )
 
 
 @pytest.fixture

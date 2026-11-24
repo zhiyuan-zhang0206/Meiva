@@ -20,7 +20,7 @@ from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedEr
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
 
-GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events", "llm_usage_ledger")
+GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "llm_usage_ledger")
 
 # meiva:link base/cluster/authority/docs/group-grants.md
 GATEWAY_LEDGER_PRICE_COLUMNS = "cost_usd, price_snapshot, price_source"
@@ -49,17 +49,9 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
     ("SELECT, INSERT", ("notification_events",)),
     ("SELECT, INSERT", ("audit_events",)),
-    ("SELECT, INSERT", ("telemetry_events", "llm_usage_ledger")),
+    ("SELECT, INSERT", ("llm_usage_ledger",)),
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
-    ("SELECT, INSERT", ("agent_metric_observations",)),
-    (
-        "SELECT, INSERT, UPDATE",
-        (
-            "agent_metric_days",
-            "agent_lifecycle_intervals",
-            "agent_metric_file_cursors",
-        ),
-    ),
+    ("SELECT, INSERT, UPDATE", ("agent_lifecycle_intervals",)),
     ("SELECT, UPDATE", ("schedules",)),
     ("SELECT, INSERT, UPDATE", ("schedule_runs",)),
     ("SELECT, DELETE", ("schedule_sync_requests",)),
@@ -138,12 +130,6 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     _grant(conn, "REVOKE UPDATE ON {} FROM {}", "notification_events", runner)
     _grant(conn, "GRANT UPDATE (announced_at) ON {} TO {}", "notification_events", runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
-
-    _grant(
-        conn,
-        "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer, integer) TO {}",
-        runner,
-    )
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:
