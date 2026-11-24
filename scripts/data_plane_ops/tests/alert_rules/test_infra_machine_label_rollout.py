@@ -96,7 +96,7 @@ def promtool_fixture() -> dict[str, object]:
         _promql_case(memory, expected_memory),
         _promql_case(panels[(2102, "A")], expected_memory),
         _promql_case(
-            enqueue_failures, {"old": 25, "new": 5, "both": 5, "new-one-sample": 25}, exporter=True
+            enqueue_failures, {"old": 25, "new": 5, "both": 5, "new-one-sample": 26}, exporter=True
         ),
     ]
     expressions = set(rules.values()) | set(panels.values())

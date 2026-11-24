@@ -159,7 +159,7 @@ def test_the_logs_provider_resource_carries_the_routing_identity(tmp_path: Path)
 
 
 def test_the_process_tracer_resource_carries_the_routing_identity(tmp_path: Path) -> None:
-    from types import SimpleNamespace
+    from dataclasses import dataclass
 
     from base.host.db_authority.api import ensure_telemetry_token
     from base.telemetry.tests.otlp.identity_inputs import machine_identity
@@ -168,11 +168,14 @@ def test_the_process_tracer_resource_carries_the_routing_identity(tmp_path: Path
     home = tmp_path / ".meiva"
     home.mkdir()
     ensure_telemetry_token(home.resolve(), "fixture-token-a")
-    settings = SimpleNamespace(
-        trace_enabled=True,
-        trace_strip_content=True,
-        telemetry_otlp_endpoint="http://127.0.0.1:9",
-    )
+
+    @dataclass
+    class Settings:
+        trace_enabled: bool = True
+        trace_strip_content: bool = True
+        telemetry_otlp_endpoint: str = "http://127.0.0.1:9"
+
+    settings = Settings()
 
     provider = build_process_tracer(
         service="test",

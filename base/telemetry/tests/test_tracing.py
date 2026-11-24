@@ -272,7 +272,11 @@ def test_traceloop_resource_carries_the_routing_identity(
     home.mkdir()
     ensure_telemetry_token(home.resolve(), "fixture-token-a")
     calls: list[dict[str, Any]] = []
-    stub_traceloop_init(monkeypatch, lambda **kw: calls.append(kw))
+
+    def record_init(**kw: Any) -> None:
+        calls.append(kw)
+
+    stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
         now=system_clock().now,

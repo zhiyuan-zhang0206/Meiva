@@ -1589,7 +1589,12 @@ groups:
       # ── R15: newly rejected telemetry (enqueue-failure delta > 0 in 5m) ──
       # These are monotonic counters. `increase` is load-bearing: comparing an
       # absolute value would create a permanent alert after the first failure
-      # until the collector restarted.
+      # until the collector restarted. One `increase` per signal: a single
+      # `__name__=~` selector makes `increase` drop the name and collide on
+      # labelset ("vector cannot contain metrics with the same labelset"),
+      # which `execErrState: OK` would turn into an alert that never fires.
+      # The collector creates a counter on its first failure, so a series
+      # that is new in the window (`unless ... offset 5m`) counts as its value.
       - uid: meiva-ops-otelcol-enqueue-failures
         title: "OTel Collector rejected telemetry"
         condition: D
@@ -1623,9 +1628,17 @@ groups:
               editorMode: code
               expr: >-
                 sum by (machine, exporter) (
-                  increase({machine!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m])
-                  or on (machine, exporter)
-                  label_join(increase({machine="", machine_name!="", __name__=~"otelcol_exporter_enqueue_failed_(log_records|metric_points|spans)_total"}[5m]), "machine", "", "machine_name")
+                  label_replace(increase(otelcol_exporter_enqueue_failed_log_records_total{machine!=""}[5m]), "signal", "log_records", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_log_records_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "log_records", "", "")
+                  or (otelcol_exporter_enqueue_failed_log_records_total{machine!=""} unless otelcol_exporter_enqueue_failed_log_records_total{machine!=""} offset 5m)
+                  or
+                  label_replace(increase(otelcol_exporter_enqueue_failed_metric_points_total{machine!=""}[5m]), "signal", "metric_points", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_metric_points_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "metric_points", "", "")
+                  or (otelcol_exporter_enqueue_failed_metric_points_total{machine!=""} unless otelcol_exporter_enqueue_failed_metric_points_total{machine!=""} offset 5m)
+                  or
+                  label_replace(increase(otelcol_exporter_enqueue_failed_spans_total{machine!=""}[5m]), "signal", "spans", "", "")
+                  or on (machine, exporter, signal) label_replace(label_join(increase(otelcol_exporter_enqueue_failed_spans_total{machine="", machine_name!=""}[5m]), "machine", "", "machine_name"), "signal", "spans", "", "")
+                  or (otelcol_exporter_enqueue_failed_spans_total{machine!=""} unless otelcol_exporter_enqueue_failed_spans_total{machine!=""} offset 5m)
                 )
               instant: true
               range: false
