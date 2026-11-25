@@ -37,6 +37,7 @@ class ContextCompacted:
 class ReasoningDelta:
     turn_id: str
     text: str
+    block: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class ReasoningText:
 class TextDelta:
     turn_id: str
     text: str
+    block: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

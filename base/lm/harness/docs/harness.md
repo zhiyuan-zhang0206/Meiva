@@ -74,7 +74,7 @@ and open questions are recorded in
 |---|---|
 | `base_session.py` | `BaseHarnessSession`, `ActiveTurn` and `SessionBinding`: the shared session state (the turn an input of ours started in an idle session, the delivery ledger, bounded event queue with delta dropping, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`). There is no queue and no outcome: a turn is reported only by its events, and what to deliver next is the caller's decision |
 | `cancel.py` | `CancelReport`, `ProcessObservation`, `describe`, `Sweep`, and the pure functions that cut a report from them |
-| `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
+| `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split. A delta's optional `block` is the adapter's stable id of the output block (Claude `<message.id>:<block index>`, Codex the item id, `None` where the CLI gives none): the live overlay's block identity and, when the record carries the same id, the exact key that retires it |
 | `turn.py` | `SessionTotals`, `add_cost` |
 | `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary) |
 | `handoff.py` | the sectioned handoff document, `HANDOFF_VERSION`, its rendered byte size, and the workspace file it is saved to for after a compaction |

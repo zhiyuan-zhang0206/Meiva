@@ -215,3 +215,18 @@ def test_derived_role_sets_match_registry_flags() -> None:
         frozenset(cls.model_fields["role"].default for cls, g in ROLE_CLASSES if g) == GLOBAL_ROLES
     )
     assert GLOBAL_ROLES <= SYSTEM_ROLES
+
+
+def test_timeline_snapshot_retires_is_on_the_wire_only_when_non_empty() -> None:
+    from base.events.live.projection import EVENT_ADAPTER, TimelineSnapshot
+
+    plain = json.loads(TimelineSnapshot(agent_id=7, items=[], msg_count=1).model_dump_json())
+    assert "retires" not in plain
+
+    retiring = TimelineSnapshot(agent_id=7, items=[], msg_count=1, retires=["live.t1.0"])
+    wire = retiring.model_dump_json()
+    assert json.loads(wire)["retires"] == ["live.t1.0"]
+    parsed = EVENT_ADAPTER.validate_json(wire)
+    assert isinstance(parsed, TimelineSnapshot)
+    assert parsed.retires == ["live.t1.0"]
+    assert EVENT_ADAPTER.validate_json(json.dumps(plain)).retires == []
