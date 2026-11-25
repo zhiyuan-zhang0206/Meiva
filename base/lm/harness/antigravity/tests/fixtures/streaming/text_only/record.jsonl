@@ -1,0 +1,2 @@
+{"t":0.031,"row":{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-25T03:27:55Z","content":"<USER_REQUEST>\nReply with exactly one short sentence: what is 2+2? Do not use tools.\n</USER_REQUEST>"}}
+{"t":7.387,"row":{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-25T03:27:55Z","model":"gemini-4-argon-high","input_tokens":9671,"cache_read_tokens":0,"output_tokens":50,"content":"2 + 2 is 4."}}

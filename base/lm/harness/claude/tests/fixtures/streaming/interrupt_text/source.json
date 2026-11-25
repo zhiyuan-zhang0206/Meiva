@@ -1,0 +1,12 @@
+{
+  "cli": "Claude Code 2.1.322 (rows carry version 2.1.322)",
+  "sdk": "claude-agent-sdk 0.2.168, include_partial_messages=True, thinking={type: adaptive, display: summarized}, model claude-haiku-5-5",
+  "scenario": "interrupted 1 s after the first text delta: the partial text IS persisted (isAbortedMidStream=true, stop_reason null) followed by a user '[Request interrupted by user]' row",
+  "clock": "t = seconds since the prompt was sent; stream.jsonl is the SDK message stream in arrival order, record.jsonl the transcript rows with the time the file grew to contain them (5 ms poll)",
+  "sanitization": [
+    "dropped SystemMessage/RateLimitEvent from the stream; dropped message_start.message.usage",
+    "dropped transcript row types other than user/assistant (queue-operation, attachment, atis-latch, api-request*, last-prompt, ai-title, cost-state)",
+    "signatures replaced by <signature>; session id, cwd, gitBranch, slug, requestRef removed; cwd paths -> /work/<scenario>; strings > 400 chars cut",
+    "message ids, requestId, uuids, apiBlockIndex, isAbortedMidStream untouched (they are the reconciliation keys under study)"
+  ]
+}
