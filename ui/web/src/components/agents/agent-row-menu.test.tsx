@@ -166,6 +166,14 @@ describe("AgentRow right-click context menu", () => {
     expect(screen.getByText("Kill")).toBeTruthy();
   });
 
+  it("restarts an external harness only while idle, the gateway's rule for a restart that acts at once", () => {
+    const idle = render(
+      <AgentRow {...baseProps} agent={ag(1, { harness: "codex", status: "idling" })} depth={0} ancestorsIsLast={[]} />,
+    );
+    openMenu(idle.container.querySelector("li")!);
+    expect(screen.getByText("Restart")).toBeTruthy();
+  });
+
   it("terminated agent: menu shows Resurrect + Resurrect with prompt, no Fork / Kill", () => {
     const dead: AgentRowType = { ...ag(2), status: "terminated" };
     const { container } = render(
