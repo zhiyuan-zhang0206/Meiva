@@ -241,7 +241,7 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
 
     assert resp.status_code == 403
     assert resp.json() == {"detail": "origin not allowed"}
-    assert resp.headers["vary"] == "Origin"
+    assert resp.headers["vary"] == "Origin, Accept-Encoding"
 
 
 def test_bearer_authenticated_post_allows_disallowed_origin(

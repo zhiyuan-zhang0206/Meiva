@@ -25,6 +25,19 @@ send, including when the peer disconnects or stops reading for 30 s (the
 connection is then aborted). A file that ends before its declared length closes the
 connection rather than leaving it open for a peer to misread.
 
+A route the caller lists in `gzip_routes` (agent-ops lists `POST /ops`; the file routes stay
+plain, because the gateway relays their `Content-Length`) answers a JSON or text body of 1 KiB or
+more gzipped (level 5) to a client that sent
+`Accept-Encoding: gzip`: the answer carries `Content-Encoding: gzip` and
+`Vary: Accept-Encoding`, and its `Content-Length` is the compressed size. A body of
+128 KiB or more is compressed in a worker thread so the event loop does not wait. Partial
+answers, `FileBody` streams, other content types and a body that does not shrink are sent as
+they are. The agent-ops timeline answer (60-270 KB of JSON) is a quarter of that size on the
+wire, which is what a relayed link between the gateway and a runner is paid in. The 1 KiB
+bound is where a saving stops being worth a header (below it the gain is a packet); level 5 is
+the knee of the ratio/CPU curve for JSON text (a 100 KB window is about 26 KB after 1.5 ms,
+level 9 gains under 3 % for three times the CPU).
+
 Connections are one-shot (`Connection: close`) unless the caller passes a
 `KeepAlive`, as the agent-ops server does so that a client making many reads of one
 host (a browser seeking through media, relayed by the gateway) pays one TCP

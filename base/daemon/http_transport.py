@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gzip
 import json
 import logging
 import math
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import BinaryIO
 
 from opentelemetry.trace import SpanKind, StatusCode, Tracer
@@ -49,6 +50,11 @@ _HEAD_TIMEOUT_S = 2.0
 _BODY_TIMEOUT_S = 10.0
 STREAM_CHUNK_BYTES = 64 * 1024
 _WRITE_BLOCKED_TIMEOUT_S = 30.0
+
+GZIP_MIN_BYTES = 1024
+GZIP_LEVEL = 5
+GZIP_OFFLOAD_BYTES = 128 * 1024
+_GZIP_CONTENT_TYPES = ("application/json", "text/")
 _POLL_S = 1.0
 _REASONS = {
     200: "OK",
@@ -135,6 +141,7 @@ class _Served:
     body_slots: Mapping[tuple[str, str], asyncio.Semaphore]
     tracer: Tracer | None
     keep_alive: KeepAlive | None
+    gzip_routes: frozenset[tuple[str, str]]
     serving: Callable[[], bool]
 
 
@@ -180,6 +187,44 @@ def _content_length(header_lines: list[bytes]) -> int:
     if not (declared[0].isascii() and declared[0].isdigit()):
         raise _BadFramingError("Content-Length must be one decimal number")
     return int(declared[0])
+
+
+def _accepts_gzip(header_lines: list[bytes]) -> bool:
+    for token in (_header_value(header_lines, b"accept-encoding") or "").split(","):
+        name, _, parameters = token.partition(";")
+        if name.strip().lower() != "gzip":
+            continue
+        quality = parameters.replace(" ", "").lower()
+        return not (quality.startswith("q=") and quality[2:].strip("0.") == "")
+    return False
+
+
+def _gzip_candidate(response: _Response) -> bool:
+    return (
+        response.status == 200
+        and isinstance(response.body, bytes)
+        and len(response.body) >= GZIP_MIN_BYTES
+        and response.content_type.lower().startswith(_GZIP_CONTENT_TYPES)
+        and not any(name.lower() == "content-encoding" for name in response.headers)
+    )
+
+
+async def _encoded(request: _Request, response: _Response, served: _Served) -> _Response:
+    body = response.body
+    if (request.method, request.path) not in served.gzip_routes:
+        return response
+    if not isinstance(body, bytes) or not _gzip_candidate(response):
+        return response
+    if not _accepts_gzip(request.header_lines):
+        return response
+    if len(body) >= GZIP_OFFLOAD_BYTES:
+        packed = await asyncio.to_thread(gzip.compress, body, GZIP_LEVEL, mtime=0)
+    else:
+        packed = gzip.compress(body, GZIP_LEVEL, mtime=0)
+    if len(packed) >= len(body):
+        return response
+    headers = {**response.headers, "Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
+    return replace(response, body=packed, headers=headers)
 
 
 def _response(
@@ -344,7 +389,7 @@ async def _exchange(
 ) -> bool:
     try:
         request = _Request.parse(head)
-        response = await _routed_response(reader, request, served)
+        response = await _encoded(request, await _routed_response(reader, request, served), served)
         reusable = _reusable(request, response, served, nth=nth)
     except _BadFramingError as exc:
         response = _json_response(400, {"error": str(exc)})
@@ -384,6 +429,7 @@ async def start_daemon_http(
     body_slots: Mapping[tuple[str, str], asyncio.Semaphore] | None = None,
     tracer: Tracer | None = None,
     keep_alive: KeepAlive | None = None,
+    gzip_routes: frozenset[tuple[str, str]] = frozenset(),
 ) -> asyncio.Server:
     """Bind only the explicitly supplied routes and health response."""
     server: asyncio.Server | None = None
@@ -395,6 +441,7 @@ async def start_daemon_http(
         body_slots=dict(body_slots or {}),
         tracer=tracer,
         keep_alive=keep_alive,
+        gzip_routes=gzip_routes,
         serving=lambda: server is None or server.is_serving(),
     )
 

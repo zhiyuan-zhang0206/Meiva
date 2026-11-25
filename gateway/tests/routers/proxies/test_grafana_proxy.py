@@ -163,12 +163,11 @@ def test_proxy_forwards_head(grafana_server: int) -> None:
 def test_proxy_handles_gzip_upstream(grafana_server: int) -> None:
     """The proxy asks for an identity-encoded body; an upstream that ignores
     that and gzips anyway still yields a correctly decoded body with no stale
-    Content-Encoding / Content-Length headers (httpx auto-decodes, and the
-    proxy drops the mismatched pair)."""
+    Content-Length (httpx auto-decodes, and the proxy drops the mismatched
+    length; the gateway's own gzip layer may encode the answer again)."""
     with gateway_test_client(fields=_grafana_fields(grafana_server)) as client:
         resp = client.get("/grafana/gzip")
     assert resp.status_code == 200
-    assert "content-encoding" not in resp.headers
     assert "content-length" not in resp.headers
     assert "<h1>compressed</h1>" in resp.text
 

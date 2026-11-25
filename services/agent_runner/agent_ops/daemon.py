@@ -557,6 +557,7 @@ async def serve_ops_daemon(  # noqa: PLR0915 — composition root wires each ops
             host=bind_host,
             tracer=tracer,
             keep_alive=KeepAlive(),
+            gzip_routes=frozenset({("POST", "/ops")}),
             body_limits=desktop.limits,
             body_slots=desktop.slots,
             extra_routes={
