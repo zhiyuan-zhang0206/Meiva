@@ -105,8 +105,13 @@ describe("edge fade", () => {
     expect(host.sheets).toEqual([edgeFadeCss()]);
     for (let s = 0; s < EDGE_FADE_STEP_OPACITY.length; s++) {
       expect(edgeFadeCss()).toContain(
-        `::highlight(stream-edge-${s}) { color: color-mix(in srgb, currentColor ${Math.round(EDGE_FADE_STEP_OPACITY[s] * 100)}%, transparent); }`,
+        `::highlight(stream-edge-${s}) { color: color-mix(in srgb, var(--stream-edge-color, var(--foreground)) ${Math.round(EDGE_FADE_STEP_OPACITY[s] * 100)}%, transparent); }`,
       );
     }
+  });
+
+  it("never resolves the highlight colour through currentColor (black in ::highlight, invisible in dark mode)", () => {
+    expect(edgeFadeCss()).not.toMatch(/currentcolor/i);
+    expect(edgeFadeCss()).toContain("var(--stream-edge-color, var(--foreground))");
   });
 });

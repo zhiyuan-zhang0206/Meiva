@@ -22,7 +22,7 @@ const highlightName = (step: number) => `stream-edge-${step}`;
 export function edgeFadeCss(): string {
   return EDGE_FADE_STEP_OPACITY.map(
     (opacity, step) =>
-      `::highlight(${highlightName(step)}) { color: color-mix(in srgb, currentColor ${Math.round(opacity * 100)}%, transparent); }`,
+      `::highlight(${highlightName(step)}) { color: color-mix(in srgb, var(--stream-edge-color, var(--foreground)) ${Math.round(opacity * 100)}%, transparent); }`,
   ).join("\n");
 }
 

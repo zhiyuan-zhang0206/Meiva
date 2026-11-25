@@ -358,16 +358,20 @@
   .chat-md li { margin-block: var(--chat-md-li-my); }
   .chat-md :is(strong, b) {
     @apply font-semibold text-foreground dark:text-[#efece6];
+    --stream-edge-color: var(--foreground);
   }
-  .chat-md h1 { @apply text-[1.3em] leading-[1.35] font-semibold text-foreground dark:text-[#efece6] mt-5 mb-2; }
-  .chat-md h2 { @apply text-[1.18em] leading-[1.38] font-semibold text-foreground dark:text-[#efece6] mt-4.5 mb-1.5; }
-  .chat-md h3 { @apply text-[1.08em] leading-[1.4] font-semibold text-foreground dark:text-[#efece6] mt-4 mb-1.5; }
+  .chat-md h1 { @apply text-[1.3em] leading-[1.35] font-semibold text-foreground dark:text-[#efece6] mt-5 mb-2; --stream-edge-color: var(--foreground); }
+  .chat-md h2 { @apply text-[1.18em] leading-[1.38] font-semibold text-foreground dark:text-[#efece6] mt-4.5 mb-1.5; --stream-edge-color: var(--foreground); }
+  .chat-md h3 { @apply text-[1.08em] leading-[1.4] font-semibold text-foreground dark:text-[#efece6] mt-4 mb-1.5; --stream-edge-color: var(--foreground); }
   .chat-md h4,
   .chat-md h5,
-  .chat-md h6 { @apply text-[1em] leading-[1.45] font-semibold text-foreground dark:text-[#efece6] mt-3.5 mb-1; }
+  .chat-md h6 { @apply text-[1em] leading-[1.45] font-semibold text-foreground dark:text-[#efece6] mt-3.5 mb-1; --stream-edge-color: var(--foreground); }
+  .dark .chat-md :is(strong, b, h1, h2, h3, h4, h5, h6) { --stream-edge-color: #efece6; }
   .chat-md code {
     @apply bg-muted/75 dark:bg-white/[0.06] text-foreground/90 dark:text-[#e8e4dd] px-1.5 py-[1px] rounded-[5px] text-[0.86em] leading-[1.2] font-mono;
+    --stream-edge-color: color-mix(in oklab, var(--foreground) 90%, transparent);
   }
+  .dark .chat-md code { --stream-edge-color: #e8e4dd; }
   /* Code card chrome. A fenced block draws it on its ScrollArea frame
      (.md-scroll-code) so the border and background stay put while long lines
      scroll; PythonCode wraps its lines and keeps drawing it on the <pre>. */
@@ -377,7 +381,9 @@
   }
   .chat-md pre {
     @apply px-3.5 py-2.5 font-mono text-[13px] leading-[1.6] max-w-full;
+    --stream-edge-color: color-mix(in oklab, var(--foreground) 90%, transparent);
   }
+  .dark .chat-md pre { --stream-edge-color: #e4e1db; }
   /* The <pre> inside the frame is only the scrolling content: no chrome of
      its own, as wide as its longest line but never narrower than the frame. */
   .chat-md .md-scroll-code pre.md-scroll-pre {
@@ -385,12 +391,16 @@
   }
   .chat-md pre > code {
     @apply bg-transparent dark:bg-transparent px-0 py-0 text-inherit dark:text-inherit leading-[inherit];
+    --stream-edge-color: inherit;
   }
+  .dark .chat-md pre > code { --stream-edge-color: inherit; }
   .chat-md blockquote {
     @apply border-l-2 border-muted-foreground/60 pl-3.5 text-muted-foreground my-3;
+    --stream-edge-color: var(--muted-foreground);
   }
   .chat-md a {
     @apply text-primary underline underline-offset-2;
+    --stream-edge-color: var(--primary);
   }
   .chat-md table {
     @apply border-collapse text-[13.5px] leading-[1.5];

@@ -588,7 +588,7 @@ export const ItemView = memo(function ItemView({
       return (
         <div ref={bodyRef} className="rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2">
           {item.source && item.source !== "execute_code" ? (
-            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
+            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90 [--stream-edge-color:color-mix(in_oklab,var(--foreground)_90%,transparent)]">
               {streamingPayload}
             </pre>
           ) : (
@@ -600,7 +600,10 @@ export const ItemView = memo(function ItemView({
     case "agent_reasoning":
       return (
         <TimelineItemImageBatch>
-          <div ref={bodyRef} className="text-[12.5px] leading-relaxed text-muted-foreground/90">
+          <div
+            ref={bodyRef}
+            className="text-[12.5px] leading-relaxed text-muted-foreground/90 [--stream-edge-color:color-mix(in_oklab,var(--muted-foreground)_90%,transparent)]"
+          >
             <ChatMarkdown content={markdownPayload} />
           </div>
         </TimelineItemImageBatch>

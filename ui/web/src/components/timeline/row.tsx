@@ -201,7 +201,11 @@ export const TimelineRow = memo(function TimelineRow({
         <ItemErrorBoundary resetKey={item.payload}>
           <div
             data-testid="agent-message-prose"
-            className={cn("text-[15px] leading-[25px] text-foreground/92 dark:text-[#e2dfd9]", MIN_W_0)}
+            className={cn(
+              "text-[15px] leading-[25px] text-foreground/92 dark:text-[#e2dfd9]",
+              "[--stream-edge-color:color-mix(in_oklab,var(--foreground)_92%,transparent)] dark:[--stream-edge-color:#e2dfd9]",
+              MIN_W_0,
+            )}
           >
             <div data-quote-body={!item.partial && !streaming ? "" : undefined}><ItemView item={item} streaming={streaming} /></div>
           </div>
