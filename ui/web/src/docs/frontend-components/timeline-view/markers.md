@@ -51,6 +51,21 @@ which a reload cannot fix, and gets no such hint. The alarm also logs to the dev
 console — the timeline is client-only `"use client"` code, so no `window` guard is
 needed.
 
+The gateway-synthesized source `harness_switch` marks a harness epoch's start. It is
+classified by source before the `NoteTag` check, so it renders whether or not the
+generated vocabulary lists it, as a `Harness switch` (`ArrowLeftRight`) card whose body
+is the English switch text (the harness change plus the restart message when there is
+one). It is an ordinary work-level row: it folds into the surrounding Work Block beside
+thinking and tool rows, starts collapsed, and adds no divider and no primary message
+(user ruling 2026-11-25, which keeps the 2026-11-13 decision that a switch draws no
+boundary). It is a wake marker for active-time summaries, so the idle gap between the
+two sessions is not counted as work. A harness switch shares no conversation with the
+new harness; the card only records that it happened. An earlier epoch whose record
+cannot be read produces no row at all (user ruling 2026-11-25).
+`tests/e2e/visual/test_harness_switch_block.py` pages a four-epoch history into a real
+browser and asserts the order, the work-level placement, and that the card never raises
+the unrecognized alarm.
+
 `ErrorMarkerBody`, `UnknownMarkerChip`, and `EphemeralSystemMarker` preserve the
 stable assertion hooks: `marker-unrecognized` must never render for a page built
 from the running server's code, `marker-unrecognized-reload` marks the stale-page

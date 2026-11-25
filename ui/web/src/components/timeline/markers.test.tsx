@@ -71,6 +71,11 @@ describe("classifyMarker", () => {
     expect(classifyMarker(null, "error:boom")).toEqual({ kind: "error" });
   });
 
+  it("gives the harness switch block its own card", () => {
+    expect(classifyMarker("harness_switch", "Switched harness: meiva -> codex")).toEqual({ kind: "harness_switch" });
+    expect(isSilentMarker("harness_switch", "cancelled")).toBe(false);
+  });
+
   it("sends truly unrecognized sources/payloads to the unrecognized card family", () => {
     expect(classifyMarker(null)).toEqual({ kind: "unrecognized" });
     expect(classifyMarker("tag_from_a_newer_server")).toEqual({ kind: "unrecognized" });

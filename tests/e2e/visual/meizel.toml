@@ -1,4 +1,5 @@
 [uses]
+"test_harness_switch_block.py" = ["stubbed_home.py"]
 "test_layout_invariants.py" = ["stubbed_home.py"]
 "test_quote_selection.py" = ["stubbed_home.py"]
 "test_pending_pickup.py" = ["stubbed_home.py"]

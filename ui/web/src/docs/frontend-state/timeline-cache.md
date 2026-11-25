@@ -115,9 +115,9 @@ backend sends nothing for an id after retiring it.
 An agent that switched harness keeps one timeline. The gateway reads the current
 epoch exactly as before (unprefixed ids, live SSE and overlay ids unchanged) and
 serves earlier epochs only through `before=` paging, with every id prefixed
-`e<seq>.` (`e0.h123.0`, `e0.12.0`, `e0.s1.<cp>.3.0`). Two synthetic locals mark an
-epoch's start: `e<seq>.sw` (the switch block) and `e<seq>.unavailable` (a segment
-that could not be read).
+`e<seq>.` (`e0.h123.0`, `e0.12.0`, `e0.s1.<cp>.3.0`). The synthetic local `e<seq>.sw`
+(the switch block) marks an epoch's start; an epoch whose record cannot be read is
+skipped by the gateway and leaves no row.
 
 The store order is one total order, `(epoch, slot, compact rank, message, block)`
 with the current epoch last (`sortByItemId`, `lib/fold/item-id.ts`); no timestamp
@@ -125,7 +125,7 @@ decides placement. The compact machinery (`parseItemIdParts`, transition buffers
 `crossedUnseenCompact`, the `msg_count` stale-partial rule) only understands
 current-epoch ids: `parseItemIdParts` returns null for a prefixed id, so earlier
 epochs are never judged by a compact or by `msg_count`. The older-page cursor is the
-oldest loaded real row, which may be a synthetic row, and the gateway accepts every
+oldest loaded real row, which may be the switch block, and the gateway accepts every
 id it emits as a cursor.
 
 `useTimeline` takes the agent's harness; when it changes for the selected agent the

@@ -397,6 +397,7 @@ def open_page(
     scripted_sse: bool = False,
     extra_init_script: str | None = None,
     timeline_items: Sequence[Mapping[str, object]] | None = None,
+    timeline_pages: Mapping[str, object] | None = None,
     settings: Sequence[Mapping[str, object]] | None = None,
 ) -> Page:
     # meiva:note
@@ -443,6 +444,9 @@ def open_page(
                     "msg_count": len(timeline_items),
                     "has_more": False,
                 }
+            if timeline_pages is not None and endpoint == "/api/agents/1/timeline":
+                before = parse_qs(urlsplit(url).query).get("before", [""])[0]
+                body = timeline_pages.get(before, {"items": [], "msg_count": 0, "has_more": False})
             if settings is not None and endpoint == "/api/settings":
                 body = {"settings": settings}
             elif open_inspector and endpoint == "/api/settings":

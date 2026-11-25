@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  ArrowLeftRight,
   GitFork,
   Hand,
   Info,
@@ -36,6 +37,11 @@ const LIFECYCLE_META: Record<
   lifecycle_fork: { icon: GitFork, title: "Forked", titleKey: "forked" },
 };
 
+const HARNESS_SWITCH_META: MarkerVisual = {
+  icon: ArrowLeftRight,
+  title: "Harness switch",
+  titleKey: "harnessSwitch",
+};
 const MEMORY_META: MarkerVisual = { icon: NotebookText, title: "Memory", titleKey: "memory" };
 const BACKGROUND_TASK_META: MarkerVisual = {
   icon: Terminal,
@@ -59,6 +65,8 @@ export function markerVisual(cls: MarkerClass): MarkerVisual {
   switch (cls.kind) {
     case "lifecycle":
       return LIFECYCLE_META[cls.tag];
+    case "harness_switch":
+      return HARNESS_SWITCH_META;
     case "memory":
       return MEMORY_META;
     case "background_task":

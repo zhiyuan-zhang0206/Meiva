@@ -241,6 +241,14 @@ describe("messageCardConfig", () => {
     expect(errCfg!.fixedDefault).toBe(false);
     expect(errCfg!.ownQuoteBody).toBe(true);
 
+    const switchCfg = messageCardConfig(
+      item("system_marker", { source: "harness_switch", payload: "Switched harness: meiva -> codex" }),
+    );
+    expect(switchCfg!.title).toBe("Harness switch");
+    expect(switchCfg!.titleKey).toBe("markers.harnessSwitch");
+    expect(switchCfg!.fixedDefault).toBe(false);
+    expect(switchCfg!.ownQuoteBody).toBe(false);
+
     const unrecognizedCfg = messageCardConfig(
       item("system_marker", { source: "future_tag", payload: "raw payload" }),
     );

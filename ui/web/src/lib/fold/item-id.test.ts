@@ -36,7 +36,7 @@ describe("epoch-prefixed item ids", () => {
       expect(isEpochItemId(id)).toBe(false);
     }
     expect(isSyntheticEpochItemId("e1.sw")).toBe(true);
-    expect(isSyntheticEpochItemId("e1.unavailable")).toBe(true);
+    expect(isSyntheticEpochItemId("e1.unavailable")).toBe(false);
     expect(isSyntheticEpochItemId("e1.5.0")).toBe(false);
   });
 
@@ -77,14 +77,13 @@ describe("sortByItemId across epochs", () => {
     ]);
   });
 
-  it("puts the switch block, then the unavailable placeholder, before the rest of the epoch", () => {
+  it("puts the switch block before the rest of its epoch", () => {
     const sorted = sortByItemId([
-      item("e1.unavailable", { kind: "system_marker", source: "history_unavailable" }),
       item("e1.4.0"),
       item("e1.sw", { kind: "system_marker", source: "harness_switch" }),
       item("e0.9.0"),
     ]);
-    expect(ids(sorted)).toEqual(["e0.9.0", "e1.sw", "e1.unavailable", "e1.4.0"]);
+    expect(ids(sorted)).toEqual(["e0.9.0", "e1.sw", "e1.4.0"]);
   });
 
   it("keeps compact segments of an earlier epoch oldest-first, as in the current epoch", () => {

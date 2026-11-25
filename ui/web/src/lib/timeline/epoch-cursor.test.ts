@@ -24,17 +24,11 @@ describe("findOldestTimelineCursor with earlier epochs", () => {
     expect(findOldestTimelineCursor(items)?.item_id).toBe("e0.7.0");
   });
 
-  it("skips an earlier epoch's system prompt but accepts the synthetic rows as cursors", () => {
+  it("skips an earlier epoch's system prompt but accepts the switch block as a cursor", () => {
     const withPrompt = sortByItemId([item("e0.0.0", { kind: "system_prompt" }), item("e0.1.0"), item("2.0")]);
     expect(findOldestTimelineCursor(withPrompt)?.item_id).toBe("e0.1.0");
     const withSwitch = sortByItemId([item("e1.sw", { kind: "system_marker", source: "harness_switch" }), item("2.0")]);
     expect(findOldestTimelineCursor(withSwitch)?.item_id).toBe("e1.sw");
-    const unavailable = sortByItemId([
-      item("e1.unavailable", { kind: "system_marker", source: "history_unavailable" }),
-      item("e1.sw", { kind: "system_marker", source: "harness_switch" }),
-      item("2.0"),
-    ]);
-    expect(findOldestTimelineCursor(unavailable)?.item_id).toBe("e1.sw");
   });
 });
 

@@ -387,6 +387,19 @@ describe("summarizeTurn — active-segment timing", () => {
     expect(summarizeTurn(interruptedThenHiddenWake).settledActiveMs).toBe(7 * MIN);
   });
 
+  it("splits the active time at a harness switch so the gap between the sessions is not counted", () => {
+    const t0 = Date.parse("2026-11-25T10:00:00.000Z");
+    const MIN = 60_000;
+    const items = [
+      item("agent_reasoning", null, "e0.1.0", { created_at: new Date(t0 + 5 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+      item("system_marker", "harness_switch", "e1.sw", { created_at: new Date(t0 + 125 * MIN).toISOString(), show_timestamp: true }),
+      item("agent_reasoning", null, "40.0", { created_at: new Date(t0 + 130 * MIN).toISOString(), reasoning_ms: 5 * MIN }),
+    ];
+    const summary = summarizeTurn(items);
+    expect(summary.settledActiveMs).toBe(10 * MIN);
+    expect(summary.liveSegmentStartMs).not.toBeNull();
+  });
+
   it("splits and deduplicates queued heartbeat system_markers without counting inter-heartbeat idle time", () => {
     const t0 = Date.parse("2026-11-22T10:00:00.000Z");
     const MIN = 60_000;

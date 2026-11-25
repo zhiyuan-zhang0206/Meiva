@@ -110,3 +110,10 @@ footer, the composer's band) is `ICON_SIZE_CLASS` (16px). A control the
 breakpoint hides has no box and is skipped; glyphs inside content (the pending
 strip's clock, the send button's filled stop square) keep their own optical
 size and are out of scope.
+
+`test_harness_switch_block.py` drives the same stubbed page with a paged `GET /timeline`
+(`open_page(timeline_pages=...)` answers by the `before` cursor): a head window of the
+current epoch and three older pages that cross meiva, claude_code and codex epochs (one
+epoch's content is absent, as when the gateway skips an unreadable record). It pages the history in by scrolling up and asserts the rows
+land in epoch order, each `e<seq>.sw` row sits inside a work block, and no row raises
+the unrecognized-marker alarm.

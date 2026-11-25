@@ -306,3 +306,26 @@ describe("groupIntoTurns", () => {
     ]);
   });
 });
+
+describe("groupIntoTurns across a harness switch", () => {
+  it("keeps the switch block inside the work block, beside thinking and tool rows", () => {
+    const items = [
+      item("inbound_chat", "user", "e0.1.0"),
+      item("agent_reasoning", null, "e0.2.0"),
+      item("agent_code", null, "e0.2.1"),
+      item("system_marker", "harness_switch", "e1.sw"),
+      item("agent_reasoning", null, "40.0"),
+      item("agent_chat", null, "41.0"),
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual(["single(inbound_chat@0)", "turn(4@1)", "single(agent_chat@5)"]);
+    const turn = groups[1];
+    expect(turn.kind === "turn" && turn.items.map((it) => it.item_id)).toEqual(["e0.2.0", "e0.2.1", "e1.sw", "40.0"]);
+  });
+
+  it("counts the switch block as a system note", () => {
+    const summary = summarizeTurn([item("system_marker", "harness_switch", "e1.sw")]);
+    expect(summary.systemNotes).toBe(1);
+    expect(formatTurnSummary(summary)).toBe("1 system note");
+  });
+});
