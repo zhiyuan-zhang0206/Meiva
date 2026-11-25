@@ -903,6 +903,9 @@ root = "meiva_builtins/plugins/meiva_usage/tests"
 root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination/meiva-chatroom/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests"
 
 [[tool.pyright.executionEnvironments]]
