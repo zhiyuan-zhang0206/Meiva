@@ -1,6 +1,7 @@
-exports = ["chunk.py", "deadlines.py", "stream.py"]
+exports = ["chunk.py", "deadlines.py", "harness_overlay.py", "stream.py"]
 
 [uses]
+"harness_overlay.py" = []
 "stream.py" = ["chunk.py", "deadlines.py"]
 
 [purity]

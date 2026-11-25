@@ -41,7 +41,7 @@ Antigravity reads the main full transcript in file order, with the same bounded 
 
 ## The two pieces
 
-- **Entries** (`entries.py`): `HumanInput`, `AgentText`, `Reasoning`, `ToolCall`, `ToolResult`,
+- **Entries** (`entries.py`): `HumanInput`, `AgentText`, `Reasoning` (these two carry the CLI's `block` id when the row names one, which the live overlay reconciles with the stream by; the projected item keeps it with the row's unshaped `text`, neither shown), `ToolCall`, `ToolResult`,
   `Notice`, `Interrupt`, `Compaction`, `TokenUsage`, `TurnEnd`, `Failure`, `Anomaly`. Each has
   a stable `key` (idempotency), an `Order(seq, sub)` that gives the entry's place inside the record,
   and an optional `turn`. A kind is in the vocabulary only if two of the three CLIs have a counterpart.

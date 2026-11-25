@@ -330,6 +330,7 @@ class Projector:
                 reasoning_ms=more.reasoning_ms,
                 exec_ms=more.exec_ms,
                 complete=more.complete,
+                block=more.block,
             )
         )
 
@@ -374,10 +375,15 @@ class Projector:
                 entry,
                 DraftKind.AGENT_REASONING,
                 entry.text,
-                _Extra(reasoning_ms=entry.duration_ms),
+                _Extra(reasoning_ms=entry.duration_ms, block=entry.block),
             )
         else:
-            self._draft(entry, DraftKind.AGENT_CHAT, entry.text, _Extra(complete=entry.complete))
+            self._draft(
+                entry,
+                DraftKind.AGENT_CHAT,
+                entry.text,
+                _Extra(complete=entry.complete, block=entry.block),
+            )
 
     def _on_call(self, entry: ToolCall) -> None:
         self._draft(
@@ -561,3 +567,4 @@ class _Extra:
     reasoning_ms: int | None = None
     exec_ms: int | None = None
     complete: bool = True
+    block: str | None = None

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import tempfile
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
+from agent.graph.llm_stream.harness_overlay import LiveOverlay
 from base.agents.context import MeivaContext
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.project import (
@@ -16,6 +14,7 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
+from base.agents.history.transcript_timeline.record import fork_floor
 from base.agents.history.transcript_timeline.record.harness import (
     entry_reader,
     input_wire_ids,
@@ -44,11 +43,11 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
 from base.api_contracts.agent_contract import Harness
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_all
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -64,7 +63,6 @@ from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import (
-    BLOCK_BYTES,
     FileRow,
     RecordFile,
     UnreadRows,
@@ -139,6 +137,13 @@ class ReadTimelineSink:
         self._harness = ctx.harness.value
         mode = ctx.require_agent().prompt.user_delivery_mode
         self._policy = ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode)
+        self._overlay = LiveOverlay(
+            publisher.emit,
+            agent_id,
+            non_human_wake=lambda: self._non_human_wake,
+            explicit_visibility=self._policy.explicit_visibility,
+            delivery_mode=UserDeliveryMode(mode),
+        )
         self._timing_revision: int | None = None
         self._timing_start: int | None = None
         self._timing_needed = False
@@ -213,6 +218,7 @@ class ReadTimelineSink:
             self._check_reply(event.text)
         elif isinstance(event, ToolUse) and event.parent_tool_use_id is None:
             self._unmarked_tail = False
+        self._overlay.on_event(event)
         if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
             await self._read_logged(anchor=event)
         self._dirty.set()
@@ -286,12 +292,15 @@ class ReadTimelineSink:
         clock = self._ctx.require_clock()
         before, deadline = self._closed_turns, clock.monotonic() + END_WAIT_SECONDS
         wait = bool(turns) or interrupted or error is not None
-        while True:
-            await self._read_logged()
-            if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
-                self._require_record(ended=wait, said=any(turn.text for turn in turns))
-                return
-            await clock.asleep(END_POLL_SECONDS)
+        try:
+            while True:
+                await self._read_logged()
+                if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
+                    self._require_record(ended=wait, said=any(turn.text for turn in turns))
+                    return
+                await clock.asleep(END_POLL_SECONDS)
+        finally:
+            self._publish_retired(self._overlay.retire_all(), self._from or 0)
 
     # meiva:note
     # A turn that did something and ends with no record file to show for it is a failed turn, not a quiet one: nothing of
@@ -507,7 +516,9 @@ class ReadTimelineSink:
         shown = {item.item.item_id for item in projected.items}
         running = [item for item in projected.pending if item.item.item_id not in shown]
         sent = [*projected.items, *running]
+        retires = self._overlay.superseded(projected.items)
         if not sent:
+            self._publish_retired(retires, end)
             return
         carried = [] if self._last is None else [self._last]
         self._publisher.emit(
@@ -515,10 +526,19 @@ class ReadTimelineSink:
                 agent_id=self._agent_id,
                 items=[item.item.model_dump() for item in (*carried, *sent)],
                 msg_count=end,
+                retires=retires,
             ).model_dump_json()
         )
         self._last = max((*carried, *sent), key=lambda item: item.offset)
         self._emit_committed_inbounds(sent)
+
+    def _publish_retired(self, retires: list[str], end: int) -> None:
+        if retires:
+            self._publisher.emit(
+                TimelineSnapshot(
+                    agent_id=self._agent_id, items=[], msg_count=end, retires=retires
+                ).model_dump_json()
+            )
 
     def _emit_committed_inbounds(self, sent: Sequence[ProjectedItem]) -> None:
         for item in sent:
@@ -617,8 +637,8 @@ class ReadTimelineSink:
         if sid is None:
             return False
         home = self._ctx.require_meiva_home()
-        floor_path = _fork_floor_path(home, self._agent_id, self._harness)
-        stored = _read_fork_floor(floor_path, session_id=sid)
+        floor_path = fork_floor.fork_floor_path(home, self._agent_id, self._harness)
+        stored = fork_floor.read_fork_floor(floor_path, session_id=sid)
         if stored is not None:
             self._fork_floor = stored
             self._fork_floor_loaded = True
@@ -626,7 +646,7 @@ class ReadTimelineSink:
         cut = self._resolve_fork_cut(file, parent_id=parent_id, home=home)
         if cut is None:
             return False
-        _write_fork_floor(floor_path, session_id=sid, floor=cut)
+        fork_floor.write_fork_floor(floor_path, session_id=sid, floor=cut)
         self._fork_floor = cut
         self._fork_floor_loaded = True
         return True
@@ -636,12 +656,12 @@ class ReadTimelineSink:
         if keys:
             primary = wire_id(self._harness, self._input_keys[0]) if self._input_keys else None
             target_uuids = {wire_id(self._harness, key) for key in keys}
-            matched = _find_earliest_input_offset(file, target_uuids, primary)
+            matched = fork_floor.find_earliest_input_offset(file, target_uuids, primary)
             if matched is not None:
                 return matched
         parent_uuids = self._parent_record_uuids(parent_id, home=home)
         if parent_uuids:
-            parent_end, saw_child = _parent_fork_cut(file, parent_uuids)
+            parent_end, saw_child = fork_floor.parent_fork_cut(file, parent_uuids)
             if parent_end is not None:
                 return parent_end if saw_child else None
         if self._history_end > 0:
@@ -684,107 +704,8 @@ class ReadTimelineSink:
         )
         if parent_path is None:
             return None
-        self._parent_uuids = frozenset(_read_row_uuids(parent_path))
+        self._parent_uuids = frozenset(fork_floor.read_row_uuids(parent_path))
         return self._parent_uuids
-
-
-def _row_uuid(row: Mapping[str, object]) -> str | None:
-    attachment = row.get("attachment")
-    if is_object_dict(attachment):
-        source = attachment.get("source_uuid")
-        if isinstance(source, str) and source:
-            return source
-    value = row.get("uuid")
-    return value if isinstance(value, str) and value else None
-
-
-def _is_child_conversation_row(row: Mapping[str, object]) -> bool:
-    return row.get("type") in ("user", "assistant")
-
-
-def _find_earliest_input_offset(
-    file: RecordFile, target_uuids: set[str], primary_uuid: str | None
-) -> int | None:
-    earliest: int | None = None
-    pos = file.complete_end()
-    while pos > 0:
-        block = file.rows_before(pos, BLOCK_BYTES)
-        found_primary = False
-        for row in block.rows:
-            uid = _row_uuid(row.row)
-            if uid in target_uuids:
-                if earliest is None or row.offset < earliest:
-                    earliest = row.offset
-                if primary_uuid is not None and uid == primary_uuid:
-                    found_primary = True
-        if found_primary or block.start == 0 or block.start >= pos:
-            break
-        pos = block.start
-    return earliest
-
-
-def _read_row_uuids(path: Path) -> set[str]:
-    uuids: set[str] = set()
-    try:
-        with path.open("rb") as handle:
-            for raw_line in handle:
-                try:
-                    parsed = object_of(json.loads, raw_line.decode("utf-8", errors="replace"))
-                except ValueError:
-                    continue
-                if is_object_dict(parsed) and (uid := _row_uuid(parsed)) is not None:
-                    uuids.add(uid)
-    except OSError:
-        return set()
-    return uuids
-
-
-def _parent_fork_cut(file: RecordFile, parent_uuids: frozenset[str]) -> tuple[int | None, bool]:
-    saw_child = False
-    pos = file.complete_end()
-    while pos > 0:
-        block = file.rows_before(pos, BLOCK_BYTES)
-        for row in reversed(block.rows):
-            uid = _row_uuid(row.row)
-            if uid is not None and uid in parent_uuids:
-                return row.end, saw_child
-            if _is_child_conversation_row(row.row):
-                saw_child = True
-        if block.start == 0 or block.start >= pos:
-            break
-        pos = block.start
-    return None, saw_child
-
-
-def _fork_floor_path(home: Path, agent_id: int, harness: str) -> Path:
-    return harness_sessions_dir(home=home) / f"{agent_id}.{harness}.floor"
-
-
-def _read_fork_floor(path: Path, *, session_id: str) -> int | None:
-    try:
-        raw = object_of(json.loads, path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not is_object_dict(raw) or raw.get("session_id") != session_id:
-        return None
-    floor = raw.get("floor")
-    if isinstance(floor, int) and not isinstance(floor, bool) and floor >= 0:
-        return floor
-    return None
-
-
-def _write_fork_floor(path: Path, *, session_id: str, floor: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".floor-", suffix=".json")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps({"session_id": session_id, "floor": floor}) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        Path(temporary).replace(path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
 
 
 __all__ = ["ReadTimelineSink"]

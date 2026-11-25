@@ -56,6 +56,7 @@ class TimelineDraft:
     reasoning_ms: int | None = None
     exec_ms: int | None = None
     complete: bool = True
+    block: str | None = None
 
 
 # meiva:note

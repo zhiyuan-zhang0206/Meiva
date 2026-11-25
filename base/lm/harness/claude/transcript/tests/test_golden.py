@@ -21,11 +21,13 @@ from base.lm.harness.session.transcript.drafts import (
     TimelineDraft,
 )
 from base.lm.harness.session.transcript.entries import (
+    AgentText,
     AnomalyKind,
     AnyEntry,
     Failure,
     HumanInput,
     Interrupt,
+    Reasoning,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -434,3 +436,15 @@ def test_subagent_usage_never_enters_a_main_turn_figure() -> None:
     assert {u.record for u in early.usage} == {SYNC_AGENT, ASYNC_AGENT}
     _ = projector.feed(main)
     assert sum(t.usage.output_tokens for t in projector.usage_by_turn().values()) == 1040
+
+
+def test_a_text_and_a_thinking_row_carry_the_id_the_stream_gave_their_block() -> None:
+    blocks = [
+        (type(entry).__name__, entry.block)
+        for entry in entries_of("multiblock")
+        if isinstance(entry, AgentText | Reasoning)
+    ]
+    assert blocks == [
+        ("Reasoning", "msg_011CgxkqeD2XF521K9CTduo6:0"),
+        ("AgentText", "msg_011CgxkqeD2XF521K9CTduo6:1"),
+    ]
