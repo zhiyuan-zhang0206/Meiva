@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
+from base.agents.epochs.model import HarnessEpoch
+from base.agents.epochs.native_slice import native_slice_of
+from base.agents.epochs.read import read_epochs
 from base.agents.history.checkpoint import (
     CheckpointReadError,
     CheckpointTimelineSource,
@@ -30,10 +34,20 @@ from base.agents.history.checkpoint import (
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.api_contracts.reading import ReadingSourceUnavailableError, encode_reading_source
 from base.db import Database, agent_exists
+from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
+from gateway.agents.history.epoch_pages import (
+    EpochRead,
+    Unavailable,
+    assemble_page,
+    page_target,
+    usable_epochs,
+)
+from gateway.agents.history.epoch_range import ExternalRange, external_range, in_time_range
 from gateway.agents.history.native_reading_window import native_source_identity, native_source_items
 from gateway.agents.history.paging import (
     STANDING_HEAD_NOTE_TAGS,
@@ -47,14 +61,16 @@ from gateway.agents.history.paging import (
     window_or_cross,
 )
 from gateway.agents.history.read_inputs import TimelineRead
-from gateway.agents.history.record_timeline import record_window_for
+from gateway.agents.history.record_timeline import fetch_record_window_sync, record_window_for
 from gateway.http.config import gateway_state
 from gateway.message_admission.cursor import (
     MAX_CURSOR_LENGTH,
+    CursorPart,
     TimelineCursor,
     parse_cursor,
 )
 from gateway.message_admission.harness import agent_harness
+from ops.rpc_schemas import HarnessTimelineWindow, RecordUnreadable
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -76,11 +92,20 @@ class TimelineResponse(BaseModel):
     The endpoint returns only a tail window (newest `limit` items); `before`
     pages further back for scroll-up history. `has_more` reports whether
     older items exist before the returned window.
+
+    A harness switch ends an epoch and opens the next. The current epoch's items
+    keep their unprefixed ids; an earlier epoch's items are prefixed `e<seq>.`
+    (`e0.12.0`, `e0.s1.<checkpoint>.3.0`, `e1.h123.0`), its switch block is
+    `e<seq>.sw`. A page reads one epoch; the response's `current_epoch`
+    is the seq of the epoch whose ids are unprefixed (0 for an agent that never
+    switched). `msg_count` describes the current epoch and is 0 on a page of an
+    earlier epoch.
     """
 
     items: list[TimelineItem]
     msg_count: int
     has_more: bool
+    current_epoch: int = 0
     reading_source: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
 
 
@@ -125,6 +150,8 @@ def _load_history_tail(
     items = _load_history_segment(
         db, agent_id, boundary_ids[rank - 1], rank, read=read, limit=limit
     )
+    if items is not None and not items and read.epoch_slice is not None:
+        return _load_history_tail(db, agent_id, boundary_ids, rank + 1, limit, depth, read=read)
     if not items:
         return [], False
     window, segment_has_more = tail_window(items, limit)
@@ -156,7 +183,9 @@ def _load_history_segment(
     if not source.messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    return native_source_items(source, agent_id, read.rendering, segment_prefix=prefix)
+    return native_source_items(
+        source, agent_id, read.rendering, segment_prefix=prefix, epoch_slice=read.epoch_slice
+    )
 
 
 def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
@@ -316,7 +345,7 @@ def _head_response(
     read: TimelineRead,
 ) -> TimelineResponse:
     """The head window (no cursor) of the current segment."""
-    items = native_source_items(source, agent_id, read.rendering)
+    items = native_source_items(source, agent_id, read.rendering, epoch_slice=read.epoch_slice)
     msg_count = len(source.messages)
     tail, tail_has_more = tail_window(items, limit)
     window = initial_window(
@@ -344,6 +373,11 @@ def head_timeline(
     read = request_timeline_read(request)
     limit = read.default_limit
     harness = _get_agent_harness(request, agent_id)
+    epochs = _epochs_of(request, agent_id, harness)
+    if epochs:
+        return _epoch_response(
+            request, agent_id, epochs, limit, None, None, read=read, preloaded_source=source
+        )
     if harness != "meiva":
         return _external_harness_response(request, agent_id, harness, limit, None, None)
     return _meiva_harness_response(
@@ -446,8 +480,14 @@ def _meiva_harness_response(
     )
     boundary_ids = list(source.boundaries if depth < 0 else source.boundaries[:depth])
     if before is None:
-        return _head_response(agent_id, source, limit, boundary_ids, read=read)
-    items_cp = native_source_items(source, agent_id, read.rendering)
+        head = _head_response(agent_id, source, limit, boundary_ids, read=read)
+        if read.epoch_slice is None or head.items or not boundary_ids:
+            return head
+        older_items, older_more = _load_history_tail(
+            db, agent_id, boundary_ids, 1, limit, depth, read=read
+        )
+        return head.model_copy(update={"items": older_items, "has_more": older_more})
+    items_cp = native_source_items(source, agent_id, read.rendering, epoch_slice=read.epoch_slice)
     msg_count = len(source.messages)
     paged = _current_page_before(items_cp, cursor, limit, depth, boundary_ids, msg_count)
     if isinstance(paged, TimelineResponse):
@@ -459,6 +499,145 @@ def _meiva_harness_response(
     return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)
 
 
+def _epochs_of(request: Request, agent_id: int, harness: str) -> list[HarnessEpoch]:
+    with gateway_state(request).db_pool.connection() as conn:
+        return usable_epochs(read_epochs(conn, agent_id), harness)
+
+
+def _epoch_native_read(
+    request: Request,
+    agent_id: int,
+    epochs: Sequence[HarnessEpoch],
+    seq: int,
+    within: TimelineCursor | None,
+    limit: int,
+    read: TimelineRead,
+    preloaded_source: CheckpointTimelineSource | None,
+) -> EpochRead:
+    local = None if within is None else replace(within, epoch=None, part=CursorPart.CONTENT)
+    page = _meiva_harness_response(
+        request,
+        agent_id,
+        limit,
+        None if local is None else local.item_id(),
+        local,
+        read=replace(read, epoch_slice=native_slice_of(epochs, seq)),
+        preloaded_source=preloaded_source if seq == len(epochs) - 1 else None,
+    )
+    return EpochRead(
+        page.items,
+        has_more=page.has_more,
+        msg_count=page.msg_count,
+        reading_source=page.reading_source,
+    )
+
+
+_UNREADABLE = {
+    RecordUnreadable.NO_SESSION: Unavailable.NO_SESSION,
+    RecordUnreadable.FILE_MISSING: Unavailable.FILE_MISSING,
+    RecordUnreadable.SESSION_MISMATCH: Unavailable.SESSION_REPLACED,
+    RecordUnreadable.UNDECODABLE: Unavailable.UNDECODABLE,
+}
+_NOT_WRITTEN_YET = frozenset({RecordUnreadable.NO_SESSION, RecordUnreadable.FILE_MISSING})
+_DEGRADED_STATUS = {503: Unavailable.MACHINE_OFFLINE, 502: Unavailable.READ_FAILED}
+
+
+def _epoch_window(
+    request: Request,
+    agent_id: int,
+    epoch: HarnessEpoch,
+    span: ExternalRange,
+    before: int | None,
+    limit: int,
+    *,
+    current: bool,
+) -> HarnessTimelineWindow | Unavailable:
+    try:
+        return fetch_record_window_sync(
+            request,
+            agent_id,
+            epoch.harness,
+            limit=limit,
+            before=before,
+            floor=span.floor,
+            session_id=None if current else epoch.session_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code not in _DEGRADED_STATUS:
+            raise
+        return _DEGRADED_STATUS[exc.status_code]
+
+
+def _epoch_external_read(
+    request: Request,
+    agent_id: int,
+    epochs: Sequence[HarnessEpoch],
+    seq: int,
+    within: TimelineCursor | None,
+    limit: int,
+) -> EpochRead:
+    epoch, current = epochs[seq], seq == len(epochs) - 1
+    if not reads_timeline_from_record(epoch.harness):
+        return EpochRead([], has_more=False, unavailable=Unavailable.UNSUPPORTED)
+    if within is not None and (not within.is_harness or within.checkpoint_id):
+        return EpochRead([], has_more=False)
+    span = external_range(epochs, epoch)
+    before = span.ceiling if within is None else within.msg_idx
+    window = _epoch_window(request, agent_id, epoch, span, before, limit, current=current)
+    if isinstance(window, Unavailable):
+        return EpochRead([], has_more=False, unavailable=window)
+    if window.unreadable is not None and not (current and window.unreadable in _NOT_WRITTEN_YET):
+        return EpochRead([], has_more=False, unavailable=_UNREADABLE[window.unreadable])
+    items = [item for item in window.items if in_time_range(item, span.since, span.until)]
+    has_more = window.has_more and (not span.timed or len(items) == len(window.items))
+    return EpochRead(items, has_more=has_more, msg_count=window.size)
+
+
+def _epoch_response(
+    request: Request,
+    agent_id: int,
+    epochs: Sequence[HarnessEpoch],
+    limit: int,
+    before: str | None,
+    cursor: TimelineCursor | None,
+    *,
+    read: TimelineRead,
+    preloaded_source: CheckpointTimelineSource | None = None,
+) -> TimelineResponse:
+    current = epochs[-1].seq
+    target = page_target(epochs, before, cursor)
+    if target.seq is None:
+        return TimelineResponse(
+            items=target.fixed or [],
+            msg_count=0,
+            has_more=False,
+            current_epoch=current,
+        )
+    if epochs[target.seq].harness == "meiva":
+        result = _epoch_native_read(
+            request, agent_id, epochs, target.seq, target.within, limit, read, preloaded_source
+        )
+    else:
+        result = _epoch_external_read(request, agent_id, epochs, target.seq, target.within, limit)
+    if result.unavailable is not None:
+        logger.warning(
+            "timeline epoch {epoch} of agent {agent_id} is skipped: {reason}",
+            event="timeline_epoch_unreadable",
+            agent_id=agent_id,
+            epoch=target.seq,
+            harness=epochs[target.seq].harness,
+            reason=result.unavailable.value,
+        )
+    page = assemble_page(epochs, target.seq, result)
+    return TimelineResponse(
+        items=page.items,
+        msg_count=page.msg_count,
+        has_more=page.has_more,
+        current_epoch=current,
+        reading_source=page.reading_source,
+    )
+
+
 @router.get("/api/agents/{agent_id}/timeline", dependencies=[Depends(deny_isolated_result_read)])
 def get_timeline(
     agent_id: int,
@@ -467,7 +646,13 @@ def get_timeline(
     # task #3696 exception inventory); the default *window* is
     # display.timeline_default_limit.
     limit: int | None = Query(default=None, ge=1, le=1000),
-    before: str | None = Query(default=None),
+    before: str | None = Query(
+        default=None,
+        description=(
+            "The oldest item id the client holds, verbatim: any id this endpoint returns, including"
+            " `e<seq>.sw` of an earlier harness epoch."
+        ),
+    ),
 ) -> TimelineResponse:
     """Timeline = raw view of LangGraph state.messages, one window at a time.
 
@@ -481,6 +666,17 @@ def get_timeline(
     One checkpoint segment is built at a time; windowing trims the payload +
     the frontend render. A checkpoint read failure returns 503. Retained
     compact boundaries remain independently readable via /timeline/retained.
+
+    Across harness switches the timeline is one conversation read epoch by epoch.
+    The current epoch is served as above with unchanged ids. A `before` cursor at
+    the head of an epoch continues into the previous one: its items carry the
+    `e<seq>.` id prefix, its start is a `harness_switch` system marker
+    `e<seq>.sw`, and a page reads one epoch only. An epoch whose history cannot be
+    read (its machine is offline, its record was removed or moved) is skipped
+    without an item, with a warning in the gateway log; it never fails the page,
+    and the page is its switch block, so paging goes on to the epoch before it.
+    Items of an earlier epoch have no `reading_locator`, are not served by
+    `/timeline/window`, and cannot be quoted.
     """
     read = request_timeline_read(request)
     if limit is None:
@@ -488,6 +684,9 @@ def get_timeline(
     cursor = parse_cursor(before) if before is not None else None
     _require_agent(request, agent_id)
     harness = _get_agent_harness(request, agent_id)
+    epochs = _epochs_of(request, agent_id, harness)
+    if epochs:
+        return _epoch_response(request, agent_id, epochs, limit, before, cursor, read=read)
     if harness != "meiva":
         return _external_harness_response(request, agent_id, harness, limit, before, cursor)
     return _meiva_harness_response(request, agent_id, limit, before, cursor, read=read)
@@ -497,7 +696,7 @@ def _retained_cursor(before: str | None, checkpoint_id: str | None) -> TimelineC
     if before is None:
         return None
     cursor = parse_cursor(before)
-    if cursor is None or cursor.checkpoint_id is None:
+    if cursor is None or cursor.checkpoint_id is None or cursor.epoch is not None:
         raise HTTPException(status_code=400, detail="Retained history requires a historical cursor")
     if checkpoint_id is not None and cursor.checkpoint_id != checkpoint_id:
         raise HTTPException(status_code=400, detail="Retained boundary and cursor do not match")

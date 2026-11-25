@@ -1,0 +1,35 @@
+{
+  "request": "before=e2.sw (epoch 1 could not be read: its page is only its switch block)",
+  "response": {
+    "items": [
+      {
+        "item_id": "e1.sw",
+        "quote": null,
+        "activity_pending": null,
+        "kind": "system_marker",
+        "source": "harness_switch",
+        "payload": "Switched harness: meiva -> claude_code (claude-sonnet-5-5)",
+        "created_at": "2026-11-25T06:00:00+00:00",
+        "inbound_id": null,
+        "source_message_id": null,
+        "source_inbound_id": null,
+        "source_block_idx": null,
+        "compact_id": null,
+        "reasoning_ms": null,
+        "reasoning_tokens": null,
+        "exec_ms": null,
+        "show_timestamp": true,
+        "user_facing": true,
+        "images": null,
+        "image_dimensions": null,
+        "files": null,
+        "image_captions": null,
+        "sdk_calls": null,
+        "code_elapsed_ms": null
+      }
+    ],
+    "msg_count": 0,
+    "has_more": true,
+    "current_epoch": 3
+  }
+}

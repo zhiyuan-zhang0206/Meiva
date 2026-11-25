@@ -91,6 +91,30 @@ def test_pages_before_a_cursor_tile_the_record_without_gaps_or_repeats(tmp_path:
     assert len(whole) > 8
 
 
+def test_pages_above_a_floor_tile_the_rows_from_it_and_stop_there(tmp_path: Path) -> None:
+    file = write(tmp_path / "long.jsonl", fixture_text("long_session"))
+    whole = window(file, limit=1000).items
+    floor = whole[len(whole) // 2].offset
+    expected = [p.item.item_id for p in whole if p.offset >= floor]
+    pages: list[str] = []
+    before: int | None = None
+    while True:
+        page = window(file, limit=3, before=before, floor=floor)
+        pages = [*(p.item.item_id for p in page.items), *pages]
+        if not page.has_more:
+            break
+        before = page.items[0].offset
+    assert pages == expected
+    assert window(file, limit=1000, floor=floor).has_more is False
+
+
+def test_a_window_that_ends_at_its_floor_is_empty_and_final(tmp_path: Path) -> None:
+    file = write(tmp_path / "long.jsonl", fixture_text("long_session"))
+    floor = window(file, limit=1000).items[3].offset
+    page = window(file, before=floor, floor=floor)
+    assert (page.items, page.has_more) == ((), False)
+
+
 def test_a_call_without_a_result_is_running_until_its_result_is_in_the_record(
     tmp_path: Path,
 ) -> None:

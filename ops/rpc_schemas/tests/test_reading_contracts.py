@@ -34,7 +34,13 @@ def test_ordinary_wire_is_consumed_by_a_strict_old_reader(before: int | None) ->
     wire = request.wire_payload()
     old = StrictOldRequest.model_validate(wire)
     assert old.before == before and old.delivery_mode is None
-    assert not {"anchor_item_id", "reading_locator", "reading_direction"}.intersection(wire)
+    assert not {
+        "anchor_item_id",
+        "reading_locator",
+        "reading_direction",
+        "floor",
+        "session_id",
+    }.intersection(wire)
     response = HarnessTimelineWindow(items=[], has_more=False, size=0).model_dump(mode="json")
     assert response == {
         "items": [],
@@ -90,3 +96,34 @@ def test_new_selector_wire_requires_a_reader_that_supports_it() -> None:
     assert request.wire_payload()["reading_direction"] == "anchor"
     with pytest.raises(ValidationError):
         _ = StrictOldRequest.model_validate(request.wire_payload())
+
+
+def test_a_floor_and_a_session_are_sent_only_when_asked_for() -> None:
+    request = HarnessTimelineReadRequest(
+        agent_id=42,
+        harness="codex",
+        limit=50,
+        before=900,
+        floor=100,
+        session_id="s-1",
+        explicit_visibility=False,
+        delivery_mode=None,
+    )
+    assert (request.wire_payload()["floor"], request.wire_payload()["session_id"]) == (100, "s-1")
+
+
+@pytest.mark.parametrize(
+    "fields", [{"before": 50, "floor": 100}, {"anchor_item_id": "h5.0", "floor": 1}]
+)
+def test_a_floor_applies_only_to_a_window_that_ends_above_it(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        HarnessTimelineReadRequest.model_validate(
+            {
+                "agent_id": 42,
+                "harness": "codex",
+                "limit": 50,
+                "explicit_visibility": False,
+                "delivery_mode": None,
+                **fields,
+            }
+        )

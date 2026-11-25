@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base.agents.epochs.native_slice import NativeEpochSlice, apply_native_slice
 from base.agents.history.checkpoint import CheckpointTimelineSource, load_checkpoint_timeline_source
 from base.agents.history.timeline import build_timeline_items, reading_target, reading_window
 from base.agents.history.timeline_item import ReadingWindow, TimelineItem
@@ -28,6 +29,7 @@ def native_source_items(
     rendering: TimestampPolicy,
     *,
     segment_prefix: str | None = None,
+    epoch_slice: NativeEpochSlice | None = None,
 ) -> list[TimelineItem]:
     if segment_prefix is None:
         segment_prefix = (
@@ -38,6 +40,8 @@ def native_source_items(
     items, _ = build_timeline_items(
         source.messages, inputs=rendering, segment_prefix=segment_prefix
     )
+    if epoch_slice is not None:
+        items = apply_native_slice(items, epoch_slice)
     identity = native_source_identity(source, agent_id)
     for item in items:
         if (

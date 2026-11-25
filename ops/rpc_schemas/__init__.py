@@ -40,6 +40,7 @@ from ops.rpc_schemas.harness_timeline import (
     HarnessTimelineReadRequest as HarnessTimelineReadRequest,
 )
 from ops.rpc_schemas.harness_timeline import HarnessTimelineWindow as HarnessTimelineWindow
+from ops.rpc_schemas.harness_timeline import RecordUnreadable as RecordUnreadable
 from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
 from ops.rpc_schemas.terminate import TerminateAgentResponse as TerminateAgentResponse

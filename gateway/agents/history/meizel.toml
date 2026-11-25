@@ -4,13 +4,15 @@ exports = ["configuration.py", "conversation.py", "inbound.py", "reading_api.py"
 "configuration.py" = ["read_inputs.py"]
 "conversation.py" = ["timeline.py"]
 "record_timeline.py" = ["configuration.py"]
-"timeline.py" = ["configuration.py", "native_reading_window.py", "paging.py", "read_inputs.py", "record_timeline.py"]
+"timeline.py" = ["configuration.py", "epoch_pages.py", "epoch_range.py", "native_reading_window.py", "paging.py", "read_inputs.py", "record_timeline.py"]
 "reading_api.py" = ["configuration.py", "native_reading_window.py", "record_timeline.py"]
-"tests" = ["paging.py", "read_inputs.py"]
+"tests" = ["epoch_pages.py", "epoch_range.py", "paging.py", "read_inputs.py", "timeline.py"]
 "understanding.py" = ["configuration.py", "read_inputs.py"]
 
 [purity]
 "__init__.py" = "strict"
 "cursor.py" = "strict"
+"epoch_pages.py" = "strict"
+"epoch_range.py" = "strict"
 "paging.py" = "strict"
 "read_inputs.py" = "strict"

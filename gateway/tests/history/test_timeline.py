@@ -64,6 +64,7 @@ def test_timeline_empty_for_new_agent(db_conn: psycopg.Connection, test_client: 
         "items": [],
         "msg_count": 0,
         "has_more": False,
+        "current_epoch": 0,
         "reading_source": encode_reading_source(
             NativeReadingSource(agent_id=tid, epoch=INITIAL_READING_EPOCH)
         ),

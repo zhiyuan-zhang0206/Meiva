@@ -51,6 +51,7 @@ def test_note_tag_value_set() -> None:
         "workspace_hygiene",
         "personal_dream",
         "agent_terminated",
+        "harness_switch",
     }
 
 

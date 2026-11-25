@@ -61,6 +61,7 @@ def window(
     harness: str = "claude_code",
     anchor: int | None = None,
     unread: UnreadRows | None = None,
+    floor: int = 0,
 ) -> Window:
     return read_window(
         file,
@@ -72,6 +73,7 @@ def window(
         render_tool=format_tool_use,
         load_sent=lambda _until, _wanted: dict(sent or {}),
         unread=unread if unread is not None else UnreadRows(),
+        floor=floor,
     )
 
 
