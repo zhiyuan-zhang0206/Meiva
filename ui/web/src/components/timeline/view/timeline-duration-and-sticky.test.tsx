@@ -278,7 +278,7 @@ describe("detail-block duration display", () => {
     expect(header).toContain("Working for 13s");
     expect(header).toContain("1 turn");
   });
-  it("shows plain Working… on an unstamped live block without lastEventAt", () => {
+  it("counts from the first render on an unstamped live block without lastEventAt", () => {
     render(
       <TimelineView
         turnActive
@@ -294,7 +294,7 @@ describe("detail-block duration display", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("Working for 1s");
   });
   it("renders PendingLiveActivityWindow when turnActive is true right after a human message", () => {
     render(

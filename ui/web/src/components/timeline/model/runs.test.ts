@@ -514,7 +514,7 @@ describe("summarizeTurn — active-segment timing", () => {
     expect(s.liveSegmentStartMs).toBe(workStart);
   });
 
-  it("returns null settledActiveMs when any active segment lacks start or end timestamps, and null priorActiveMs when a prior active segment lacks timestamps", () => {
+  it("returns null settledActiveMs when any active segment lacks start or end timestamps, and counts an unmeasurable prior active segment as 0 in the priorActiveMs lower bound", () => {
     const t = "2026-11-21T10:00:00.000Z";
     const missingBoth = summarizeTurn([
       item("agent_code", null, "a", { created_at: null }),
@@ -544,8 +544,23 @@ describe("summarizeTurn — active-segment timing", () => {
       item("agent_code", null, "3.0", { created_at: "2026-11-21T10:00:05.000Z" }),
     ]);
     expect(missingPrior.settledActiveMs).toBeNull();
-    expect(missingPrior.priorActiveMs).toBeNull();
+    expect(missingPrior.priorActiveMs).toBe(0);
     expect(missingPrior.liveSegmentStartMs).toBe(Date.parse(t));
+  });
+
+  it("sums only the measurable completed segments into the priorActiveMs lower bound", () => {
+    const t0 = Date.parse("2026-11-25T10:00:00.000Z");
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const s = summarizeTurn([
+      item("agent_code", null, "1.0", { created_at: iso(t0) }),
+      item("inbound_chat", "human", "2.0", { created_at: iso(t0 + 60_000) }),
+      item("agent_reasoning", null, "3.0", { created_at: iso(t0 + 70_000), reasoning_ms: 10_000 }),
+      item("inbound_chat", "human", "4.0", { created_at: iso(t0 + 600_000) }),
+      item("agent_code", null, "5.0", { created_at: iso(t0 + 601_000) }),
+    ]);
+    expect(s.settledActiveMs).toBeNull();
+    expect(s.priorActiveMs).toBe(10_000);
+    expect(s.liveSegmentStartMs).toBe(t0 + 600_000);
   });
 
   it("takes the latest end across out-of-order parallel tool completions", () => {

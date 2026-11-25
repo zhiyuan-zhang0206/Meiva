@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 
 import { TurnBlock } from "./run-block";
@@ -75,30 +75,34 @@ describe("TurnBlock expanded body", () => {
 describe("TurnBlock missing timing and active-segment display", () => {
   it("shows plain Worked without a warning icon when settledActiveMs is null", () => {
     render(<TurnBlock id="partial" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: null, liveSegmentStartMs: null }} />);
+      summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: 0, liveSegmentStartMs: null }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked");
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByTestId("turn-toggle").querySelector("[title], [aria-label]")).toBeNull();
   });
 
-  it("keeps a live block with missing priorActiveMs or missing anchor plain Working without a warning icon", () => {
-    const { rerender } = render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+  it("counts a live block from the first render when the live segment has no start and no event anchor exists", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
       turnActive summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: 0, liveSegmentStartMs: null }} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working for 1s");
+    act(() => { vi.advanceTimersByTime(3_000); });
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working for 3s");
     expect(screen.queryByRole("img")).toBeNull();
-
-    rerender(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      turnActive lastEventAt={1_700_000_005_000}
-      summary={{ ...baseSummary, settledActiveMs: null, priorActiveMs: null, liveSegmentStartMs: 1_700_000_000_000 }} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
-    expect(screen.queryByRole("img")).toBeNull();
+    vi.useRealTimers();
   });
 
-  it("holds priorActiveMs when a live block has closed its prior segment and has no live anchor yet", () => {
+  it("holds priorActiveMs and keeps counting when a live block has closed its prior segment and has no live anchor yet", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
     render(<TurnBlock id="live-hold" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
       turnActive lastEventAt={0}
       summary={{ ...baseSummary, settledActiveMs: 600_000, priorActiveMs: 600_000, liveSegmentStartMs: null }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Working for 10m");
+    act(() => { vi.advanceTimersByTime(5_000); });
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working for 10m 5s");
+    vi.useRealTimers();
   });
 
   it.each([0, 400, 6000])("formats complete active duration %ims", (activeMs) => {

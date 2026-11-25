@@ -1,7 +1,7 @@
 "use client";
 
 // meiva:note
-// Unified collapsible TurnBlock for secondary agent steps (both live "Working…"
+// Unified collapsible TurnBlock for secondary agent steps (both live "Working for Xs"
 // turns and completed "Worked for Xs" turns): an unboxed header with a live/settled
 // duration summary that sticks below the conversation bar while expanded. An expanded
 // body always flows at its natural height in the timeline - there is no inner
@@ -12,7 +12,7 @@
 
 import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 
 import { formatWholeSecondsDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
@@ -26,6 +26,7 @@ import {
   OVERFLOW_HIDDEN,
 } from "@/lib/layout/layout";
 import { useSyncedShimmer } from "@/components/ui/use-synced-shimmer";
+import { useWallNow } from "@/lib/transport/transport-context";
 
 import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary/card-summary";
 import { useNow } from "./model/reasoning-clock";
@@ -51,16 +52,13 @@ interface TurnBlockProps {
   lastEventAt?: number;
 }
 
-function computeLiveDurationMs(
-  summary: TurnSummary,
-  liveAnchor: number | null,
-  liveNow: number,
-): number | null {
-  if (summary.priorActiveMs === null) return null;
-  if (liveAnchor !== null) {
-    return summary.priorActiveMs + Math.max(liveNow - liveAnchor, 0);
-  }
-  return summary.priorActiveMs > 0 ? summary.priorActiveMs : null;
+function useLiveAnchor(active: boolean, knownAnchor: number | null): number | null {
+  const wallNow = useWallNow();
+  const [activeSince, setActiveSince] = useState<number | null>(() => (active ? wallNow() : null));
+  if (active && activeSince === null) setActiveSince(wallNow());
+  if (!active && activeSince !== null) setActiveSince(null);
+  if (!active) return null;
+  return knownAnchor ?? activeSince ?? wallNow();
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -113,30 +111,27 @@ export const TurnBlock = memo(function TurnBlock({
   // meiva:note
   // Active-segment work duration (user ruling 2026-11-22): Working = prior completed active
   // segments + (now - live segment start), excluding inter-turn idle gaps; Worked = sum of
-  // active segments containing agent output. Falls back to `lastEventAt` while active only if
-  // the live segment has no start timestamp yet (or keeps `priorActiveMs` when > 0 and no anchor).
+  // active segments containing agent output. The live clock never goes quiet (user report
+  // 2026-11-25): `priorActiveMs` is a lower bound, and a missing live segment start falls back to
+  // `lastEventAt`, then to the instant this header first saw the turn active.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-  const liveAnchor = turnActive
-    ? (summary.liveSegmentStartMs ?? (lastEventAt > 0 ? lastEventAt : null))
-    : null;
-  const liveNow = useNow(
-    Boolean(turnActive) && liveAnchor !== null && summary.priorActiveMs !== null,
+  const liveAnchor = useLiveAnchor(
+    Boolean(turnActive),
+    summary.liveSegmentStartMs ?? (lastEventAt > 0 ? lastEventAt : null),
   );
+  const liveNow = useNow(Boolean(turnActive));
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
-  const liveDurationMs = turnActive
-    ? computeLiveDurationMs(summary, liveAnchor, liveNow)
-    : null;
   const liveDuration =
-    liveDurationMs !== null ? formatWholeSecondsDuration(liveDurationMs) : null;
+    liveAnchor !== null
+      ? formatWholeSecondsDuration(summary.priorActiveMs + Math.max(liveNow - liveAnchor, 0))
+      : null;
   const settledDuration =
     !turnActive && hasWork && summary.settledActiveMs !== null
       ? formatWholeSecondsDuration(summary.settledActiveMs)
       : null;
-  const workedLabel = turnActive
-    ? liveDuration !== null
-      ? t("workingFor", { duration: liveDuration })
-      : t("working")
+  const workedLabel = liveDuration !== null
+    ? t("workingFor", { duration: liveDuration })
     : hasWork
       ? settledDuration !== null
         ? t("workedFor", { duration: settledDuration })
@@ -240,14 +235,11 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
 }) {
   const t = useTranslations("timeline");
   const titleRef = useSyncedShimmer(true);
-  const hasAnchor = startedAt > 0;
-  const liveNow = useNow(hasAnchor);
-  const liveDuration = hasAnchor
-    ? formatWholeSecondsDuration(Math.max(liveNow - startedAt, 0))
-    : null;
-  const label = liveDuration !== null
-    ? t("workingFor", { duration: liveDuration })
-    : t("working");
+  const liveAnchor = useLiveAnchor(true, startedAt > 0 ? startedAt : null);
+  const liveNow = useNow(true);
+  const label = t("workingFor", {
+    duration: formatWholeSecondsDuration(Math.max(liveNow - (liveAnchor ?? liveNow), 0)),
+  });
   return (
     <div
       data-live-activity-window="true"

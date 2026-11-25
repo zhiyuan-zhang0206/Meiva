@@ -140,11 +140,11 @@ describe("home loading presentation through the selected timeline reader", () =>
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
     expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
-    expect(screen.queryByText("Working…")).toBeNull();
+    expect(screen.queryByText(/^Working for/)).toBeNull();
     await act(() => { read.resolve(response()); return read.promise; });
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toMatch(/^Working for \d+s$/);
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
     view.rerender(surface(<Reader running={false} />));
@@ -159,7 +159,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     const view = renderWithBrowser(surface(<Reader fills />));
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     expect(transport.getTimeline).not.toHaveBeenCalled();
-    expect(screen.getByTestId("pending-live-activity-window").textContent).toBe("Working…");
+    expect(screen.getByTestId("pending-live-activity-window").textContent).toMatch(/^Working for \d+s$/);
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledOnce());
@@ -169,7 +169,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     await act(async () => { read.reject(new Error("Older fixture failed")); await Promise.resolve(); });
     await waitFor(() => expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("idle"));
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toMatch(/^Working for \d+s$/);
     expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByText("Selected prompt")).toBeTruthy();
   });

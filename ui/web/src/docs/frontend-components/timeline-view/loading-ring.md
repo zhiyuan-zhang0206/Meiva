@@ -21,14 +21,14 @@ once under the ring, rows that do not stay hidden behind it. An initial
 read takes precedence over a reader's older-page ring. Both suppress the inline
 first-step `PendingLiveActivityWindow` row (`!loading` in `TimelineGroupList`,
 where `TimelineView` passes `loading || readerLoadingOlder`), so source and
-reader loads present only the top ring without a competing bottom `Working…` row.
+reader loads present only the top ring without a competing bottom `Working for Xs` row.
 Background paging retains its existing invisible presentation.
 
 Once the source is ready and no reader older-page load is active, an active turn
 whose triggering message is on the timeline (see "A queued message is not work in
 progress" in [deep collapse](deep-collapse.md)) with no group or only a trailing human
 prompt presents the inline
-`PendingLiveActivityWindow` (`Working…` with the `Layers` icon, matching
+`PendingLiveActivityWindow` (`Working for Xs` with the `Layers` icon, matching
 `TurnBlock`'s collapsed header geometry without a disclosure chevron). A real
 work group keeps its expandable `TurnBlock` content and status throughout reads.
 Presentation never clears a run or applies a timeout; source failures release
