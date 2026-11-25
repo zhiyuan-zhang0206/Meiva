@@ -1,6 +1,6 @@
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/stream-reveal.md
 import {
-  EDGE_FADE_SETTLE_MS,
+  EDGE_FADE_AGE_OUT_MS,
   EDGE_FADE_STEP_OPACITY,
   EDGE_FADE_TAIL_GRAPHEMES,
 } from "./constants";
@@ -122,7 +122,7 @@ export function settleEdgeFade(host: HighlightHost, owner: object, root: HTMLEle
   const startedAt = performance.now();
   const step = (ts: number) => {
     if (cancelled) return;
-    const progress = Math.min(1, (ts - startedAt) / EDGE_FADE_SETTLE_MS);
+    const progress = Math.min(1, (ts - startedAt) / EDGE_FADE_AGE_OUT_MS);
     if (progress >= 1) {
       clearEdgeFade(owner);
       return;

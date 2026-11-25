@@ -13,4 +13,4 @@ export const REVEAL_MAX_FRAME_DT_MS = 250;
 
 export const EDGE_FADE_TAIL_GRAPHEMES = 16;
 export const EDGE_FADE_STEP_OPACITY = [0.22, 0.45, 0.7, 0.88] as const;
-export const EDGE_FADE_SETTLE_MS = 220;
+export const EDGE_FADE_AGE_OUT_MS = 400;
