@@ -161,7 +161,6 @@ export function AgentRow({
   // the other action mid-fade.
   const [forkOpen, setForkOpen] = useState(false);
   const [resurrectOpen, setResurrectOpen] = useState(false);
-  const [restartOpen, setRestartOpen] = useState(false);
 
   const { settings: userSettings } = useUserSettings();
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
@@ -222,8 +221,8 @@ export function AgentRow({
     }
   };
 
-  const confirmRestart = () => {
-    setRestartOpen(true);
+  const restart = () => {
+    onRestart(t("restartMessage"));
   };
 
   const { hoverOpen, onMouseEnter, onMouseLeave, dismissHover } = useAgentRowHover(
@@ -412,7 +411,7 @@ export function AgentRow({
           <>
             {(agent.harness === "meiva" || agent.status === "idling") && (
               <ContextMenuItem
-                onSelect={confirmRestart}
+                onSelect={restart}
                 disabled={pending !== undefined}
               >
                 <RotateCw /> {t("restart")}
@@ -468,21 +467,6 @@ export function AgentRow({
           placeholder={t("resurrectPromptPlaceholder")}
           submitLabel={t("resurrect")}
           onSubmit={onResurrect}
-        />
-      ) : null}
-      {restartOpen ? (
-        <LazyPromptDialog
-          open
-          onOpenChange={setRestartOpen}
-          title={t("restartAgent")}
-          description={t("restartDesc")}
-          placeholder={t("restartPromptPlaceholder")}
-          submitLabel={t("restart")}
-          onSubmit={(message: string) => {
-            if (message.trim()) {
-              onRestart(message.trim());
-            }
-          }}
         />
       ) : null}
       </ContextMenu>

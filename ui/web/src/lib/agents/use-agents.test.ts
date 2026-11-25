@@ -581,7 +581,7 @@ describe("useAgents.restart", () => {
       await result.current.restart(1, "restarting");
     });
 
-    expect(api.restartAgent).toHaveBeenCalledWith(1, { message: "restarting", config_overlay: undefined });
+    expect(api.restartAgent).toHaveBeenCalledWith(1, { message: "restarting" });
   });
 
   it("failure → showError + does not throw", async () => {

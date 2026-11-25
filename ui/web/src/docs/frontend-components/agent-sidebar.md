@@ -155,6 +155,10 @@ switches the card immediately (0 ms), and leaving closes it at once (coarse
 pointers suppress synthetic hover tooltips). Rows can be renamed inline either by
 double-clicking the label or by choosing `Rename` from the context menu (long-press
 on touch, right-click on desktop).
+`Restart` is one click with a fixed message and no config: the frontend cannot change an agent's
+harness, model or effort on restart. It is offered on a Meiva-harness row at any status and on an
+external-harness row only while idle, the same rule the gateway enforces (409 otherwise). A harness
+switch comes from the agent itself (`meiva.self.restart`) or from operators (restart API / CLI).
 Status arrives over SSE. Every home entry expands the rail once: the one-time
 reset lives in `HomeShell` (which survives layout-frame switches while the
 sidebar remounts) and waits for the persisted settings, so a cold load with

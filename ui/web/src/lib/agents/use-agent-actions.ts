@@ -24,7 +24,7 @@ export interface AgentActions {
   spawn: (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
-  restart: (id: number, message: string, config_overlay?: Record<string, unknown>) => Promise<void>;
+  restart: (id: number, message: string) => Promise<void>;
   resurrect: (id: number, prompt?: string) => Promise<void>;
   compact: (id: number) => Promise<void>;
 }
@@ -159,15 +159,8 @@ export function useAgentActions(
   });
 
   const restartMutation = useMutation({
-    mutationFn: ({
-      id,
-      message,
-      config_overlay,
-    }: {
-      id: number;
-      message: string;
-      config_overlay?: Record<string, unknown>;
-    }) => client.restartAgent(id, { message, config_overlay }),
+    mutationFn: ({ id, message }: { id: number; message: string }) =>
+      client.restartAgent(id, { message }),
     onSuccess: () => track("restart"),
     onError: (e: unknown) => showError(`Restart failed: ${errMsg(e)}`),
   });
@@ -367,13 +360,9 @@ export function useAgentActions(
   );
 
   const restart = useCallback(
-    async (
-      id: number,
-      message: string,
-      config_overlay?: Record<string, unknown>,
-    ) => {
+    async (id: number, message: string) => {
       try {
-        await restartMutation.mutateAsync({ id, message, config_overlay });
+        await restartMutation.mutateAsync({ id, message });
       } catch {
         return;
       }

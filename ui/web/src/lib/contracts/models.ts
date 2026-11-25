@@ -7,7 +7,7 @@ import type { components } from "./types-generated";
 import type { ModelsResponse } from "./types";
 
 // meiva:note
-// The runtime loop an agent is born on, fixed for its whole life: `meiva` is the built-in runtime, the others run the loop on an external CLI. The spawn form offers this choice and never changes it afterwards; a fork keeps its source's value. `launchable` is the platform's own answer to "can this machine actually start a session on it" - a harness can be installed (available) and still not launchable, and the UI says so rather than letting the choice look usable.
+// The runtime loop an agent runs on: `meiva` is the built-in runtime, the others run the loop on an external CLI. The spawn form offers this choice at birth and a fork keeps its source's value. The frontend has no way to change it afterwards; a harness switch comes from the agent itself (`meiva.self.restart`) or from operators (restart API / CLI), and shares no conversation with the new harness. `launchable` is the platform's own answer to "can this machine actually start a session on it" - a harness can be installed (available) and still not launchable, and the UI says so rather than letting the choice look usable.
 // meiva:link base/agents/docs/harness/harness.md
 
 export type Harness = components["schemas"]["Harness"];
