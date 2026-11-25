@@ -446,7 +446,7 @@ class TestSpawnHarness:
         assert response.status_code == 400
         body = response.json()
         assert body["reason"] == "fork_harness_mismatch"
-        assert "immutable" in body["detail"]
+        assert "keeps its source's harness" in body["detail"]
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
