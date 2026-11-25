@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -28,3 +29,12 @@ class HarnessEpoch:
 class RecordExtent:
     session_id: str
     offset: int
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchExtents:
+    leaving: RecordExtent | None = None
+    arriving: RecordExtent | None = None
+
+
+RecordExtentReader = Callable[[int, str], RecordExtent | None]

@@ -69,6 +69,7 @@ async def test_external_restart_preserves_schedules(
         catalog=model_catalog,
         default_model="deepseek-flash",
         home=unit_home,
+        environ={},
     )
 
     assert _state(db_conn, sid) == before

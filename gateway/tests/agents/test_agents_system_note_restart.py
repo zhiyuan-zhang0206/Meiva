@@ -6,6 +6,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.agents.epochs.read import read_epochs
 from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.api_contracts.idempotency import keyed_headers
 from base.lm.catalog import ModelCatalog
@@ -370,6 +371,19 @@ class TestRestart:
                 assert row[2].get("reasoning_effort") == "medium"
                 assert "harness" not in row[2]
                 assert row[3] is not None
+            db_conn.commit()
+            first, second = read_epochs(db_conn, agent_id)
+            assert (first.harness, first.switched_by, first.ended_at is not None) == (
+                "meiva",
+                "birth",
+                True,
+            )
+            assert (second.seq, second.harness, second.model) == (1, "codex", "gpt-6.1-sol")
+            assert (second.switched_by, second.reason, second.ended_at) == (
+                "user",
+                "switching to codex",
+                None,
+            )
 
     def test_harness_switch_codex_to_meiva(self, db_conn: psycopg.Connection) -> None:
         from base import paths
@@ -503,7 +517,11 @@ class TestRestart:
 
         expected = "continue checking"
         if old_harness != "codex":
-            expected = f"[Harness switched from '{old_harness}' to 'codex']\n" + expected
+            expected = (
+                f"[Harness switched from '{old_harness}' to 'codex' by user]\n"
+                "Nothing said before the switch is visible here; this message is the handoff."
+                "\n\n" + expected
+            )
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT content, kind, source, payload FROM inbound_messages "

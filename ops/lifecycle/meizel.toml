@@ -4,7 +4,7 @@ exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "term
 "__init__.py" = ["deferred_restart.py", "events.py", "hosted_turn.py", "launch.py", "restart_row.py", "resurrect_gates.py", "resurrect_plan.py", "termination.py"]
 "delivery.py" = ["__init__.py"]
 "launch.py" = ["launch_row.py"]
-"tests" = ["__init__.py", "delivery.py", "hosted_turn.py", "launch.py", "launch_row.py", "resurrect_plan.py", "termination.py"]
+"tests" = ["__init__.py", "delivery.py", "hosted_turn.py", "launch.py", "launch_row.py", "restart_row.py", "resurrect_plan.py", "termination.py"]
 
 [purity]
 "launch_row.py" = "strict"

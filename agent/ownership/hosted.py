@@ -25,17 +25,19 @@ from agent.ownership.lifecycle_plan import (
     LifecycleKind as LifecycleKind,
 )
 from agent.ownership.lifecycle_plan import (
-    TurnFatalStamp as TurnFatalStamp,
-)
-from agent.ownership.lifecycle_plan import (
-    TurnSettlement as TurnSettlement,
-)
-from agent.ownership.lifecycle_plan import (
+    RestartInputs,
     lifecycle_kind,
     restart_apply,
     shell_cutoff,
     turn_close,
 )
+from agent.ownership.lifecycle_plan import (
+    TurnFatalStamp as TurnFatalStamp,
+)
+from agent.ownership.lifecycle_plan import (
+    TurnSettlement as TurnSettlement,
+)
+from base.agents.epochs.model import RecordExtentReader, SwitchExtents
 from base.agents.inbox.termination_notice import (
     AncestorTerminationNotice,
     notify_nearest_living_ancestor_async,
@@ -182,6 +184,21 @@ async def _apply_terminate_command(
     return cutoff, ancestor_notification, terminate_event
 
 
+def _switch_extents(
+    command: _LifecycleCommand,
+    agent_id: int,
+    stored_harness: str,
+    read_extent: RecordExtentReader | None,
+) -> SwitchExtents:
+    transition = command.transition
+    if read_extent is None or transition is None or transition.target_harness == stored_harness:
+        return SwitchExtents()
+    return SwitchExtents(
+        leaving=read_extent(agent_id, stored_harness),
+        arriving=read_extent(agent_id, transition.target_harness),
+    )
+
+
 async def _apply_restart_command(
     conn: AsyncConnectionLike,
     incarnation: RuntimeIncarnation,
@@ -189,14 +206,18 @@ async def _apply_restart_command(
     *,
     resume_turn: bool,
     stored_harness: str,
+    read_extent: RecordExtentReader | None,
 ) -> HarnessSwitch | None:
     plan = restart_apply(
         incarnation.agent_id,
-        source=command.source,
-        message=command.content or None,
-        resume_turn=resume_turn,
-        transition=command.transition,
+        RestartInputs(
+            source=command.source,
+            message=command.content or None,
+            resume_turn=resume_turn,
+            transition=command.transition,
+        ),
         stored_harness=stored_harness,
+        extents=_switch_extents(command, incarnation.agent_id, stored_harness, read_extent),
     )
     if command.transition is None and plan.note is not None and command.fast_ack_note is not None:
         plan = replace(
@@ -249,6 +270,7 @@ async def apply_hosted_lifecycle(
     incarnation: RuntimeIncarnation,
     *,
     resume_turn: bool,
+    read_extent: RecordExtentReader | None = None,
 ) -> AppliedLifecycle | None:
     cutoff: int | None = None
     switch: HarnessSwitch | None = None
@@ -285,6 +307,7 @@ async def apply_hosted_lifecycle(
                     command,
                     resume_turn=resume_turn,
                     stored_harness=stored_harness,
+                    read_extent=read_extent,
                 )
             case "terminate":
                 cutoff, ancestor_notification, terminate_event = await _apply_terminate_command(
@@ -301,32 +324,6 @@ async def apply_hosted_lifecycle(
         switch=switch,
         ancestor_notification=ancestor_notification,
     )
-
-
-# meiva:note
-# The harness the claimed restart of this incarnation is about to store, or None when no restart
-# is claimed, it carries no transition or the transition keeps the stored harness. The host reads
-# it before the apply so the effects the switch owes that sit outside the database (the old
-# harness's session record) run first and can be repeated: the command stays claimed until the
-# apply commits, and a successor claims it again.
-async def claimed_harness_switch_target(
-    pool: AsyncPool, incarnation: RuntimeIncarnation
-) -> str | None:
-    async with pool.connection() as conn:
-        cursor = await conn.execute(
-            "SELECT m.harness, c.payload FROM agents_meta m JOIN inbound_messages c "
-            "ON c.agent_id = m.id WHERE m.id=%s AND m.runtime_generation=%s "
-            "AND m.runtime_owner=%s AND c.kind='restart' AND c.status='claimed' "
-            "ORDER BY c.id LIMIT 1",
-            (incarnation.agent_id, incarnation.generation, incarnation.owner),
-        )
-        row = await cursor.fetchone()
-    if row is None:
-        return None
-    transition = restart_transition_of(row[1])
-    if transition is None or transition.target_harness == _stored_harness((0, row[0])):
-        return None
-    return transition.target_harness
 
 
 # meiva:note

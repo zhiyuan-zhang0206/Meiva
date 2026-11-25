@@ -156,6 +156,7 @@ async def test_restart_agent_op_persists_message_on_restart_inbound(
         catalog=model_catalog,
         agent_host_port=8114,
         home=resolve_meiva_home(),
+        environ={},
     )
     assert result.status == "enqueued"
     assert db_conn.execute(
@@ -263,6 +264,7 @@ async def test_restart_agent_op_terminated_short_circuits(
             catalog=build_model_catalog(home=meiva_home()),
             default_model=settings.lm.llm_model,
             home=meiva_home(),
+            environ={},
         )
         assert received.get_message(timeout=0.1) is None
     assert resp.status == "already_terminated"
@@ -292,6 +294,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             catalog=model_catalog,
             agent_host_port=8114,
             home=resolve_meiva_home(),
+            environ={},
         )
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
@@ -389,6 +392,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
         catalog=model_catalog,
         agent_host_port=8114,
         home=resolve_meiva_home(),
+        environ={},
     )
     assert result.status == "enqueued"
     assert db_conn.execute(
@@ -417,6 +421,7 @@ async def test_lifecycle_op_unparseable_path_raises(
             catalog=model_catalog,
             agent_host_port=8114,
             home=resolve_meiva_home(),
+            environ={},
         )
 
 
@@ -440,6 +445,7 @@ async def test_guarded_resurrect_path_requires_trigger(
             catalog=model_catalog,
             agent_host_port=8114,
             home=resolve_meiva_home(),
+            environ={},
         )
 
 
@@ -464,6 +470,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             catalog=model_catalog,
             agent_host_port=8114,
             home=resolve_meiva_home(),
+            environ={},
         )
 
 
@@ -487,6 +494,7 @@ async def test_explicit_resurrect_dispatches_manual_op(
         catalog=model_catalog,
         agent_host_port=8114,
         home=resolve_meiva_home(),
+        environ={},
     )
     assert result.status == "spawned"
     assert db_conn.execute(
@@ -533,6 +541,7 @@ async def test_a_force_terminate_releases_the_pages_of_the_home_it_was_given(
             catalog=model_catalog,
             agent_host_port=8114,
             home=served_home,
+            environ={},
         )
     finally:
         server.close()
@@ -569,6 +578,7 @@ async def test_scheduled_native_restart_losing_claim_race_preserves_running_turn
             catalog=model_catalog,
             default_model="deepseek-flash",
             home=agent_host.host.home,
+            environ={},
             require_quiescent=True,
         )
     )

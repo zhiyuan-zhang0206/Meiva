@@ -35,7 +35,7 @@ async def record_switch_note(
 ) -> None:
     from agent.graph.node_log import SNAPSHOT_CURSOR
     from agent.messages import NoteTag, system_note_message
-    from base.agents.messages.lifecycle_text import by_who
+    from base.agents.messages.lifecycle_text import harness_switch_note
 
     if old_harness == new_harness:
         return
@@ -43,8 +43,8 @@ async def record_switch_note(
     if old_harness != "meiva" or history.graph is None:
         return
     now = history.timestamps.require_now()
-    note_content = (
-        f"Harness switched from '{old_harness}' to '{new_harness}' by {by_who(source)}: {message}"
+    note_content = harness_switch_note(
+        source, message, from_harness=old_harness, to_harness=new_harness
     )
     note = system_note_message(
         inputs=history.timestamps,

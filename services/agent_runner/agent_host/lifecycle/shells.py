@@ -10,6 +10,7 @@ from agent.ownership.hosted import (
     LifecycleKind,
     apply_hosted_lifecycle,
 )
+from base.agents.epochs.model import RecordExtentReader
 from base.agents.inbox.wake import publish_inbound_wake_async
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.termination_notice import AncestorTerminationNotice
@@ -140,8 +141,11 @@ async def apply_lifecycle_command(
     resume_turn: bool,
     home: Path,
     history: SwitchHistory | None = None,
+    read_extent: RecordExtentReader | None = None,
 ) -> LifecycleKind | None:
-    applied = await apply_hosted_lifecycle(pool, incarnation, resume_turn=resume_turn)
+    applied = await apply_hosted_lifecycle(
+        pool, incarnation, resume_turn=resume_turn, read_extent=read_extent
+    )
     if applied is None:
         return None
     if applied.kind == "terminate":

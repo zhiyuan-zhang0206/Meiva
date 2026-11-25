@@ -6,16 +6,18 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import assert_never
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.epochs.extent import extent_reader_at
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
-from base.agents.messages.lifecycle_text import fast_acknowledgement_note
+from base.agents.messages.lifecycle_text import fast_acknowledgement_note, harness_switch_note
 from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentStatus,
@@ -469,15 +471,10 @@ def restart_blocking(
 
     with write_transaction(db_pool) as conn:
         row = conn.execute(
-            "SELECT status, harness FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
+            "SELECT status FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
         ).fetchone()
         if row is None:
             raise RuntimeError(f"agent {agent_id} does not exist")
-        if row[1] != "meiva":
-            raise ValueError(
-                f"Restart is not supported for external harness '{row[1]}'; "
-                f"use terminate and resurrect instead."
-            )
         if row[0] == "terminated":
             return None
         payload: dict[str, object] | None = None
@@ -542,6 +539,8 @@ async def _execute_harness_transition(
     is_switch: bool,
     host: LocalAgentHost,
     catalog: ModelCatalog,
+    home: Path,
+    environ: Mapping[str, str],
     require_quiescent: bool = False,
 ) -> RestartAgentResponse:
     if status not in ("idling", "terminated"):
@@ -580,12 +579,15 @@ async def _execute_harness_transition(
         db_pool,
         agent_id,
         target_harness,
-        body.config_overlay,
+        body,
         catalog,
+        extent_reader_at(home, environ),
     )
 
     restart_note = (
-        f"[Harness switched from '{old_harness}' to '{target_harness}']\n{body.message}"
+        harness_switch_note(
+            body.source, body.message, from_harness=old_harness, to_harness=target_harness
+        )
         if is_switch
         else body.message
     )
@@ -612,6 +614,7 @@ async def restart_agent_op(
     catalog: ModelCatalog,
     default_model: str,
     home: Path,
+    environ: Mapping[str, str],
     require_quiescent: bool = False,
 ) -> RestartAgentResponse:
     if require_quiescent and body.at_turn_end:
@@ -643,6 +646,8 @@ async def restart_agent_op(
             is_switch=is_switch,
             host=host,
             catalog=catalog,
+            home=home,
+            environ=environ,
             require_quiescent=True,
         )
     if not is_switch and status == "terminated":
@@ -679,6 +684,8 @@ async def restart_agent_op(
         is_switch=is_switch,
         host=host,
         catalog=catalog,
+        home=home,
+        environ=environ,
     )
 
 
@@ -712,6 +719,7 @@ async def lifecycle_op(
     *,
     catalog: ModelCatalog,
     home: Path,
+    environ: Mapping[str, str],
     agent_host_port: int,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
@@ -770,6 +778,7 @@ async def lifecycle_op(
             catalog=catalog,
             default_model=settings.lm.llm_model,
             home=home,
+            environ=environ,
             require_quiescent=action == "restart-scheduled",
         )
     raise AssertionError(f"unreachable: action={action!r}")

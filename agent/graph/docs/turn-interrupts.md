@@ -146,10 +146,14 @@ steering of messages that arrive meanwhile stops at it, so they stay pending. Wh
 or native execution returns, the claim takes the command first and alone and `handle_restart` ends the
 invocation on every harness; the agent's own source is never idle, so the apply queues the note.
 `apply_hosted_lifecycle` then stores the overlay and the harness, releases the incarnation, closes
-the command and queues the note, in one transaction, and the host removes the old harness's session
-record just before it (a retry may run that twice) and writes the switch note in the outgoing
-history just after it. The note is `[Harness switched from 'a' to 'b']` plus the agent's message for a
-switch, and the restart-accepted text for a restart that kept its harness (the session resumes).
+the command and queues the note, in one transaction. A switch also closes the agent's current
+`agent_harness_epochs` row and opens the next one in that transaction, with the lengths of the
+record files it leaves and arrives in (read on this machine, see
+[harness epochs](../../../base/agents/epochs/docs/epochs.md)). The host writes the switch note in
+the outgoing native history just after the commit. The note is the one text `harness_switch_note`
+builds (the harness left, the harness now running, who asked, that nothing said before the switch
+is visible to the new harness, and the agent's message as the handoff) for a switch, and the
+restart-accepted text for a restart that kept its harness (the session resumes).
 A command still claimed when its host died is claimed again by the next incarnation and applied then;
 a command still pending when the agent crashes is superseded by the resurrection.
 See [the decision](../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md).

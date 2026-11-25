@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -10,9 +10,11 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.timeline import reading_target, reading_window
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
+from base.agents.history.transcript_timeline.project import ProjectedItem
 from base.agents.history.transcript_timeline.record.harness import (
     compressed_file,
     record_file,
+    reply_key,
     session_file,
     unreadable_file,
     wire_id,
@@ -110,7 +112,7 @@ def read_harness_timeline(
             raise
         _report_unreadable(request, environ, record.session_id, reason=str(error))
         return _empty(request)
-    items = _with_record_locators(window.timeline_items, request, record.session_id)
+    items = _with_record_locators(window.timeline_items, request, record.session_id, window.items)
     verified = (
         request.anchor_item_id
         if any(item.item_id == request.anchor_item_id for item in items)
@@ -149,9 +151,13 @@ def _record_source(request: HarnessTimelineReadRequest, session: str) -> RecordR
 
 
 def _with_record_locators(
-    items: list[TimelineItem], request: HarnessTimelineReadRequest, session: str
+    items: list[TimelineItem],
+    request: HarnessTimelineReadRequest,
+    session: str,
+    projected: Sequence[ProjectedItem],
 ) -> list[TimelineItem]:
     source = _record_source(request, session)
+    entry_keys = {shown.item.item_id: shown.key for shown in projected}
     bound: list[TimelineItem] = []
     for item in items:
         offset, block = item.item_id.split(".")
@@ -162,7 +168,12 @@ def _with_record_locators(
             offset=int(offset[1:]),
             block=int(block),
         )
-        bound.append(item.model_copy(update={"reading_locator": encode_reading_locator(locator)}))
+        update: dict[str, object] = {"reading_locator": encode_reading_locator(locator)}
+        if item.kind == "agent_chat":
+            update["publication_key"] = reply_key(
+                request.harness, entry_keys[item.item_id], session
+            )
+        bound.append(item.model_copy(update=update))
     return bound
 
 
@@ -193,7 +204,7 @@ def _reading_window(
             load_sent=load_sent,
             unread=unread,
         )
-        items = _with_record_locators(window.timeline_items, request, session)
+        items = _with_record_locators(window.timeline_items, request, session, window.items)
         target = reading_target(items, locator)
         selected = reading_window(
             items,
@@ -204,7 +215,7 @@ def _reading_window(
             newer_available=window.has_newer,
         )
         contextual = window.with_call_context(selected.items)
-        selected_items = _with_record_locators(contextual, request, session)
+        selected_items = _with_record_locators(contextual, request, session, window.items)
         return HarnessTimelineWindow(
             items=selected_items,
             has_more=selected.older_cursor is not None,

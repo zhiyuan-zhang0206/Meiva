@@ -213,7 +213,7 @@
   "agent/nodes.py": 2,
   "agent/ownership/audit_payloads.py": 1,
   "agent/ownership/corpse_reap.py": 3,
-  "agent/ownership/hosted.py": 18,
+  "agent/ownership/hosted.py": 17,
   "agent/ownership/inbound.py": 2,
   "agent/ownership/lifecycle_plan.py": 13,
   "agent/ownership/tests/ownership_support.py": 5,

@@ -17,6 +17,7 @@ from agent.checkpoint import AgentGraph, flush_checkpoint
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
+from base.agents.epochs.model import RecordExtentReader
 from base.agents.history.delta_read_compat import seed_latest_checkpoint_messages
 from base.api_contracts.agent_contract import ReconstructionScope
 from base.db.protocols import AsyncPool
@@ -72,6 +73,7 @@ class InvocationHooks:
     wake_resumed: Callable[[int], object]
     home: Path
     bus: EventBus | None = None
+    read_extent: RecordExtentReader | None = None
 
 
 # meiva:note
@@ -142,6 +144,7 @@ async def finish_completed_invocation(
                     resume_turn=resume_turn,
                     home=hooks.home,
                     history=SwitchHistory(checkpoints.graph, ctx.timestamp_policy()),
+                    read_extent=hooks.read_extent,
                 )
             logger.info(
                 "hosted lifecycle return settled",

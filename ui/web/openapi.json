@@ -17194,6 +17194,17 @@
             ],
             "title": "Reading Locator"
           },
+          "publication_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Key"
+          },
           "quote": {
             "anyOf": [
               {

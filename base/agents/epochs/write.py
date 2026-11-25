@@ -68,6 +68,13 @@ def birth_epoch(agent_id: int, *, harness: str, model: str | None) -> Statement:
     return _OPEN_NEXT, (agent_id, harness, model, None, None, "birth", None, agent_id)
 
 
+def store_harness(agent_id: int, harness: str) -> tuple[Statement, ...]:
+    statements: list[Statement] = [(_STORE_HARNESS, (harness, agent_id))]
+    if harness != "meiva":
+        statements.append((_MARK_HARNESS_MODEL_SELECTION, (agent_id,)))
+    return tuple(statements)
+
+
 def harness_switch(agent_id: int, facts: SwitchFacts) -> tuple[Statement, ...]:
     leaving, arriving = facts.leaving, facts.arriving
     statements: list[Statement] = [
@@ -92,8 +99,6 @@ def harness_switch(agent_id: int, facts: SwitchFacts) -> tuple[Statement, ...]:
                 agent_id,
             ),
         ),
-        (_STORE_HARNESS, (facts.new_harness, agent_id)),
     ]
-    if facts.new_harness != "meiva":
-        statements.append((_MARK_HARNESS_MODEL_SELECTION, (agent_id,)))
+    statements.extend(store_harness(agent_id, facts.new_harness))
     return tuple(statements)

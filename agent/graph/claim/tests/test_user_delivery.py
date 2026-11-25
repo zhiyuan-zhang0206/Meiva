@@ -777,6 +777,12 @@ async def test_flush_text_wakes_on_disk_growth_while_stdout_is_silent_and_refres
         )
         expected_pub = [(f"harness:antigravity:{session}:{initial_offset}", "reactive reply")]
         assert _agent_publications(db_conn, tid) == expected_pub
+        [chat] = [
+            item
+            for item in _snapshot_items_of_kind(snapshots, "agent_chat")
+            if item.get("payload") == "reactive reply"
+        ]
+        assert chat["publication_key"] == expected_pub[0][0]
         await wait_until(lambda: refresh_calls == 1, "A1 requested timing refresh")
 
         store_timings(path, _reactive_timing_trajectory())
