@@ -77,7 +77,9 @@ The project owner ruled on 2026-11-25:
 9. **One switch note.** The note the new harness receives (`[Harness switched from 'a' to 'b' by <who>]`, the reminder that
    nothing said before the switch is visible, then the restart message) comes from one function; the three copies of the format
    in the lifecycle text, the operator route and the runner are removed with the dead code around them
-   (`claimed_harness_switch_target` and the unreachable protection in the operator route).
+   (`claimed_harness_switch_target` and the unreachable protection in the operator route). The note that
+   leaving the built-in harness wrote into the native checkpoint is removed too: the only place a switch is
+   shown is the epoch table, through the switch block, so the built-in epoch cannot show it twice.
 10. **Backfill is best effort.** For agents that switched before the table existed, a data migration rebuilds
     epochs from the `[Harness switched from 'a' to 'b']` system notes of the inbox. An agent whose notes do not
     form one consistent chain ending at its current harness (or has none) gets a single epoch on the current
