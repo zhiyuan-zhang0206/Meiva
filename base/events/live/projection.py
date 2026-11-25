@@ -37,7 +37,14 @@ syncing producer and consumer; not forward-compat.
 from enum import StrEnum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    model_serializer,
+)
 
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.host.boundary.untyped import object_of
@@ -386,6 +393,14 @@ class TimelineSnapshot(_Base):
     role: Literal["timeline_snapshot"] = "timeline_snapshot"
     items: list[dict[str, object]]  # list of TimelineItem.model_dump()
     msg_count: int
+    retires: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_retires(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        if not self.retires:
+            del data["retires"]
+        return data
 
 
 class InboundCommitted(_Base):
