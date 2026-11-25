@@ -1,5 +1,5 @@
 // meiva:note
-// Python code block with syntax highlighting, a copy button and a streaming cursor on the last line. React.memo skips re-highlighting while `code` / `streaming` are unchanged, which matters during streaming: Prism tokenization is this component's main CPU cost. The ~85KB highlighter must stay out of the first-load bundle, so one shared lazy chunk carries it — every code block reads that chunk from context, and the prefetch triggers (a card header's pointer-enter/focus intent, CodeHighlighterPreloader's idle callback, the schedules row's expand button) warm the same chunk ahead of the click that needs it. Until it resolves the block renders plain source with the copy control; a rejected load drops the attempt so the next mount retries.
+// Python code block with syntax highlighting, a copy button. React.memo skips re-highlighting while `code` / `streaming` are unchanged, which matters during streaming: Prism tokenization is this component's main CPU cost. The ~85KB highlighter must stay out of the first-load bundle, so one shared lazy chunk carries it — every code block reads that chunk from context, and the prefetch triggers (a card header's pointer-enter/focus intent, CodeHighlighterPreloader's idle callback, the schedules row's expand button) warm the same chunk ahead of the click that needs it. Until it resolves the block renders plain source with the copy control; a rejected load drops the attempt so the next mount retries.
 // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 "use client";
 
@@ -98,14 +98,12 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false, co
             className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed my-2"
           >
             {tokens.map((line, i) => {
-              const isLast = i === tokens.length - 1;
               const lineProps = getLineProps({ line });
               return (
                 <div key={i} {...lineProps}>
                   {line.map((token, j) => (
                     <span key={j} {...getTokenProps({ token })} />
                   ))}
-                  {streaming && isLast ? <BlinkCursor /> : null}
                 </div>
               );
             })}
@@ -131,14 +129,7 @@ function PlainCode({ code, streaming, copy = true }: Props) {
         className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed my-2"
       >
         {code}
-        {streaming ? <BlinkCursor /> : null}
       </pre>
     </div>
-  );
-}
-
-function BlinkCursor() {
-  return (
-    <span className="inline-block w-1.5 h-3 ml-0.5 bg-foreground/70 animate-pulse align-middle" />
   );
 }

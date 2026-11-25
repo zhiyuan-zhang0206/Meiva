@@ -64,7 +64,7 @@ export function setTimelineTransitionForTest(runner?: (cb: () => void) => void):
 export interface UseTimelineResult {
   items: BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
-  /** Whether the last agent_code is streaming — used by PythonCode for the blinking cursor */
+  /** Whether the last agent_code is streaming — drives the code row live reveal and PythonCode data-streaming */
   streamingCode: boolean;
   /** SSE connection state — when agentId=null, keeps the initial value (no subscription, no banner). */
   connectionState: ConnectionState;

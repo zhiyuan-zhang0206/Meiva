@@ -7,7 +7,7 @@ with code blocks (home timeline, `/control/schedules`) and fetches it once
 idle; a code block's own collapsed toggle (`CardHeader`, the schedules row
 expand button) also fetches it on pointer-enter/focus, ahead of the click
 that expands it. Not yet resolved → plain unhighlighted text (the surface's
-copy control, when it offers one, and the streaming cursor stay present — no
+copy control, when it offers one, stays present — no
 blank body); already prefetched → the first render is already highlighted, no
 flash. Tokenization still only runs when a code block renders or its source
 changes. `copy` is a caller decision: a code surface that shows the agent's
