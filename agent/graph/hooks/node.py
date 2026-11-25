@@ -119,6 +119,7 @@ def hook_node(
                 "display", "timeline_default_limit"
             ),
             publish_timeline=not is_external,
+            epoch_slice=runtime.context.native_epoch_slice,
         ):
             cmd = await runner(hook_state, runtime, config)
             cmd_update: object = cmd.update

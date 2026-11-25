@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
@@ -7,6 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from agent.graph import node_log
 from agent.graph.node_log import StallConfig, node_lifecycle
+from base.agents.epochs.native_slice import NativeEpochSlice
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
@@ -34,6 +36,7 @@ def _enter(
     full_window: bool = False,
     timeline_inputs: TimestampPolicy = _TIMELINE_INPUTS,
     timeline_limit: int = _TIMELINE_LIMIT,
+    epoch_slice: NativeEpochSlice | None = None,
 ):
     return node_lifecycle(
         node,
@@ -45,6 +48,7 @@ def _enter(
         timeline_inputs=timeline_inputs,
         timeline_limit=timeline_limit,
         full_window=full_window,
+        epoch_slice=epoch_slice,
     )
 
 
@@ -258,6 +262,29 @@ async def test_the_timeline_limit_bounds_a_full_window_snapshot(live_events: Liv
     (snapshot,) = _snapshots(await live_events.object_events())
     assert snapshot["msg_count"] == 5
     assert _item_ids(snapshot) == ["3.0", "4.0"]
+
+
+async def test_a_full_window_holds_only_the_items_of_the_current_epoch(
+    live_events: LiveEvents,
+) -> None:
+    def reply(text: str, hour: int) -> AIMessage:
+        stamp = f"2026-11-25T{hour:02d}:30:00+00:00"
+        return AIMessage(content=text, additional_kwargs={"meiva_created_at": stamp})
+
+    history = [
+        SystemMessage(content="prompt"),
+        reply("before the switch", 2),
+        reply("after the switch", 6),
+    ]
+    switched = datetime(2026, 11, 25, 5, tzinfo=UTC)
+    async with _enter(
+        live_events, history, epoch_slice=NativeEpochSlice(switched, None, first=False)
+    ):
+        pass
+
+    (snapshot,) = _snapshots(await live_events.object_events())
+    assert _item_ids(snapshot) == ["2.0"]
+    assert snapshot["msg_count"] == 3
 
 
 async def test_a_render_failure_leaves_the_cursor_so_the_next_enter_renders_the_full_window(

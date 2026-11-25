@@ -135,6 +135,7 @@ async def exec_node(
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
+        epoch_slice=runtime.context.native_epoch_slice,
     ):
         return await exec_node_impl(state, runtime, config, process=process)
 

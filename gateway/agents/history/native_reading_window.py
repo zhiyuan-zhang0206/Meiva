@@ -40,8 +40,7 @@ def native_source_items(
     items, _ = build_timeline_items(
         source.messages, inputs=rendering, segment_prefix=segment_prefix
     )
-    if epoch_slice is not None:
-        items = apply_native_slice(items, epoch_slice)
+    items = apply_native_slice(items, epoch_slice)
     identity = native_source_identity(source, agent_id)
     for item in items:
         if (

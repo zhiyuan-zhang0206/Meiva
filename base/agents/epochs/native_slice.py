@@ -39,8 +39,10 @@ def native_slice_of(epochs: Sequence[HarnessEpoch], seq: int) -> NativeEpochSlic
 
 
 def apply_native_slice(
-    items: Sequence[TimelineItem], epoch_slice: NativeEpochSlice
+    items: Sequence[TimelineItem], epoch_slice: NativeEpochSlice | None
 ) -> list[TimelineItem]:
+    if epoch_slice is None:
+        return list(items)
     stamps = _item_stamps(items)
     return [item for item, stamp in zip(items, stamps, strict=True) if epoch_slice.holds(stamp)]
 

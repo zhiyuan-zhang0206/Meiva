@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Protocol, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
+from base.agents.epochs.native_slice import NativeEpochSlice
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -314,6 +315,8 @@ class MeivaContext:
 
     agent: AgentSlices | None = None
     """This agent's per-turn configuration, resolved by the host when the turn starts."""
+
+    native_epoch_slice: NativeEpochSlice | None = None
 
     extensions: ExtensionRegistry | None = None
     """What the enabled plugins contribute (prompt sections, context notes), as the loader built it

@@ -318,6 +318,7 @@ async def init_context_node(
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=runtime.context.harness is Harness.MEIVA,
+        epoch_slice=runtime.context.native_epoch_slice,
     ):
         cwd_update = await ValidateCwdAfterInitHook()(state, runtime, config)
         reset = state.context_reset

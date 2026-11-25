@@ -3,7 +3,7 @@ exports = ["birth", "context", "epochs", "history", "inbox", "incarnation", "lab
 [uses]
 "birth" = ["epochs", "history", "inbox", "labels.py", "model"]
 "epochs" = ["history", "messages"]
-"context" = ["history", "messages", "observation", "sdk"]
+"context" = ["epochs", "history", "messages", "observation", "sdk"]
 "history" = ["incarnation", "messages", "model", "sdk"]
 "inbox" = ["messages"]
 "lifecycle.py" = ["lifecycle_signals.py"]

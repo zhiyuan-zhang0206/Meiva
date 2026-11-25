@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage
 from agent.graph.node_log import SNAPSHOT_CURSOR
 from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
+from base.agents.epochs.native_slice import apply_native_slice
 from base.agents.history.timeline import build_timeline_items, tail_window
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 
@@ -87,7 +88,10 @@ def publish_end_timeline_snapshot(
         combined,
         inputs=ctx.timestamp_policy(),
     )
-    window, _ = tail_window(items, ctx.require_agent().read("display", "timeline_default_limit"))
+    window, _ = tail_window(
+        apply_native_slice(items, ctx.native_epoch_slice),
+        ctx.require_agent().read("display", "timeline_default_limit"),
+    )
     # No system-prompt special-casing: this end-of-life snapshot is a rare
     # full-window publish, and 0.0 flows through the merge like any item.
     ctx.event_publisher.emit(
