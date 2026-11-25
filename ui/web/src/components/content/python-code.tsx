@@ -52,11 +52,6 @@ const theme: PrismTheme = {
   ],
 };
 
-// meiva:note
-// The streaming edge fade paints `::highlight()` ranges, where `currentColor` is not the token's
-// colour (it resolves to black). Each token therefore republishes its own syntax colour as
-// `--stream-edge-color`, so the faded tail keeps the token's hue in both themes.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/stream-reveal.md
 type EdgeColorStyle = CSSProperties & { "--stream-edge-color"?: string };
 
 function withEdgeColor(style: CSSProperties | undefined): EdgeColorStyle | undefined {

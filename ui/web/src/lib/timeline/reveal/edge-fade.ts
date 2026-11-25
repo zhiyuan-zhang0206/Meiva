@@ -19,10 +19,6 @@ const STEPS = EDGE_FADE_STEP_OPACITY.length;
 const GRAPHEMES_PER_STEP = EDGE_FADE_TAIL_GRAPHEMES / STEPS;
 const highlightName = (step: number) => `stream-edge-${step}`;
 
-// Inside `::highlight()` `currentColor` does not resolve to the host text's colour: Chromium
-// uses the highlight's own initial value (opaque black), which blends to a near-background
-// dark in dark mode. Custom properties do inherit from the host element, so each text surface
-// declares `--stream-edge-color` as its real foreground (see stream-reveal.md).
 export function edgeFadeCss(): string {
   return EDGE_FADE_STEP_OPACITY.map(
     (opacity, step) =>
