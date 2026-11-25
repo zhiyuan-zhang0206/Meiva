@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.env.harness_binaries import without_git_shim
 from tests.ci.prepush.prepush_probe import hook_table
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -499,8 +500,10 @@ def _path_without_pnpm(shadow: Path) -> str:
 # The programs this file runs are the machine's own, as in every other case here: the subject is a
 # shell hook, so a fake would test nothing. This reads `PATH` for them without going through
 # `shutil.which`, whose ambient form the host-platform lint counts for a different kind of test.
+# The agent-facing git shim is skipped: it is first on PATH, and a symlink to it inside the shadow
+# directory has no other git left to find once PATH is cut down to that directory.
 def _on_path(program: str) -> str:
-    for entry in os.environ.get("PATH", "").split(os.pathsep):
+    for entry in without_git_shim(os.environ.get("PATH")).split(os.pathsep):
         candidate = Path(entry) / program
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
