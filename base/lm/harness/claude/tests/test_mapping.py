@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from base.lm.harness.claude.mapping import (
     AssistantError,
+    StreamedMessage,
     map_message,
     parse_assistant_error,
     parse_result,
@@ -353,3 +354,49 @@ def test_assistant_error_redacts_secrets_while_keeping_diagnostic_message() -> N
     assert "sk-ant-oat01-fixturesecret" not in parsed.text
     assert "tok_live_secret_123" not in parsed.text
     assert "Failed to authenticate" in parsed.text
+
+
+def _delta(index: int, kind: str, text: str, *, parent: str | None = None) -> fake.StreamEvent:
+    field = "thinking" if kind == "thinking_delta" else "text"
+    return fake.StreamEvent(
+        event={
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": kind, field: text},
+        },
+        parent_tool_use_id=parent,
+    )
+
+
+def test_a_delta_names_its_block_by_the_message_the_stream_started_and_its_index() -> None:
+    streamed = StreamedMessage()
+    start = fake.StreamEvent(event={"type": "message_start", "message": {"id": "msg_1"}})
+    assert map_message(start, turn_id="t1", streamed=streamed) == []
+    assert map_message(_delta(0, "thinking_delta", "x"), turn_id="t1", streamed=streamed) == [
+        ReasoningDelta(turn_id="t1", text="x", block="msg_1:0")
+    ]
+    assert map_message(_delta(1, "text_delta", "y"), turn_id="t1", streamed=streamed) == [
+        TextDelta(turn_id="t1", text="y", block="msg_1:1")
+    ]
+    again = fake.StreamEvent(event={"type": "message_start", "message": {"id": "msg_2"}})
+    assert map_message(again, turn_id="t1", streamed=streamed) == []
+    assert map_message(_delta(0, "text_delta", "z"), turn_id="t1", streamed=streamed) == [
+        TextDelta(turn_id="t1", text="z", block="msg_2:0")
+    ]
+
+
+def test_a_sub_agent_stream_neither_streams_nor_changes_the_message_in_progress() -> None:
+    streamed = StreamedMessage()
+    main = fake.StreamEvent(event={"type": "message_start", "message": {"id": "msg_main"}})
+    sub = fake.StreamEvent(
+        event={"type": "message_start", "message": {"id": "msg_sub"}}, parent_tool_use_id="call-1"
+    )
+    assert map_message(main, turn_id="t1", streamed=streamed) == []
+    assert map_message(sub, turn_id="t1", streamed=streamed) == []
+    assert (
+        map_message(_delta(0, "text_delta", "s", parent="call-1"), turn_id="t1", streamed=streamed)
+        == []
+    )
+    assert map_message(_delta(0, "text_delta", "m"), turn_id="t1", streamed=streamed) == [
+        TextDelta(turn_id="t1", text="m", block="msg_main:0")
+    ]

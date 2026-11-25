@@ -1,7 +1,8 @@
-exports = ["harness.py", "match.py", "read.py"]
+exports = ["fork_floor.py", "harness.py", "match.py", "read.py"]
 
 [uses]
 "__init__.py" = []
+"fork_floor.py" = []
 "harness.py" = []
 "read.py" = ["harness.py", "match.py"]
 "match.py" = []
@@ -9,6 +10,7 @@ exports = ["harness.py", "match.py", "read.py"]
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
+"fork_floor.py" = { mode = "off", why = "the per-session fork floor file and the scans of a record file that find where a fork's own rows begin; it reads and writes files and decides nothing about what a timeline shows" }
 "harness.py" = { mode = "off", why = "the choice of what differs between the CLIs whose timeline is read from their own record (where the record is and how its rows are read) by the harness; it reads a path and decides nothing about what a timeline shows" }
 "read.py" = { mode = "off", why = "the window read: it asks the record file for blocks of rows backwards from the window's end and hands them to the strict projection until the window is full; what the rows show is decided in project.py" }
 

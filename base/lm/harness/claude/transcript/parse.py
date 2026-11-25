@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TypedDict
@@ -290,9 +290,10 @@ def _assistant(
     aborted = raw.get("isAbortedMidStream") is True
     entries: list[AnyEntry] = []
     call_ms = dict(state.call_ms)
+    stream_block = _stream_block(ref, raw, blocks)
     for index, block in enumerate(blocks):
         key = f"claude:{row.uuid}" if len(blocks) == 1 else f"claude:{row.uuid}:{index}"
-        entry = _block(row, key, index, block, raw, aborted=aborted)
+        entry = _block(row, key, index, block, raw, stream_block=stream_block)
         if isinstance(entry, ToolCall):
             call_ms[entry.call_id] = row.ms
         if entry is not None:
@@ -304,6 +305,13 @@ def _assistant(
     if row.record == MAIN_RECORD and isinstance(stop, str) and stop in _ENDING_STOPS:
         entries.append(TurnEnd(**_entry_fields(row, 2, key=f"claude:{row.uuid}:end")))
     return ParseState(call_ms), tuple(entries)
+
+
+def _stream_block(ref: str, raw: Mapping[str, object], blocks: Sequence[object]) -> str | None:
+    index = raw.get("apiBlockIndex")
+    if len(blocks) != 1 or not isinstance(index, int) or isinstance(index, bool):
+        return None
+    return f"{ref}:{index}"
 
 
 def _api_error(
@@ -324,8 +332,9 @@ def _block(
     block: object,
     raw: Mapping[str, object],
     *,
-    aborted: bool,
+    stream_block: str | None,
 ) -> AnyEntry | None:
+    aborted = raw.get("isAbortedMidStream") is True
     if not is_object_dict(block):
         return _missing(row, "message.content[]")
     fields = _entry_fields(row, index * 10, key=key)
@@ -337,13 +346,16 @@ def _block(
             **fields,
             text=text if isinstance(text, str) else "",
             duration_ms=duration if isinstance(duration, int) else None,
+            block=stream_block,
         )
     if kind == "text":
         text = block.get("text")
         if not isinstance(text, str):
             return _missing(row, "text")
         ref = _message_ref(raw)
-        return AgentText(**fields, text=text, message_ref=ref, complete=not aborted)
+        return AgentText(
+            **fields, text=text, message_ref=ref, complete=not aborted, block=stream_block
+        )
     if kind == "tool_use":
         call_id, name, tool_input = block.get("id"), block.get("name"), block.get("input")
         if not isinstance(call_id, str) or not isinstance(name, str):

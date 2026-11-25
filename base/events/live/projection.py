@@ -37,9 +37,17 @@ syncing producer and consumer; not forward-compat.
 from enum import StrEnum
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    model_serializer,
+)
 
 from base.api_contracts.user_delivery import UserDeliveryMode
+from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 
 # One SSE event per window: the agent-side publisher coalesces deltas / chunks
@@ -386,6 +394,16 @@ class TimelineSnapshot(_Base):
     role: Literal["timeline_snapshot"] = "timeline_snapshot"
     items: list[dict[str, object]]  # list of TimelineItem.model_dump()
     msg_count: int
+    retires: list[str] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_retires(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data = object_of(handler, self)
+        if not is_object_dict(data):
+            raise TypeError("a model serializer returned a non-object")
+        if not self.retires:
+            del data["retires"]
+        return data
 
 
 class InboundCommitted(_Base):

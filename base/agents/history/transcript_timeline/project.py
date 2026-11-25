@@ -32,6 +32,7 @@ from base.lm.harness.session.transcript.projection import Projector
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 UNMATCHED = "unmatched"
+_STREAMED_KINDS = (DraftKind.AGENT_CHAT, DraftKind.AGENT_REASONING)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,8 @@ class ProjectedItem:
     turn: str | None
     call_id: str | None
     is_call: bool
+    block: str | None = None
+    text: str = ""
 
 
 # meiva:note
@@ -162,6 +165,8 @@ class RecordProjector:
             turn=draft.turn,
             call_id=draft.tool_use_id,
             is_call=is_call,
+            block=draft.block,
+            text=draft.payload if draft.kind in _STREAMED_KINDS else "",
         )
 
 
