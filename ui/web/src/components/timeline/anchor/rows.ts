@@ -1,6 +1,6 @@
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { canonicalBufferCoordinate, type CompactCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { parseItemIdParts } from "@/lib/timeline/timeline";
+import { isDisplayOnlyItemId, parseItemIdParts } from "@/lib/timeline/timeline";
 
 import type { RowRef } from "./dom";
 
@@ -35,7 +35,7 @@ function candidates(canonical: readonly BackendTimelineItem[], buffer: CompactTr
   return rows;
 }
 
-const real = (candidate: Candidate) => !candidate.item.item_id.startsWith("_");
+const real = (candidate: Candidate) => !isDisplayOnlyItemId(candidate.item.item_id);
 
 // meiva:note
 // The loaded row a ref names, in the order `candidates` lists them. Identify runs on every reader

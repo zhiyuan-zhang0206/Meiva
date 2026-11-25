@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { BackendTimelineItem, UserMessage } from "../contracts/types";
+import { isLiveOverlayId } from "../fold";
 import { useApi } from "../transport/transport-context";
 
 export function useUserMessages(agentId: number | null) {
@@ -23,6 +24,7 @@ export function withUserMessages(items: BackendTimelineItem[], messages: readonl
   const byKey = new Map(messages.map((message) => [message.source_key, message]));
   const attached = new Set<number>();
   const result = items.map((item) => {
+    if (isLiveOverlayId(item.item_id)) return item;
     const block = item.item_id.split(".").at(-1);
     const key = item.source_message_id ? `assistant:${item.source_message_id}:0.${block}` : `harness:${item.item_id}`;
     const message = byKey.get(key);
