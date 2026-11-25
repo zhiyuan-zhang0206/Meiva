@@ -1,4 +1,4 @@
-exports = ["image-dimensions-cache.ts", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
+exports = ["image-dimensions-cache.ts", "reveal", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-timeline.ts"]
 
 [uses]
 "tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
@@ -11,7 +11,6 @@ exports = ["image-dimensions-cache.ts", "timeline-store.ts", "timeline-width.ts"
 "timeline.test.ts" = ["timeline.ts"]
 "timeline.ts" = ["timeline-plan.ts"]
 "use-compact-history-retention.ts" = ["timeline-plan.ts", "timeline-store.ts"]
-"use-throttled-streaming.test.ts" = ["use-throttled-streaming.ts"]
 "use-timeline.test.ts" = ["tests", "timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "use-timeline.ts" = ["timeline-plan.ts", "timeline-store.ts", "use-compact-history-retention.ts"]
 

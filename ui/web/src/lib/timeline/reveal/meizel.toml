@@ -1,0 +1,11 @@
+exports = ["constants.ts", "edge-fade.ts", "use-stream-edge-fade.ts", "use-stream-reveal.ts"]
+
+[uses]
+"controller.test.ts" = ["constants.ts", "controller.ts", "recordings"]
+"controller.ts" = ["constants.ts"]
+"edge-fade.test.ts" = ["constants.ts", "edge-fade.ts"]
+"edge-fade.ts" = ["constants.ts"]
+"recordings" = ["controller.ts"]
+"use-stream-edge-fade.test.tsx" = ["edge-fade.ts", "use-stream-edge-fade.ts"]
+"use-stream-edge-fade.ts" = ["edge-fade.ts"]
+"use-stream-reveal.ts" = ["controller.ts"]

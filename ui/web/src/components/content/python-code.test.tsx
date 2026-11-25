@@ -41,7 +41,7 @@ it("highlights immediately when the chunk was already prefetched", async () => {
   const { container, rerender, browser } = renderWith(chunk, <PythonCode code={first} streaming />);
   expect(container.querySelector("pre")?.textContent).toBe(first);
   expect(container.querySelector("pre .token.string")?.textContent).toBe('"<pending>"');
-  expect(container.querySelector("pre .animate-pulse")).not.toBeNull();
+  expect(container.querySelector("pre .animate-pulse")).toBeNull();
   expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
 
   rerender(<PythonCode code={latest} streaming />);
@@ -64,14 +64,14 @@ it("falls back to plain text, then highlights once an un-prefetched chunk resolv
 
   expect(container.querySelector("pre")?.textContent).toBe(code);
   expect(container.querySelector("pre .token")).toBeNull();
-  expect(container.querySelector("pre .animate-pulse")).not.toBeNull();
+  expect(container.querySelector("pre .animate-pulse")).toBeNull();
   expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
   expect(importModule).toHaveBeenCalledTimes(1);
 
   await waitFor(() => {
     expect(container.querySelector("pre .token.string")?.textContent).toBe('"<pending>"');
   });
-  expect(container.querySelector("pre .animate-pulse")).not.toBeNull();
+  expect(container.querySelector("pre .animate-pulse")).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
   await waitFor(() => expect(browser.actions.copied).toEqual([code]));

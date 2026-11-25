@@ -11,22 +11,21 @@ describe("ItemView: agent_chat", () => {
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "hello" })]} />,
     );
     expect(screen.getByTestId("agent-message-prose")).toBeTruthy();
-    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/streaming…/)).toBeNull();
     expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hello");
   });
-  it("partial=true → renders normal prose + pulsing streaming cursor without ellipsis prefix", () => {
+  it("partial=true → renders normal prose with no streaming dot and no ellipsis prefix", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "in progress", partial: true })]}
       />,
     );
     expect(screen.getByTestId("chat-markdown").textContent).toBe("in progress");
-    expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
+    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/streaming…/)).toBeNull();
   });
-  it("interrupted=true → drops streaming cursor without InterruptedNotice", () => {
+  it("interrupted=true → no InterruptedNotice", () => {
     render(
       <TimelineView
         items={[
@@ -39,7 +38,6 @@ describe("ItemView: agent_chat", () => {
         ]}
       />,
     );
-    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
   });
 });
