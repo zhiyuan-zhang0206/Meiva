@@ -19,93 +19,56 @@ _ENVELOPE = frozenset({"agent_id", "machine", "cluster", "category", "level", "p
 
 class Signal(NamedTuple):
     event: str
-    group: str
     pending: str
     severity: str
     threshold: float = 0
 
 
 SIGNALS: dict[str, Signal] = {
-    "meiva-ops-health-probe-warning": Signal("health_probe_failing", "meiva-ops", "3m", "warning"),
-    "meiva-ops-health-probe-error": Signal("health_probe_failing", "meiva-ops", "10m", "error"),
-    "meiva-ops-health-probe-silent": Signal("health_probe_ran", "meiva-ops", "0m", "error"),
-    "meiva-ops-service-start-unready": Signal(
-        "service_start_unready", "meiva-ops", "0m", "warning"
-    ),
-    "meiva-ops-boot-retries-exhausted": Signal(
-        "boot_retries_exhausted", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-schedule-verify-failed": Signal(
-        "schedule_verify_failed", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-plugin-collector-silent": Signal(
-        "plugin_collector_cycle", "meiva-ops", "5m", "warning"
-    ),
-    "meiva-ops-machine-offline-warning": Signal(
-        "machine_probe_failed", "meiva-ops", "3m", "warning"
-    ),
-    "meiva-ops-machine-offline-error": Signal("machine_probe_failed", "meiva-ops", "10m", "error"),
-    "meiva-ops-agent-host-down": Signal("machine_agent_host_down", "meiva-ops", "3m", "error"),
-    "meiva-ops-machine-stopped-too-long": Signal(
-        "machine_stopped_too_long", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-exec-child-boot-failed": Signal(
-        "exec_child_boot_failed", "meiva-ops", "0s", "warning"
-    ),
-    "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
-    "meiva-ops-delivery-stranded-wake": Signal(
-        "delivery_stranded_wake", "meiva-ops", "0m", "warning"
-    ),
-    "meiva-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "meiva-ops", "2m", "warning"),
-    "meiva-ops-root-unit-restart-failed": Signal(
-        "root_unit_failure_state", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-root-unit-absent": Signal("root_unit_failure_state", "meiva-ops", "0m", "error"),
-    "meiva-ops-root-unit-breaker-open": Signal(
-        "root_unit_failure_state", "meiva-ops", "0m", "critical"
-    ),
-    "meiva-ops-root-unit-not-revivable": Signal(
-        "root_unit_not_revivable", "meiva-ops", "0m", "error", 1
-    ),
-    "meiva-ops-root-unit-stop-escalated": Signal(
-        "root_unit_stop_escalated", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 0),
+    "meiva-ops-health-probe-warning": Signal("health_probe_failing", "3m", "warning"),
+    "meiva-ops-health-probe-error": Signal("health_probe_failing", "10m", "error"),
+    "meiva-ops-health-probe-silent": Signal("health_probe_ran", "0m", "error"),
+    "meiva-ops-service-start-unready": Signal("service_start_unready", "0m", "warning"),
+    "meiva-ops-boot-retries-exhausted": Signal("boot_retries_exhausted", "0m", "error"),
+    "meiva-ops-schedule-verify-failed": Signal("schedule_verify_failed", "0m", "error"),
+    "meiva-ops-plugin-collector-silent": Signal("plugin_collector_cycle", "5m", "warning"),
+    "meiva-ops-machine-offline-warning": Signal("machine_probe_failed", "3m", "warning"),
+    "meiva-ops-machine-offline-error": Signal("machine_probe_failed", "10m", "error"),
+    "meiva-ops-agent-host-down": Signal("machine_agent_host_down", "3m", "error"),
+    "meiva-ops-machine-stopped-too-long": Signal("machine_stopped_too_long", "0m", "error"),
+    "meiva-ops-exec-child-boot-failed": Signal("exec_child_boot_failed", "0s", "warning"),
+    "meiva-ops-delivery-stalled": Signal("delivery_stalled", "1m", "warning"),
+    "meiva-ops-delivery-stranded-wake": Signal("delivery_stranded_wake", "0m", "warning"),
+    "meiva-ops-db-pool-acquire-slow": Signal("db_pool_acquire_slow", "2m", "warning"),
+    "meiva-ops-root-unit-restart-failed": Signal("root_unit_failure_state", "0m", "error"),
+    "meiva-ops-root-unit-absent": Signal("root_unit_failure_state", "0m", "error"),
+    "meiva-ops-root-unit-breaker-open": Signal("root_unit_failure_state", "0m", "critical"),
+    "meiva-ops-root-unit-not-revivable": Signal("root_unit_not_revivable", "0m", "error", 1),
+    "meiva-ops-root-unit-stop-escalated": Signal("root_unit_stop_escalated", "0m", "error"),
+    "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "0m", "warning", 0),
     # meiva:note
     # The no-verdict debounce: one diagnostic sample per 60s, so three rounds is the three-minute
     # window the query carries, and a single round of "no verdict" is not worth an alert (2026-10-27).
-    "meiva-ops-root-diagnostic-no-verdict": Signal(
-        "root_diagnostic", "meiva-ops", "0m", "warning", 2
-    ),
-    "meiva-ops-root-diagnostic-browser-reach": Signal(
-        "root_diagnostic", "meiva-ops", "0m", "warning", 2
-    ),
+    "meiva-ops-root-diagnostic-no-verdict": Signal("root_diagnostic", "0m", "warning", 2),
+    "meiva-ops-root-diagnostic-browser-reach": Signal("root_diagnostic", "0m", "warning", 2),
     # meiva:note
-    # Five events the 2026-11-06 audit found declared and unheard (#6400). They sit in the fast
+    # Five events the 2026-11-06 audit found declared and unheard (#6400). They sit in the
     # group because each is "one occurrence is the signal", and none of them reads `service_name`:
     # that value is a by-product of how a process got a telemetry pipeline, not of what happened.
-    "meiva-ops-schedule-not-progressing": Signal(
-        "schedule_not_progressing", "meiva-ops", "0m", "warning"
-    ),
-    "meiva-ops-llm-turn-aborted": Signal("llm_turn_aborted", "meiva-ops", "0m", "warning"),
-    "meiva-ops-llm-usage-metering-failed": Signal(
-        "llm_usage_metering_failed", "meiva-ops", "0m", "warning"
-    ),
-    "meiva-ops-llm-usage-unpriced": Signal("llm_usage_unpriced", "meiva-ops", "0m", "error"),
-    "meiva-ops-exec-node-timeout": Signal("exec_node_timeout", "meiva-ops", "0m", "warning"),
-    "meiva-ops-exec-subprocess-killed": Signal(
-        "exec_subprocess_killed", "meiva-ops", "0m", "warning"
-    ),
+    "meiva-ops-schedule-not-progressing": Signal("schedule_not_progressing", "0m", "warning"),
+    "meiva-ops-llm-turn-aborted": Signal("llm_turn_aborted", "0m", "warning"),
+    "meiva-ops-llm-usage-metering-failed": Signal("llm_usage_metering_failed", "0m", "warning"),
+    "meiva-ops-llm-usage-unpriced": Signal("llm_usage_unpriced", "0m", "error"),
+    "meiva-ops-exec-node-timeout": Signal("exec_node_timeout", "0m", "warning"),
+    "meiva-ops-exec-subprocess-killed": Signal("exec_subprocess_killed", "0m", "warning"),
 }
 
 
-def _rules() -> dict[str, tuple[str, dict[str, Any]]]:
+def _rules() -> dict[str, dict[str, Any]]:
     document: dict[str, Any] = yaml.safe_load(_RULES.read_text(encoding="utf-8"))
-    return {
-        rule["uid"]: (group["name"], rule)
-        for group in document["groups"]
-        for rule in group["rules"]
-    }
+    (group,) = document["groups"]
+    assert group["name"] == "meiva-ops"
+    return {rule["uid"]: rule for rule in group["rules"]}
 
 
 def _query(rule: dict[str, Any]) -> str:
@@ -122,8 +85,7 @@ def _threshold(rule: dict[str, Any]) -> float:
 @pytest.mark.parametrize("uid", sorted(SIGNALS))
 def test_the_rule_carries_the_pinned_debounce_severity_and_threshold(uid: str) -> None:
     signal = SIGNALS[uid]
-    group, rule = _rules()[uid]
-    assert group == signal.group
+    rule = _rules()[uid]
     assert rule["for"] == signal.pending
     assert rule["labels"]["severity"] == signal.severity
     assert _threshold(rule) == signal.threshold
@@ -134,7 +96,7 @@ def test_the_rule_carries_the_pinned_debounce_severity_and_threshold(uid: str) -
 
 @pytest.mark.parametrize("uid", sorted(SIGNALS))
 def test_the_rule_reads_its_declared_telemetry_event_in_the_prod_cluster(uid: str) -> None:
-    query = _query(_rules()[uid][1])
+    query = _query(_rules()[uid])
     assert f'event_name="{SIGNALS[uid].event}"' in query
     spec = EVENTS[SIGNALS[uid].event]
     assert spec.category == "telemetry"
@@ -145,7 +107,7 @@ def test_the_rule_reads_its_declared_telemetry_event_in_the_prod_cluster(uid: st
 @pytest.mark.parametrize("uid", sorted(SIGNALS))
 def test_the_rule_only_groups_and_filters_by_fields_the_event_carries(uid: str) -> None:
     signal = SIGNALS[uid]
-    query = _query(_rules()[uid][1])
+    query = _query(_rules()[uid])
     declared = set(payload_keys(signal.event))
     used = set(re.findall(r"attributes_(\w+)", query))
     assert used <= declared, f"{uid} reads {used - declared}, not in {signal.event}'s payload"
@@ -155,7 +117,7 @@ def test_the_rule_only_groups_and_filters_by_fields_the_event_carries(uid: str) 
 
 
 def test_the_agent_host_down_window_is_shorter_than_its_debounce() -> None:
-    rule = _rules()["meiva-ops-agent-host-down"][1]
+    rule = _rules()["meiva-ops-agent-host-down"]
     (window,) = re.findall(r"\[(\d+)m\]", _query(rule))
     (node,) = [d for d in rule["data"] if d["refId"] == "A"]
     pending = int(rule["for"].removesuffix("m"))
@@ -165,36 +127,36 @@ def test_the_agent_host_down_window_is_shorter_than_its_debounce() -> None:
 
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
     for uid in ("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"):
-        assert "sum by (attributes_check)" in _query(_rules()[uid][1])
+        assert "sum by (attributes_check)" in _query(_rules()[uid])
 
 
 def test_the_probe_dead_man_fires_on_an_absent_heartbeat() -> None:
-    rule = _rules()["meiva-ops-health-probe-silent"][1]
+    rule = _rules()["meiva-ops-health-probe-silent"]
     assert "absent_over_time(" in _query(rule)
     assert rule["labels"]["metric"] == "health_probe_silent"
 
 
 def test_the_warning_and_error_tiers_of_one_outage_share_a_query() -> None:
     for warning, error in (("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"),):
-        assert _query(_rules()[warning][1]) == _query(_rules()[error][1])
+        assert _query(_rules()[warning]) == _query(_rules()[error])
 
 
 def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
-    for group, rule in _rules().values():
+    for rule in _rules().values():
         assert rule["keepFiringFor"] == "5m"
-        assert rule["missing_series_evals_to_resolve"] == (6 if group == "meiva-ops" else 2)
+        assert rule["missing_series_evals_to_resolve"] == 6
         assert "keep_firing_for" not in rule
 
 
 @pytest.mark.parametrize("diagnostic", ["venv", "browser-reach"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
-    rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
+    rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic]
     assert "by (machine)" in _query(rule)
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
 
 
 def test_collector_silence_reads_all_service_identities_and_both_cycle_outcomes() -> None:
-    rule = _rules()["meiva-ops-plugin-collector-silent"][1]
+    rule = _rules()["meiva-ops-plugin-collector-silent"]
     query = _query(rule)
     assert "absent_over_time(" in query
     assert "[35m]" in query

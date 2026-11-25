@@ -274,9 +274,8 @@ provisioning cycle when needed.
 ## Alerting
 
 **Live**: Grafana Alerting rules, as code in
-[`../alerting/rules.yml`](../alerting/rules.yml) — thirty-eight rules (2026-09-18)
-split between the one-minute `meiva-ops` group and five-minute `meiva-ops-slow`
-group over Loki and Prometheus: the event-health,
+[`../alerting/rules.yml`](../alerting/rules.yml) — the rules
+of the one-minute `meiva-ops` group over Loki and Prometheus: the event-health,
 backlog, LLM-latency, delivery, freshness, trace-watermark,
 billing, host/data-plane, and collector-delivery rules, plus the three
 slow-request rules R17/R18 (gateway fast-route p95 two-tier + turn-duration

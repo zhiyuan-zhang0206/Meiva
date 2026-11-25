@@ -120,9 +120,11 @@ alert state: Grafana is the one truth, and the Web UI badge and `meiva stats` re
 
 ## Rules
 
-The rules are split between `meiva-ops` (evaluated every minute) and
-`meiva-ops-slow` (evaluated every five minutes). Each rule retains its own
-`for` window and threshold. `rules.yml` is the condition catalog: events without a
+All rules live in one evaluation group, `meiva-ops`, evaluated every minute.
+There is no slower group: a rule's cost is a query over its own explicit window,
+which does not depend on how often the rule runs, and one full pass of the group
+costs well under a second of query time (measured 2026-11-25). Each rule retains
+its own `for` window and threshold. `rules.yml` is the condition catalog: events without a
 matching rule do not create an alert of their own (aggregate rules may still count
 them). The Warning / Error status card counts events separately.
 The table below names the configured conditions.
@@ -137,7 +139,7 @@ A real recovery followed by a later failure starts a new episode; the gateway an
 frontend do not merge independent episodes by timestamp.
 
 Missing series use Grafana's native `missing_series_evals_to_resolve` as well:
-six evaluations for the 1m group and two for the 5m group retain a disappearing
+six one-minute evaluations retain a disappearing
 instance for at least five minutes from its first missing evaluation. This avoids
 a peer recovering early while another peer still returns data. NoData/OK handling
 also follows Grafana's native recovery state machine. Root diagnostic queries keep
@@ -165,29 +167,29 @@ as `[no value]`. Pinned by `tests/scripts/test_alert_rules.py`.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
 
-| uid | Group | Metric | Condition | `for` | Severity |
-|-----|-------|--------|-----------|-------|----------|
-| `meiva-ops-warning-error-spike` | `meiva-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
-| `meiva-ops-sse-drop-backlog` | `meiva-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap); summary adds the distinct agent count | 5m | warning |
-| `meiva-ops-llm-latency-p95` | `meiva-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
-| `meiva-ops-delivery-stalled-backlog` | `meiva-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki); summary adds the distinct agent count | 5m | warning |
-| `meiva-ops-inbound-consumed-unknown` | `meiva-ops-slow` | inbound consumed without execution evidence | `inbound_consumed_unknown` count in 24h > 2 (Loki); summary adds the distinct agent count | 10m | warning |
-| `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
-| `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
-| `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
-| `meiva-ops-main-red-watch-silent` | `meiva-ops` | main-red watch round heartbeat | no `meiva_main_red_watch_round_rounds_total` sample for 1h (two missed half-hour rounds) while one was seen in the last 6d (Prometheus, absent_over_time) | 5m | error |
-| `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
-| `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
-| `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
-| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
-| `meiva-ops-gw-latency-slow-warning` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
-| `meiva-ops-gw-latency-slow-error` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
-| `meiva-ops-tempo-backend-down` | `meiva-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
-| `meiva-ops-events-low-water` | `meiva-ops` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
-| `meiva-ops-telemetry-queue-loss` | `meiva-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
-| `meiva-ops-recovery-drill-failed` | `meiva-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
-| `meiva-ops-backup-dump-failed` | `meiva-ops` | scheduled logical dump failed | `backup_dump_failed` (level=error) in 24h > 0 (Loki) | 0m | error |
-| `meiva-ops-llm-rate-limit` | `meiva-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `meiva-ops-warning-error-spike` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
+| `meiva-ops-sse-drop-backlog` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap); summary adds the distinct agent count | 5m | warning |
+| `meiva-ops-llm-latency-p95` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
+| `meiva-ops-delivery-stalled-backlog` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki); summary adds the distinct agent count | 5m | warning |
+| `meiva-ops-inbound-consumed-unknown` | inbound consumed without execution evidence | `inbound_consumed_unknown` count in 15m > 2 (Loki); summary adds the distinct agent count | 10m | warning |
+| `meiva-ops-events-freshness` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
+| `meiva-ops-root-health-stale` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
+| `meiva-ops-gateway-metrics-silent` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
+| `meiva-ops-main-red-watch-silent` | main-red watch round heartbeat | no `meiva_main_red_watch_round_rounds_total` sample for 1h (two missed half-hour rounds) while one was seen in the last 6d (Prometheus, absent_over_time) | 5m | error |
+| `meiva-ops-llm-billing-quota` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
+| `meiva-ops-gateway-latency-route-warning` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
+| `meiva-ops-gateway-latency-route-error` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
+| `meiva-ops-turn-duration-p95` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
+| `meiva-ops-gw-latency-slow-warning` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
+| `meiva-ops-gw-latency-slow-error` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
+| `meiva-ops-tempo-backend-down` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
+| `meiva-ops-events-low-water` | event stream below low-water mark | count in 5m < 150 (Loki) | 10m | warning |
+| `meiva-ops-telemetry-queue-loss` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
+| `meiva-ops-recovery-drill-failed` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `meiva-ops-backup-dump-failed` | scheduled logical dump failed | `backup_dump_failed` (level=error) in 24h > 0 (Loki) | 0m | error |
+| `meiva-ops-llm-rate-limit` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
 
 
 Infrastructure layer (issue #46) — the per-machine OTel Collector sidecar's
@@ -262,12 +264,12 @@ Storage and store growth — absolute-size gauges from the OTLP metric mirror
 translation renders the dimensionless gauges with a `_ratio` suffix — the
 series the rules read are e.g. `meiva_checkpoint_table_sizes_blobs_bytes_ratio`:
 
-| uid | Group | Metric | Condition | `for` | Severity |
-|-----|-------|--------|-----------|-------|----------|
-| `meiva-ops-checkpoint-blobs-freshness` | `meiva-ops` | checkpoint table size emitter silence | no sample of any of the three series in Prometheus for 2h (absent_over_time) | 5m | warning |
-| `meiva-ops-checkpoint-blobs-growth` | `meiva-ops` | checkpoint tables footprint growth | +1 GiB across the three tables in the trailing 6h (Prometheus) | 15m | warning |
-| `meiva-ops-memory-search-rows-warning` | `meiva-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
-| `meiva-ops-memory-search-rows-critical` | `meiva-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
+| uid | Metric | Condition | `for` | Severity |
+|-----|--------|-----------|-------|----------|
+| `meiva-ops-checkpoint-blobs-freshness` | checkpoint table size emitter silence | no sample of any of the three series in Prometheus for 2h (absent_over_time) | 5m | warning |
+| `meiva-ops-checkpoint-blobs-growth` | checkpoint tables footprint growth | +1 GiB across the three tables in the trailing 6h (Prometheus) | 15m | warning |
+| `meiva-ops-memory-search-rows-warning` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
+| `meiva-ops-memory-search-rows-critical` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
 
 The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
 Their UIDs keep the historical `blobs` scope they were born with; since
@@ -350,11 +352,18 @@ e.g. `meiva stop --yes --close-shell-sessions --stop-browser --stop-extras --kee
 `meiva start --all-services`; readiness alone cannot prove that a running Grafana reloaded a file.
 There is no independent launchd or systemd Grafana restart path.
 
+A running Grafana also applies a changed rendered `rules.yml` without a restart:
+`curl --fail --user admin --request POST http://127.0.0.1:53003/api/admin/provisioning/alerting/reload`
+(`53003` on the station; the admin password is in `<home>/lgtm/native/grafana/admin_password`).
+Rules are matched by uid, so a rule that moved to another group is updated in place (same
+database id) and a group left empty disappears; verified on Grafana 13.2.3 with a scratch
+instance, 2026-11-25. Check the result with `GET /api/prometheus/grafana/api/v1/rules` and
+`meiva observability status`.
+
 ## How to add a rule
 
-1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Meiva`). Put fast
-   rules in `meiva-ops` (`interval: 1m`) and expensive slow-request rules in
-   `meiva-ops-slow` (`interval: 5m`). Loki queries: stream selector
+1. Add a rule to `rules.yml` (uid must be unique; keep `folder: Meiva`). Every rule
+   goes in the one group, `meiva-ops` (`interval: 1m`). Loki queries: stream selector
    `{service_name="unknown_service"}` + `| json` before any field filter,
    and wrap every count in `sum(...)` — the unknown_service family has >500
    streams over a day and an unaggregated count hits Loki's per-query

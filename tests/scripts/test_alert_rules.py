@@ -22,9 +22,6 @@ from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
     assert_reduce_keeps_route_label as assert_reduce_keeps_route_label,
 )
 from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
-    load_groups as _load_groups,
-)
-from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
     load_rules as load_rules,
 )
 from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
@@ -100,22 +97,6 @@ def test_rule_uids_fit_grafana_40_char_limit() -> None:
             f"uid {rule['uid']!r} is {len(rule['uid'])} chars — Grafana caps "
             "alert-rule UIDs at 40 and fails the whole provisioning file"
         )
-
-
-def test_low_cost_rules_use_the_slow_group() -> None:
-    groups = _load_groups()
-    group_for_rule = {rule["uid"]: group["name"] for group in groups for rule in group["rules"]}
-    for uid in (
-        "meiva-ops-llm-rate-limit",
-        "meiva-ops-llm-billing-quota",
-        "meiva-ops-gateway-latency-route-warning",
-        "meiva-ops-gateway-latency-route-error",
-        "meiva-ops-turn-duration-p95",
-        "meiva-ops-gw-latency-slow-warning",
-        "meiva-ops-gw-latency-slow-error",
-        "meiva-ops-tempo-backend-down",
-    ):
-        assert group_for_rule[uid] == "meiva-ops-slow"
 
 
 def test_rules_never_query_postgres() -> None:
