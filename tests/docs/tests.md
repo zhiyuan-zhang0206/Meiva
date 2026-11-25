@@ -62,7 +62,13 @@ Validation ownership across hooks and CI: [Test CI integration](test-ci.md).
 ### Browser frame sample scope
 
 `tests/e2e/state/test_timeline_virtualization.py` takes the best p95 from three
-serial sweeps to reduce load jitter. Its 33 ms gate compares uniform
+serial sweeps to reduce load jitter. Frame gaps are `requestAnimationFrame`
+tick multiples, not a continuous scale: headless Chromium ticks at 60 Hz (16.7 ms) and, on a loaded runner,
+settles at 30 Hz (33.3 ms plus ~0.1 ms timestamp jitter; 33.30 and 33.40 ms were
+observed in #9245), so a bound at 33 ms fails a healthy 30 Hz p95. A genuine
+mount-cost regression drops frames to the next tick (50 ms), so the 40 ms
+`FRAME_P95_BUDGET_MS` sits between the 2-tick and 3-tick values and fails
+exactly when p95 reaches three ticks. The gate compares uniform
 `agent_chat` primary-row content. Expanded reasoning rows still check bounded
 DOM and prepend behavior; this sample does not establish a frame-time bound
 for every content shape or every run.
