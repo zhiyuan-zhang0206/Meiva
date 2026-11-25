@@ -268,6 +268,7 @@ describe("home loading presentation through the selected timeline reader", () =>
       await open([], false);
       send(arrived);
       expect(workWindow()).toBeNull();
+      expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
       send(picked([sent]));
       expect(workWindow()?.textContent).toMatch(/^Working for [0-4]s$/);
     });
@@ -366,15 +367,6 @@ describe("composerMode derivation", () => {
     hooksState.turnActive = false;
     wrap(<HomePage />);
     expect(screen.getByTestId("timeline").getAttribute("data-turn-active")).toBe("1");
-  });
-  it("TimelineView presents no work while the only reason for busy is a queued message", () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];
-    hooksState.turnActive = true;
-    hooksState.awaitingPickup = true;
-    wrap(<HomePage />);
-    expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
-    expect(screen.getByTestId("timeline").getAttribute("data-turn-active")).toBe("0");
   });
   it("TimelineView receives busy=false when idle and no turn in flight", () => {
     hooksState.activeId = 5;
