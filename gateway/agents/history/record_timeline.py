@@ -28,7 +28,9 @@ _log = logging.getLogger(__name__)
 # the machine the agent lives on, with the `gateway.timeline_read_timeout_seconds` deadline and no retry (a timeline read is
 # asked again by the page).
 # A machine that cannot be reached is a 503, as for any read of the agent's machine: the record is on that machine and
-# nowhere else, so its history is not shown while it is offline. A failure of the operation itself is a 502. The
+# nowhere else, so its history is not shown while it is offline; a machine whose last liveness probe (`machine_probe`, every ~30 s)
+# found it offline is answered with that 503 at once, without dialing it (a dial to an unroutable address holds the request and its
+# worker thread for the 10 s connect cap). A failure of the operation itself is a 502. The
 # sync routes ask through the event loop that serves them (`anyio.from_thread.run`), and the reply-suggestion route
 # (async) asks directly. Raising the default deadline from 3s to 15s keeps slow 3s-11.9s reads from 503ing, at the
 # tradeoff that a stalled read holds an anyio worker thread (default limiter: 40 threads) up to 15s on sync routes.
@@ -37,17 +39,22 @@ _log = logging.getLogger(__name__)
 
 class _MachineRow(BaseModel):
     machine: str
+    online: bool | None
 
 
-def _placement(request: Request, agent_id: int) -> tuple[str, UserDeliveryMode]:
+def _placement(request: Request, agent_id: int) -> tuple[str, bool | None, UserDeliveryMode]:
     with gateway_state(request).db_pool.connection() as conn:
         row = query_one(
-            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+            conn,
+            _MachineRow,
+            "SELECT a.machine, mp.online FROM agents_meta a "
+            "LEFT JOIN machine_probe mp ON mp.machine_name = a.machine WHERE a.id = %s",
+            (agent_id,),
         )
         if row is None:
             raise HTTPException(404, "Agent not found")
         mode = delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
-    return row.machine, mode
+    return row.machine, row.online, mode
 
 
 async def fetch_record_window(
@@ -63,7 +70,9 @@ async def fetch_record_window(
     session_id: str | None = None,
 ) -> HarnessTimelineWindow:
     state = gateway_state(request)
-    machine, mode = await asyncio.to_thread(_placement, request, agent_id)
+    machine, online, mode = await asyncio.to_thread(_placement, request, agent_id)
+    if online is False:
+        raise HTTPException(503, "The agent's machine is unavailable")
     payload = HarnessTimelineReadRequest(
         agent_id=agent_id,
         harness=harness,

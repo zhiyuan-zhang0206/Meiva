@@ -156,6 +156,46 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
     assert response.status_code == 503
 
 
+def _probe(conn: psycopg.Connection, machine: str, *, online: bool) -> None:
+    conn.execute(
+        "INSERT INTO machine_probe (machine_name, online, consecutive_failures) VALUES (%s, %s, %s)",
+        (machine, online, 0 if online else 3),
+    )
+    conn.commit()
+
+
+def test_a_machine_the_last_probe_found_offline_is_a_503_without_dialing_it(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
+) -> None:
+    agent = _record_agent(db_conn, record_harness)
+    _probe(db_conn, "macmini", online=False)
+    runner = ScriptedRunner({"items": [], "has_more": False, "size": 0})
+    client.app.state.rpc = runner
+
+    response = client.get(f"/api/agents/{agent}/timeline")
+
+    assert response.status_code == 503
+    assert runner.calls == []
+
+
+def test_a_machine_the_last_probe_found_online_is_read_as_usual(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
+) -> None:
+    agent = _record_agent(db_conn, record_harness)
+    _probe(db_conn, "macmini", online=True)
+    runner = ScriptedRunner(
+        {"items": [], "has_more": False, "size": 0}, expected_timeout_s=READ_TIMEOUT_S
+    )
+    client.app.state.rpc = runner
+
+    assert client.get(f"/api/agents/{agent}/timeline").status_code == 200
+    assert len(runner.calls) == 1
+
+
 def test_a_session_with_no_record_is_an_empty_timeline(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
