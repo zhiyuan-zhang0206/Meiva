@@ -35,6 +35,7 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
 export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 export { QUESTIONS_QUERY_KEY } from "./questions";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
+export { isDisplayOnlyItemId, isLiveOverlayId } from "./overlay-id";
 export {
   isEventForThread,
   isReattachedTimelineContext,

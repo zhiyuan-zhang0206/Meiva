@@ -11,7 +11,9 @@ export {
 } from "../fold/timeline";
 
 export {
+  isDisplayOnlyItemId,
   isEventForThread,
+  isLiveOverlayId,
   isReattachedTimelineContext,
   parseItemId,
   parseItemIdParts,

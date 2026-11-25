@@ -1,4 +1,5 @@
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
+import { isDisplayOnlyItemId } from "@/lib/timeline/timeline";
 
 // meiva:note
 // The reader's place is one value: the tail, or a row whose top edge sits `offset` px below the
@@ -89,7 +90,7 @@ export function readRowAnchor(
   let fallback: Extract<ViewAnchor, { kind: "row" }> | null = null;
   for (const node of viewport.querySelectorAll<HTMLElement>(READABLE_ROWS)) {
     const id = node.dataset.itemId;
-    if (!id || id.startsWith("_")) continue;
+    if (!id || isDisplayOnlyItemId(id)) continue;
     const rect = node.getBoundingClientRect();
     if (rect.bottom <= box.top + BAR_HEIGHT_PX || rect.top >= box.bottom) continue;
     const header = expandedTurnHeader(node);

@@ -92,6 +92,24 @@ coordinates `<msg_idx>.<block_idx>` for native agents, byte-offset coordinates
 tool calls (`activity_pending: true`) are replaced in place when a later snapshot
 delivers the settled call, or dropped when a newer snapshot omits them.
 
+## Overlay rows (external harness streaming)
+
+An external harness's record has no token-level content, so while it writes a block
+the backend streams it as ordinary `chat_*` / `reasoning_*` events whose ids are
+`live.<turn_id>.<block_key>`. These overlay rows are display only and never a record
+position: they sort after every record row, and `isLiveOverlayId` /
+`isDisplayOnlyItemId` (`lib/fold/item-id.ts`) keep them out of reading-position
+bookmarks and the tail-departure watermark, the unread boundary, publication
+matching (`withUserMessages`) and the older-page cursor.
+
+A `timeline_snapshot` may carry `retires: string[]`, the overlay ids it supersedes
+(absent when empty). `mergeSnapshotWithStreaming` removes them in the same step it
+applies `items`, so a committed row and its overlay never show together; a snapshot
+with `items: []` and `retires` ends a turn or an interrupt. Retirement is by id, so
+it also removes an overlay whose committed row a `GET /timeline` already delivered.
+An overlay id that no snapshot retires is kept like any in-flight partial, and the
+backend sends nothing for an id after retiring it.
+
 ## Relationship to Other Nodes
 
 - [Frontend State Management](frontend-state.md)

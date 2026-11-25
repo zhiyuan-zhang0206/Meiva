@@ -620,6 +620,12 @@ export function applySystemEvent(
  *    neither (error-interrupted turn, stale after compact) is dropped so
  *    it cannot linger as a ghost bubble.
  *
+ * 4. `retires` names overlay ids (`live.*`, an external harness's text while
+ *    it is still being written) the snapshot supersedes: they are removed in
+ *    the same step the snapshot items land, so the committed row and its
+ *    overlay never show together and an overlay never outlives its turn. An
+ *    overlay id is otherwise kept like any in-flight partial.
+ *
  * Compaction is NOT reconciled here: the store hard-resets the thread on
  * `compact_done` (see timeline-store.ts) because compaction shrinks the
  * history and keep-all would resurrect pre-compact items.
@@ -636,9 +642,12 @@ export function mergeSnapshotWithStreaming(
   snapshot: readonly BackendTimelineItem[],
   msg_count: number,
   streamingIds: ReadonlySet<string> = new Set(),
+  retires: readonly string[] = [],
 ): BackendTimelineItem[] {
   const committedById = new Map(snapshot.map((it) => [it.item_id, it]));
+  const retired = new Set(retires);
   const clientExtras = prev.filter((it) => {
+    if (retired.has(it.item_id)) return false;
     const committed = committedById.get(it.item_id);
     if (committed !== undefined) {
       let updated = committed;
@@ -744,12 +753,16 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
     // ones never do (message 0 is below the cursor). Either way the merge's
     // id-replace rule keeps a single copy — no special-casing needed.
     const snapshotIds = new Set(snapItems.map((it) => it.item_id));
+    const retires = ev.retires ?? [];
+    const retiredIds = new Set(retires);
     return {
       ...t,
-      // Streamed ids now in the snapshot are committed → stop tracking them;
-      // ids still in flight stay tracked for a later cancel.
-      streamingIds: new Set([...t.streamingIds].filter((id) => !snapshotIds.has(id))),
-      items: mergeSnapshotWithStreaming(t.items, snapItems, ev.msg_count, t.streamingIds),
+      // Streamed ids now in the snapshot are committed (or retired overlays) →
+      // stop tracking them; ids still in flight stay tracked for a later cancel.
+      streamingIds: new Set(
+        [...t.streamingIds].filter((id) => !snapshotIds.has(id) && !retiredIds.has(id)),
+      ),
+      items: mergeSnapshotWithStreaming(t.items, snapItems, ev.msg_count, t.streamingIds, retires),
     };
   }
 
