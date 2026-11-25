@@ -6,12 +6,10 @@ import { useTimelineWindow, type WindowGroup } from "./use-timeline-window";
 
 const VIEWPORT_PX = 800;
 const GROUP_COUNT = 60;
-// Far taller than the 80px estimate, as a group holding a long table or a long reply is.
 const REAL_HEIGHT_PX = 600;
 const ESTIMATE_PX = 80;
 const GAP_PX = 12;
 const ANCHOR_INDEX = 30;
-// The reader stands inside the anchor group, its top this far above the viewport top.
 const ANCHOR_OFFSET_PX = -300;
 
 const GROUPS: WindowGroup[] = Array.from({ length: GROUP_COUNT }, (_, index) => ({
@@ -22,10 +20,6 @@ const GROUPS: WindowGroup[] = Array.from({ length: GROUP_COUNT }, (_, index) => 
   expandedRows: null,
 }));
 
-// meiva:note
-// The real timeline holds the reader's row in place by rewriting scrollTop after every commit. This
-// harness does the same against a mocked layout in which a mounted group is REAL_HEIGHT_PX tall and
-// a spacer is exactly its style height, so the window and the writer interact as they do in a browser.
 function Harness({ onWrite }: { onWrite: () => void }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -91,11 +85,6 @@ function installLayout(viewport: HTMLElement) {
 describe("useTimelineWindow", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  // meiva:note
-  // Production crash (React error 185 on load-older): groups the window mounts but has not yet
-  // measured count as 80px. Sliding past them replaces a tall real group by a short spacer, the
-  // anchor writer then moves scrollTop to follow its row, the window slides back, and so on inside
-  // one task: the ResizeObserver never gets a frame to record the real heights.
   it("settles when the reader's row sits below unmeasured rows far taller than their estimate", () => {
     vi.stubGlobal("ResizeObserver", class {
       observe = vi.fn();
