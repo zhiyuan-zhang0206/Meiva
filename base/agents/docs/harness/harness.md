@@ -58,11 +58,35 @@ Harness is a property of the agent initialized at birth and switchable on restar
   writes the row).
 - On restart, an agent in `idling` or `terminated` status may switch harness via
   `POST /api/agents/{id}/restart` with `config_overlay={"harness": "..."}` and a
-  mandatory `message`. The prior immutable update trigger was retired to enable
-  controlled operator and agent transitions. A running agent switches itself with
+  mandatory `message`. The update trigger that once made the column immutable was retired to
+  enable controlled operator and agent transitions. A running agent switches itself with
   `meiva.self.restart(message, config_overlay={"harness": ..., "llm_model": ...})`: the
   same validation, then a pending command the host applies when the turn ends
   ([decision](../../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md)).
+
+## Epochs and what a switch shares
+
+`agents_meta.harness` is the harness the agent runs on now. `agent_harness_epochs` keeps the
+history of it: one row per stretch of the agent's life on one harness (seq from 0, the harness and
+model, the CLI session id once bound, `started_at` / `ended_at` with NULL for the current epoch,
+the byte range of the CLI record that belongs to the epoch when there is one, who switched, and the
+restart message truncated). It holds facts about when and where, never what was said. The birth
+transaction writes epoch 0; a switch closes the current epoch, opens the next and updates
+`agents_meta.harness` in one transaction; a restart that keeps the harness opens nothing. The
+timeline page composes its earlier pages from these rows
+([timeline](../../history/docs/timeline/timeline.md#timeline-across-a-harness-switch);
+[decision](../../../../docs/decisions/agents/timeline/2026-11-25-continuous-timeline-across-harness-switch.md)).
+
+**A switch shares no conversation.** The new harness starts with its own history and its own system
+prompt and cannot see anything said or done before the switch. Meiva does not replay or summarize the
+old conversation and appends no note about it to the built-in checkpoint. The restart message is the
+only handoff: the caller (an operator, the agent itself through `meiva.self.restart`, or the restart
+dialog) writes the handoff there and, when it is long, writes it to a file and points to the path.
+The switch note the new harness receives says so in one sentence, and the SDK docstrings, the
+`meiva-guide` agents skill and the dialog carry the same rule. Switching back to a harness resumes
+that harness's own session record (see
+[the decision](../../../../docs/decisions/agents/graph/2026-11-12-harness-switch-keeps-session-records.md)),
+which holds none of what happened on other harnesses in between.
 
 ## The fork rule
 
@@ -76,8 +100,8 @@ rolling the birth back. A source with no launcher raises `HarnessNotLaunchable`.
 ## No launcher, no birth
 
 Recording a harness no launcher serves would make the column a claim about a
-runtime loop that is not running, and the value never changes, so such an agent
-could be neither run nor moved. The birth boundary refuses it, and two run-time
+runtime loop that is not running, so such an agent could not run until it was
+switched onto another loop. The birth boundary refuses it, and two run-time
 gates keep rows born before the rule inert. The set, both gates and what
 "launchable" does not promise:
 [launchable harnesses and the birth gate](launchable-and-birth.md).

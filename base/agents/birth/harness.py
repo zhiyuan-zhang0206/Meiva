@@ -63,10 +63,9 @@ class _LoginEvidence:
 
 
 # meiva:note
-# Birth is the last moment this choice is cheap to refuse: a stored harness is
-# immutable, so a value no launcher can start would leave an agent that can
-# neither run nor move onto another loop, and only a force terminate could end
-# it. A fork inherits its source's harness, so a source that never got a
+# Birth is the last moment this choice is cheap to refuse: a value no launcher
+# can start would leave an agent that cannot run until someone switches it onto
+# another loop, and only a force terminate could end it otherwise. A fork inherits its source's harness, so a source that never got a
 # launcher is refused by the same rule instead of copying the dead value.
 # meiva:link base/agents/docs/harness/harness.md
 def _require_launchable(
@@ -78,7 +77,7 @@ def _require_launchable(
     if fork_from is None:
         raise HarnessNotLaunchable(
             f"harness {harness.value!r} has no launcher yet: nothing in this release can run "
-            f"an agent on it, and a stored harness never changes, so the row could never run. "
+            f"an agent on it, so the row could never run. "
             f"Spawn on one of {allowed} instead"
         )
     raise HarnessNotLaunchable(
@@ -152,8 +151,8 @@ def resolve_birth_harness(
         if requested_harness is not source:
             raise ForkHarnessMismatch(
                 f"cannot fork agent {fork_from} onto harness {requested_harness.value!r}: the "
-                f"source runs on {source.value!r}, and harness is an immutable property of an "
-                f"agent. A fork inherits the source's conversation, which only its own harness "
+                f"source runs on {source.value!r}, and a fork keeps its "
+                f"source's harness. A fork inherits the source's conversation, which only its own harness "
                 f"can read. Spawn a new agent with config_overlay={{'harness': {requested_harness.value!r}}} instead of "
                 f"forking onto it, or restart the source onto that harness first and fork it "
                 f"there."

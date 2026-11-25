@@ -49,7 +49,7 @@ identity, not admission or execution evidence; older details may omit it.
 ## Harness identity
 
 Cards, directory rows and selected detail expose the required `harness` enum
-directly from `agents_meta.harness`. It is immutable identity, not a model or an
+directly from `agents_meta.harness`. It is the harness the agent runs on now (changed only by a harness switch), not a model or an
 availability inference, and does not depend on catalog access. Missing or unknown
 wire values fail validation. The frontend uses it to name the running harness
 and keep native-only prompt display out of external transcripts.

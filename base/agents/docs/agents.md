@@ -6,7 +6,7 @@ Its component nodes describe the current contracts and implementation.
 
 ## Documented components
 
-- [Agent harness identity](harness/harness.md) — Immutable harness identity and its local availability probe
+- [Agent harness identity](harness/harness.md) — Harness identity, birth and restart switching, and its local availability probe
   ([launchable set and the birth gate](harness/launchable-and-birth.md),
   [which models a harness runs](harness/harness-models.md)).
 - [Hierarchical Understanding](../history/hierarchy/docs/hierarchy.md) — Hierarchical Understanding.

@@ -93,8 +93,10 @@ question in the user's persistent queue. There is no public `meiva.attach` call.
 - **Switch an existing agent's harness:** An `idling` or `terminated` agent can
   switch harnesses bidirectionally (`meiva` <-> external or external <-> external)
   via `meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "claude_code"})`
-  (or `meiva agents restart <id> -m "..." --config '{"harness": "claude_code"}'`). Follow
-  the preconditions and handoff file contract in
+  (or `meiva agents restart <id> -m "..." --config '{"harness": "claude_code"}'`). A switch
+  shares no conversation: the new harness cannot see the old one, so `message` is the only
+  handoff (write it there, or point to a file when it is long). Follow
+  the preconditions and handoff contract in
   [agents](../agents/SKILL.md#switching-harnesses--handoff-process).
 
 ## Introspection
@@ -111,8 +113,8 @@ implementation (PR B) to be deployed; check the deployed commands' `--help`
 for flag availability.
 
 To switch yourself after a turn, use `meiva.self.restart` and end the turn after
-its receipt, or schedule `meiva agents restart <id> -m "<reason and handoff path>"
---overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort> --at +60s --source agent:<your_id>`.
+its receipt, or schedule `meiva agents restart <id> -m "<handoff or path to a handoff file>"
+--config '{"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}' --at +60s --source agent:<your_id>`.
 A scheduled cross-machine move uses `meiva agents transfer <id> --to <machine>
 --message "<reason>" --at +60s --source agent:<your_id>`. Finish the turn before
 the returned `run_at`: each schedule attempts once and refuses a running target.

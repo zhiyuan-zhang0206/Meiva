@@ -201,6 +201,10 @@ def restart(message: str, *, config_overlay: dict[str, object] | None = None) ->
     ("meiva", "claude_code", "codex" or "antigravity"); a switch also needs an explicit
     `llm_model` for the new runtime. Invalid input raises before anything is recorded.
 
+    A harness switch shares no conversation: the new runtime cannot see anything said or
+    done before the switch, so `message` is the only handoff. Put the handoff in it; if it
+    is long, write it to a file first and point to that path in the message.
+
     On the native runtime this call ends the current execution; finish required work
     before calling it. On an external runtime the restart is recorded and applied after
     your current turn ends, never during it: the call returns a receipt (print it), you
