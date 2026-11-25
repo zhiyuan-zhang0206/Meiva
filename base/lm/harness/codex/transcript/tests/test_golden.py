@@ -427,3 +427,12 @@ def test_a_page_that_starts_mid_turn_reads_a_steer_with_the_turns_already_seen()
     assert [entry.joined_running_turn for entry in warm] == [True]
     whole = _of(parse_items_page({"data": rows}), HumanInput)
     assert [entry.joined_running_turn for entry in whole] == [False, True]
+
+
+def test_a_reply_names_the_item_the_stream_names_it_by() -> None:
+    rollout = parse_rollout(load_lines("steer/rollout.jsonl"), record=MAIN_RECORD)
+    replies = _of(rollout, AgentText)
+    assert replies
+    assert [entry.block for entry in replies] == [
+        entry.key.removeprefix("agent:") for entry in replies
+    ]

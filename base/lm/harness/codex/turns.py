@@ -12,7 +12,6 @@ from base.lm.harness.session import SessionTotals
 
 class NotificationKind(StrEnum):
     TEXT_DELTA = "text_delta"
-    REASONING_DELTA = "reasoning_delta"
     ITEM_STARTED = "item_started"
     ITEM_COMPLETED = "item_completed"
     USAGE = "usage"
@@ -27,8 +26,6 @@ class NotificationKind(StrEnum):
 # meiva:link base/lm/harness/codex/docs/codex.md
 _KINDS = {
     "item/agentMessage/delta": NotificationKind.TEXT_DELTA,
-    "item/reasoning/summaryTextDelta": NotificationKind.REASONING_DELTA,
-    "item/reasoning/textDelta": NotificationKind.REASONING_DELTA,
     "item/started": NotificationKind.ITEM_STARTED,
     "item/completed": NotificationKind.ITEM_COMPLETED,
     "thread/tokenUsage/updated": NotificationKind.USAGE,

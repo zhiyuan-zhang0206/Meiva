@@ -12,8 +12,11 @@ from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
 from base.lm.harness.codex.tests.support import start
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
+    AssistantText,
+    ReasoningDelta,
     SessionBound,
     SessionStarted,
+    TextDelta,
     ToolResult,
     ToolUse,
     TurnCompleted,
@@ -87,6 +90,31 @@ async def test_turn_streams_text_and_reports_usage(tmp_path: Path) -> None:
         completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
         assert completed.duration_ms == 12
         assert completed.cumulative_cost_usd is None
+    finally:
+        await harness.stop()
+
+
+async def test_each_message_item_streams_as_its_own_block(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        ticket = await send(harness, "explain")
+        await harness.turn_started()
+        harness.server.delta("I will ", item_id="msg-a")
+        harness.server.reasoning_delta("Weighing the options")
+        harness.server.delta("look.", item_id="msg-a")
+        harness.server.message("I will look.", item_id="msg-a", phase="commentary")
+        harness.server.delta("Done.", item_id="msg-b")
+        harness.server.message("Done.", item_id="msg-b")
+        harness.server.complete()
+        await asyncio.wait_for(ticket.outcome(), 2)
+        deltas = harness.of(TextDelta)
+        assert [(event.block, event.text) for event in deltas] == [
+            ("msg-a", "I will "),
+            ("msg-a", "look."),
+            ("msg-b", "Done."),
+        ]
+        assert [event.text for event in harness.of(AssistantText)] == ["I will look.", "Done."]
+        assert not harness.of(ReasoningDelta)
     finally:
         await harness.stop()
 

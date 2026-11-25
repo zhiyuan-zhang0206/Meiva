@@ -6,7 +6,7 @@ into.
 
 | app-server method | Bridge event |
 |---|---|
-| `item/agentMessage/delta` | `TextDelta` |
+| `item/agentMessage/delta` | `TextDelta`, `block` = the item's `itemId` (the id its `item/completed` and rollout row carry) |
 | `item/completed` (`agentMessage`) | `AssistantText`; the `final_answer` phase also becomes the turn's reply text |
 | `item/completed` (`userMessage`) | confirms foreground steering when the thread, turn and client message IDs match a pending request |
 | `item/started` / `item/completed` (`commandExecution`) | `ToolUse` / `ToolResult` (`is_error` when the status is failed/declined or the exit code is non-zero) |
@@ -15,7 +15,7 @@ into.
 | `item/started` / `item/completed` of a tool item (`commandExecution`, `fileChange`, `mcpToolCall`, `dynamicToolCall`, `webSearch`, `collabAgentToolCall`) of such a thread | `ToolUse` / `ToolResult` with `parent_tool_use_id` set to the spawn call's item ID |
 | `item/*` (`mcpToolCall`, `dynamicToolCall`, `webSearch`) | `ToolUse` / `ToolResult` |
 | `item/started` / `item/completed` (`collabAgentToolCall`) | `ToolUse` / `ToolResult`, keyed by item ID with the operation and receiver status |
-| `item/reasoning/summaryTextDelta`, `item/reasoning/textDelta` | `ReasoningDelta` |
+| `item/reasoning/summaryTextDelta`, `item/reasoning/textDelta` | nothing: a summary arrives whole just before its item completes, so streaming it shows nothing `item/completed` does not |
 | `item/completed` (`reasoning`) | `ReasoningText` when text is available |
 | `thread/tokenUsage/updated` | per-turn `Usage`, accumulated by `turns.TurnRecord` into `SessionTotals` |
 | `turn/started` during launch | provisional interrupt target |

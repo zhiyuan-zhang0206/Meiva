@@ -22,8 +22,6 @@ from base.lm.harness.session import SessionTotals
 def test_every_read_notification_is_classified_by_its_method() -> None:
     for method, kind in (
         ("item/agentMessage/delta", NotificationKind.TEXT_DELTA),
-        ("item/reasoning/summaryTextDelta", NotificationKind.REASONING_DELTA),
-        ("item/reasoning/textDelta", NotificationKind.REASONING_DELTA),
         ("item/started", NotificationKind.ITEM_STARTED),
         ("item/completed", NotificationKind.ITEM_COMPLETED),
         ("thread/tokenUsage/updated", NotificationKind.USAGE),

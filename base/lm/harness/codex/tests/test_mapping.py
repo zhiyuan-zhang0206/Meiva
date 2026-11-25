@@ -8,12 +8,20 @@ from base.lm.harness.codex.mapping import (
     text_delta,
     usage_from,
 )
-from base.lm.harness.events import ContextCompacted, TextDelta, ToolResult, ToolUse
+from base.lm.harness.events import (
+    ContextCompacted,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+)
 
 
-def test_delta_maps_to_text_delta() -> None:
+def test_delta_maps_to_text_delta_named_by_its_item() -> None:
+    assert text_delta({"delta": "hi", "itemId": "msg-1"}, "turn-1") == [
+        TextDelta(turn_id="turn-1", text="hi", block="msg-1")
+    ]
     assert text_delta({"delta": "hi"}, "turn-1") == [TextDelta(turn_id="turn-1", text="hi")]
-    assert text_delta({"delta": ""}, "turn-1") == []
+    assert text_delta({"delta": "", "itemId": "msg-1"}, "turn-1") == []
 
 
 def test_command_item_maps_to_one_tool_use_and_one_result() -> None:

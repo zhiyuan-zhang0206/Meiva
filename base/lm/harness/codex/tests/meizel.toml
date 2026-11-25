@@ -12,3 +12,4 @@ exports = ["child_environment_server.py", "fake_app_server.py", "fake_stdio_serv
 "test_unsolicited.py" = ["support.py"]
 "test_transport.py" = ["fake_stdio_server.py"]
 "test_delivery.py" = ["support.py"]
+"test_streaming_replay.py" = ["support.py"]

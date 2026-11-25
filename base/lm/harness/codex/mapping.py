@@ -8,7 +8,6 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     BridgeEvent,
     ContextCompacted,
-    ReasoningDelta,
     ReasoningText,
     TextDelta,
     ToolResult,
@@ -44,14 +43,7 @@ def text_delta(params: RequestParams, turn_id: str) -> list[BridgeEvent]:
     delta = _as_text(params.get("delta"))
     if not delta:
         return []
-    return [TextDelta(turn_id=turn_id, text=delta)]
-
-
-def reasoning_delta(params: RequestParams, turn_id: str) -> list[BridgeEvent]:
-    delta = _as_text(params.get("delta"))
-    if not delta:
-        return []
-    return [ReasoningDelta(turn_id=turn_id, text=delta)]
+    return [TextDelta(turn_id=turn_id, text=delta, block=_as_text(params.get("itemId")))]
 
 
 def item_event(params: RequestParams, *, phase: str, turn_id: str) -> list[BridgeEvent]:

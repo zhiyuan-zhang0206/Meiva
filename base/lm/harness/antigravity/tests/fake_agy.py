@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from base.lm.harness.antigravity.tests.fake_idle import prepare_idle, replay_late_idle_echo
+from base.lm.harness.antigravity.tests.fake_replay import replay_prompt
 from base.lm.harness.antigravity.tests.fake_wire import (
     SID,
     STAMP,
@@ -367,6 +368,9 @@ def fresh_prompt(transcript: Path, request: int, command: str) -> None:
 
 
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
+    if command.startswith("replay-"):
+        replay_prompt(transcript, request, command.removeprefix("replay-"))
+        return
     if command in {"resumed-command-completion", "unresolved-attribution"}:
         resumed_command_completion(transcript, request, command)
         return
