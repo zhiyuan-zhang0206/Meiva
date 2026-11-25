@@ -51,7 +51,7 @@ the preview gate.
 | `REVEAL_MIN_GRAPHEMES_PER_SEC` | 40 | Keeps text moving when the backlog is tiny (a 5-grapheme tail ends in ~125 ms instead of trailing off exponentially) and turns a one-character arrival into a step instead of a pop. |
 | `REVEAL_SOFT_CAP_GRAPHEMES_PER_SEC` | 400 | A single burst is spread over about a second instead of appearing at once; ~6-7 graphemes per frame at 60 fps still reads as flow. |
 | `REVEAL_MAX_LAG_MS` | 1200 ms | Upper end of the 1-1.5 s lag the product accepts as still live; the soft cap yields to this bound for very large backlogs. |
-| `REVEAL_SETTLE_MS` | 250 ms | The remainder after a commit is flushed within the 300 ms product limit; nothing waits on it (cursor, Copy and the Worked line switch at the commit). |
+| `REVEAL_SETTLE_MS` | 250 ms | The remainder after a commit is flushed within the 300 ms product limit; nothing waits on it (Copy and the Worked line switch at the commit). |
 | `REVEAL_MAX_FRAME_DT_MS` | 250 ms | After a long stall a raw time step would teleport the text; the backlog law already raised the speed during the stall. |
 | `EDGE_FADE_TAIL_GRAPHEMES` | 16 | A 40-400 ms soft edge at nominal speeds: wide enough to read as a gradient, short enough never to leave stale grey text. |
 | `EDGE_FADE_STEP_OPACITY` | 0.22 / 0.45 / 0.70 / 0.88 | Four steps over the tail read as a continuous ramp and need only four highlight rules. |

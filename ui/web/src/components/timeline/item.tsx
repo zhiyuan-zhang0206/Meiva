@@ -496,16 +496,6 @@ function EnvelopeContent({
   );
 }
 
-function StreamingCursor() {
-  return (
-    <span
-      aria-hidden="true"
-      data-testid="streaming-cursor"
-      className="mt-1.5 inline-block size-2 rounded-full bg-foreground/60 animate-pulse motion-reduce:animate-none"
-    />
-  );
-}
-
 export const ItemView = memo(function ItemView({
   item,
   streaming,
@@ -590,7 +580,6 @@ export const ItemView = memo(function ItemView({
         <TimelineItemImageBatch>
           <div ref={bodyRef}>
             <ChatMarkdown content={markdownPayload} />
-            {item.partial && !item.interrupted ? <StreamingCursor /> : null}
           </div>
         </TimelineItemImageBatch>
       );

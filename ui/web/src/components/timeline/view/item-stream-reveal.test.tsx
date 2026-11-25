@@ -88,7 +88,6 @@ describe("ItemView streaming reveal", () => {
     rerender(<ItemView item={chat(committed, { partial: false })} streaming={false} />);
     expect(shown().startsWith(before)).toBe(true);
     expect(shown().length).toBeGreaterThanOrEqual(before.length);
-    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     await frames(REVEAL_SETTLE_MS + 100);
     expect(shown()).toBe(committed);
   });
@@ -124,10 +123,9 @@ describe("ItemView streaming reveal", () => {
     expect(shown()).toBe("this is **bold and done**");
   });
 
-  it("an interrupted partial chat stops being live: full text, no repair, no cursor", () => {
+  it("an interrupted partial chat stops being live: full text and no repair", () => {
     render(<ItemView item={chat("cut off **mid", { interrupted: true })} streaming={false} />);
     expect(shown()).toBe("cut off **mid");
-    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
   });
 
   it("reveals streaming code without cutting a grapheme", async () => {
