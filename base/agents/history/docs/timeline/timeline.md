@@ -131,8 +131,8 @@ harness, the CLI record cut by byte range or, without one, by time) and stored n
   [the 2026-11-13 decision](../../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)
   hid stay hidden.
 - **An epoch that cannot be read** (machine offline, CLI record cleaned up, record left on another machine after a
-  transfer) is one `system_marker` item, `source="history_unavailable"`, id `e<seq>.unavailable`, with the reason;
-  the rest of the page is served.
+  transfer) is skipped silently: no item stands for it, the rest of the page is served, and the gateway logs a
+  warning event.
 - **Not for earlier epochs yet:** `reading_locator`, `/timeline/window` and quoting an item (refused with 422). The response carries `current_epoch`. A CLI's sub-agent stays one tool call.
 - **No shared context.** What the page shows to a person is not what the agent on the new harness can read. That
   harness sees its own history and the restart message, nothing else.

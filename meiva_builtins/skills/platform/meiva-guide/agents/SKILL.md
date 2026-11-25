@@ -145,8 +145,7 @@ switches: scrolling back past a switch reaches the earlier harness's conversatio
 small "Switched harness" item in the work block at the point of the switch. That is a view
 for people. The agent on the new harness still cannot read the old conversation, so do not
 write "as discussed above" in a handoff. An earlier harness's history that cannot be read
-(machine offline, CLI record cleaned up) appears as one "history unavailable" item and the
-rest of the timeline still loads.
+(machine offline, CLI record cleaned up) is left out of the timeline and the rest still loads.
 
 ## Introspection
 

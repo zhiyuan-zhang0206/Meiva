@@ -57,11 +57,11 @@ The project owner ruled on 2026-11-25:
    the new model and, when there is one, the restart message summary. The page renders it in the work block, at
    the level of a thinking or tool item: not a divider, not a reply. This is the whole of what is lifted from
    decision 8; restarts that keep the harness, lost turns, unconfirmed inputs, fork markers and the seed stay hidden.
-6. **A source that cannot be read costs its own segment.** The record on an offline machine, a CLI record that was
-   cleaned up, a record left behind by a transfer: the epoch shows one item, `kind="system_marker"`,
-   `source="history_unavailable"`, id `e<seq>.unavailable`, with an English reason, and the rest of the page is
-   served. For an earlier epoch this replaces the 503 of the 2026-11-13 consequences "a machine that is offline shows no
-   history": the segment is unavailable, the page is not.
+6. **A source that cannot be read is skipped.** The record on an offline machine, a CLI record that was cleaned
+   up, a record left behind by a transfer: the earlier epoch contributes no items and no placeholder, the page
+   serves everything else, and the gateway logs a warning event naming the agent and the epoch. For an earlier
+   epoch this replaces the 503 of the 2026-11-13 consequences "a machine that is offline shows no history": the
+   segment is missing from the view, the page is not refused.
 7. **Not supported for earlier epochs, for now.** Items of an earlier epoch have no `reading_locator` and are not
    reachable by `/timeline/window`. Sub-agents of a CLI stay one tool call in the main record.
 8. **A harness switch shares no conversation, and the restart message is the handoff.** The new harness starts

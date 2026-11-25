@@ -35,9 +35,8 @@ class TimelineItem(BaseModel):
     with `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE
     merge path. Items of a harness epoch before the agent's current one
     (an earlier harness the agent switched away from) carry the further
-    prefix `e<seq>.`, and the synthesized switch and unavailable markers are
-    `e<seq>.sw` and `e<seq>.unavailable`; the current epoch's ids are never
-    prefixed. For an
+    prefix `e<seq>.`, and the synthesized switch marker is `e<seq>.sw`; the
+    current epoch's ids are never prefixed. For an
     AIMessage, text/thinking are content blocks (block_idx = their content
     position) and each tool call gets `block_idx = <number of text/thinking
     content blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic
