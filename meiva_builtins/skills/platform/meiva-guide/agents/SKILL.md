@@ -93,8 +93,8 @@ does not replay, summarize or forward the old conversation. The `message` of the
 restart call is the only handoff, and it arrives as the first note on the new harness.
 Write the handoff yourself, in that message. If it is longer than a few paragraphs,
 write it to a file first and point to the path in the message. The same holds for
-every entry point below, and for the restart dialog in the web UI (an agent's row menu:
-choose another harness, model and effort, and write the handoff in the message box).
+every entry point below. The web UI's Restart is a plain restart on the same harness; a
+switch is started only from the agent itself, the CLI, the SDK or the REST API.
 
 - **SDK**: `meiva.agents.restart(agent_id, message="<handoff or path>", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
 - **CLI**: `meiva agents restart <agent_id> -m "<handoff or path>" --config '{"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}'`

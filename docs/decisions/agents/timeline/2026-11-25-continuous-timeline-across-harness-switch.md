@@ -68,18 +68,22 @@ The project owner ruled on 2026-11-25:
    with its own history and its own system prompt. Meiva does not replay the earlier conversation, does not
    summarize it, and does not append a note about it to the built-in checkpoint when the built-in harness comes
    back. The agent hands over by what it writes in the restart message (`meiva.self.restart(message, ...)`,
-   `meiva.agents.restart`, `meiva agents restart -m`, `POST /api/agents/{id}/restart`, the restart dialog): the
+   `meiva.agents.restart`, `meiva agents restart -m`, `POST /api/agents/{id}/restart`): the
    state of the work, and, when that is long, the path of a file that holds it. The message arrives as the first
-   note on the new harness. The skill `meiva-guide/agents`, the SDK docstrings, the restart dialog and the switch
-   note all say this in one voice.
+   note on the new harness. The skill `meiva-guide/agents`, the SDK and CLI help and the switch
+   note all say this in one voice. The web UI offers no switch: its Restart keeps the harness, with a fixed
+   message and no config, so a switch is started only by the agent itself (`meiva.self.restart`) or by an
+   operator through the SDK, CLI or REST API.
 9. **One switch note.** The note the new harness receives (`[Harness switched from 'a' to 'b']`, the reason and
    the reminder that nothing before the switch is visible) comes from one function; the three copies of the format
    in the lifecycle text, the operator route and the runner are removed with the dead code around them
    (`claimed_harness_switch_target` and the unreachable protection in the operator route).
 10. **Backfill is best effort.** For agents that switched before the table existed, a data migration rebuilds
-    epochs from the `[Harness switched from 'a' to 'b']` system notes of the inbox, the session records' times and
-    `agents_meta.harness_configured_at`. Where it cannot, it merges the interleaved stretches into one epoch with
-    `switched_by='backfill'` and no coordinates. It is idempotent and assumes no old note exists.
+    epochs from the `[Harness switched from 'a' to 'b']` system notes of the inbox. An agent whose notes do not
+    form one consistent chain ending at its current harness (or has none) gets a single epoch on the current
+    harness with `switched_by='backfill'` and no coordinates. Session records live outside the database and
+    `harness_configured_at` is overwritten on each switch, so the migration uses neither. It is idempotent and
+    assumes no old note exists.
 
 ## Alternatives rejected
 

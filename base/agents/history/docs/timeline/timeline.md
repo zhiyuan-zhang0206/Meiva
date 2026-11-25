@@ -133,6 +133,6 @@ harness, the CLI record cut by byte range or, without one, by time) and stored n
 - **An epoch that cannot be read** (machine offline, CLI record cleaned up, record left on another machine after a
   transfer) is one `system_marker` item, `source="history_unavailable"`, id `e<seq>.unavailable`, with the reason;
   the rest of the page is served.
-- **Not for earlier epochs yet:** `reading_locator` and `/timeline/window`. A CLI's sub-agent stays one tool call.
+- **Not for earlier epochs yet:** `reading_locator`, `/timeline/window` and quoting an item (refused with 422). The response carries `current_epoch`. A CLI's sub-agent stays one tool call.
 - **No shared context.** What the page shows to a person is not what the agent on the new harness can read. That
   harness sees its own history and the restart message, nothing else.

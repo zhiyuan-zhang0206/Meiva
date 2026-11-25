@@ -80,10 +80,10 @@ timeline page composes its earlier pages from these rows
 **A switch shares no conversation.** The new harness starts with its own history and its own system
 prompt and cannot see anything said or done before the switch. Meiva does not replay or summarize the
 old conversation and appends no note about it to the built-in checkpoint. The restart message is the
-only handoff: the caller (an operator, the agent itself through `meiva.self.restart`, or the restart
-dialog) writes the handoff there and, when it is long, writes it to a file and points to the path.
+only handoff: the caller (an operator through the SDK, CLI or REST API, or the agent itself through
+`meiva.self.restart`; the web UI's Restart never switches) writes the handoff there and, when it is long, writes it to a file and points to the path.
 The switch note the new harness receives says so in one sentence, and the SDK docstrings, the
-`meiva-guide` agents skill and the dialog carry the same rule. Switching back to a harness resumes
+`meiva-guide` agents skill and the CLI help carry the same rule. Switching back to a harness resumes
 that harness's own session record (see
 [the decision](../../../../docs/decisions/agents/graph/2026-11-12-harness-switch-keeps-session-records.md)),
 which holds none of what happened on other harnesses in between.
