@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import io
+import os
 import threading
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
@@ -379,4 +381,103 @@ async def test_an_error_answer_never_keeps_the_connection() -> None:
         status, headers, _ = await _read_reply(reader)
         assert (status, headers["connection"]) == (404, "close")
         assert await _at_eof(reader)
+        writer.close()
+
+
+_JSON_TEXT = b'{"items": [' + b'{"payload": "gzip me, I repeat myself"},' * 600 + b"{}]}"
+
+
+async def _json_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 200, _JSON_TEXT, "application/json"
+
+
+async def _partial_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 206, _JSON_TEXT, "application/json"
+
+
+async def _archive_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 200, _JSON_TEXT, "application/octet-stream"
+
+
+async def _small_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 200, b'{"ok": true}', "application/json"
+
+
+async def _incompressible_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 200, os.urandom(4096), "application/json"
+
+
+async def _big_route(_body: bytes) -> tuple[int, bytes, str]:
+    return 200, _JSON_TEXT * 8, "application/json"
+
+
+_GZIP_ROUTES: dict[tuple[str, str], object] = {
+    ("POST", "/json"): _json_route,
+    ("POST", "/partial"): _partial_route,
+    ("POST", "/archive"): _archive_route,
+    ("POST", "/small"): _small_route,
+    ("POST", "/random"): _incompressible_route,
+    ("POST", "/big"): _big_route,
+}
+
+
+async def _exchange_once(port: int, path: str, accept: str | None) -> Reply:
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    extra = "" if accept is None else f"Accept-Encoding: {accept}\r\n"
+    writer.write(_request(path, extra=extra))
+    reply = await _read_reply(reader)
+    writer.close()
+    return reply
+
+
+@pytest.mark.asyncio
+async def test_a_json_answer_is_gzipped_for_a_client_that_accepts_it() -> None:
+    async with _serving(_GZIP_ROUTES) as (_, port):
+        status, headers, body = await _exchange_once(port, "/json", "gzip, deflate")
+        assert status == 200
+        assert headers["content-encoding"] == "gzip"
+        assert headers["vary"] == "Accept-Encoding"
+        assert headers["content-length"] == str(len(body))
+        assert len(body) < len(_JSON_TEXT) // 4
+        assert gzip.decompress(body) == _JSON_TEXT
+
+
+@pytest.mark.asyncio
+async def test_a_body_past_the_offload_bound_is_gzipped_too() -> None:
+    async with _serving(_GZIP_ROUTES) as (_, port):
+        _, headers, body = await _exchange_once(port, "/big", "gzip")
+        assert headers["content-encoding"] == "gzip"
+        assert gzip.decompress(body) == _JSON_TEXT * 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "accept"),
+    [
+        ("/json", None),
+        ("/json", "identity"),
+        ("/json", "gzip;q=0"),
+        ("/json", "br, deflate"),
+        ("/small", "gzip"),
+        ("/archive", "gzip"),
+        ("/partial", "gzip"),
+        ("/random", "gzip"),
+    ],
+)
+async def test_every_other_answer_leaves_uncompressed(path: str, accept: str | None) -> None:
+    async with _serving(_GZIP_ROUTES) as (_, port):
+        _, headers, body = await _exchange_once(port, path, accept)
+        assert "content-encoding" not in headers
+        assert headers["content-length"] == str(len(body))
+
+
+@pytest.mark.asyncio
+async def test_a_gzipped_answer_keeps_the_connection_reusable() -> None:
+    async with _serving(_GZIP_ROUTES) as (_, port):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        for _ in range(2):
+            writer.write(_request("/json", extra="Accept-Encoding: gzip\r\n"))
+            _, headers, body = await _read_reply(reader)
+            assert headers["connection"] == "keep-alive"
+            assert gzip.decompress(body) == _JSON_TEXT
         writer.close()

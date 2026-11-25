@@ -104,6 +104,7 @@ from gateway.http.error_handlers import (
     unhandled_exception_handler,
 )
 from gateway.http.middleware import latency, runtime_metrics
+from gateway.http.middleware.compression import install_response_compression
 from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.model_catalog import (
     CatalogAppState,
@@ -520,6 +521,8 @@ def create_app(
     )
 
     app.middleware("http")(request_trace_middleware(config.rng))
+
+    install_response_compression(app)
 
     app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
