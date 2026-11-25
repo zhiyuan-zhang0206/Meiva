@@ -4,7 +4,7 @@ FastAPI TestClient + real meiva_test DB. The SQL is the one place a column-name 
 cast / filter typo passes the frontend tests (which feed mock data) but breaks
 live, so it is exercised against a real DB here. Covers:
 - `total_tokens` — per-agent retained-window (7d) in+out llm_usage sums, read from
-  `telemetry_events`.
+  `llm_usage_ledger`.
 - `node_score` — windowed SUM(in)*0.1 + SUM(out)*1.0 (drives node size).
 - edge weight — lineage (spawn/fork/resurrect) permanent count*2.0 (no decay,
   always shown); message (send_message) recency-decayed, dropped below 0.01.
@@ -12,7 +12,6 @@ live, so it is exercised against a real DB here. Covers:
 - a NULL agent_id audit row never 500s the endpoint.
 """
 
-import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -57,19 +56,7 @@ def _usage(
     age_hours: float = 0.0,
     event: str = "llm_usage",
 ) -> None:
-    """Record one `llm_usage` telemetry row (or another event carrying token fields)."""
-    db_conn.execute(
-        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
-        "category, event_name, level, source, attributes) VALUES (%s, now() - (%s * interval "
-        "'1 hour'), %s, 'test', 'c', 'test', 'telemetry', %s, 'info', 'test', %s::jsonb)",
-        (
-            uuid.uuid4().int % (1 << 62),
-            age_hours,
-            agent,
-            event,
-            json.dumps({"in_total": in_total, "out_total": out_total}),
-        ),
-    )
+    """Record one `llm_usage` ledger row (any other event name records nothing)."""
     if event == "llm_usage":
         db_conn.execute(
             """

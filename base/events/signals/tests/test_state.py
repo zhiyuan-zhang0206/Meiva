@@ -22,8 +22,8 @@ def _key() -> tuple[str, str, str]:
 
 def _rows(conn: psycopg.Connection[Any], key: tuple[str, str, str]) -> list[tuple[Any, ...]]:
     return conn.execute(
-        "SELECT id, count, severity, resolved_at, resolve_reason, evidence_ref, first_event_id,"
-        " last_event_id FROM signal_state WHERE source = %s AND subject = %s AND condition = %s"
+        "SELECT id, count, severity, resolved_at, resolve_reason, evidence_ref"
+        " FROM signal_state WHERE source = %s AND subject = %s AND condition = %s"
         " ORDER BY id",
         key,
     ).fetchall()
@@ -38,7 +38,6 @@ def test_repeat_touch_keeps_one_row_and_counts(db_conn: psycopg.Connection[Any])
         subject=subject,
         condition=condition,
         severity=SignalSeverity.WARNING,
-        event_id=101,
     )
     second = open_or_touch(
         db_conn,
@@ -46,44 +45,11 @@ def test_repeat_touch_keeps_one_row_and_counts(db_conn: psycopg.Connection[Any])
         subject=subject,
         condition=condition,
         severity=SignalSeverity.WARNING,
-        event_id=102,
     )
 
     assert second.id == first.id
     assert (second.count, first.count) == (2, 1)
     assert len(_rows(db_conn, (source, subject, condition))) == 1
-
-
-def test_the_origin_event_stays_and_the_newest_one_moves(db_conn: psycopg.Connection[Any]) -> None:
-    source, subject, condition = _key()
-
-    open_or_touch(
-        db_conn,
-        source=source,
-        subject=subject,
-        condition=condition,
-        severity=SignalSeverity.WARNING,
-        event_id=101,
-    )
-    touched = open_or_touch(
-        db_conn,
-        source=source,
-        subject=subject,
-        condition=condition,
-        severity=SignalSeverity.ERROR,
-        event_id=102,
-    )
-    without_evidence = open_or_touch(
-        db_conn,
-        source=source,
-        subject=subject,
-        condition=condition,
-        severity=SignalSeverity.ERROR,
-    )
-
-    assert (touched.first_event_id, touched.last_event_id) == (101, 102)
-    assert touched.severity is SignalSeverity.ERROR
-    assert without_evidence.last_event_id == 102
 
 
 def test_the_newest_report_decides_the_severity(db_conn: psycopg.Connection[Any]) -> None:

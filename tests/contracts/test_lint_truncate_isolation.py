@@ -97,8 +97,6 @@ def _cascade_closure(seed: set[str], edges: list[tuple[str, str]]) -> set[str]:
 _EXEMPT: dict[str, str] = {
     "schema_migrations": "migration bookkeeping — never test data",
     "checkpoint_migrations": "LangGraph migration bookkeeping — never test data",
-    "agent_metric_collection": "migration-seeded collection cutover singleton — "
-    "read-only after installation, never test data",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
     "deployment_state": "R1 singleton (id=1, CHECK) — its live consumer is the "
     "code-version gate (base/db/code_version_gate.py); the row is seeded by the "

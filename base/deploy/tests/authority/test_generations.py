@@ -159,7 +159,7 @@ def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityC
 @pytest.mark.parametrize(
     ("login", "group"), [("meiva_g0_gateway", "meiva_gateway"), ("meiva_g0_runner", "meiva_runner")]
 )
-@pytest.mark.parametrize("table", ["audit_events", "telemetry_events"])
+@pytest.mark.parametrize("table", ["audit_events"])
 def test_both_groups_append_event_tables_but_cannot_rewrite_them(
     authority_postgres: AuthorityCluster, login: str, group: str, table: str
 ) -> None:

@@ -310,6 +310,12 @@ def _restore_dropped_tables(conn: psycopg.Connection) -> None:
         "token_budget_notified_at timestamptz, usd_budget_notified_at timestamptz)"
     )
     conn.execute("CREATE TABLE agent_model_tokens_daily (agent_id bigint)")
+    conn.execute(
+        "CREATE TABLE agent_metric_observations "
+        "(agent_id bigint, model text, occurred_at timestamptz)"
+    )
+    conn.execute("CREATE TABLE agent_metric_days (agent_id bigint)")
+    conn.execute("CREATE TABLE telemetry_events (event_uid bigint)")
 
 
 def test_current_reset_converges_when_the_missing_names_still_have_files(
