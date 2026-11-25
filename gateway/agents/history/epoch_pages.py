@@ -12,7 +12,6 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import NoteTag
 from gateway.message_admission.cursor import (
     SWITCH_BLOCK_ID,
-    UNAVAILABLE_ID,
     CursorPart,
     TimelineCursor,
     epoch_item_id,
@@ -26,7 +25,6 @@ __all__ = [
     "assemble_page",
     "page_target",
     "switch_block",
-    "unavailable_marker",
     "usable_epochs",
 ]
 
@@ -65,7 +63,6 @@ class PageTarget:
     seq: int | None
     within: TimelineCursor | None
     fixed: list[TimelineItem] | None = None
-    fixed_has_more: bool = False
 
 
 def usable_epochs(rows: Sequence[HarnessEpoch], harness: str) -> list[HarnessEpoch]:
@@ -85,16 +82,6 @@ def switch_block(epoch: HarnessEpoch, previous: HarnessEpoch) -> TimelineItem:
         epoch_item_id(epoch.seq, SWITCH_BLOCK_ID),
         NoteTag.HARNESS_SWITCH,
         f"Switched harness: {previous.harness} -> {epoch.harness}{model}{reason}",
-        epoch.started_at,
-    )
-
-
-def unavailable_marker(epoch: HarnessEpoch, reason: Unavailable, *, current: bool) -> TimelineItem:
-    which = "This session" if current else "Earlier session"
-    return _marker(
-        epoch_item_id(epoch.seq, UNAVAILABLE_ID),
-        NoteTag.HISTORY_UNAVAILABLE,
-        f"{which} on {epoch.harness} is unavailable: {reason.value}.",
         epoch.started_at,
     )
 
@@ -124,12 +111,6 @@ def page_target(
         return PageTarget(None, None, fixed=[])
     if cursor.part is CursorPart.SWITCH:
         return PageTarget(seq - 1 if seq > 0 else None, None, fixed=None if seq > 0 else [])
-    if cursor.part is CursorPart.UNAVAILABLE:
-        if seq == 0:
-            return PageTarget(None, None, fixed=[])
-        return PageTarget(
-            None, None, fixed=[switch_block(epochs[seq], epochs[seq - 1])], fixed_has_more=True
-        )
     return PageTarget(seq, cursor)
 
 
@@ -143,7 +124,7 @@ def assemble_page(epochs: Sequence[HarnessEpoch], seq: int, read: EpochRead) -> 
             item.model_copy(update={"item_id": epoch_item_id(seq, item.item_id)}) for item in items
         ]
     if read.unavailable is not None:
-        items = [unavailable_marker(epoch, read.unavailable, current=seq == current)]
+        items = []
     if reached_head and seq > 0:
         items = [switch_block(epoch, epochs[seq - 1]), *items]
     return EpochPage(

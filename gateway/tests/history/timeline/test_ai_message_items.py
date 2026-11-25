@@ -210,7 +210,6 @@ class TestAiMessageItems:
             NoteTag.PERSONAL_DREAM,
             NoteTag.AGENT_TERMINATED,
             NoteTag.HARNESS_SWITCH,
-            NoteTag.HISTORY_UNAVAILABLE,
         }
         hidden = {
             NoteTag.MEMORY,

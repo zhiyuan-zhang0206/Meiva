@@ -69,7 +69,6 @@ def test_an_earlier_epoch_orders_before_the_current_one_and_its_parts_in_order()
         "e0.0.0",
         "e0.12.0",
         "e1.sw",
-        "e1.unavailable",
         "e1.h5.0",
         "e1.h9000.2",
         "e2.sw",
@@ -86,7 +85,6 @@ def test_an_earlier_epoch_orders_before_the_current_one_and_its_parts_in_order()
         ("e3.h900.1", 3, CursorPart.CONTENT, "h900.1"),
         ("e1.s2.cp.4.0", 1, CursorPart.CONTENT, "4.0"),
         ("e2.sw", 2, CursorPart.SWITCH, "0.0"),
-        ("e2.unavailable", 2, CursorPart.UNAVAILABLE, "0.0"),
     ],
 )
 def test_an_epoch_cursor_names_its_epoch_and_part(

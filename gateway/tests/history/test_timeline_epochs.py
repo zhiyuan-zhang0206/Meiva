@@ -9,6 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from base.agents.history.timeline_item import TimelineItem
 from base.db import create_agent
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, reconfigure
 from gateway.tests.history.test_timeline import CompactHistoryCases
 from ops.cluster.rpc import ClusterOpUnreachable
@@ -170,21 +172,19 @@ class TestTimelineEpochs(CompactHistoryCases):
             "first answer",
         ]
 
-    def test_the_cursors_of_the_synthetic_items_are_accepted(
+    def test_the_cursor_of_the_first_epochs_head_is_a_final_empty_page(
         self, db_conn: psycopg.Connection, client: GatewayTestClient
     ) -> None:
         agent = self._meiva_cli_meiva(db_conn)
 
-        page = client.get(
-            f"/api/agents/{agent}/timeline", params={"before": "e1.unavailable"}
-        ).json()
-        assert _ids(page) == ["e1.sw"]
-        assert page["has_more"] is True
         end = client.get(f"/api/agents/{agent}/timeline", params={"before": "e0.sw"}).json()
         assert (end["items"], end["has_more"]) == ([], False)
 
-    def test_an_offline_machine_degrades_only_its_epoch(
-        self, db_conn: psycopg.Connection, client: GatewayTestClient
+    def test_an_offline_machine_skips_only_its_epoch(
+        self,
+        db_conn: psycopg.Connection,
+        client: GatewayTestClient,
+        loguru_records: LogRecords,
     ) -> None:
         agent = self._meiva_cli_meiva(db_conn)
         client.app.state.rpc = EpochRunner(lambda _: ClusterOpUnreachable("down"))
@@ -193,35 +193,35 @@ class TestTimelineEpochs(CompactHistoryCases):
 
         assert page.status_code == 200
         body = page.json()
-        assert _ids(body) == ["e1.sw", "e1.unavailable"]
-        assert body["items"][1]["source"] == "history_unavailable"
-        assert body["items"][1]["payload"].endswith("the agent's machine is offline.")
+        assert _ids(body) == ["e1.sw"]
         assert body["has_more"] is True
+        (warning,) = loguru_records.extras(event="timeline_epoch_unreadable")
+        assert (warning["agent_id"], warning["epoch"], warning["harness"]) == (
+            agent,
+            1,
+            "claude_code",
+        )
+        assert warning["reason"] == "the agent's machine is offline"
+        older = client.get(f"/api/agents/{agent}/timeline", params={"before": "e1.sw"}).json()
+        assert _ids(older) == ["e0.0.0", "e0.1.0", "e0.2.0"]
 
     @pytest.mark.parametrize(
-        ("reply", "why"),
-        [
-            (
-                {"items": [], "has_more": False, "size": 0, "unreadable": "session_mismatch"},
-                "replaced",
-            ),
-            ({"items": [], "has_more": False, "size": 0, "unreadable": "file_missing"}, "removed"),
-        ],
+        "unreadable", ["session_mismatch", "file_missing", "undecodable", "no_session"]
     )
-    def test_an_unreadable_record_of_an_earlier_epoch_is_a_placeholder(
+    def test_an_unreadable_record_of_an_earlier_epoch_is_skipped(
         self,
         db_conn: psycopg.Connection,
         client: GatewayTestClient,
-        reply: dict[str, Any],
-        why: str,
+        unreadable: str,
     ) -> None:
         agent = self._meiva_cli_meiva(db_conn)
+        reply = {"items": [], "has_more": False, "size": 0, "unreadable": unreadable}
         client.app.state.rpc = EpochRunner(lambda _: reply)
 
         body = client.get(f"/api/agents/{agent}/timeline", params={"before": "e2.sw"}).json()
 
-        assert _ids(body) == ["e1.sw", "e1.unavailable"]
-        assert why in body["items"][1]["payload"]
+        assert _ids(body) == ["e1.sw"]
+        assert body["has_more"] is True
 
     def test_the_current_external_epoch_reads_from_its_offset_and_a_missing_record_is_empty(
         self, db_conn: psycopg.Connection, client: GatewayTestClient

@@ -21,14 +21,12 @@ _MAX_CURSOR_INDEX_DIGITS = 20
 
 
 SWITCH_BLOCK_ID = "sw"
-UNAVAILABLE_ID = "unavailable"
 _CURRENT_EPOCH_KEY = 2**63 - 1
 
 
 class CursorPart(StrEnum):
     CONTENT = "content"
     SWITCH = "switch"
-    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -52,7 +50,7 @@ def epoch_item_id(seq: int, local_id: str) -> str:
 
 # meiva:note
 # Parse current (`m.b`, `hm.b`), historical (`sK.cpid.m.b`) or earlier-epoch (`e<seq>.` before any of those,
-# `e<seq>.sw`, `e<seq>.unavailable`) item ids.
+# `e<seq>.sw`) item ids.
 #
 # Historical ranks are syntax only. The checkpoint id is resolved against
 # the current boundary index and determines the canonical rank used in the
@@ -66,9 +64,8 @@ def parse_cursor(before: str) -> TimelineCursor | None:
     seq = _parse_index(head[1:])
     if seq is None or (head[1:].startswith("0") and seq != 0):
         return None
-    if rest in (SWITCH_BLOCK_ID, UNAVAILABLE_ID):
-        part = CursorPart.SWITCH if rest == SWITCH_BLOCK_ID else CursorPart.UNAVAILABLE
-        return TimelineCursor(None, 0, 0, epoch=seq, part=part)
+    if rest == SWITCH_BLOCK_ID:
+        return TimelineCursor(None, 0, 0, epoch=seq, part=CursorPart.SWITCH)
     local = _parse_local(rest)
     return None if local is None else replace(local, epoch=seq)
 
@@ -120,8 +117,8 @@ def _parse_index(value: str) -> int | None:
 
 # meiva:note
 # Order items by their position in the whole conversation, as a tuple: the epoch (an unprefixed id belongs to the
-# current epoch, which sorts after every earlier one), the part within the epoch (the switch block, then the unavailable
-# marker, then source items), the compact segment (older segments have the higher rank and come first) and the
+# current epoch, which sorts after every earlier one), the part within the epoch (the switch block, then
+# source items), the compact segment (older segments have the higher rank and come first) and the
 # logical append position (msg_idx, block_idx) parsed from the local id, numerically, so "10.0" follows "2.0". This
 # is the order the readers emit items in; sorting by created_at would reorder on a clock skew.
 def item_sort_key(item_id: str) -> tuple[int, int, int, int, int]:
@@ -132,9 +129,7 @@ def item_sort_key(item_id: str) -> tuple[int, int, int, int, int]:
         epoch_key = int(head[1:])
     if local == SWITCH_BLOCK_ID:
         return (epoch_key, 0, 0, 0, 0)
-    if local == UNAVAILABLE_ID:
-        return (epoch_key, 1, 0, 0, 0)
     segments = local.split(".")
     rank = int(segments[0][1:]) if len(segments) == 4 else 0
     raw_msg = segments[-2].removeprefix("h")
-    return (epoch_key, 2, -rank, int(raw_msg), int(segments[-1]))
+    return (epoch_key, 1, -rank, int(raw_msg), int(segments[-1]))

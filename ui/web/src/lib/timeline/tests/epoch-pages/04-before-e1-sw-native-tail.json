@@ -1,5 +1,5 @@
 {
-  "request": "before=e1.sw (or before=e1.unavailable)",
+  "request": "before=e1.sw",
   "response": {
     "items": [
       {

@@ -48,5 +48,4 @@ export const NOTE_TAGS = [
   "personal_dream",
   "agent_terminated",
   "harness_switch",
-  "history_unavailable",
 ] as const;

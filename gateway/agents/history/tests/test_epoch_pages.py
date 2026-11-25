@@ -12,7 +12,6 @@ from gateway.agents.history.epoch_pages import (
     assemble_page,
     page_target,
     switch_block,
-    unavailable_marker,
     usable_epochs,
 )
 from gateway.agents.history.epoch_range import external_range
@@ -83,16 +82,6 @@ def test_the_switch_block_names_both_harnesses_the_model_and_the_restart_message
     assert switch_block(_CHAIN[2], _CHAIN[1]).payload == "Switched harness: claude_code -> codex"
 
 
-def test_an_unavailable_marker_says_which_session_and_why() -> None:
-    marker = unavailable_marker(_CHAIN[1], Unavailable.MACHINE_OFFLINE, current=False)
-    assert (marker.item_id, marker.source) == ("e1.unavailable", "history_unavailable")
-    assert marker.payload == (
-        "Earlier session on claude_code is unavailable: the agent's machine is offline."
-    )
-    now = unavailable_marker(_CHAIN[3], Unavailable.FILE_MISSING, current=True)
-    assert now.payload.startswith("This session on meiva is unavailable")
-
-
 @pytest.mark.parametrize(
     ("before", "seq", "local"),
     [
@@ -113,16 +102,10 @@ def test_a_cursor_selects_the_epoch_it_pages(
     assert target.fixed is None
 
 
-def test_the_cursor_of_an_unavailable_marker_returns_only_its_switch_block() -> None:
-    target = page_target(_CHAIN, "e2.unavailable", parse_cursor("e2.unavailable"))
-    assert target.seq is None and target.fixed_has_more
-    assert [item.item_id for item in target.fixed or []] == ["e2.sw"]
-
-
 @pytest.mark.parametrize("before", ["e0.sw", "e0.unavailable", "e9.sw", "e9.1.0", "garbage"])
 def test_a_cursor_with_nothing_older_or_no_such_epoch_is_an_empty_final_page(before: str) -> None:
     target = page_target(_CHAIN, before, parse_cursor(before))
-    assert (target.seq, target.fixed, target.fixed_has_more) == (None, [], False)
+    assert (target.seq, target.fixed) == (None, [])
 
 
 def test_the_current_epoch_keeps_unprefixed_ids_and_ends_with_its_switch_block() -> None:
@@ -143,14 +126,13 @@ def test_the_first_epoch_has_no_switch_block_and_nothing_older() -> None:
     assert page.has_more is False
 
 
-def test_an_unavailable_epoch_is_a_switch_block_and_a_marker() -> None:
+def test_an_unreadable_epoch_is_only_its_switch_block_and_the_first_one_is_nothing() -> None:
     read = EpochRead([], has_more=False, unavailable=Unavailable.FILE_MISSING)
     page = assemble_page(_CHAIN, 1, read)
-    assert [item.item_id for item in page.items] == ["e1.sw", "e1.unavailable"]
+    assert [item.item_id for item in page.items] == ["e1.sw"]
     assert page.has_more is True
     first = assemble_page(_CHAIN, 0, read)
-    assert [item.item_id for item in first.items] == ["e0.unavailable"]
-    assert first.has_more is False
+    assert (first.items, first.has_more) == ([], False)
 
 
 def test_an_epoch_that_reports_more_but_returns_nothing_is_treated_as_read_to_its_head() -> None:

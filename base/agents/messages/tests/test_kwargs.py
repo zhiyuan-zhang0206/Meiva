@@ -52,7 +52,6 @@ def test_note_tag_value_set() -> None:
         "personal_dream",
         "agent_terminated",
         "harness_switch",
-        "history_unavailable",
     }
 
 

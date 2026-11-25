@@ -37,6 +37,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.api_contracts.reading import ReadingSourceUnavailableError, encode_reading_source
 from base.db import Database, agent_exists
+from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
 from gateway.agents.history.epoch_pages import (
@@ -95,8 +96,7 @@ class TimelineResponse(BaseModel):
     A harness switch ends an epoch and opens the next. The current epoch's items
     keep their unprefixed ids; an earlier epoch's items are prefixed `e<seq>.`
     (`e0.12.0`, `e0.s1.<checkpoint>.3.0`, `e1.h123.0`), its switch block is
-    `e<seq>.sw` and its placeholder, when its history cannot be read,
-    `e<seq>.unavailable`. A page reads one epoch; the response's `current_epoch`
+    `e<seq>.sw`. A page reads one epoch; the response's `current_epoch`
     is the seq of the epoch whose ids are unprefixed (0 for an agent that never
     switched). `msg_count` describes the current epoch and is 0 on a page of an
     earlier epoch.
@@ -610,7 +610,7 @@ def _epoch_response(
         return TimelineResponse(
             items=target.fixed or [],
             msg_count=0,
-            has_more=target.fixed_has_more,
+            has_more=False,
             current_epoch=current,
         )
     if epochs[target.seq].harness == "meiva":
@@ -619,6 +619,15 @@ def _epoch_response(
         )
     else:
         result = _epoch_external_read(request, agent_id, epochs, target.seq, target.within, limit)
+    if result.unavailable is not None:
+        logger.warning(
+            "timeline epoch {epoch} of agent {agent_id} is skipped: {reason}",
+            event="timeline_epoch_unreadable",
+            agent_id=agent_id,
+            epoch=target.seq,
+            harness=epochs[target.seq].harness,
+            reason=result.unavailable.value,
+        )
     page = assemble_page(epochs, target.seq, result)
     return TimelineResponse(
         items=page.items,
@@ -641,7 +650,7 @@ def get_timeline(
         default=None,
         description=(
             "The oldest item id the client holds, verbatim: any id this endpoint returns, including"
-            " `e<seq>.sw` and `e<seq>.unavailable` of an earlier harness epoch."
+            " `e<seq>.sw` of an earlier harness epoch."
         ),
     ),
 ) -> TimelineResponse:
@@ -663,8 +672,9 @@ def get_timeline(
     the head of an epoch continues into the previous one: its items carry the
     `e<seq>.` id prefix, its start is a `harness_switch` system marker
     `e<seq>.sw`, and a page reads one epoch only. An epoch whose history cannot be
-    read (its machine is offline, its record was removed or moved) is one
-    `history_unavailable` marker `e<seq>.unavailable`; it never fails the page.
+    read (its machine is offline, its record was removed or moved) is skipped
+    without an item, with a warning in the gateway log; it never fails the page,
+    and the page is its switch block, so paging goes on to the epoch before it.
     Items of an earlier epoch have no `reading_locator`, are not served by
     `/timeline/window`, and cannot be quoted.
     """
