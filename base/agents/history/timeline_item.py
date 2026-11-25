@@ -23,17 +23,20 @@ def _missing_reading_locator(value: object) -> bool:
 
 
 class TimelineItem(BaseModel):
-    """One element of a timeline view of LangGraph state.messages, using the
-    inbound_messages table as a timestamp anchor and impersonation history
-    expanded at its checkpoint marker. External session metadata identifies
-    the actual executor without changing the cursor grammar.
+    """One element of a timeline view: of LangGraph state.messages for the
+    built-in harness, using the inbound_messages table as a timestamp anchor
+    and impersonation history expanded at its checkpoint marker, or of a CLI's
+    session record for an external one (ids `h<offset>.<n>`).
 
     `item_id` is the stable key coordinating frontend timeline with
     streaming SSE; the current segment uses `f"{msg_idx}.{block_idx}"`
     (msg_idx = position in state.messages; for other message types
     block_idx=0). Cold-loaded compact history prefixes that local position
     with `s<rank>.<boundary_checkpoint_id>.`; it never enters the live SSE
-    merge path. For an
+    merge path. Items of a harness epoch before the agent's current one
+    (an earlier harness the agent switched away from) carry the further
+    prefix `e<seq>.`, and the synthesized switch marker is `e<seq>.sw`; the
+    current epoch's ids are never prefixed. For an
     AIMessage, text/thinking are content blocks (block_idx = their content
     position) and each tool call gets `block_idx = <number of text/thinking
     content blocks> + <ordinal in msg.tool_calls>` — a provider-agnostic

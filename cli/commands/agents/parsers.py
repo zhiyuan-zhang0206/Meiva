@@ -612,7 +612,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     _add_compact_parser(agents_sub)
 
     agents_restart_p = agents_sub.add_parser(
-        "restart", help="restart the agent in place (history preserved)"
+        "restart", help="restart the agent in place (history preserved unless the harness changes)"
     )
     agents_restart_p.add_argument("agent_id", type=int, help="agent id to restart")
     agents_restart_p.add_argument(
@@ -628,7 +628,11 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         type=_nonblank_message,
         required=True,
         metavar="TEXT",
-        help="natural-language explanation delivered to the agent (required on restart)",
+        help=(
+            "explanation delivered to the agent (required on restart); on a harness switch it is "
+            "the only handoff, since the new harness cannot see the old conversation, so put "
+            "the handoff here or point to a file"
+        ),
     )
     agents_restart_p.add_argument(
         "--at", help="one-shot future attempt: +60s, +10m or ISO timestamp"

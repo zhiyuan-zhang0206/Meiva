@@ -260,7 +260,7 @@ def test_fork_naming_another_harness_is_refused(
             local_machine=machine_identity,
         )
 
-    assert "immutable" in str(refusal.value)
+    assert "keeps its source's harness" in str(refusal.value)
     # meiva:note
     # Nothing of the refused birth survives: no identity row, no metadata row, no
     # copied conversation and no fork prompt, because the raise rolls the whole

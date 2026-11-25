@@ -178,8 +178,8 @@ class AgentRuntime:
     # Both belong to the cached runtime because an external session is expensive to
     # start and resumes by id: the cache's idle TTL and LRU bound is what closes it,
     # together with the explicit drops (terminate, restart, crash) and host shutdown.
-    # A built-in runtime carries no bridge and never asks for one; harness is immutable
-    # per agent, so a rebuilt runtime cannot switch engines under the same id.
+    # A built-in runtime carries no bridge and never asks for one; a harness switch
+    # drops the cached runtime first, so a rebuilt runtime is built for the harness now stored.
     # meiva:link agent/graph/docs/harness-turn.md
     harness: Harness = Harness.MEIVA
     harness_bridge: TurnEngine | None = None

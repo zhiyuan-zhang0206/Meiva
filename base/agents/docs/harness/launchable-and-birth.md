@@ -1,15 +1,15 @@
 # Launchable harnesses and the birth gate
 
 Split out of [Agent harness identity](harness.md),
-which owns the value set, its immutability and the fork rule. This node owns what
+which owns the value set, birth and restart switching, and the fork rule. This node owns what
 happens when the release has no launcher for a stored harness: the birth refusal
 and the gates that keep an older row inert.
 
 ## No launcher, no birth
 
 Recording a value nobody can honour would make the column a claim about a runtime
-loop that is not running — and because the value never changes, the agent could
-be neither run nor moved onto another loop. `LAUNCHABLE_HARNESSES` names the
+loop that is not running — and the agent could not run until someone switched it
+onto another loop. `LAUNCHABLE_HARNESSES` names the
 harnesses a launcher exists for, and `resolve_birth_harness` refuses the birth
 itself for anything else:
 `HarnessNotLaunchable` (`harness_not_launchable`, HTTP 400) names the harness and

@@ -30,7 +30,9 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
   parent is not woken by its own action.
 - `restart` — finish current turn, then restart as a fresh process under the
   same `agent_id` (mandatory `message` explaining the restart reason; optional
-  `config_overlay` to change model, effort, or switch harness).
+  `config_overlay` to change model, effort, or switch harness; a harness switch
+  shares no conversation, so the `message` must carry the handoff, see
+  [Switching Harnesses](#switching-harnesses--handoff-process)).
 - `interrupt` — stop the agent's running turn now so it reads your message
   (`meiva.agents.interrupt(agent_id, message)`, `meiva agents interrupt <id> -m "..." --source ...`).
   The mandatory `message` is your reason: the agent is told its turn was
@@ -84,10 +86,20 @@ or external <-> external) via `restart` with a config overlay. A new agent picks
 harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
 (`spawn` has no separate `harness` argument).
 
-- **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
-- **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort>`
-- **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "...", "llm_model": "<model>", "reasoning_effort": "<effort>"}}`
-- **From the agent itself** (on any harness): `print(meiva.self.restart("Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}))`.
+**Read this before your first switch: a harness switch shares no conversation.**
+The new harness starts with its own history and cannot see anything said or done
+before the switch: not your messages, not the user's, not your tool results. Meiva
+does not replay, summarize or forward the old conversation. The `message` of the
+restart call is the only handoff, and it arrives as the first note on the new harness.
+Write the handoff yourself, in that message. If it is longer than a few paragraphs,
+write it to a file first and point to the path in the message. The same holds for
+every entry point below. The web UI's Restart is a plain restart on the same harness; a
+switch is started only from the agent itself, the CLI, the SDK or the REST API.
+
+- **SDK**: `meiva.agents.restart(agent_id, message="<handoff or path>", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"})`
+- **CLI**: `meiva agents restart <agent_id> -m "<handoff or path>" --config '{"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}'`
+- **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "<handoff or path>", "config_overlay": {"harness": "...", "llm_model": "<model>", "reasoning_effort": "<effort>"}}`
+- **From the agent itself** (on any harness): `print(meiva.self.restart("<handoff or path>", config_overlay={"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}))`.
   The request is validated
   like any restart (a refusal raises at once), recorded, and applied when the current turn
   ends, never during it. On the native harness the call ends your execution; on an external
@@ -100,28 +112,40 @@ harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex
    waits for its turn to end instead). Scheduled `--at` submissions accept running
    targets and check for quiescence once when the schedule fires.
 2. **Mandatory Message**: `message` is mandatory across all restart calls (minimum
-   1 non-whitespace character).
+   1 non-whitespace character). For a harness switch it is also the handoff (item 4).
 3. **Model Compatibility**: A harness switch must name the target harness's `llm_model`
    and, when that model has effort options, its `reasoning_effort` in the overlay; the
    previous harness's model and effort never carry over. Changing `llm_model` on the same
    harness likewise requires naming `reasoning_effort` (a model without effort options takes none).
-4. **Handoff Document**: Before stopping or requesting a harness switch, have the
-   outgoing agent write a comprehensive handoff file (`README.md` or `HANDOFF.md`)
-   in its workspace root. This document should cover:
-   - Workspace directories and current layout
-   - Git branches and active worktree paths
-   - Active investigations and pending decisions
-   - Key architectural invariants and constraints
-   - Optionally creating a git bundle or archive if switching machines
-   The restart caller should then pass the path to this handoff document and a concise
-   summary of current progress in the mandatory `message` argument of the restart call.
+4. **Handoff in the message**: The restart `message` is the only thing the new harness
+   receives from the old one, so put what it needs to continue in it: the goal and current
+   state, what is done and what is next, open decisions and pitfalls, and where things are
+   (repo paths, branches, worktrees, ids of agents you wait on). When that is more than a
+   few paragraphs, write a handoff file in the agent's workspace (`HANDOFF.md`: workspace
+   layout, git branches and active worktree paths, active investigations, key invariants,
+   optionally a git bundle or archive when switching machines) and make the message a short
+   summary plus its absolute path, for example
+   `"Switching to codex. Goal: finish the migration PR. State: tests green, review pending. Read /home/me/.meiva/workspaces/42/HANDOFF.md before anything else."`
+   The new harness has the files, memory, agents and schedules you had, not your conversation.
+   A switch without a handoff starts cold.
+5. **Session records are kept**: Switching back to a harness resumes the session that
+   harness had before. It continues its own earlier conversation and sees none of what
+   happened on other harnesses in between, so a return trip needs a handoff too.
 
 ### Transition Sequence
 When switching harnesses on restart:
-1. The runner calls `/prepare-harness-switch` to persist a lifecycle switch note in the timeline.
-2. The agent is dropped from active runner cache, and the harness session records (`$MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json`) are kept, so switching back to a harness resumes the conversation it had there.
+1. The runner calls `/prepare-harness-switch`: the agent is dropped from the active runner cache and the point where the old harness's record ends is noted.
+2. The harness session records (`$MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json`) are kept, so switching back to a harness resumes the conversation it had there.
 3. If `idling`, the agent is cleanly terminated.
-4. `agents_meta.harness` is updated in the database, and the agent is resurrected on its new harness with a wake prompt referencing the restart message.
+4. In one transaction `agents_meta.harness` is updated and a new harness epoch is recorded (`agent_harness_epochs`: one row per stretch of an agent's life on one harness). The agent is resurrected on its new harness; the first note it reads is `[Harness switched from 'a' to 'b' by <who>]`, a reminder that nothing said before the switch is visible, and then your restart message.
+
+### What the timeline shows after a switch
+The agent's timeline (web UI, `GET /api/agents/{id}/timeline`) stays continuous across
+switches: scrolling back past a switch reaches the earlier harness's conversation, with one
+small "Switched harness" item in the work block at the point of the switch. That is a view
+for people. The agent on the new harness still cannot read the old conversation, so do not
+write "as discussed above" in a handoff. An earlier harness's history that cannot be read
+(machine offline, CLI record cleaned up) is left out of the timeline and the rest still loads.
 
 ## Introspection
 
@@ -152,7 +176,7 @@ before using them.
 
 ```bash
 meiva agents transfer <id> --to <machine> --message "Move after this turn" --at +60s --source agent:<caller_id>
-meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --overlay harness=codex --overlay llm_model=<model> --overlay reasoning_effort=<effort> --at +60s --source agent:<caller_id>
+meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --config '{"harness": "codex", "llm_model": "<model>", "reasoning_effort": "<effort>"}' --at +60s --source agent:<caller_id>
 ```
 
 `--at` accepts relative times such as `+60s` / `+10m` or an ISO-8601 timestamp,

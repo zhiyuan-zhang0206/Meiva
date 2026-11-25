@@ -108,3 +108,31 @@ selector fields, and ordinary RPC replies omit unused new envelope fields.
 Browser restoration is a separate consumer stage. A failed or cancelled read,
 budget refusal or unavailable source is not evidence that a saved bookmark was
 deleted and must not cause a fallback viewport to overwrite it.
+
+## Timeline across a harness switch
+
+An agent's timeline is continuous across its harness switches, and its context is not shared (the
+[decision](../../../../../docs/decisions/agents/timeline/2026-11-25-continuous-timeline-across-harness-switch.md);
+the facts are in `agent_harness_epochs`, see [harness identity](../../../docs/harness/harness.md#epochs-and-what-a-switch-shares)).
+The page of the current epoch is exactly what it was: the same ids, so the live stream, the sink and the streaming
+overlay are untouched. A `before=` cursor that reaches the head of the current epoch continues into the previous
+one, and so on, composed when asked for from that epoch's source (the checkpoint cut by time for the built-in
+harness, the CLI record cut by byte range or, without one, by time) and stored nowhere.
+
+- **Ids and order.** Items of an earlier epoch are `e<seq>.` followed by the id the source gives them (`e0.h123.0`,
+  `e0.12.0`). The order is `(epoch seq, order within the epoch)`; there is no comparison of `created_at` across
+  sources. A page reads one source. `has_more` holds while an earlier epoch or earlier item exists. `msg_count`
+  is the current epoch's count, and the page's rule that drops running items a snapshot no longer mentions applies
+  to current-epoch ids only.
+- **The switch block.** The start of each epoch after the first carries one `system_marker` item with
+  `source="harness_switch"` and id `e<seq>.sw` (`seq` is the new epoch's), whose English payload names the harnesses,
+  the new model and the reason when there is one. It is a work-level item beside thinking and tool items in the
+  work block, not a divider and not a reply; the other markers that decision 8 of
+  [the 2026-11-13 decision](../../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)
+  hid stay hidden.
+- **An epoch that cannot be read** (machine offline, CLI record cleaned up, record left on another machine after a
+  transfer) is skipped silently: its history is not shown (its switch block still stands where it begins), the rest of the page is served, and the gateway logs a
+  warning event.
+- **Not for earlier epochs yet:** `reading_locator`, `/timeline/window` and quoting an item (refused with 422). The response carries `current_epoch`. A CLI's sub-agent stays one tool call.
+- **No shared context.** What the page shows to a person is not what the agent on the new harness can read. That
+  harness sees its own history and the restart message, nothing else.

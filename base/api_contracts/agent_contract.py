@@ -438,8 +438,8 @@ class ForkHarnessMismatch(ForkError, MeivaAgentError, ValueError):  # noqa: N818
 
 # meiva:note
 # A harness no launcher can start refuses the birth itself: the row would record
-# a runtime loop that can never run, and the stored harness is immutable, so the
-# agent could be neither run nor moved onto another loop. Raising before the row
+# a runtime loop that can never run, so the agent could not run until someone
+# switched it onto another loop. Raising before the row
 # exists is what keeps every stored value a claim about a loop that can start.
 # meiva:link base/agents/docs/harness/harness.md
 class HarnessNotLaunchable(MeivaAgentError):  # noqa: N818
