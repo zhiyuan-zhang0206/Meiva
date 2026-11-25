@@ -1,4 +1,4 @@
-exports = ["math.ts", "remark-autolink-delimiter.ts", "remark-cjk-link-boundary.ts"]
+exports = ["math.ts", "remark-autolink-delimiter.ts", "remark-cjk-link-boundary.ts", "streaming-repair.ts"]
 
 [uses]
 "math.ts" = ["latex-math-guard.ts", "remark-display-math-recovery.ts", "remark-latex-math.ts"]
@@ -7,6 +7,7 @@ exports = ["math.ts", "remark-autolink-delimiter.ts", "remark-cjk-link-boundary.
 "remark-cjk-link-boundary.test.ts" = ["remark-cjk-link-boundary.ts"]
 "remark-cjk-link-boundary.ts" = ["remark-shared.ts"]
 "remark-display-math-recovery.ts" = ["remark-shared.ts"]
+"streaming-repair.test.ts" = ["streaming-repair.ts"]
 "remark-latex-math.test.ts" = ["latex-math-guard.ts", "remark-display-math-recovery.ts", "remark-latex-math.ts"]
 "remark-latex-math.ts" = ["latex-math-guard.ts"]
 

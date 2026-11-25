@@ -4548,8 +4548,6 @@
   "ui/web/src/lib/timeline/timeline.test.ts": 9,
   "ui/web/src/lib/timeline/timeline.ts": 1,
   "ui/web/src/lib/timeline/use-compact-history-retention.ts": 9,
-  "ui/web/src/lib/timeline/use-throttled-streaming.test.ts": 5,
-  "ui/web/src/lib/timeline/use-throttled-streaming.ts": 4,
   "ui/web/src/lib/timeline/use-timeline.test.ts": 13,
   "ui/web/src/lib/timeline/use-timeline.ts": 34,
   "ui/web/src/lib/transport/api-base.ts": 2,

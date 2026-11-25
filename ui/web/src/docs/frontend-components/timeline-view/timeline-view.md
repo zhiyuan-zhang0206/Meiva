@@ -5,7 +5,8 @@
 ## Streaming rows
 
 Memoization, clock ownership and announcements:
-[Streaming rows](streaming-rows.md).
+[Streaming rows](streaming-rows.md). Buffered, smoothed display of streamed text:
+[Stream reveal](stream-reveal.md).
 
 ## Returning to an agent
 

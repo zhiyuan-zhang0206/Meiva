@@ -22,7 +22,7 @@
 
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ChatMarkdown } from "@/components/content/markdown";
@@ -37,7 +37,11 @@ import {
   setCachedImageDimensions,
   type ImageDimensions,
 } from "@/lib/timeline/image-dimensions-cache";
-import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
+import { repairStreamingMarkdown } from "@/lib/markdown/streaming-repair";
+import { useMediaQuery } from "@/lib/layout/use-media-query";
+import { domHighlightHost } from "@/lib/timeline/reveal/edge-fade";
+import { useStreamEdgeFade } from "@/lib/timeline/reveal/use-stream-edge-fade";
+import { useStreamReveal } from "@/lib/timeline/reveal/use-stream-reveal";
 import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
 import { TimelineItemImageBatch } from "./model/image-loading";
@@ -51,7 +55,7 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 // One re-parse per SSE event window (~25 FPS) reads as live while removing the
 // per-chunk parse storm that pegs the mobile main thread. The window is the
 // same constant the agent-side publisher coalesces into (generated from
-// base/events/live/projection.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
+// base/events/live/projection.py EVENT_COALESCE_MS). The reveal hook (use-stream-reveal.ts) commits to React no more often than this.
 //
 // A FIXED window is not enough: the parse is O(payload length), so as a code
 // block streams, each flush re-highlights the whole accumulated text — total
@@ -60,8 +64,8 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 // 25Hz, a 300-line block ≈ 11.8s/s). The window therefore widens linearly with
 // payload length — one extra SSE window per 2400 bytes, capped at 1s — so a
 // 300-line block re-parses ~1x/s while chat/reasoning keep the live 40ms
-// cadence. The settle path (use-throttled-streaming.ts, !live) still renders
-// the final text in full immediately.
+// cadence. Once the stream has settled and the reveal has flushed (<=250ms), the
+// final text renders in full.
 const STREAM_PARSE_INTERVAL_BASE_MS = SSE_EVENT_WINDOW_MS;
 const STREAM_PARSE_INTERVAL_MAX_MS = 1000;
 const STREAM_PARSE_INTERVAL_BYTES_PER_STEP = 2400;
@@ -509,18 +513,27 @@ export const ItemView = memo(function ItemView({
   item: BackendTimelineItem;
   streaming: boolean;
 }) {
-  // Throttle the heavy-parse content (chat markdown / python highlight) while it
-  // streams. The hook is called unconditionally (rules of hooks); `live` is
-  // false for every other kind, making it a no-op pass-through.
+  // Display what the reveal has uncovered, not what has arrived: the store keeps
+  // every received byte, this hook paces what the reader sees (see
+  // reveal/controller.ts) and throttles React commits to the markdown / Prism parse
+  // budget. The hook is called unconditionally (rules of hooks); `live` is false
+  // for every other kind, so the text passes through untouched.
   const live =
-    (item.kind === "agent_chat" && Boolean(item.partial)) ||
+    (item.kind === "agent_chat" && Boolean(item.partial) && !item.interrupted) ||
     isLiveReasoning(item) ||
     (item.kind === "agent_code" && streaming);
-  const streamingPayload = useThrottledStreaming(
+  const { text: streamingPayload, revealing } = useStreamReveal(
     item.payload,
     live,
     streamingParseIntervalMs(item.payload.length),
   );
+  const markdownPayload = useMemo(
+    () => (revealing ? repairStreamingMarkdown(streamingPayload) : streamingPayload),
+    [revealing, streamingPayload],
+  );
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  useStreamEdgeFade(bodyRef, revealing, streamingPayload, reducedMotion ? null : domHighlightHost());
 
   switch (item.kind) {
     case "inbound_chat": {
@@ -575,8 +588,8 @@ export const ItemView = memo(function ItemView({
     case "agent_chat":
       return (
         <TimelineItemImageBatch>
-          <div>
-            <ChatMarkdown content={streamingPayload} />
+          <div ref={bodyRef}>
+            <ChatMarkdown content={markdownPayload} />
             {item.partial && !item.interrupted ? <StreamingCursor /> : null}
           </div>
         </TimelineItemImageBatch>
@@ -584,7 +597,7 @@ export const ItemView = memo(function ItemView({
 
     case "agent_code":
       return (
-        <div className="rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2">
+        <div ref={bodyRef} className="rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2">
           {item.source && item.source !== "execute_code" ? (
             <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
               {streamingPayload}
@@ -598,8 +611,8 @@ export const ItemView = memo(function ItemView({
     case "agent_reasoning":
       return (
         <TimelineItemImageBatch>
-          <div className="text-[12.5px] leading-relaxed text-muted-foreground/90">
-            <ChatMarkdown content={streamingPayload} />
+          <div ref={bodyRef} className="text-[12.5px] leading-relaxed text-muted-foreground/90">
+            <ChatMarkdown content={markdownPayload} />
           </div>
         </TimelineItemImageBatch>
       );
