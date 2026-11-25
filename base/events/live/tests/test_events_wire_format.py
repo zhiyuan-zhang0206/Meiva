@@ -229,4 +229,6 @@ def test_timeline_snapshot_retires_is_on_the_wire_only_when_non_empty() -> None:
     parsed = EVENT_ADAPTER.validate_json(wire)
     assert isinstance(parsed, TimelineSnapshot)
     assert parsed.retires == ["live.t1.0"]
-    assert EVENT_ADAPTER.validate_json(json.dumps(plain)).retires == []
+    bare = EVENT_ADAPTER.validate_json(json.dumps(plain))
+    assert isinstance(bare, TimelineSnapshot)
+    assert bare.retires == []
