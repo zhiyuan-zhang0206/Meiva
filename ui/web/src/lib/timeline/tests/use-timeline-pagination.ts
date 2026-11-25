@@ -6,6 +6,7 @@ import type {
 } from "../../contracts/types";
 import { useTimeline } from "../use-timeline";
 import { registerUseTimelineCompactTests } from "./use-timeline-compact";
+import { registerUseTimelineEpochTests } from "./use-timeline-epochs";
 import type { UseTimelineTestContext } from "./use-timeline-context";
 import { registerUseTimelineOwnershipTests } from "./use-timeline-ownership";
 import { registerUseTimelineSseTests } from "./use-timeline-sse";
@@ -375,6 +376,7 @@ describe("useTimeline mount + pagination", () => {
 });
 
   registerUseTimelineSwitchTests(ctx);
+  registerUseTimelineEpochTests(ctx);
   registerUseTimelineCompactTests(ctx);
   registerUseTimelineSseTests(ctx);
   registerUseTimelineStreamingTests(ctx);

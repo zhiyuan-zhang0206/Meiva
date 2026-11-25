@@ -122,6 +122,7 @@ export function useTimeline(
   agentId: number | null,
   showError: (msg: string) => void,
   agentStatus?: string,
+  agentHarness?: string,
 ): UseTimelineResult {
   const api = useApi();
   const wallNow = useWallNow();
@@ -497,6 +498,19 @@ export function useTimeline(
     compactTailReady: compactBuffer?.tailReady ?? false,
     retainedItemsMax,
   });
+
+  const harnessRef = useRef<{ id: number | null; harness: string | undefined }>({ id: agentId, harness: agentHarness });
+  useEffect(function restartOnHarnessSwitch() {
+    const prev = harnessRef.current;
+    harnessRef.current = { id: agentId, harness: agentHarness };
+    if (agentId === null || prev.id !== agentId) return;
+    if (prev.harness === undefined || agentHarness === undefined || prev.harness === agentHarness) return;
+    olderRequest.current?.controller.abort();
+    olderRequest.current = null;
+    lastAppliedDataRef.current = null;
+    switchThread(agentId, null, false);
+    requestReconcile();
+  }, [agentId, agentHarness, switchThread, requestReconcile]);
 
   const prevAgentRef = useRef<{ id: number | null; status: string | undefined }>({
     id: agentId,

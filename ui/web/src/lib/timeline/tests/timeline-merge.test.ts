@@ -265,31 +265,29 @@ describe("mergeSnapshotWithStreaming", () => {
     expect(result[0].reasoningStartedAt).toBe(123456);
   });
 
-  it("cross-harness merge: harness snapshot does not collide with or wipe out checkpoint items", () => {
+  it("earlier-epoch rows survive a current-epoch snapshot and stay ahead of it", () => {
     const prev: BackendTimelineItem[] = [
-      item({ item_id: "0.0", kind: "system_prompt", payload: "You are Meiva", created_at: undefined }),
-      item({ item_id: "1.0", kind: "inbound_chat", payload: "hello meiva", created_at: "2026-11-01T10:00:00Z" }),
-      item({ item_id: "2.0", kind: "agent_chat", payload: "meiva response", created_at: "2026-11-01T10:00:05Z" }),
+      item({ item_id: "e0.1.0", kind: "inbound_chat", payload: "hello meiva", created_at: "2026-11-01T10:00:00Z" }),
+      item({ item_id: "e0.2.0", kind: "agent_chat", payload: "meiva response", created_at: "2026-11-01T10:00:05Z" }),
+      item({ item_id: "e1.sw", kind: "system_marker", source: "harness_switch", payload: "Switched" }),
     ];
     const snapshot: BackendTimelineItem[] = [
-      item({ item_id: "h0.0", kind: "inbound_chat", payload: "hello codex", created_at: "2026-11-01T10:05:00Z" }),
-      item({ item_id: "h1.0", kind: "agent_chat", payload: "codex response", created_at: "2026-11-01T10:05:05Z" }),
+      item({ item_id: "h0.0", kind: "inbound_chat", payload: "hello codex", created_at: "2026-10-01T10:05:00Z" }),
+      item({ item_id: "h1.0", kind: "agent_chat", payload: "codex response", created_at: "2026-10-01T10:05:05Z" }),
     ];
     const result = mergeSnapshotWithStreaming(prev, snapshot, 2);
 
-    expect(result.map((i) => i.item_id)).toEqual(["0.0", "1.0", "2.0", "h0.0", "h1.0"]);
+    expect(result.map((i) => i.item_id)).toEqual(["e0.1.0", "e0.2.0", "e1.sw", "h0.0", "h1.0"]);
   });
 
-  it("cross-harness chronological sort: meiva -> harness -> meiva", () => {
-    const items: BackendTimelineItem[] = [
-      item({ item_id: "3.0", kind: "agent_chat", payload: "resumed meiva", created_at: "2026-11-01T10:10:00Z" }),
-      item({ item_id: "h0.0", kind: "agent_chat", payload: "external turn", created_at: "2026-11-01T10:05:00Z" }),
-      item({ item_id: "1.0", kind: "agent_chat", payload: "initial meiva", created_at: "2026-11-01T10:00:00Z" }),
-      item({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: undefined }),
+  it("msg_count stale-partial cleanup only judges current-epoch ids", () => {
+    const prev: BackendTimelineItem[] = [
+      item({ item_id: "e0.9.0", kind: "agent_chat", payload: "frozen partial", partial: true }),
     ];
-    const result = mergeSnapshotWithStreaming([], items, 4);
+    const snapshot: BackendTimelineItem[] = [item({ item_id: "h5.0", payload: "current" })];
+    const result = mergeSnapshotWithStreaming(prev, snapshot, 100);
 
-    expect(result.map((i) => i.item_id)).toEqual(["0.0", "1.0", "h0.0", "3.0"]);
+    expect(result.map((i) => i.item_id)).toEqual(["e0.9.0", "h5.0"]);
   });
 });
 

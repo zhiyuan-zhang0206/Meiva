@@ -61,7 +61,7 @@ function HomePageWiring() {
   const settings = useUserSettings();
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
   const alerts = useFiringAlerts();
-  const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
+  const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status, agents.activeAgent?.harness);
   // meiva:note
   // Populates `useTimelineStore` token-usage fields read by InspectorPanel's Context section.
   // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/section-details.md
