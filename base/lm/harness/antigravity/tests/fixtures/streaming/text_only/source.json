@@ -1,0 +1,9 @@
+{
+  "cli": "agy 1.5.16 acp (stdio JSON-RPC), model gemini-4-argon-high",
+  "scenario": "one agent_message_chunk, no tools",
+  "clock": "t = seconds since session/prompt was sent; stream.jsonl = session/update notifications (plus our own sent frames and the prompt result), record.jsonl = transcript_full.jsonl rows with the time the file grew to contain them (5 ms poll)",
+  "sanitization": [
+    "dropped config_option_update, available_commands_update, session_info_update notifications",
+    "USER_INPUT content cut after </USER_REQUEST> (drops metadata and settings text); session id -> $session; cwd -> /work/<scenario>"
+  ]
+}

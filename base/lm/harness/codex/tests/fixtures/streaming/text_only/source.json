@@ -1,0 +1,10 @@
+{
+  "cli": "codex-cli 0.166.0 app-server (stdio JSON-RPC), model gpt-6-astra, effort per scenario, turn/start summary=detailed",
+  "scenario": "one agentMessage, effort low, no tools",
+  "clock": "t = seconds since turn/start was sent; stream.jsonl = app-server notifications in arrival order, record.jsonl = rollout lines with the time the file grew to contain them (5 ms poll)",
+  "sanitization": [
+    "kept only turn/*, item/*, thread/status/changed notifications; thread and turn ids -> $thread/$turn; cwd -> /work/<scenario>",
+    "rollout: dropped session_meta details, world_state, turn_context, thread_settings_applied, token counts, additional_tools, developer messages and the AGENTS.md injection; encrypted_content -> <encrypted>; internal_chat_message_metadata_passthrough dropped; strings > 400 chars cut",
+    "item ids (msg_*, rs_*, exec-*) untouched (they are the reconciliation keys under study)"
+  ]
+}

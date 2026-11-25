@@ -1,0 +1,5 @@
+{"t":0.0,"sent":{"id":4,"method":"session/prompt","params":{"sessionId":"$session","prompt":[{"type":"text","text":"Reply with exactly one short sentence: what is 2+2? Do not use tools."}]}}}
+{"t":0.019,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"usage_update","used":0,"size":1048576}}}
+{"t":7.261,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"2 + 2 is 4."}}}}
+{"t":7.381,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"usage_update","used":9721,"size":1048576}}}
+{"t":7.386,"result":{"stopReason":"end_turn","usage":{"inputTokens":9671,"outputTokens":50,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":38,"totalTokens":9721}},"id":4}
