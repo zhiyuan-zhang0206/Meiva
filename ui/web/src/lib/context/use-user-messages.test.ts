@@ -72,3 +72,9 @@ it("keeps harness and native records on their own items in a merged cross-harnes
   const merged = withUserMessages([native, harnessItem("h9.0", "harness")], [nativeRecord, harnessRecord]);
   expect(merged.map((item) => item.userDelivery?.id)).toEqual([1, 2]);
 });
+
+it("never attaches a delivery to an overlay row of an external harness", () => {
+  const live = applySystemEvent([], { role: "chat_delta", agent_id: 7, item_id: "live.t1.msg_a:0", content: "writing" }, 1);
+  const message: UserMessage = { ...publication, mode: "prefix", source_key: "harness:live.t1.msg_a:0" };
+  expect(withUserMessages(live, [message])[0].userDelivery).toBeUndefined();
+});

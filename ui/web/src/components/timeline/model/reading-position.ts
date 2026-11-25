@@ -1,4 +1,5 @@
 import type { BrowserStorage } from "@/lib/browser/browser";
+import { isDisplayOnlyItemId } from "@/lib/timeline/timeline";
 
 // meiva:note
 // Bounded per-tab sessionStorage cache for cross-reload reading bookmarks:
@@ -45,7 +46,7 @@ function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark
   if (
     typeof candidate.itemId !== "string" ||
     candidate.itemId.length === 0 ||
-    candidate.itemId.startsWith("_")
+    isDisplayOnlyItemId(candidate.itemId)
   ) {
     return false;
   }
