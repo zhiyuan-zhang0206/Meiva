@@ -53,7 +53,7 @@ import { SIDEBAR_ICON_CLASS, SidebarIconButton } from "./icon-button";
 
 /** Shared by the expanded footer and collapsed rail. */
 export const STATUS_POPOVER_CLASS =
-  "z-50 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
+  "z-50 w-80 max-w-[calc(var(--visual-viewport-width,100vw)-1.5rem)] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md outline-none";
 
 // meiva:note
 // Point-in-time cluster state (`live_count` and plugin-declared balances / subscription

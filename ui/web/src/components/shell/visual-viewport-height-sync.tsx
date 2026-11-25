@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import type { ViewportCause } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
 
@@ -25,6 +26,15 @@ import { pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
 // `pinnedShellHeight` in lib/browser/viewport.ts owns the decision and this shell only applies it
 // to the document.
 //
+// Rotation: iPadOS `WKWebView` (`CriOS`) can keep the previous orientation's layout viewport and
+// zoom the page to fit it after a turn, in either direction, so the port tells this shell when the
+// device `rotated` and the shell asks it to `resetScale` (a transient `minimum-scale=1,
+// maximum-scale=1` on the viewport meta). While the layout width still disagrees with the visual
+// width at scale 1, `pinnedShellWidth` pins <html> to the visual width as the fallback. A rotation
+// is the one moment the scale is reset without asking the reading (the event, not a scale value,
+// tells WebKit's zoom-to-fit from the reader's pinch); a `recheck` (settled rotation, tab back in
+// the foreground, mount) resets only while the width is still stuck, and a pinch is never pulled back.
+//
 // Renders nothing; mounted from app/layout.tsx inside <Providers> — the same file that declares the
 // Android meta — so every route, login included, is covered.
 // meiva:link ui/web/src/docs/frontend-state/browser-port.md
@@ -39,6 +49,7 @@ export function VisualViewportHeightSync() {
     };
     const clearWidthPin = () => {
       rootStyle.width = "";
+      rootStyle.minWidth = "";
       rootStyle.maxWidth = "";
       rootStyle.overflowX = "";
       rootStyle.removeProperty("--visual-viewport-width");
@@ -47,8 +58,12 @@ export function VisualViewportHeightSync() {
       clearHeightPin();
       clearWidthPin();
     };
-    const sync = () => {
+    const sync = (cause: ViewportCause) => {
       const reading = viewport.read();
+      const pinnedWidth = pinnedShellWidth(reading);
+      if (cause === "rotated" || (cause === "recheck" && pinnedWidth !== null)) {
+        viewport.resetScale();
+      }
       const pinned = pinnedShellHeight(reading);
       if (pinned === null) {
         clearHeightPin();
@@ -58,16 +73,22 @@ export function VisualViewportHeightSync() {
         // ignoring `html.style.height`, and `env(safe-area-inset-bottom)` stays non-zero even
         // when the on-screen keyboard covers the Home Indicator. Publishing `--visual-viewport-height`
         // and zeroing `--safe-area-bottom` lets fixed overlays, dialogs and max-height caps shrink
-        // with the visible band above the keyboard.
+        // with the visible band above the keyboard. A height mismatch that comes with a width
+        // mismatch is a stuck rotation, not a keyboard: the Home Indicator is still there, so the
+        // safe area stays.
         rootStyle.height = `${pinned}px`;
         rootStyle.setProperty("--visual-viewport-height", `${pinned}px`);
-        rootStyle.setProperty("--safe-area-bottom", "0px");
+        if (pinnedWidth === null) {
+          rootStyle.setProperty("--safe-area-bottom", "0px");
+        } else {
+          rootStyle.removeProperty("--safe-area-bottom");
+        }
       }
-      const pinnedWidth = pinnedShellWidth(reading);
       if (pinnedWidth === null) {
         clearWidthPin();
       } else {
         rootStyle.width = `${pinnedWidth}px`;
+        rootStyle.minWidth = `${pinnedWidth}px`;
         rootStyle.maxWidth = `${pinnedWidth}px`;
         rootStyle.overflowX = "hidden";
         rootStyle.setProperty("--visual-viewport-width", `${pinnedWidth}px`);
@@ -77,11 +98,11 @@ export function VisualViewportHeightSync() {
       }
     };
 
-    sync();
+    sync("recheck");
     // meiva:note
-    // `resize` carries height changes (keyboard opens/closes, orientation or toolbar moves);
-    // `scroll` catches WebKit's pan-the-focused-field pass and `WKWebView` scroll-inset shifts,
-    // which can land after the resize.
+    // `resize` carries height changes (keyboard opens/closes, toolbar moves); `scroll` catches
+    // WebKit's pan-the-focused-field pass and `WKWebView` scroll-inset shifts, which can land after
+    // the resize; rotations and the tab returning to the foreground arrive as their own causes.
     const unsubscribe = viewport.subscribe(sync);
     return () => {
       unsubscribe();

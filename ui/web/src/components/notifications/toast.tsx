@@ -16,7 +16,7 @@ export function ToastHost() {
   const toast = useStore((s) => s.toast);
   if (!toast) return null;
   return (
-    <div className="fixed right-4 bottom-24 z-[100] max-w-[min(28rem,calc(100vw-2rem))]">
+    <div className="fixed right-4 bottom-24 z-[100] max-w-[min(28rem,calc(var(--visual-viewport-width,100vw)-2rem))]">
       <InlineError surface="floating" role="alert">
         {toast}
       </InlineError>

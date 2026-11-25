@@ -59,7 +59,7 @@ export function SearchOverlay({
     .sort((a, b) => b.agent_id - a.agent_id);
 
   return (
-    <div className="fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+    <div className="fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] w-[var(--visual-viewport-width,100%)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Slight dim + click-to-close backdrop */}
       <div
         data-testid="search-overlay-backdrop"
@@ -67,7 +67,7 @@ export function SearchOverlay({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className={cn("relative mx-auto mt-[min(12vh,calc(var(--visual-viewport-height,100dvh)*0.08))] w-[min(30rem,calc(100vw-2rem))] rounded-lg border border-border bg-background shadow-2xl", OVERFLOW_HIDDEN)}>
+      <div className={cn("relative mx-auto mt-[min(12vh,calc(var(--visual-viewport-height,100dvh)*0.08))] w-[min(30rem,calc(var(--visual-viewport-width,100vw)-2rem))] rounded-lg border border-border bg-background shadow-2xl", OVERFLOW_HIDDEN)}>
         <div className={cn("items-center gap-2 border-b border-border px-3", FLEX)}>
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input

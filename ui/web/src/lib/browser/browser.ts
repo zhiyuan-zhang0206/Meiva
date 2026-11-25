@@ -83,6 +83,9 @@ export interface BrowserView {
 // `(0, 0)` so WebKit's focus pan and `WKWebView` keyboard insets cannot push the pinned shell off
 // the top edge or leave a scrollable blank tail after the keyboard closes. A frame with no page has
 // no visual viewport at all.
+// `subscribe` says why it fires (`moved` / `rotated` / `recheck`), and `resetScale` holds the viewport
+// meta at scale 1 for a moment and restores it, so a rotation that left WebKit zoomed can be undone
+// without locking the reader's pinch (see browser-port.md).
 export interface ViewportReading {
   readonly layoutHeight: number;
   readonly layoutWidth?: number;
@@ -93,10 +96,13 @@ export interface ViewportReading {
   } | null;
 }
 
+export type ViewportCause = "moved" | "rotated" | "recheck";
+
 export interface BrowserViewport {
   read(): ViewportReading;
   resetScroll(): void;
-  subscribe(onChange: () => void): () => void;
+  resetScale(): void;
+  subscribe(onChange: (cause: ViewportCause) => void): () => void;
 }
 
 // meiva:note

@@ -22,6 +22,7 @@ import type {
   BrowserStorage,
   BrowserViewport,
   MediaQuery,
+  ViewportCause,
 } from "./browser";
 import { pageLocation } from "./browser";
 
@@ -37,6 +38,7 @@ export interface LiveDocument {
   createElement(tag: "textarea"): HTMLTextAreaElement;
   readonly body: { appendChild(node: Node): unknown; removeChild(node: Node): unknown };
   execCommand(command: "copy"): boolean;
+  readonly visibilityState?: string;
 }
 
 export interface LiveViewport {
@@ -55,7 +57,21 @@ export interface LiveResizeObserver {
   disconnect(): void;
 }
 
-export type LivePageEventType = "popstate" | "resize" | "scroll" | "orientationchange";
+export type LivePageEventType =
+  | "popstate"
+  | "resize"
+  | "scroll"
+  | "orientationchange"
+  | "visibilitychange";
+
+export interface LiveOrientation {
+  addEventListener(type: "change", listener: () => void): void;
+  removeEventListener(type: "change", listener: () => void): void;
+}
+
+export interface LiveViewportMeta {
+  content: string;
+}
 
 export interface LivePage {
   readonly location: { readonly href: string; assign(url: string): void };
@@ -75,6 +91,8 @@ export interface LivePage {
   readonly innerHeight: number;
   readonly innerWidth?: number;
   readonly visualViewport: LiveViewport | null;
+  readonly screenOrientation?: LiveOrientation | null | undefined;
+  viewportMeta(): LiveViewportMeta | null;
   scrollTo(x: number, y: number): void;
   readonly navigator: LiveNavigator;
   readonly document: LiveDocument;
@@ -263,13 +281,123 @@ export function viewOver(page: LivePage | null): Browser["view"] {
   };
 }
 
+export const ROTATION_COALESCE_MS = 50;
+
+export const ROTATION_RESAMPLE_MS = [60, 180, 350, 600] as const;
+export const ROTATION_RECHECK_MS = 180;
+
+export const SCALE_LOCK_MS = 60;
+
+export function withoutScaleLimits(content: string): string[] {
+  return content
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "" && !/^(minimum|maximum)-scale\s*=/i.test(entry));
+}
+
+function scaleLockOver(page: LivePage | null, onRestored: () => void) {
+  let pristine: string | null = null;
+  let timer: number | null = null;
+  const restore = (): void => {
+    if (timer !== null && page !== null) page.clearTimeout(timer);
+    timer = null;
+    if (pristine === null) return;
+    const meta = page?.viewportMeta();
+    if (meta) meta.content = pristine;
+    pristine = null;
+  };
+  return {
+    lock(): void {
+      if (page === null) return;
+      const meta = page.viewportMeta();
+      if (meta === null) return;
+      pristine ??= meta.content;
+      if (timer !== null) page.clearTimeout(timer);
+      meta.content = [...withoutScaleLimits(pristine), "minimum-scale=1", "maximum-scale=1"].join(", ");
+      timer = page.setTimeout(() => {
+        timer = null;
+        restore();
+        page.scrollTo(0, 0);
+        onRestored();
+      }, SCALE_LOCK_MS);
+    },
+    release: restore,
+  };
+}
+
+function followViewport(
+  page: LivePage,
+  visual: LiveViewport,
+  emit: (cause: ViewportCause) => void,
+): () => void {
+  const samples = new Set<number>();
+  let coalescing: number | null = null;
+  const moved = () => emit("moved");
+  const onRotation = () => {
+    if (coalescing !== null) return;
+    coalescing = page.setTimeout(() => {
+      coalescing = null;
+    }, ROTATION_COALESCE_MS);
+    for (const timer of samples) page.clearTimeout(timer);
+    samples.clear();
+    emit("rotated");
+    for (const delayMs of ROTATION_RESAMPLE_MS) {
+      const timer = page.setTimeout(() => {
+        samples.delete(timer);
+        emit(delayMs === ROTATION_RECHECK_MS ? "recheck" : "moved");
+      }, delayMs);
+      samples.add(timer);
+    }
+  };
+  const onVisibility = () => {
+    if (page.document.visibilityState !== "hidden") emit("recheck");
+  };
+  const orientation = page.screenOrientation ?? null;
+  let portrait: Partial<MediaQueryList> | null = null;
+  try {
+    portrait = page.matchMedia("(orientation: portrait)");
+  } catch {
+    portrait = null;
+  }
+  visual.addEventListener("resize", moved);
+  visual.addEventListener("scroll", moved);
+  page.addEventListener("resize", moved);
+  page.addEventListener("scroll", moved);
+  page.addEventListener("orientationchange", onRotation);
+  page.addEventListener("visibilitychange", onVisibility);
+  orientation?.addEventListener("change", onRotation);
+  portrait?.addEventListener?.("change", onRotation);
+  return () => {
+    for (const timer of samples) page.clearTimeout(timer);
+    samples.clear();
+    if (coalescing !== null) page.clearTimeout(coalescing);
+    coalescing = null;
+    visual.removeEventListener("resize", moved);
+    visual.removeEventListener("scroll", moved);
+    page.removeEventListener("resize", moved);
+    page.removeEventListener("scroll", moved);
+    page.removeEventListener("orientationchange", onRotation);
+    page.removeEventListener("visibilitychange", onVisibility);
+    orientation?.removeEventListener("change", onRotation);
+    portrait?.removeEventListener?.("change", onRotation);
+  };
+}
+
 // meiva:note
 // The page's viewport. Every read is a fresh measurement — a height is not a stored fact — and the
-// subscription follows both the visual viewport (which a keyboard, a toolbar or a pinch moves) and
-// the page's own resize and scroll (which orientation changes and `WKWebView` keyboard insets move).
-// `resetScroll` returns the root page scroll to `(0, 0)`. A frame with no page (a server render)
-// has neither, and says so with a zero reading.
+// subscription follows the visual viewport (which a keyboard, a toolbar or a pinch moves), the
+// page's own resize and scroll (which `WKWebView` keyboard insets move), every rotation signal the
+// page has, and the tab returning to the foreground; the page's listeners are attached once for
+// all subscribers. `resetScroll` returns the root page scroll to `(0, 0)`; `resetScale` re-asks
+// WebKit for scale 1 in the current orientation through a short-lived viewport-meta lock. A frame
+// with no page (a server render) has none of this, and says so with a zero reading.
 export function viewportOver(page: LivePage | null): BrowserViewport {
+  const subscribers = new Set<(cause: ViewportCause) => void>();
+  const emit = (cause: ViewportCause) => {
+    for (const subscriber of [...subscribers]) subscriber(cause);
+  };
+  const scale = scaleLockOver(page, () => emit("moved"));
+  let unfollow: (() => void) | null = null;
   return {
     read: () =>
       page === null
@@ -291,33 +419,19 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
     resetScroll() {
       page?.scrollTo(0, 0);
     },
+    resetScale: () => scale.lock(),
     subscribe(onChange) {
       const visual = page?.visualViewport ?? null;
       if (page === null || visual === null) return () => undefined;
-      const timers = new Set<number>();
-      const onOrientationChange = () => {
-        onChange();
-        for (const delayMs of [100, 300]) {
-          const timer = page.setTimeout(() => {
-            timers.delete(timer);
-            onChange();
-          }, delayMs);
-          timers.add(timer);
-        }
-      };
-      visual.addEventListener("resize", onChange);
-      visual.addEventListener("scroll", onChange);
-      page.addEventListener("resize", onChange);
-      page.addEventListener("scroll", onChange);
-      page.addEventListener("orientationchange", onOrientationChange);
+      const subscriber = (cause: ViewportCause) => onChange(cause);
+      subscribers.add(subscriber);
+      unfollow ??= followViewport(page, visual, emit);
       return () => {
-        for (const timer of timers) page.clearTimeout(timer);
-        timers.clear();
-        visual.removeEventListener("resize", onChange);
-        visual.removeEventListener("scroll", onChange);
-        page.removeEventListener("resize", onChange);
-        page.removeEventListener("scroll", onChange);
-        page.removeEventListener("orientationchange", onOrientationChange);
+        subscribers.delete(subscriber);
+        if (subscribers.size > 0) return;
+        unfollow?.();
+        unfollow = null;
+        scale.release();
       };
     },
   };
@@ -446,6 +560,10 @@ export const browser: Browser =
         get visualViewport() {
           return window.visualViewport;
         },
+        get screenOrientation() {
+          return "orientation" in window.screen ? window.screen.orientation : null;
+        },
+        viewportMeta: () => window.document.querySelector<HTMLMetaElement>('meta[name="viewport"]'),
         scrollTo: (x, y) => window.scrollTo(x, y),
 
         newResizeObserver:

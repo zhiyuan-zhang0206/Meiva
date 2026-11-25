@@ -65,8 +65,8 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
           // unavailability reasons remain reachable without hover-only tooltips.
           // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
           className={cn(
-            "z-50 max-w-[94vw] text-popover-foreground outline-none",
-            isNarrow ? "w-[94vw]" : coarsePointer ? "w-[min(26rem,94vw)]" : "w-fit",
+            "z-50 max-w-[calc(var(--visual-viewport-width,100vw)*0.94)] text-popover-foreground outline-none",
+            isNarrow ? "w-[calc(var(--visual-viewport-width,100vw)*0.94)]" : coarsePointer ? "w-[min(26rem,calc(var(--visual-viewport-width,100vw)*0.94))]" : "w-fit",
           )}
         >
           <ScrollArea viewportClassName="max-h-[min(80dvh,var(--radix-popover-content-available-height,80dvh))] overscroll-y-contain">

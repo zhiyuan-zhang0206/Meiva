@@ -114,4 +114,56 @@ describe("useBreakpoint", () => {
     expect(result.current.isNarrow).toBe(false);
     expect(result.current.tier).toBe("lg");
   });
+
+  it("switches into large mode when a stuck portrait layout viewport is wider in the visual viewport after rotating to landscape", () => {
+    resizeViewport(820);
+    const browser = fakeBrowser({
+      viewport: {
+        layoutHeight: 1180,
+        layoutWidth: 820,
+        visual: { height: 1180, width: 820, scale: 1 },
+      },
+    });
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(browser) });
+    expect(result.current.isLarge).toBe(false);
+    expect(result.current.tier).toBe("lg");
+
+    act(() => {
+      browser.answerViewport({
+        layoutHeight: 1180,
+        layoutWidth: 820,
+        visual: { height: 820, width: 1180, scale: 1 },
+      });
+    });
+    expect(result.current.isLarge).toBe(true);
+    expect(result.current.isNarrow).toBe(false);
+    expect(result.current.isWide).toBe(false);
+    expect(result.current.tier).toBe("xl");
+  });
+
+  it("flips both ways on consecutive rotations and ignores a pinch zoom", () => {
+    resizeViewport(1180);
+    const browser = fakeBrowser({
+      viewport: { layoutHeight: 820, layoutWidth: 1180, visual: { height: 820, width: 1180, scale: 1 } },
+    });
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(browser) });
+    const answer = (visualWidth: number, scale = 1) =>
+      act(() => {
+        browser.answerViewport({
+          layoutHeight: 820,
+          layoutWidth: 1180,
+          visual: { height: 820, width: visualWidth, scale },
+        });
+      });
+
+    answer(820, 0.9999);
+    expect(result.current.tier).toBe("lg");
+    answer(1180);
+    expect(result.current.tier).toBe("xl");
+    answer(820);
+    expect(result.current.isLarge).toBe(false);
+    answer(590, 2);
+    expect(result.current.isLarge).toBe(true);
+    expect(result.current.tier).toBe("xl");
+  });
 });

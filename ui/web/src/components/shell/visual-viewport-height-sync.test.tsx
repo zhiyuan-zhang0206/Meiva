@@ -14,6 +14,7 @@ import {
   KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX,
   pinnedShellHeight,
   pinnedShellWidth,
+  VIEWPORT_SCALE_EPSILON,
   VIEWPORT_WIDTH_PIN_MIN_DELTA_PX,
 } from "@/lib/browser/viewport";
 import { renderWithBrowser } from "@/test-support/render";
@@ -29,6 +30,7 @@ afterEach(() => {
   cleanup();
   document.documentElement.style.height = "";
   document.documentElement.style.width = "";
+  document.documentElement.style.minWidth = "";
   document.documentElement.style.maxWidth = "";
   document.documentElement.style.overflowX = "";
   document.documentElement.style.removeProperty("--visual-viewport-height");
@@ -150,6 +152,7 @@ it("pins the shell width when an unzoomed visual viewport is narrower than a stu
   const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, { browser });
 
   expect(document.documentElement.style.width).toBe("820px");
+  expect(document.documentElement.style.minWidth).toBe("820px");
   expect(document.documentElement.style.maxWidth).toBe("820px");
   expect(document.documentElement.style.overflowX).toBe("hidden");
   expect(document.documentElement.style.getPropertyValue("--visual-viewport-width")).toBe("820px");
@@ -161,6 +164,7 @@ it("pins the shell width when an unzoomed visual viewport is narrower than a stu
     visual: { height: 820, width: 1180, scale: 1 },
   });
   expect(document.documentElement.style.width).toBe("");
+  expect(document.documentElement.style.minWidth).toBe("");
   expect(document.documentElement.style.maxWidth).toBe("");
   expect(document.documentElement.style.overflowX).toBe("");
   expect(document.documentElement.style.getPropertyValue("--visual-viewport-width")).toBe("");
@@ -191,4 +195,139 @@ it("decides the width pin from the reading alone", () => {
       visual: { height: 1180, width: 590, scale: 2 },
     }),
   ).toBeNull();
+});
+
+const LANDSCAPE = { width: 1180, height: 820 };
+const PORTRAIT = { width: 820, height: 1180 };
+
+function stuck(layout: { width: number; height: number }, visual: { width: number; height: number }, scale = 1) {
+  return {
+    layoutHeight: layout.height,
+    layoutWidth: layout.width,
+    visual: { height: visual.height, width: visual.width, scale },
+  };
+}
+
+function rootWidthPin() {
+  const style = document.documentElement.style;
+  return [style.width, style.minWidth, style.maxWidth, style.overflowX, style.getPropertyValue("--visual-viewport-width")];
+}
+
+it("pins the shell wider when a portrait layout viewport is stuck after rotating to landscape", () => {
+  const browser = fakeBrowser({ viewport: stuck(PORTRAIT, LANDSCAPE) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+
+  expect(rootWidthPin()).toEqual(["1180px", "1180px", "1180px", "hidden", "1180px"]);
+});
+
+it("keeps the safe area while the height is stuck with the width, and zeroes it for a keyboard alone", () => {
+  const browser = fakeBrowser({ viewport: stuck({ width: 820, height: 1180 }, LANDSCAPE) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+
+  expect(document.documentElement.style.height).toBe("820px");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-height")).toBe("820px");
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("");
+  expect(document.documentElement.style.width).toBe("1180px");
+
+  browser.answerViewport(stuck(LANDSCAPE, { width: 1180, height: 500 }));
+  expect(document.documentElement.style.getPropertyValue("--safe-area-bottom")).toBe("0px");
+  expect(document.documentElement.style.width).toBe("");
+});
+
+it("pins the shell taller when a landscape layout height is stuck after rotating to portrait", () => {
+  renderWithBrowser(<VisualViewportHeightSync />, {
+    browser: fakeBrowser({ viewport: stuck(LANDSCAPE, PORTRAIT) }),
+  });
+
+  expect(document.documentElement.style.height).toBe("1180px");
+  expect(document.documentElement.style.width).toBe("820px");
+});
+
+it("still pins through WebKit's float jitter around scale 1, and never against a real pinch", () => {
+  for (const scale of [0.9999, 1.005, 1 - VIEWPORT_SCALE_EPSILON / 2, 1 + VIEWPORT_SCALE_EPSILON / 2]) {
+    const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, {
+      browser: fakeBrowser({ viewport: stuck(LANDSCAPE, PORTRAIT, scale) }),
+    });
+    expect(document.documentElement.style.width).toBe("820px");
+    unmount();
+  }
+
+  const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, PORTRAIT, 2) });
+  const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  expect(rootWidthPin()).toEqual(["", "", "", "", ""]);
+  expect(document.documentElement.style.height).toBe("");
+  browser.recheckViewport();
+  expect(browser.actions.viewportScaleResets).toBe(0);
+  unmount();
+});
+
+it("asks the browser to reset the scale on every rotation, whatever the reading says", () => {
+  const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, LANDSCAPE) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  expect(browser.actions.viewportScaleResets).toBe(0);
+
+  browser.rotateViewport(stuck(LANDSCAPE, PORTRAIT, 0.7));
+  expect(browser.actions.viewportScaleResets).toBe(1);
+  browser.rotateViewport(stuck(PORTRAIT, LANDSCAPE, 1.44));
+  expect(browser.actions.viewportScaleResets).toBe(2);
+  expect(browser.actions.viewportScrollResets).toBeGreaterThanOrEqual(3);
+});
+
+it("rechecks a settled rotation or a returning tab, and only resets while the width is still stuck", () => {
+  const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, LANDSCAPE) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+
+  browser.recheckViewport();
+  expect(browser.actions.viewportScaleResets).toBe(0);
+
+  browser.recheckViewport(stuck(LANDSCAPE, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(1);
+  expect(document.documentElement.style.width).toBe("820px");
+
+  browser.answerViewport(stuck(LANDSCAPE, PORTRAIT));
+  browser.answerViewport(stuck(LANDSCAPE, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(1);
+
+  browser.recheckViewport(stuck(PORTRAIT, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(1);
+  expect(rootWidthPin()).toEqual(["", "", "", "", ""]);
+});
+
+it("resets a viewport that is already stuck when the shell mounts", () => {
+  const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, PORTRAIT) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  expect(browser.actions.viewportScaleResets).toBe(1);
+});
+
+it("clears every pin and stops listening on unmount", () => {
+  const browser = fakeBrowser({ viewport: stuck(PORTRAIT, LANDSCAPE) });
+  const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  expect(rootWidthPin()[0]).toBe("1180px");
+
+  unmount();
+  expect(rootWidthPin()).toEqual(["", "", "", "", ""]);
+  expect(document.documentElement.style.height).toBe("");
+  const resets = browser.actions.viewportScaleResets;
+  browser.rotateViewport(stuck(LANDSCAPE, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(resets);
+  expect(rootWidthPin()).toEqual(["", "", "", "", ""]);
+});
+
+it("decides the width pin in both directions and through float jitter", () => {
+  expect(pinnedShellWidth(stuck(LANDSCAPE, PORTRAIT))).toBe(820);
+  expect(pinnedShellWidth(stuck(PORTRAIT, LANDSCAPE))).toBe(1180);
+  expect(pinnedShellWidth(stuck(PORTRAIT, { width: 820 + VIEWPORT_WIDTH_PIN_MIN_DELTA_PX, height: 1180 }))).toBeNull();
+  expect(pinnedShellWidth(stuck({ width: 1280, height: 800 }, { width: 1263, height: 800 }))).toBeNull();
+  expect(pinnedShellWidth(stuck(LANDSCAPE, PORTRAIT, 0.9999))).toBe(820);
+  expect(pinnedShellWidth(stuck(LANDSCAPE, PORTRAIT, 1.005))).toBe(820);
+  expect(pinnedShellWidth(stuck(LANDSCAPE, PORTRAIT, 1.25))).toBeNull();
+  expect(pinnedShellWidth(stuck(LANDSCAPE, PORTRAIT, 0.7))).toBeNull();
+  expect(pinnedShellWidth({ layoutHeight: 800, visual: { height: 800, scale: 1 } })).toBeNull();
+  expect(pinnedShellWidth({ layoutHeight: 800, layoutWidth: 1180, visual: { height: 800, width: 0, scale: 1 } })).toBeNull();
+});
+
+it("pins a layout height that is stuck taller or shorter than the visual band, through float jitter", () => {
+  expect(pinnedShellHeight({ layoutHeight: 1180, visual: { height: 820, scale: 0.9999 } })).toBe(820);
+  expect(pinnedShellHeight({ layoutHeight: 820, visual: { height: 1180, scale: 1.005 } })).toBe(1180);
+  expect(pinnedShellHeight({ layoutHeight: 820, visual: { height: 1180, scale: 1.5 } })).toBeNull();
 });
