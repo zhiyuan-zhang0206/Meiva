@@ -1,0 +1,68 @@
+{"t":2.222,"cls":"StreamEvent","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011ChNwLYS5LQitakQsBhoBn","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"input_transformations":[],"diagnostics":null,"context_management":null}},"parent_tool_use_id":null}
+{"t":2.222,"cls":"StreamEvent","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"parent_tool_use_id":null}
+{"t":2.973,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I chec","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.973,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ked the product: 17 times","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.973,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 23 is 391, which","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.973,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is not above 400. Next","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.973,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I'll run the echo command","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.974,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" in","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.974,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Bash to print","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.974,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" spike-ok.","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.974,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\n","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":2.974,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"<signature>"}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"AssistantMessage","content":[{"__t":"ThinkingBlock","thinking":"I checked the product: 17 times 23 is 391, which is not above 400. Next I'll run the echo command in Bash to print spike-ok.\n\n","signature":"<signature>"}],"model":"claude-haiku-5-5","parent_tool_use_id":null,"message_id":"msg_011ChNwLYS5LQitakQsBhoBn"}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"17 × "}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"23 = 391, which is"}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" not greater than 400."}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Running"}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the command"}},"parent_tool_use_id":null}
+{"t":2.978,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" now."}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"AssistantMessage","content":[{"__t":"TextBlock","text":"17 × 23 = 391, which is not greater than 400. Running the command now."}],"model":"claude-haiku-5-5","parent_tool_use_id":null,"message_id":"msg_011ChNwLYS5LQitakQsBhoBn"}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_stop","index":1},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_01UvubXqHSyMn7F4AYtJKbkp","name":"Bash","input":{},"caller":{"type":"direct"}}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":""}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"comma"}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"nd\": \"e"}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"cho spi"}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ke-ok\""}},"parent_tool_use_id":null}
+{"t":2.98,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":", \"desc"}},"parent_tool_use_id":null}
+{"t":2.981,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"ription"}},"parent_tool_use_id":null}
+{"t":2.981,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\": \"Pri"}},"parent_tool_use_id":null}
+{"t":2.981,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"nt spik"}},"parent_tool_use_id":null}
+{"t":2.981,"cls":"StreamEvent","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"e-ok\"}"}},"parent_tool_use_id":null}
+{"t":2.985,"cls":"AssistantMessage","content":[{"__t":"ToolUseBlock","id":"toolu_01UvubXqHSyMn7F4AYtJKbkp","name":"Bash","input":{"command":"echo spike-ok","description":"Print spike-ok"}}],"model":"claude-haiku-5-5","parent_tool_use_id":null,"message_id":"msg_011ChNwLYS5LQitakQsBhoBn"}
+{"t":2.992,"cls":"StreamEvent","event":{"type":"content_block_stop","index":2},"parent_tool_use_id":null}
+{"t":2.994,"cls":"StreamEvent","event":{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":14642,"cache_read_input_tokens":0,"output_tokens":152,"output_tokens_details":{"thinking_tokens":46}},"context_management":{"applied_edits":[]}},"parent_tool_use_id":null}
+{"t":3.001,"cls":"StreamEvent","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"t":3.048,"cls":"UserMessage","content":[{"__t":"ToolResultBlock","tool_use_id":"toolu_01UvubXqHSyMn7F4AYtJKbkp","content":"spike-ok","is_error":false}],"parent_tool_use_id":null,"tool_use_result":{"stdout":"spike-ok","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false}}
+{"t":3.901,"cls":"StreamEvent","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011ChNwLgFrzJyZbkoFh2MKG","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"input_transformations":[],"diagnostics":null,"context_management":null}},"parent_tool_use_id":null}
+{"t":3.902,"cls":"StreamEvent","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"parent_tool_use_id":null}
+{"t":4.879,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The tool retur","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.879,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ned \"spike-ok,\"","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.879,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" so I just","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" need to give","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a one-s","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"entence answer and","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" t","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ool-availability notices don","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'t mat","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ter here.","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.88,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\n","estimated_tokens":null}},"parent_tool_use_id":null}
+{"t":4.881,"cls":"StreamEvent","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"<signature>"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"AssistantMessage","content":[{"__t":"ThinkingBlock","thinking":"The tool returned \"spike-ok,\" so I just need to give a one-sentence answer and the tool-availability notices don't matter here.\n\n","signature":"<signature>"}],"model":"claude-haiku-5-5","parent_tool_use_id":null,"message_id":"msg_011ChNwLgFrzJyZbkoFh2MKG"}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" command printed `spike-"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ok`, and 17 ×"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 23 = 391,"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" which is not greater than 400"}},"parent_tool_use_id":null}
+{"t":4.882,"cls":"StreamEvent","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."}},"parent_tool_use_id":null}
+{"t":4.883,"cls":"AssistantMessage","content":[{"__t":"TextBlock","text":"The command printed `spike-ok`, and 17 × 23 = 391, which is not greater than 400."}],"model":"claude-haiku-5-5","parent_tool_use_id":null,"message_id":"msg_011ChNwLgFrzJyZbkoFh2MKG"}
+{"t":4.883,"cls":"StreamEvent","event":{"type":"content_block_stop","index":1},"parent_tool_use_id":null}
+{"t":4.883,"cls":"StreamEvent","event":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":3534,"cache_read_input_tokens":14642,"output_tokens":86,"output_tokens_details":{"thinking_tokens":51}},"context_management":{"applied_edits":[]}},"parent_tool_use_id":null}
+{"t":4.883,"cls":"StreamEvent","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"t":4.888,"cls":"ResultMessage","subtype":"success","stop_reason":"end_turn","is_error":false,"num_turns":2}

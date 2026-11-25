@@ -1,0 +1,11 @@
+{"t":0.0,"sent":{"id":4,"method":"session/prompt","params":{"sessionId":"$session","prompt":[{"type":"text","text":"Count from 1 to 400, separated by single spaces, nothing else."}]}}}
+{"t":0.016,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"usage_update","used":0,"size":1048576}}}
+{"t":7.801,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"1 2 3 4 5 6 7 8 9 10 11"}}}}
+{"t":7.966,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" 12 13 14 15 16 17 18 19"}}}}
+{"t":8.154,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" 20 21 22 23 24 25 26 27"}}}}
+{"t":8.347,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" 28 29 30 31 32 33 34 35"}}}}
+{"t":8.491,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" 36 37 38 39 40 41 42 43"}}}}
+{"t":8.733,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" 44 45 46 47 48 49 50 51 52 53 "}}}}
+{"t":8.815,"sent":{"method":"session/cancel","params":{"sessionId":"$session"}}}
+{"t":8.817,"method":"session/update","params":{"sessionId":"$session","update":{"sessionUpdate":"usage_update","used":9868,"size":1048576}}}
+{"t":8.82,"result":{"stopReason":"cancelled","usage":{"inputTokens":9666,"outputTokens":202,"cachedReadTokens":0,"cachedWriteTokens":0,"thoughtTokens":52,"totalTokens":9868}},"id":4}

@@ -1,0 +1,70 @@
+{"t":0.191,"method":"thread/status/changed","params":{"threadId":"$thread","status":{"type":"active","activeFlags":[]}}}
+{"t":0.191,"method":"turn/started","params":{"threadId":"$thread","turn":{"id":"$turn","rootTurnId":"$turn","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":1795577234,"completedAt":null,"durationMs":null}}}
+{"t":3.051,"method":"item/started","params":{"item":{"type":"userMessage","id":"01a210be-5130-79a3-be5b-f1f9bc61ccce","clientId":null,"content":[{"type":"text","text":"Count from 1 to 400, separated by single spaces, nothing else.","text_elements":[]}],"startedAtMs":1795577237809,"completedAtMs":null},"threadId":"$thread","turnId":"$turn","startedAtMs":1795577237809}}
+{"t":3.053,"method":"item/completed","params":{"item":{"type":"userMessage","id":"01a210be-5130-79a3-be5b-f1f9bc61ccce","clientId":null,"content":[{"type":"text","text":"Count from 1 to 400, separated by single spaces, nothing else.","text_elements":[]}],"startedAtMs":1795577237809,"completedAtMs":1795577237809},"threadId":"$thread","turnId":"$turn","completedAtMs":1795577237809}}
+{"t":5.41,"method":"item/started","params":{"item":{"type":"agentMessage","id":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","text":"","phase":"final_answer","memoryCitation":null,"delivery":null,"questions":null,"startedAtMs":1795577240168,"completedAtMs":null},"threadId":"$thread","turnId":"$turn","startedAtMs":1795577240168}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"1"}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"2"}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"3"}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"4"}}
+{"t":5.411,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.412,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"5"}}
+{"t":5.412,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.412,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"6"}}
+{"t":5.412,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.413,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"7"}}
+{"t":5.413,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.684,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"8"}}
+{"t":5.684,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.684,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"9"}}
+{"t":5.685,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.685,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"10"}}
+{"t":5.686,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.686,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"11"}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"12"}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"13"}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"14"}}
+{"t":5.688,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":5.689,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"15"}}
+{"t":5.689,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"16"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"17"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"18"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"19"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"20"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"21"}}
+{"t":6.005,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.006,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"22"}}
+{"t":6.006,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.006,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"23"}}
+{"t":6.006,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"24"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"25"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"26"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"27"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"28"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"29"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"30"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":"31"}}
+{"t":6.332,"method":"item/agentMessage/delta","params":{"threadId":"$thread","turnId":"$turn","itemId":"msg_011825de42058241016b065597e80487d0a5a9fc87cddbb30f","delta":" "}}
+{"t":6.422,"meta":"interrupt_called"}
+{"t":6.43,"method":"thread/status/changed","params":{"threadId":"$thread","status":{"type":"idle"}}}
+{"t":6.43,"method":"turn/completed","params":{"threadId":"$thread","turn":{"id":"$turn","rootTurnId":"$turn","items":[],"itemsView":"notLoaded","status":"interrupted","error":null,"startedAt":1795577234,"completedAt":1795577241,"durationMs":6420}}}
