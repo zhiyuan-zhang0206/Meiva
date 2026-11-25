@@ -1,6 +1,6 @@
 import type { BackendTimelineItem } from "../contracts/types";
 
-import { EPOCH_SWITCH_LOCAL, EPOCH_UNAVAILABLE_LOCAL, parseEpochItemId } from "./epoch-id";
+import { EPOCH_SWITCH_LOCAL, parseEpochItemId } from "./epoch-id";
 
 export function parseItemId(itemId: string): [number, number] | null {
   const parts = itemId.split(".");
@@ -59,8 +59,7 @@ interface OrderKey {
 
 const CURRENT_EPOCH = Number.POSITIVE_INFINITY;
 const SLOT_SWITCH = 0;
-const SLOT_UNAVAILABLE = 1;
-const SLOT_CONTENT = 2;
+const SLOT_CONTENT = 1;
 
 function orderKey(itemId: string): OrderKey | null {
   const prefixed = parseEpochItemId(itemId);
@@ -68,9 +67,6 @@ function orderKey(itemId: string): OrderKey | null {
   const local = prefixed?.local ?? itemId;
   if (prefixed !== null && local === EPOCH_SWITCH_LOCAL) {
     return { epoch, slot: SLOT_SWITCH, rank: 0, msg: 0, block: 0 };
-  }
-  if (prefixed !== null && local === EPOCH_UNAVAILABLE_LOCAL) {
-    return { epoch, slot: SLOT_UNAVAILABLE, rank: 0, msg: 0, block: 0 };
   }
   const parts = parseItemIdParts(local);
   if (parts === null) return null;

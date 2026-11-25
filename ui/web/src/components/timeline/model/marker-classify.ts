@@ -4,6 +4,7 @@ export type NoteTag = (typeof NOTE_TAGS)[number];
 
 const NOTE_TAG_SET: ReadonlySet<string> = new Set(NOTE_TAGS);
 const ARCHIVED_TASK_NOTE = "task";
+export const HARNESS_SWITCH_SOURCE = "harness_switch";
 
 function isNoteTag(s: string): s is NoteTag {
   return NOTE_TAG_SET.has(s);
@@ -32,6 +33,7 @@ export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
 
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }
+  | { readonly kind: "harness_switch" }
   | { readonly kind: "memory" }
   | { readonly kind: "background_task" }
   | { readonly kind: "note" }
@@ -49,6 +51,7 @@ export function classifyMarker(source: string | null, payload?: string): MarkerC
   if (source === "background_task" || source === "task-notification") {
     return { kind: "background_task" };
   }
+  if (source === HARNESS_SWITCH_SOURCE) return { kind: "harness_switch" };
   if (source === ARCHIVED_TASK_NOTE) return { kind: "note" };
   if (source !== null && isNoteTag(source)) {
     if (isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
@@ -83,6 +86,12 @@ export function isSilentEphemeralPayload(payload: string): boolean {
 // like machinery still renders.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function isSilentMarker(source: string | null, payload: string): boolean {
-  if (source === ARCHIVED_TASK_NOTE || (source !== null && isNoteTag(source))) return false;
+  if (
+    source === ARCHIVED_TASK_NOTE ||
+    source === HARNESS_SWITCH_SOURCE ||
+    (source !== null && isNoteTag(source))
+  ) {
+    return false;
+  }
   return isSilentEphemeralPayload(payload);
 }

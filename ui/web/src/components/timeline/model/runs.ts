@@ -11,7 +11,7 @@ import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
 
-import { classifyMarker, isSilentMarker } from "./marker-classify";
+import { classifyMarker, HARNESS_SWITCH_SOURCE, isSilentMarker } from "./marker-classify";
 
 export type TurnTranslator = (
   key: string,
@@ -242,6 +242,7 @@ interface ComputedSegment {
 
 const WAKE_MARKER_SOURCES: ReadonlySet<string> = new Set([
   "heartbeat",
+  HARNESS_SWITCH_SOURCE,
   "lifecycle_restart",
   "lifecycle_resurrect",
   "lifecycle_fork",

@@ -4,7 +4,6 @@ export interface EpochItemId {
 }
 
 export const EPOCH_SWITCH_LOCAL = "sw";
-export const EPOCH_UNAVAILABLE_LOCAL = "unavailable";
 
 const EPOCH_ID = /^e(\d+)\.(.+)$/;
 
@@ -21,5 +20,5 @@ export function isEpochItemId(itemId: string): boolean {
 
 export function isSyntheticEpochItemId(itemId: string): boolean {
   const parsed = parseEpochItemId(itemId);
-  return parsed !== null && (parsed.local === EPOCH_SWITCH_LOCAL || parsed.local === EPOCH_UNAVAILABLE_LOCAL);
+  return parsed !== null && parsed.local === EPOCH_SWITCH_LOCAL;
 }
