@@ -503,9 +503,19 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
 # serialize_time` read 0 events). The modules are read through `loaded_attribute`, so a test that
 # never loaded them pays one dict lookup, and a test that owns its sinks
 # (`release_process_logging`'s own) is unaffected.
+#
+# The same holds for the loguru `extra` the process binds (`logger.configure(extra={"agent_id": ...})`
+# in `start_process_logging`, the sink fixtures and tests that bind an agent): it is process-global
+# and stamps every later record in the worker, so a test asserting a record's exact `extra` (e.g.
+# `== {"event": "harness_timing_collection_failed"}`) failed only when it shared a worker with a
+# binder (#9260). The worker's baseline is the empty `extra` loguru starts with, which no fixture or
+# plugin changes; teardown puts it back through the public `configure`.
 @pytest.fixture(autouse=True)
 def _release_process_logging() -> Iterator[None]:
     yield
+    loguru_logger = loaded_attribute("loguru", "logger")
+    if loguru_logger is not None:
+        loguru_logger.configure(extra={})
     release = loaded_attribute("base.log.process", "release_process_logging")
     if release is not None:
         release()
