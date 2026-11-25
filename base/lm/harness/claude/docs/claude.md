@@ -65,9 +65,11 @@ and the CLI reports its end on its own:
 
 - **Inputs carry a uuid; the CLI's echo is the acknowledgement.** Every input is sent as a user
   message with a uuid derived from its key (`delivery.key_uuid`), and the session starts the CLI with
-  `--replay-user-messages` (an SDK that cannot pass it is refused; a CLI that does not echo fails the
-  session at the first result instead of guessing). The write is a weak receipt (`InputReceived`,
-  WEAK); the echo of our uuid is `InputInContext`. Where the model gets the input depends on the CLI:
+  `--replay-user-messages`. The write is a weak receipt (`InputReceived`, WEAK); the echo of our uuid
+  is `InputInContext`. An unlabelled or human result before the first echo fails the session when
+  an input is in flight. A result with its own non-human origin can arrive first on resume, for
+  example when the CLI reports a stopped background task. The input stays pending until its echo.
+  Where the model gets the input depends on the CLI:
   at the next tool boundary (the echo arrives mid-turn and joins that turn) or, when the turn has no
   tool left to cross, about a second after that turn's result, as a turn of its own (the echo arrives
   with no turn open and starts one: `TurnStarted(HARNESS, QUEUED_INPUT_REVIVED, keys)`). The same
