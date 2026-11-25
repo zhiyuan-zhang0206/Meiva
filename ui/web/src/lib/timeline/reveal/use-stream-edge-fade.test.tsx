@@ -32,15 +32,15 @@ afterEach(() => {
 });
 
 describe("useStreamEdgeFade", () => {
-  it("paints while revealing, ages out after the settle, and clears on unmount", async () => {
+  it("paints until the reveal catches up, then ages out, and clears on unmount", async () => {
     const host = new FakeHost();
     const ref = mount("a sentence that is being revealed");
     const { rerender, unmount } = renderHook(
-      ({ revealing, shown }) => useStreamEdgeFade(ref, revealing, shown, host),
-      { initialProps: { revealing: true, shown: "a sentence" } },
+      ({ caughtUp, shown }) => useStreamEdgeFade(ref, caughtUp, shown, host),
+      { initialProps: { caughtUp: false, shown: "a sentence" } },
     );
     expect(host.ranges.size).toBeGreaterThan(0);
-    rerender({ revealing: false, shown: "a sentence that is being revealed" });
+    rerender({ caughtUp: true, shown: "a sentence that is being revealed" });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -49,7 +49,7 @@ describe("useStreamEdgeFade", () => {
       await vi.advanceTimersByTimeAsync(400);
     });
     expect(host.ranges.size).toBe(0);
-    rerender({ revealing: true, shown: "another burst" });
+    rerender({ caughtUp: false, shown: "another burst" });
     expect(host.ranges.size).toBeGreaterThan(0);
     unmount();
     expect(host.ranges.size).toBe(0);
@@ -57,15 +57,15 @@ describe("useStreamEdgeFade", () => {
 
   it("paints nothing without a host (no Highlight API, or reduced motion)", () => {
     const ref = mount("a sentence that is being revealed");
-    const { unmount } = renderHook(() => useStreamEdgeFade(ref, true, "a sentence", null));
+    const { unmount } = renderHook(() => useStreamEdgeFade(ref, false, "a sentence", null));
     unmount();
     expect(document.body.textContent).toBe("a sentence that is being revealed");
   });
 
-  it("never paints a row that was never revealing (history)", () => {
+  it("never paints a row that is already caught up (history)", () => {
     const host = new FakeHost();
     const ref = mount("history text");
-    renderHook(() => useStreamEdgeFade(ref, false, "history text", host));
+    renderHook(() => useStreamEdgeFade(ref, true, "history text", host));
     expect(host.ranges.size).toBe(0);
   });
 });

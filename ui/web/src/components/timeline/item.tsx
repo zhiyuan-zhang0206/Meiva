@@ -39,8 +39,7 @@ import {
 } from "@/lib/timeline/image-dimensions-cache";
 import { repairStreamingMarkdown } from "@/lib/markdown/streaming-repair";
 import { useMediaQuery } from "@/lib/layout/use-media-query";
-import { domHighlightHost } from "@/lib/timeline/reveal/edge-fade";
-import { useStreamEdgeFade } from "@/lib/timeline/reveal/use-stream-edge-fade";
+import { useEdgeFadeHost, useStreamEdgeFade } from "@/lib/timeline/reveal/use-stream-edge-fade";
 import { useStreamReveal } from "@/lib/timeline/reveal/use-stream-reveal";
 import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
@@ -512,7 +511,7 @@ export const ItemView = memo(function ItemView({
     (item.kind === "agent_chat" && Boolean(item.partial) && !item.interrupted) ||
     isLiveReasoning(item) ||
     (item.kind === "agent_code" && streaming);
-  const { text: streamingPayload, revealing } = useStreamReveal(
+  const { text: streamingPayload, revealing, caughtUp } = useStreamReveal(
     item.payload,
     live,
     streamingParseIntervalMs(item.payload.length),
@@ -523,7 +522,8 @@ export const ItemView = memo(function ItemView({
   );
   const bodyRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  useStreamEdgeFade(bodyRef, revealing, streamingPayload, reducedMotion ? null : domHighlightHost());
+  const edgeFadeHost = useEdgeFadeHost();
+  useStreamEdgeFade(bodyRef, caughtUp, streamingPayload, reducedMotion ? null : edgeFadeHost);
 
   switch (item.kind) {
     case "inbound_chat": {

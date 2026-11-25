@@ -12,8 +12,11 @@ vi.mock("@/components/content/python-code", () => ({
   PythonCode: ({ code }: { code: string }) => <pre data-testid="code">{code}</pre>,
 }));
 
+import type { HighlightHost, HighlightLike } from "@/lib/timeline/reveal/edge-fade";
 import { REVEAL_SETTLE_MS } from "@/lib/timeline/reveal/constants";
-import { renderWithBrowser as render } from "@/test-support/render";
+import { EdgeFadeHostContext } from "@/lib/timeline/reveal/use-stream-edge-fade";
+import { renderWithBrowser } from "@/test-support/render";
+import type { ReactElement, ReactNode } from "react";
 
 import { ItemView } from "../item";
 
@@ -30,6 +33,26 @@ function chat(payload: string, extra: Partial<BackendTimelineItem> = {}): Backen
     ...extra,
   };
 }
+
+class FakeHost implements HighlightHost {
+  readonly ranges = new Set<Range>();
+  highlight(): HighlightLike {
+    return this.ranges;
+  }
+  adoptStyles(): void {
+    return undefined;
+  }
+}
+
+function renderFading(ui: ReactElement, host: HighlightHost | null) {
+  return renderWithBrowser(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <EdgeFadeHostContext.Provider value={host}>{children}</EdgeFadeHostContext.Provider>
+    ),
+  });
+}
+
+const render = renderWithBrowser;
 
 const shown = () => screen.getByTestId("md").textContent;
 
@@ -144,5 +167,80 @@ describe("ItemView streaming reveal", () => {
     expect(code.startsWith(text)).toBe(true);
     await frames(3000);
     expect(screen.getByTestId("code").textContent).toBe(code);
+  });
+
+  describe("leading-edge fade never outlives the reveal", () => {
+    const sentence = "so the open question is where that structure enters.";
+
+    async function settleFrames() {
+      for (let i = 0; i < 15; i++) await frames(100);
+    }
+
+    it("a stream that pauses mid-sentence (still partial) ages the edge out", async () => {
+      const host = new FakeHost();
+      const { rerender } = renderFading(<ItemView item={chat("")} streaming />, host);
+      rerender(<ItemView item={chat(sentence)} streaming />);
+      await frames(100);
+      expect(host.ranges.size).toBeGreaterThan(0);
+      await settleFrames();
+      expect(shown()).toBe(sentence);
+      expect(host.ranges.size).toBe(0);
+    });
+
+    it("a new delta after the pause paints the edge again, and it ages out again", async () => {
+      const host = new FakeHost();
+      const { rerender } = renderFading(<ItemView item={chat("")} streaming />, host);
+      rerender(<ItemView item={chat(sentence)} streaming />);
+      await settleFrames();
+      expect(host.ranges.size).toBe(0);
+      rerender(<ItemView item={chat(`${sentence} And then the stream resumes with more words.`)} streaming />);
+      await frames(100);
+      expect(host.ranges.size).toBeGreaterThan(0);
+      await settleFrames();
+      expect(host.ranges.size).toBe(0);
+    });
+
+    it("an interrupted stream (never committed) leaves nothing translucent", async () => {
+      const host = new FakeHost();
+      const { rerender } = renderFading(<ItemView item={chat("")} streaming />, host);
+      rerender(<ItemView item={chat(sentence)} streaming />);
+      await frames(100);
+      rerender(<ItemView item={chat(sentence, { interrupted: true })} streaming={false} />);
+      await settleFrames();
+      expect(host.ranges.size).toBe(0);
+    });
+
+    it("a hidden tab that becomes visible shows everything with no translucent edge left", async () => {
+      const host = new FakeHost();
+      const { rerender } = renderFading(<ItemView item={chat("")} streaming />, host);
+      rerender(<ItemView item={chat("z".repeat(600))} streaming />);
+      await frames(30);
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await settleFrames();
+      expect(shown()).toBe("z".repeat(600));
+      expect(host.ranges.size).toBe(0);
+    });
+
+    it("a committed row that takes over leaves no ranges", async () => {
+      const host = new FakeHost();
+      const { rerender } = renderFading(<ItemView item={chat("")} streaming />, host);
+      rerender(<ItemView item={chat(sentence)} streaming />);
+      await frames(100);
+      rerender(<ItemView item={chat(sentence, { partial: false })} streaming={false} />);
+      await settleFrames();
+      expect(host.ranges.size).toBe(0);
+    });
+
+    it("never paints a row that mounts complete", async () => {
+      const host = new FakeHost();
+      renderFading(<ItemView item={chat(sentence)} streaming />, host);
+      await frames(100);
+      expect(host.ranges.size).toBe(0);
+    });
   });
 });

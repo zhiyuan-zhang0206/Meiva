@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearEdgeFade, edgeFadeCss, paintEdgeFade, settleEdgeFade, type HighlightHost, type HighlightLike } from "./edge-fade";
-import { EDGE_FADE_SETTLE_MS, EDGE_FADE_STEP_OPACITY, EDGE_FADE_TAIL_GRAPHEMES } from "./constants";
+import { EDGE_FADE_AGE_OUT_MS, EDGE_FADE_STEP_OPACITY, EDGE_FADE_TAIL_GRAPHEMES } from "./constants";
 
 class FakeHost implements HighlightHost {
   readonly highlights = new Map<string, Set<Range>>();
@@ -80,11 +80,11 @@ describe("edge fade", () => {
   it("settling ages the edge out over the settle window instead of snapping opaque", async () => {
     const host = new FakeHost();
     settleEdgeFade(host, {}, mount("abcdefghijklmnopqrstuvwxyz"));
-    await vi.advanceTimersByTimeAsync(EDGE_FADE_SETTLE_MS / 2);
+    await vi.advanceTimersByTimeAsync(EDGE_FADE_AGE_OUT_MS / 2);
     const mid = host.all().join("").length;
     expect(mid).toBeGreaterThan(0);
     expect(mid).toBeLessThan(EDGE_FADE_TAIL_GRAPHEMES);
-    await vi.advanceTimersByTimeAsync(EDGE_FADE_SETTLE_MS);
+    await vi.advanceTimersByTimeAsync(EDGE_FADE_AGE_OUT_MS);
     expect(host.all()).toEqual([]);
   });
 

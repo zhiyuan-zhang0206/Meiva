@@ -55,7 +55,7 @@ the preview gate.
 | `REVEAL_MAX_FRAME_DT_MS` | 250 ms | After a long stall a raw time step would teleport the text; the backlog law already raised the speed during the stall. |
 | `EDGE_FADE_TAIL_GRAPHEMES` | 16 | A 40-400 ms soft edge at nominal speeds: wide enough to read as a gradient, short enough never to leave stale grey text. |
 | `EDGE_FADE_STEP_OPACITY` | 0.22 / 0.45 / 0.70 / 0.88 | Four steps over the tail read as a continuous ramp and need only four highlight rules. |
-| `EDGE_FADE_SETTLE_MS` | 220 ms | The edge ages out instead of snapping opaque, which would be the one visible pop. |
+| `EDGE_FADE_AGE_OUT_MS` | 400 ms | Once the reveal has caught up the edge ages out to fully opaque over this time (300-500 ms is long enough to read as a fade and short enough that a paused stream never looks stuck mid-gradient); snapping opaque would be a visible pop. |
 
 ## Which text is animated
 
@@ -84,7 +84,7 @@ painted at stepped opacity (newest faintest) with the CSS Custom Highlight API
 react-markdown already own: no span per character, no layout change, and copy,
 selection and accessibility see the same text. Highlight colour is derived from
 the text's own colour (`color-mix(currentColor ...)`), so syntax colours in code
-survive. The edge ages out over `EDGE_FADE_SETTLE_MS` when the stream settles.
+survive. The edge is painted only while the reveal still has something to show. The moment the reveal catches up with the arrived text, whatever the reason (the provider paused, the turn ended before the commit snapshot arrived, the stream committed, the tab became visible again), it ages out over `EDGE_FADE_AGE_OUT_MS` and the loop stops; a new delta paints it again. A row that mounts already caught up is never painted.
 A browser without the API, and a user with `prefers-reduced-motion`, get the same
 smooth reveal without the gradient.
 

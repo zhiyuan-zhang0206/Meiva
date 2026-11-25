@@ -9,11 +9,13 @@ import { RevealController } from "./controller";
 export interface StreamReveal {
   text: string;
   revealing: boolean;
+  caughtUp: boolean;
 }
 
 export function useStreamReveal(text: string, live: boolean, renderIntervalMs: number): StreamReveal {
   const [ctrl] = useState(() => new RevealController(text, live));
   const [shown, setShown] = useState(text);
+  const [caughtUp, setCaughtUp] = useState(true);
   const intervalRef = useRef(renderIntervalMs);
   const frameRef = useRef<number | null>(null);
   const committedEndRef = useRef(text.length);
@@ -35,12 +37,14 @@ export function useStreamReveal(text: string, live: boolean, renderIntervalMs: n
       frameRef.current = null;
       ctrl.advance(ts);
       if (ctrl.done || ts - lastCommitRef.current >= intervalRef.current) commit(ts);
+      setCaughtUp(ctrl.done);
       if (!ctrl.done || ctrl.shownEnd() !== committedEndRef.current) {
         frameRef.current = requestAnimationFrame(tick);
       }
     };
     const now = performance.now();
     ctrl.update(text, live, now);
+    setCaughtUp(ctrl.done);
     if (document.hidden) {
       ctrl.snap();
       commit(now);
@@ -58,6 +62,7 @@ export function useStreamReveal(text: string, live: boolean, renderIntervalMs: n
       ctrl.snap();
       committedEndRef.current = ctrl.shownEnd();
       setShown(ctrl.shown());
+      setCaughtUp(true);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
@@ -68,5 +73,5 @@ export function useStreamReveal(text: string, live: boolean, renderIntervalMs: n
   }, [ctrl]);
 
   const settled = !live && shown === text;
-  return settled ? { text, revealing: false } : { text: shown, revealing: true };
+  return settled ? { text, revealing: false, caughtUp } : { text: shown, revealing: true, caughtUp };
 }
