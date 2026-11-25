@@ -49,7 +49,8 @@ def test_the_watchdog_is_the_only_route_and_does_not_fall_through() -> None:
     (route,) = _policy()["routes"]
     assert route["object_matchers"] == [["metric", "=", "alert_pipeline_watchdog"]]
     assert route["continue"] is False
-    assert route["repeat_interval"] == route["group_interval"] == "5m"
+    assert route["repeat_interval"] == "5m"
+    assert route["group_interval"] == "1m"
     assert route["group_wait"] == "0s"
 
 

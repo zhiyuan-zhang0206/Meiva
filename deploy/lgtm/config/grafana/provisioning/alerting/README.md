@@ -444,7 +444,9 @@ rule. The watchdog sends a heartbeat to make failures visible on a quiet night.
 
 - `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
   nothing about the system; its only job is to walk the whole path and refresh one gauge. Its route
-  repeats every 5 minutes and carries `continue: false`, so the heartbeat costs one POST per period
+  repeats every 5 minutes (`repeat_interval: 5m` checked on a `group_interval: 1m` tick, so the
+  measured period is five to six minutes; with the two intervals equal Alertmanager skips every other
+  beat) and carries `continue: false`, so the heartbeat costs one POST per period
   and never reaches the catch-all.
 - `meiva-ops-alert-pipeline-silent` reads the gauge the gateway refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:receive_alert_webhook`

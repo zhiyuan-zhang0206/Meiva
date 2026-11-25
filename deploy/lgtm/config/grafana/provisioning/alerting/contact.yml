@@ -34,7 +34,10 @@ policies:
     group_by:
     - alertname
     group_wait: 0s
-    group_interval: 5m
+    # Alertmanager only re-sends on a group_interval tick once repeat_interval has elapsed; with the
+    # two equal, a tick landing just short of 5m skips a beat (measured 600 s in production). A 1m
+    # tick keeps the heartbeat at five to six minutes.
+    group_interval: 1m
     repeat_interval: 5m
 deleteContactPoints:
 - orgId: 1
