@@ -1,5 +1,7 @@
 import type { BackendTimelineItem } from "../contracts/types";
 
+import { EPOCH_SWITCH_LOCAL, EPOCH_UNAVAILABLE_LOCAL, parseEpochItemId } from "./epoch-id";
+
 export function parseItemId(itemId: string): [number, number] | null {
   const parts = itemId.split(".");
   if (parts.length !== 2) return null;
@@ -47,33 +49,49 @@ export function parseItemIdParts(itemId: string): ItemIdParts | null {
   return { rank, checkpointId, msg, block };
 }
 
+interface OrderKey {
+  epoch: number;
+  slot: number;
+  rank: number;
+  msg: number;
+  block: number;
+}
+
+const CURRENT_EPOCH = Number.POSITIVE_INFINITY;
+const SLOT_SWITCH = 0;
+const SLOT_UNAVAILABLE = 1;
+const SLOT_CONTENT = 2;
+
+function orderKey(itemId: string): OrderKey | null {
+  const prefixed = parseEpochItemId(itemId);
+  const epoch = prefixed?.epoch ?? CURRENT_EPOCH;
+  const local = prefixed?.local ?? itemId;
+  if (prefixed !== null && local === EPOCH_SWITCH_LOCAL) {
+    return { epoch, slot: SLOT_SWITCH, rank: 0, msg: 0, block: 0 };
+  }
+  if (prefixed !== null && local === EPOCH_UNAVAILABLE_LOCAL) {
+    return { epoch, slot: SLOT_UNAVAILABLE, rank: 0, msg: 0, block: 0 };
+  }
+  const parts = parseItemIdParts(local);
+  if (parts === null) return null;
+  return { epoch, slot: SLOT_CONTENT, rank: parts.rank, msg: parts.msg, block: parts.block };
+}
+
+function compareKeys(a: OrderKey, b: OrderKey): number {
+  if (a.epoch !== b.epoch) return a.epoch < b.epoch ? -1 : 1;
+  if (a.slot !== b.slot) return a.slot - b.slot;
+  if (a.rank !== b.rank) return b.rank - a.rank;
+  if (a.msg !== b.msg) return a.msg - b.msg;
+  return a.block - b.block;
+}
+
 export function sortByItemId(items: BackendTimelineItem[]): BackendTimelineItem[] {
   return [...items].sort((a, b) => {
-    const pa = parseItemIdParts(a.item_id);
-    const pb = parseItemIdParts(b.item_id);
-
-    if (pa === null) return pb === null ? 0 : 1;
-    if (pb === null) return -1;
-
-    const aHarness = a.item_id.startsWith("h");
-    const bHarness = b.item_id.startsWith("h");
-    if (aHarness !== bHarness) {
-      if (a.kind === "system_prompt" || a.item_id === "0.0") return -1;
-      if (b.kind === "system_prompt" || b.item_id === "0.0") return 1;
-      if (a.created_at && b.created_at) {
-        const cmp = a.created_at.localeCompare(b.created_at);
-        if (cmp !== 0) return cmp;
-      } else if (a.created_at && !b.created_at) {
-        return 1;
-      } else if (!a.created_at && b.created_at) {
-        return -1;
-      }
-      return aHarness ? 1 : -1;
-    }
-
-    if (pa.rank !== pb.rank) return pb.rank - pa.rank;
-    if (pa.msg !== pb.msg) return pa.msg - pb.msg;
-    return pa.block - pb.block;
+    const ka = orderKey(a.item_id);
+    const kb = orderKey(b.item_id);
+    if (ka === null) return kb === null ? 0 : 1;
+    if (kb === null) return -1;
+    return compareKeys(ka, kb);
   });
 }
 

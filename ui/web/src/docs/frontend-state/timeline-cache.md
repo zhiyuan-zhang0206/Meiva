@@ -110,6 +110,28 @@ it also removes an overlay whose committed row a `GET /timeline` already deliver
 An overlay id that no snapshot retires is kept like any in-flight partial, and the
 backend sends nothing for an id after retiring it.
 
+## Earlier harness epochs
+
+An agent that switched harness keeps one timeline. The gateway reads the current
+epoch exactly as before (unprefixed ids, live SSE and overlay ids unchanged) and
+serves earlier epochs only through `before=` paging, with every id prefixed
+`e<seq>.` (`e0.h123.0`, `e0.12.0`, `e0.s1.<cp>.3.0`). Two synthetic locals mark an
+epoch's start: `e<seq>.sw` (the switch block) and `e<seq>.unavailable` (a segment
+that could not be read).
+
+The store order is one total order, `(epoch, slot, compact rank, message, block)`
+with the current epoch last (`sortByItemId`, `lib/fold/item-id.ts`); no timestamp
+decides placement. The compact machinery (`parseItemIdParts`, transition buffers,
+`crossedUnseenCompact`, the `msg_count` stale-partial rule) only understands
+current-epoch ids: `parseItemIdParts` returns null for a prefixed id, so earlier
+epochs are never judged by a compact or by `msg_count`. The older-page cursor is the
+oldest loaded real row, which may be a synthetic row, and the gateway accepts every
+id it emits as a cursor.
+
+`useTimeline` takes the agent's harness; when it changes for the selected agent the
+view drops every row (the rows on screen would otherwise sit beside the same history
+now prefixed `e<seq>.`) and one composed read re-seeds the new head.
+
 ## Relationship to Other Nodes
 
 - [Frontend State Management](frontend-state.md)

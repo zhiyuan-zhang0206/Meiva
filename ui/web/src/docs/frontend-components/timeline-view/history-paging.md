@@ -38,3 +38,14 @@ therefore records its origin where it begins (`OlderLoadOrigin` in
 request keeps one ring element from its start to its landing, so a parent
 re-render, however frequent, never rebuilds it
 ([The loading ring](loading-ring.md)).
+
+## Paging into earlier harness epochs
+
+After a harness switch the older-page cursor keeps working across the boundary:
+the oldest loaded real row names the cursor, and once the current epoch is
+exhausted that row is an `e<seq>.`-prefixed id (or a synthetic `e<seq>.sw` /
+`e<seq>.unavailable` row), so the same `before=` read continues into the previous
+epoch. Rows are placed by the total order in
+[Selected Timeline State](../../frontend-state/timeline-cache.md), never by
+`created_at`. An earlier epoch's system prompt is never a cursor, as in the
+current epoch.

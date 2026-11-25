@@ -8,6 +8,7 @@ import {
 import {
   isEventForThread,
   isReattachedTimelineContext,
+  isEpochItemId,
   parseItemIdParts,
   standingHeadNoteIds,
 } from "../fold";
@@ -123,7 +124,7 @@ export function crossedUnseenCompact(
   incoming: BackendTimelineItem[],
 ): boolean {
   return incoming.some((env) => {
-    if (!isCompactEnvelopeKind(env.kind)) return false;
+    if (!isCompactEnvelopeKind(env.kind) || isEpochItemId(env.item_id)) return false;
     const localEnv = local.find((it) => it.item_id === env.item_id);
     if (localEnv === undefined) return true;
     return localEnv.kind !== env.kind || localEnv.created_at !== env.created_at;

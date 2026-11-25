@@ -1,5 +1,11 @@
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "../fold";
+import {
+  isReattachedTimelineContext,
+  isSyntheticEpochItemId,
+  parseEpochItemId,
+  parseItemIdParts,
+  standingHeadNoteIds,
+} from "../fold";
 
 export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "aborted" | "failed";
 
@@ -61,7 +67,8 @@ export function findOldestTimelineCursor(
 ): BackendTimelineItem | undefined {
   const headNoteIds = standingHeadNoteIds(items);
   const isRealCursor = (it: BackendTimelineItem): boolean => {
-    const parts = parseItemIdParts(it.item_id);
+    if (isSyntheticEpochItemId(it.item_id)) return true;
+    const parts = parseItemIdParts(parseEpochItemId(it.item_id)?.local ?? it.item_id);
     if (parts === null) return false;
     if (headNoteIds.has(it.item_id)) return false;
     return (

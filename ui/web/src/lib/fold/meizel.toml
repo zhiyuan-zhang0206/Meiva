@@ -4,7 +4,9 @@ exports = ["agents.ts", "owner.ts", "timeline.ts"]
 "agents.ts" = ["types.ts"]
 "fold.test.ts" = ["agents.ts", "graph.ts", "index.ts", "questions.ts"]
 "graph.ts" = ["types.ts"]
-"index.ts" = ["agents.ts", "graph.ts", "item-id.ts", "overlay-id.ts", "questions.ts", "types.ts"]
+"item-id.test.ts" = ["epoch-id.ts", "item-id.ts"]
+"item-id.ts" = ["epoch-id.ts"]
+"index.ts" = ["agents.ts", "epoch-id.ts", "graph.ts", "item-id.ts", "overlay-id.ts", "questions.ts", "types.ts"]
 "questions.ts" = ["types.ts"]
 "owner.ts" = ["index.ts", "repair.ts"]
 "repair.test.ts" = ["repair.ts"]
@@ -12,6 +14,7 @@ exports = ["agents.ts", "owner.ts", "timeline.ts"]
 
 [purity]
 "agents.ts" = "strict"
+"epoch-id.ts" = "strict"
 "graph.ts" = "strict"
 "index.ts" = "strict"
 "item-id.ts" = "strict"
