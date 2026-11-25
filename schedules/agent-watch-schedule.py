@@ -93,7 +93,9 @@ def watch_once(
 # a wave provisions it; it claims no slot, so the cron ladder is untouched.
 if __name__ == "__main__":
     home = resolve_meiva_home()
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+    with open_schedule_entry(
+        globals().get("MEIVA_SCHEDULE_INPUTS"), home=home, process=_PROCESS_NAME
+    ) as inputs:
         watch = partial(
             watch_once,
             inputs=inputs,

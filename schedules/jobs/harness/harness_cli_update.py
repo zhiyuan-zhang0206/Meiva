@@ -18,7 +18,7 @@ from base.host.env.harness.convergence import (
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.harness.update_plan import decide_round
 
-_PROCESS_NAME = "harness-cli-update"
+PROCESS_NAME = "harness-cli-update"
 _EVENT_NAME = "harness_cli_update_round"
 
 
@@ -57,11 +57,11 @@ def execute_round(
 ) -> None:
     if not is_production:
         decision = decide_round(None, skipped_non_production=True)
-        print(f"[{slot.isoformat()}] {_PROCESS_NAME}: {decision.log_line}")
+        print(f"[{slot.isoformat()}] {PROCESS_NAME}: {decision.log_line}")
         emit_system_event(
             _EVENT_NAME,
             decision.telemetry_payload,
-            process=_PROCESS_NAME,
+            process=PROCESS_NAME,
             producer=inputs.producer,
             machine_reader=inputs.machine.name,
             image=inputs.image,
@@ -78,11 +78,11 @@ def execute_round(
         run_shell=run_shell,
     )
     decision = decide_round(report)
-    print(f"[{slot.isoformat()}] {_PROCESS_NAME}: {decision.log_line}")
+    print(f"[{slot.isoformat()}] {PROCESS_NAME}: {decision.log_line}")
     emit_system_event(
         _EVENT_NAME,
         decision.telemetry_payload,
-        process=_PROCESS_NAME,
+        process=PROCESS_NAME,
         producer=inputs.producer,
         machine_reader=inputs.machine.name,
         image=inputs.image,

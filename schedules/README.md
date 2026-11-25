@@ -446,6 +446,8 @@ Declarative entries open the ordinary SDK context from their process environment
 this binds `schedule:<id>` and an optional owner agent for SDK attribution. Each
 entry executes once and closes its owned clients. A hand-run entry constructs its
 own `ScheduleInputs` through `open_schedule_entry`, preserving the loaded commit's
-code-version gate. C9 and the debt sweep open process logging and the event writer
+code-version gate. A schedule that emits a system event passes its telemetry `process` to
+`open_schedule_entry`, so the process is named before any `meiva.*` call can label it `sdk` (a
+loss-only process whose `MeterProvider` drops every metric). C9 and the debt sweep open process logging and the event writer
 only when they report (`schedules/jobs/telemetry_event.py`); debt dry runs assemble
 no root.

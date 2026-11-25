@@ -41,6 +41,7 @@ from schedules.plans.debt_sweep_worker import (
 from schedules.plans.directory_plan import ReportRecipient
 
 __all__ = [
+    "PROCESS_NAME",
     "DebtSweep",
     "SweepCli",
     "SweepDone",
@@ -51,7 +52,7 @@ __all__ = [
     "sweep_day",
 ]
 
-_PROCESS_NAME = "schedule-debt-sweep-daily"
+PROCESS_NAME = "schedule-debt-sweep-daily"
 _SCAN_PROGRAM = ("scripts", "audit", "tech_debt_candidates.sh")
 
 
@@ -137,7 +138,7 @@ def sweep_day(
         emit_system_event(
             "debt_sweep_daily",
             event_payload(done.day, done.scan, done.dispatch.action, done.dispatch.agent_id),
-            process=_PROCESS_NAME,
+            process=PROCESS_NAME,
             producer=inputs.producer,
             machine_reader=inputs.machine.name,
             image=inputs.image,
