@@ -209,6 +209,7 @@ def _agent(item: Obj, place: _Place) -> list[AnyEntry]:
             **place.common("agent", at_ms=place.completed_ms),
             text=text(item, "text"),
             message_ref=place.id,
+            block=place.id,
         )
     ]
 
