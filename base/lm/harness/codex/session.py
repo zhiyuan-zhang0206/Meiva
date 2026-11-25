@@ -31,7 +31,6 @@ from base.lm.harness.codex.frames import (
 )
 from base.lm.harness.codex.mapping import (
     item_event,
-    reasoning_delta,
     text_delta,
     usage_from,
 )
@@ -519,7 +518,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if not message.turn_id or params.get("threadId") != self._session_id:
             return
         if (
-            message.kind in (NotificationKind.TEXT_DELTA, NotificationKind.REASONING_DELTA)
+            message.kind is NotificationKind.TEXT_DELTA
             and len(self._early_notifications) >= self.config.max_buffered_events
         ):
             self._dropped_deltas += 1
@@ -530,8 +529,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         match message.kind:
             case NotificationKind.TEXT_DELTA:
                 self._on_text_delta(message, params)
-            case NotificationKind.REASONING_DELTA:
-                self._on_reasoning_delta(message, params)
             case NotificationKind.ITEM_STARTED | NotificationKind.ITEM_COMPLETED:
                 self._on_item(message, params)
             case NotificationKind.USAGE:
@@ -560,13 +557,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if local is None:
             return
         for event in text_delta(params, turn_id=local):
-            self._emit(event)
-
-    def _on_reasoning_delta(self, message: Inbound, params: JsonObject) -> None:
-        local = self._attribute(message.turn_id)
-        if local is None:
-            return
-        for event in reasoning_delta(params, turn_id=local):
             self._emit(event)
 
     def _on_item(self, message: Inbound, params: JsonObject) -> None:

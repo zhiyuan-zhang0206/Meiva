@@ -153,19 +153,36 @@ class FakeAppServer:
     def current_turn(self) -> str:
         return self.turn_ids[-1]
 
-    def delta(self, text: str, *, turn_id: str | None = None) -> None:
+    def delta(self, text: str, *, item_id: str = "msg-1", turn_id: str | None = None) -> None:
         self.emit(
             "item/agentMessage/delta",
             {
                 "threadId": self.thread_id,
                 "turnId": turn_id or self.current_turn,
-                "itemId": "msg-1",
+                "itemId": item_id,
+                "delta": text,
+            },
+        )
+
+    def reasoning_delta(self, text: str, *, item_id: str = "rs-1") -> None:
+        self.emit(
+            "item/reasoning/summaryTextDelta",
+            {
+                "threadId": self.thread_id,
+                "turnId": self.current_turn,
+                "itemId": item_id,
+                "summaryIndex": 0,
                 "delta": text,
             },
         )
 
     def message(
-        self, text: str, *, phase: str = "final_answer", turn_id: str | None = None
+        self,
+        text: str,
+        *,
+        item_id: str = "msg-1",
+        phase: str = "final_answer",
+        turn_id: str | None = None,
     ) -> None:
         self.emit(
             "item/completed",
@@ -173,7 +190,7 @@ class FakeAppServer:
                 "threadId": self.thread_id,
                 "turnId": turn_id or self.current_turn,
                 "completedAtMs": 0,
-                "item": {"type": "agentMessage", "id": "msg-1", "text": text, "phase": phase},
+                "item": {"type": "agentMessage", "id": item_id, "text": text, "phase": phase},
             },
         )
 
