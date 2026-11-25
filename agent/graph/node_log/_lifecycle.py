@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, Sequence
 
 from langchain_core.messages import BaseMessage
 
+from base.agents.epochs.native_slice import NativeEpochSlice, apply_native_slice
 from base.agents.history.timeline import build_timeline_items, tail_window
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
@@ -80,6 +81,7 @@ async def node_lifecycle(
     timeline_limit: int,
     full_window: bool = False,
     publish_timeline: bool = True,
+    epoch_slice: NativeEpochSlice | None = None,
 ) -> AsyncGenerator[None]:
     turn_progress.mark(agent_id)
     with stall_guard(node_name, stall):
@@ -91,7 +93,7 @@ async def node_lifecycle(
                     messages,
                     inputs=timeline_inputs,
                 )
-                window, _ = tail_window(items, timeline_limit)
+                window, _ = tail_window(apply_native_slice(items, epoch_slice), timeline_limit)
             else:
                 window, msg_count = build_timeline_items(
                     messages,

@@ -1,14 +1,16 @@
-exports = ["extent.py", "model.py", "native_slice.py", "read.py", "write.py"]
+exports = ["chain.py", "extent.py", "model.py", "native_slice.py", "read.py", "write.py"]
 
 [uses]
+"chain.py" = ["model.py"]
 "extent.py" = ["model.py"]
 "native_slice.py" = ["model.py"]
-"read.py" = ["model.py"]
-"tests" = ["model.py", "native_slice.py", "read.py", "write.py"]
+"read.py" = ["chain.py", "model.py", "native_slice.py"]
+"tests" = ["chain.py", "model.py", "native_slice.py", "read.py", "write.py"]
 "write.py" = ["model.py"]
 
 [purity]
 "__init__.py" = "strict"
+"chain.py" = "strict"
 "model.py" = "strict"
 "native_slice.py" = "strict"
 "write.py" = "strict"

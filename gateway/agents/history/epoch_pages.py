@@ -25,10 +25,7 @@ __all__ = [
     "assemble_page",
     "page_target",
     "switch_block",
-    "usable_epochs",
 ]
-
-MIN_EPOCHS = 2
 
 
 class Unavailable(StrEnum):
@@ -63,16 +60,6 @@ class PageTarget:
     seq: int | None
     within: TimelineCursor | None
     fixed: list[TimelineItem] | None = None
-
-
-def usable_epochs(rows: Sequence[HarnessEpoch], harness: str) -> list[HarnessEpoch]:
-    if len(rows) < MIN_EPOCHS:
-        return []
-    if [row.seq for row in rows] != list(range(len(rows))):
-        return []
-    if rows[-1].ended_at is not None or rows[-1].harness != harness:
-        return []
-    return list(rows)
 
 
 def switch_block(epoch: HarnessEpoch, previous: HarnessEpoch) -> TimelineItem:

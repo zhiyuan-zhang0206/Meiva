@@ -30,15 +30,12 @@ from agent.ownership.hosted import (
 )
 from agent.startup import consume_claimed_inbounds
 from agent.state import BaseAgentState
-from agent.turn.runloop import (
-    PendingTurnFailure,
-    emit_error_event,
-    graph_config,
-)
+from agent.turn.runloop import PendingTurnFailure, emit_error_event, graph_config
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.epochs.extent import extent_reader_at
+from base.agents.epochs.read import read_native_slice
 from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     retained_reconstruction,
@@ -638,6 +635,9 @@ class AgentHost:
             rng=self._policy.rng,
             bus=self._bus,
             agent=slices,
+            native_epoch_slice=await read_native_slice(
+                self._control_pool, agent_id, runtime.harness
+            ),
             extensions=self._extensions,
             commands=self._commands,
             turn_progress=self.turn_progress,

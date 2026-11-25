@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
+from base.agents.epochs.chain import usable_epochs
 from base.agents.epochs.model import HarnessEpoch
 from base.agents.epochs.native_slice import native_slice_of
 from base.agents.epochs.read import read_epochs
@@ -45,7 +46,6 @@ from gateway.agents.history.epoch_pages import (
     Unavailable,
     assemble_page,
     page_target,
-    usable_epochs,
 )
 from gateway.agents.history.epoch_range import ExternalRange, external_range, in_time_range
 from gateway.agents.history.native_reading_window import native_source_identity, native_source_items

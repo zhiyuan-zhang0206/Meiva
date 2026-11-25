@@ -253,6 +253,7 @@ async def llm_attempt(
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
+        epoch_slice=runtime.context.native_epoch_slice,
     ):
         try:
             _enforce_retry_budget(

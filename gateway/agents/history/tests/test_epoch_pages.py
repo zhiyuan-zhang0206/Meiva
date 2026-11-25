@@ -12,7 +12,6 @@ from gateway.agents.history.epoch_pages import (
     assemble_page,
     page_target,
     switch_block,
-    usable_epochs,
 )
 from gateway.agents.history.epoch_range import external_range
 from gateway.message_admission.cursor import parse_cursor
@@ -55,15 +54,6 @@ _CHAIN = [
     _epoch(2, "codex"),
     _epoch(3, "meiva", ended=False),
 ]
-
-
-def test_a_chain_of_epochs_is_usable_when_it_ends_on_the_agents_harness() -> None:
-    assert usable_epochs(_CHAIN, "meiva") == _CHAIN
-    assert usable_epochs(_CHAIN, "codex") == []
-    assert usable_epochs(_CHAIN[:1], "meiva") == []
-    assert usable_epochs([], "meiva") == []
-    assert usable_epochs([_CHAIN[0], _CHAIN[2], _CHAIN[3]], "meiva") == []
-    assert usable_epochs(_CHAIN[:3], "codex") == []
 
 
 def test_the_switch_block_names_both_harnesses_the_model_and_the_restart_message() -> None:
