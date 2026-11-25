@@ -3652,6 +3652,7 @@ export interface components {
         TimelineItem: {
             item_id: string;
             reading_locator?: string | null;
+            publication_key?: string | null;
             quote?: components["schemas"]["Quote"] | null;
             activity_pending?: boolean | null;
             kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";

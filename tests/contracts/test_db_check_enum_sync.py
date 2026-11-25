@@ -27,6 +27,7 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("agents_meta", "status"): {s.value for s in AgentStatus},
     ("agents_meta", "liveness_state"): {s.value for s in LivenessState},
     ("agents_meta", "harness"): {s.value for s in Harness},
+    ("agent_harness_epochs", "harness"): {s.value for s in Harness},
     ("agents_meta", "termination_source"): {s.value for s in TerminationSource},
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),
@@ -70,6 +71,7 @@ def _check_values(table: str, column: str) -> set[str]:
 # meiva:link base/agents/docs/harness/harness.md
 _RETIRED_DB_CHECK_VALUES: dict[tuple[str, str], frozenset[str]] = {
     ("agents_meta", "harness"): frozenset({"kimi_code"}),
+    ("agent_harness_epochs", "harness"): frozenset({"kimi_code"}),
 }
 
 

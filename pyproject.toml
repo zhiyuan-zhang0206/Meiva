@@ -636,6 +636,9 @@ root = "base/agents/context/gateway_client/tests"
 root = "base/agents/context/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/epochs/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/history/hierarchy/tests"
 
 [[tool.pyright.executionEnvironments]]

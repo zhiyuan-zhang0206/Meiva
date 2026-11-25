@@ -45,6 +45,7 @@ async def _restart(
         catalog=model_catalog,
         agent_host_port=8114,
         home=resolve_meiva_home(),
+        environ={},
     )
     return str(result.status)
 

@@ -371,6 +371,10 @@ async def test_a_harness_switch_the_agent_asks_for_waits_for_its_turn_to_end(
     assert cluster.row(agent_id) == ("idling", None)
     assert _stored_harness(cluster, agent_id) == "codex"
     [note] = [n for n in cluster.inbound(agent_id, "system_note") if n.status == "pending"]
-    assert note.content == "[Harness switched from 'meiva' to 'codex']\nI need a real shell"
+    assert note.content == (
+        "[Harness switched from 'meiva' to 'codex' by yourself]\n"
+        "Nothing said before the switch is visible here; this message is the handoff."
+        "\n\nI need a real shell"
+    )
     assert note.source == "self"
     await _the_next_incarnation_claims_in_order(cluster, agent_id, behind)

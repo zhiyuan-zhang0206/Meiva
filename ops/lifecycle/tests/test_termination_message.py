@@ -603,6 +603,7 @@ async def test_harness_restart_preserves_shell_sessions_during_its_terminal_tran
         catalog=model_catalog,
         default_model=settings.lm.llm_model,
         home=unit_home,
+        environ={},
     )
 
     assert resp.status == "enqueued"

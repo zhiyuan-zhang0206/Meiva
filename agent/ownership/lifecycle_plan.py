@@ -6,17 +6,25 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, LiteralString, NamedTuple
+from typing import Literal, NamedTuple
 
+from base.agents.epochs.model import SwitchExtents
+from base.agents.epochs.write import (
+    Statement,
+    SwitchFacts,
+    harness_switch,
+    merge_overlay,
+    switched_by_of,
+)
 from base.agents.incarnation.restart_transition import RestartTransition
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.lifecycle_text import (
     fast_acknowledgement_note,
+    harness_switch_note,
+    restart_accepted_text,
     restart_resume_note,
-    restart_transition_note,
 )
 from base.agents.messages.termination_notice import AncestorTerminationNotice
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -25,14 +33,12 @@ LifecycleKind = Literal["restart", "terminate"]
 
 
 # meiva:note
-# A harness change a committed restart stored: the harness the agent left, the one it now runs
-# on, who asked and the message that went with it, which the history note of the switch repeats.
+# A harness change a committed restart stored: the harness the agent left and the one it now runs
+# on. The switch is shown by the epoch rows and the note the agent reads on waking.
 @dataclass(frozen=True)
 class HarnessSwitch:
     old: str
     new: str
-    source: str
-    message: str
 
 
 # meiva:note
@@ -128,52 +134,59 @@ def resume_note(
 # settings changed whether or not a turn was cut short.
 @dataclass(frozen=True)
 class RestartApply:
-    statements: tuple[tuple[LiteralString, tuple[object, ...]], ...]
+    statements: tuple[Statement, ...]
     note: ResumeNote | None
     switches_harness: bool
 
 
-_MERGE_OVERLAY: LiteralString = (
-    "UPDATE agents_meta SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
-    "WHERE id = %s"
-)
-_STORE_HARNESS: LiteralString = (
-    "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp() WHERE id = %s"
-)
-_MARK_HARNESS_MODEL_SELECTION: LiteralString = (
-    "UPDATE agents_meta SET birth_config = COALESCE(birth_config, '{}'::jsonb) "
-    "|| '{\"harness_model_selection\": 1}'::jsonb WHERE id = %s"
-)
+@dataclass(frozen=True)
+class RestartInputs:
+    source: str
+    message: str | None
+    resume_turn: bool
+    transition: RestartTransition | None
 
 
 def restart_apply(
     agent_id: int,
+    inputs: RestartInputs,
     *,
-    source: str,
-    message: str | None,
-    resume_turn: bool,
-    transition: RestartTransition | None,
     stored_harness: str,
+    extents: SwitchExtents | None = None,
 ) -> RestartApply:
+    source, message, transition = inputs.source, inputs.message, inputs.transition
     if transition is None:
         return RestartApply(
             (),
-            resume_note(source, resume_turn=resume_turn, message=message),
+            resume_note(source, resume_turn=inputs.resume_turn, message=message),
             switches_harness=False,
         )
-    statements: list[tuple[LiteralString, tuple[object, ...]]] = []
+    statements: list[Statement] = []
     if transition.config_overlay:
-        statements.append((_MERGE_OVERLAY, (json.dumps(dict(transition.config_overlay)), agent_id)))
+        statements.append(merge_overlay(agent_id, transition.config_overlay))
     switches = transition.target_harness != stored_harness
     if switches:
-        statements.append((_STORE_HARNESS, (transition.target_harness, agent_id)))
-        if transition.target_harness != "meiva":
-            statements.append((_MARK_HARNESS_MODEL_SELECTION, (agent_id,)))
-    note_text = restart_transition_note(
-        source,
-        message,
-        from_harness=stored_harness,
-        to_harness=transition.target_harness,
+        moved = extents or SwitchExtents()
+        model = transition.config_overlay.get("llm_model")
+        statements.extend(
+            harness_switch(
+                agent_id,
+                SwitchFacts(
+                    new_harness=transition.target_harness,
+                    model=model if isinstance(model, str) else None,
+                    by=switched_by_of(source, agent_id),
+                    message=message,
+                    leaving=moved.leaving,
+                    arriving=moved.arriving,
+                ),
+            )
+        )
+    note_text = (
+        harness_switch_note(
+            source, message, from_harness=stored_harness, to_harness=transition.target_harness
+        )
+        if switches
+        else restart_accepted_text(source, message)
     )
     if update_note := fast_acknowledgement_note(transition.config_overlay):
         note_text = f"{note_text}\n\n{update_note}" if note_text else update_note

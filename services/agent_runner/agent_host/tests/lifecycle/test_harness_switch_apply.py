@@ -18,14 +18,11 @@ from agent.db import claim_inbound_batch
 from agent.ownership.tests.ownership_support import BusTap, admit_owner, agent_row
 from base import paths
 from base.agents.incarnation.restart_transition import RestartTransition
-from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
-from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory
 
 
 def _record(agent_id: int, harness: str) -> SessionRecord:
@@ -194,15 +191,8 @@ async def test_leaving_a_record_backed_harness_applies_the_switch_without_a_stor
         transition=RestartTransition("meiva", {"llm_model": "deepseek-flash"}),
         message="back to native",
     )
-    history = SwitchHistory(
-        graph=None,
-        timestamps=TimestampPolicy.from_clock(
-            Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=True
-        ),
-    )
-
     kind = await apply_lifecycle_command(
-        aops_pool, owner, bus=event_bus, resume_turn=True, home=tmp_path, history=history
+        aops_pool, owner, bus=event_bus, resume_turn=True, home=tmp_path
     )
 
     assert kind == "restart"

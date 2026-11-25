@@ -15,8 +15,10 @@ from agent.ownership.hosted import (
     HarnessSwitch,
     admit_hosted_runtime,
     apply_hosted_lifecycle,
-    claimed_harness_switch_target,
 )
+from base.agents.epochs.model import RecordExtent
+from base.agents.epochs.read import read_epochs
+from base.agents.epochs.write import birth_epoch
 from base.agents.incarnation.restart_transition import RESTART_TRANSITION, RestartTransition
 from base.db import Database, create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -30,6 +32,7 @@ def _agent(conn: psycopg.Connection, *, harness: str = "meiva") -> int:
         "ON CONFLICT (id) DO UPDATE SET status = 'idling', machine = 'host-test', harness = %s",
         (agent_id, harness, harness),
     )
+    conn.execute(*birth_epoch(agent_id, harness=harness, model=None))
     conn.commit()
     return agent_id
 
@@ -77,6 +80,24 @@ def _notes(conn: psycopg.Connection, agent_id: int) -> list[tuple[object, ...]]:
     ).fetchall()
 
 
+def _record_lengths(agent_id: int, harness: str) -> RecordExtent | None:
+    return RecordExtent(f"{harness}-session", 700) if harness == "codex" else None
+
+
+def _assert_epochs_after_switch(conn: psycopg.Connection, agent_id: int) -> None:
+    conn.commit()
+    left, current = read_epochs(conn, agent_id)
+    assert (left.harness, left.switched_by, left.source_end) == ("meiva", "birth", None)
+    assert left.ended_at is not None
+    assert (current.seq, current.harness, current.model) == (1, "codex", "gpt-6.1-sol")
+    assert (current.switched_by, current.reason, current.ended_at) == (
+        "self",
+        "I need a real shell",
+        None,
+    )
+    assert (current.session_id, current.source_start) == ("codex-session", 700)
+
+
 async def test_a_switch_is_one_commit_and_is_applied_once(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
 ) -> None:
@@ -88,18 +109,26 @@ async def test_a_switch_is_one_commit_and_is_applied_once(
         "I need a real shell",
         RestartTransition("codex", {"llm_model": "gpt-6.1-sol"}).payload(),
     )
-    assert await claimed_harness_switch_target(aops_pool, incarnation) == "codex"
 
-    applied = await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=True)
+    applied = await apply_hosted_lifecycle(
+        aops_pool, incarnation, resume_turn=True, read_extent=_record_lengths
+    )
 
     assert applied is not None and applied.kind == "restart"
-    assert applied.switch == HarnessSwitch("meiva", "codex", "self", "I need a real shell")
+    assert applied.switch == HarnessSwitch("meiva", "codex")
     status, owner, harness, overlay, selection, configured = _meta(db_conn, agent_id)
     assert (status, owner, harness, selection, configured) == ("idling", None, "codex", 1, True)
     assert isinstance(overlay, dict) and overlay["llm_model"] == "gpt-6.1-sol"
     assert _notes(db_conn, agent_id) == [
-        ("[Harness switched from 'meiva' to 'codex']\nI need a real shell", "self", "pending")
+        (
+            "[Harness switched from 'meiva' to 'codex' by yourself]\n"
+            "Nothing said before the switch is visible here; this message is the handoff."
+            "\n\nI need a real shell",
+            "self",
+            "pending",
+        )
     ]
+    _assert_epochs_after_switch(db_conn, agent_id)
     done = db_conn.execute(
         "SELECT status, payload -> 'lifecycle_release' FROM inbound_messages WHERE id = %s",
         (command,),
@@ -110,7 +139,7 @@ async def test_a_switch_is_one_commit_and_is_applied_once(
     # A retry after the commit finds nothing claimed: no second note, no second switch.
     assert await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=True) is None
     assert len(_notes(db_conn, agent_id)) == 1
-    assert await claimed_harness_switch_target(aops_pool, incarnation) is None
+    assert len(read_epochs(db_conn, agent_id)) == 2
 
 
 async def test_a_restart_that_keeps_its_harness_stores_the_overlay_and_reports_no_switch(
@@ -124,11 +153,13 @@ async def test_a_restart_that_keeps_its_harness_stores_the_overlay_and_reports_n
         "shorter timeout",
         RestartTransition("codex", {"exec_timeout_seconds": 30}).payload(),
     )
-    assert await claimed_harness_switch_target(aops_pool, incarnation) is None
 
-    applied = await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=True)
+    applied = await apply_hosted_lifecycle(
+        aops_pool, incarnation, resume_turn=True, read_extent=_record_lengths
+    )
 
     assert applied is not None and applied.switch is None
+    assert len(read_epochs(db_conn, agent_id)) == 1
     status, owner, harness, overlay, selection, _configured = _meta(db_conn, agent_id)
     assert (status, owner, harness, selection) == ("idling", None, "codex", None)
     assert isinstance(overlay, dict) and overlay["exec_timeout_seconds"] == 30

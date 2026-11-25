@@ -38,6 +38,7 @@ from agent.turn.runloop import (
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.agents.epochs.extent import extent_reader_at
 from base.agents.history.delta_read_compat import (
     recovery_reconstruction_scope,
     retained_reconstruction,
@@ -77,9 +78,7 @@ from services.agent_runner.agent_host.invocation.driver import drive_context
 from services.agent_runner.agent_host.lifecycle.personal_dream import (
     check_and_remind_personal_dream,
 )
-from services.agent_runner.agent_host.lifecycle.shells import (
-    reap_and_announce_corpses,
-)
+from services.agent_runner.agent_host.lifecycle.shells import reap_and_announce_corpses
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.lifecycle.workspace_hygiene import (
     check_and_remind_workspace_hygiene,
@@ -723,6 +722,7 @@ class AgentHost:
                             drop_agent=self.drop_agent,
                             wake_resumed=self._wake_resumed,
                             home=self._home,
+                            read_extent=extent_reader_at(self._home, self._policy.environ),
                         ),
                     )
                     if outcome is not None:

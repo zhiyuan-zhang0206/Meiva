@@ -3,17 +3,26 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.epochs.model import RecordExtentReader
+from base.agents.epochs.write import (
+    Statement,
+    SwitchFacts,
+    harness_switch,
+    merge_overlay,
+    store_harness,
+    switched_by_of,
+)
 from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
+from ops.rpc_schemas import RestartAgentRequest
 
 __all__ = ["read_restart_status_and_harness_blocking", "update_harness_transition_meta_blocking"]
 
@@ -47,27 +56,40 @@ def update_harness_transition_meta_blocking(
     db_pool: ConnectionPool,
     agent_id: int,
     target_harness: str,
-    config_overlay: dict[str, object] | None,
+    body: RestartAgentRequest,
     catalog: ModelCatalog,
+    read_extent: RecordExtentReader,
 ) -> None:
-    overlay_without_harness = split_overlay_columns(config_overlay).fields
+    overlay = split_overlay_columns(body.config_overlay).fields
     with write_transaction(db_pool) as conn:
-        if overlay_without_harness:
-            if target_harness == "meiva":
-                normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
-            conn.execute(
-                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp(), "
-                "config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
-                (target_harness, json.dumps(overlay_without_harness), agent_id),
-            )
+        row = query_one(
+            conn,
+            _StatusAndHarness,
+            "SELECT status, harness FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        stored_harness = row.harness
+        if overlay and target_harness == "meiva":
+            normalize_overlay_llm_model(overlay, models=catalog.models)
+        statements: list[Statement] = [merge_overlay(agent_id, overlay)] if overlay else []
+        if stored_harness == target_harness:
+            statements.extend(store_harness(agent_id, target_harness))
         else:
-            conn.execute(
-                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp() "
-                "WHERE id = %s",
-                (target_harness, agent_id),
+            model: object = overlay.get("llm_model")
+            statements.extend(
+                harness_switch(
+                    agent_id,
+                    SwitchFacts(
+                        new_harness=target_harness,
+                        model=model if isinstance(model, str) else None,
+                        by=switched_by_of(body.source, agent_id),
+                        message=body.message,
+                        leaving=read_extent(agent_id, stored_harness),
+                        arriving=read_extent(agent_id, target_harness),
+                    ),
+                )
             )
-        if target_harness != "meiva":
-            conn.execute(
-                "UPDATE agents_meta SET birth_config = COALESCE(birth_config, '{}'::jsonb) || '{\"harness_model_selection\": 1}'::jsonb WHERE id = %s",
-                (agent_id,),
-            )
+        for statement, params in statements:
+            conn.execute(statement, params)

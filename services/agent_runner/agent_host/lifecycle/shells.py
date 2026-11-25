@@ -10,6 +10,7 @@ from agent.ownership.hosted import (
     LifecycleKind,
     apply_hosted_lifecycle,
 )
+from base.agents.epochs.model import RecordExtentReader
 from base.agents.inbox.wake import publish_inbound_wake_async
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.termination_notice import AncestorTerminationNotice
@@ -25,7 +26,6 @@ from services.agent_runner.agent_host.lifecycle.cleanup_failures import (
     note_for,
     summarize,
 )
-from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory, record_switch_note
 
 
 # meiva:note
@@ -139,9 +139,11 @@ async def apply_lifecycle_command(
     bus: EventBus,
     resume_turn: bool,
     home: Path,
-    history: SwitchHistory | None = None,
+    read_extent: RecordExtentReader | None = None,
 ) -> LifecycleKind | None:
-    applied = await apply_hosted_lifecycle(pool, incarnation, resume_turn=resume_turn)
+    applied = await apply_hosted_lifecycle(
+        pool, incarnation, resume_turn=resume_turn, read_extent=read_extent
+    )
     if applied is None:
         return None
     if applied.kind == "terminate":
@@ -154,15 +156,6 @@ async def apply_lifecycle_command(
             ancestor_notification=applied.ancestor_notification,
         )
     elif applied.switch is not None:
-        if history is not None:
-            await record_switch_note(
-                history,
-                applied.agent_id,
-                old_harness=applied.switch.old,
-                new_harness=applied.switch.new,
-                source=applied.switch.source,
-                message=applied.switch.message,
-            )
         try:
             await publish_agent_updated(bus, applied.agent_id)
         except Exception:

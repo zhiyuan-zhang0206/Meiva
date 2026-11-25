@@ -43,33 +43,41 @@ it("uses persisted source identity after message indexes change through compacti
 });
 
 // meiva:note
-// An external harness item has no source message id; its record is keyed by the item id the
-// projector wrote (harness:h{seq}.0), the id the history API returns unchanged, also when the
-// harness items are merged into a checkpoint timeline.
+// An external harness item names its delivery record by `publication_key`, the key the backend
+// published the reply under (harness:claude:<uuid>, harness:codex:<id>); its item id is a record
+// offset that the key does not contain.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
-const harnessItem = (itemId: string, payload: string): BackendTimelineItem => ({
+const harnessItem = (itemId: string, payload: string, publicationKey?: string): BackendTimelineItem => ({
   item_id: itemId, kind: "agent_chat", source: null, payload, created_at: "2026-11-10T00:00:00Z",
-  inbound_id: null, user_facing: true, show_timestamp: true,
+  inbound_id: null, user_facing: true, show_timestamp: true, publication_key: publicationKey,
 });
 
-it("attaches an external harness record to the item whose id its source key names", () => {
-  const record: UserMessage = { ...publication, id: 4, source_key: "harness:h5.0", content: "From the harness" };
-  const merged = withUserMessages([harnessItem("h3.0", "other"), harnessItem("h5.0", "From the harness")], [record]);
+it("attaches an external harness record to the item that carries its publication key", () => {
+  const record: UserMessage = { ...publication, id: 4, source_key: "harness:claude:uuid-5", content: "From the harness" };
+  const merged = withUserMessages(
+    [harnessItem("h3.0", "other", "harness:claude:uuid-3"), harnessItem("h5.0", "From the harness", "harness:claude:uuid-5")],
+    [record],
+  );
   expect(merged.map((item) => item.userDelivery?.id)).toEqual([undefined, 4]);
 });
 
-it("does not attach a harness record to an item with another id, and renders no row for it", () => {
-  const record: UserMessage = { ...publication, id: 4, source_key: "harness:h5.0", content: "Lost", mode: "prefix" };
-  const merged = withUserMessages([harnessItem("h6.0", "Lost")], [record]);
-  expect(merged).toHaveLength(1);
-  expect(merged[0].userDelivery).toBeUndefined();
+it("does not attach a harness record to an item with another key, and renders no row for it", () => {
+  const record: UserMessage = { ...publication, id: 4, source_key: "harness:codex:item-5", content: "Lost", mode: "prefix" };
+  const merged = withUserMessages([harnessItem("h6.0", "Lost", "harness:codex:item-6"), harnessItem("h7.0", "No key")], [record]);
+  expect(merged).toHaveLength(2);
+  expect(merged.map((item) => item.userDelivery)).toEqual([undefined, undefined]);
+});
+
+it("does not read an offset-shaped key as a delivery record", () => {
+  const record: UserMessage = { ...publication, id: 4, source_key: "harness:h5.0", content: "Old key" };
+  expect(withUserMessages([harnessItem("h5.0", "Old key")], [record])[0].userDelivery).toBeUndefined();
 });
 
 it("keeps harness and native records on their own items in a merged cross-harness timeline", () => {
   const native: BackendTimelineItem = { ...harnessItem("0.1", "native"), source_message_id: "message-1" };
   const nativeRecord: UserMessage = { ...publication, id: 1, source_key: "assistant:message-1:0.1" };
-  const harnessRecord: UserMessage = { ...publication, id: 2, source_key: "harness:h9.0", content: "harness" };
-  const merged = withUserMessages([native, harnessItem("h9.0", "harness")], [nativeRecord, harnessRecord]);
+  const harnessRecord: UserMessage = { ...publication, id: 2, source_key: "harness:claude:uuid-9", content: "harness" };
+  const merged = withUserMessages([native, harnessItem("h9.0", "harness", "harness:claude:uuid-9")], [nativeRecord, harnessRecord]);
   expect(merged.map((item) => item.userDelivery?.id)).toEqual([1, 2]);
 });
 

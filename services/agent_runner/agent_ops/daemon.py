@@ -221,6 +221,7 @@ async def dispatch(
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                     catalog=catalog,
                     home=home,
+                    environ=host.environ,
                     agent_host_port=agent_host.health_port,
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")

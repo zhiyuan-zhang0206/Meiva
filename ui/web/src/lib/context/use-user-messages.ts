@@ -26,8 +26,8 @@ export function withUserMessages(items: BackendTimelineItem[], messages: readonl
   const result = items.map((item) => {
     if (isLiveOverlayId(item.item_id)) return item;
     const block = item.item_id.split(".").at(-1);
-    const key = item.source_message_id ? `assistant:${item.source_message_id}:0.${block}` : `harness:${item.item_id}`;
-    const message = byKey.get(key);
+    const key = item.publication_key ?? (item.source_message_id ? `assistant:${item.source_message_id}:0.${block}` : null);
+    const message = key === null ? undefined : byKey.get(key);
     if (!message) return item;
     attached.add(message.id);
     return { ...item, userDelivery: message };

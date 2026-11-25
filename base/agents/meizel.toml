@@ -1,7 +1,8 @@
-exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "questions", "recovery", "sdk", "tests", "to_user", "upload_delivery"]
+exports = ["birth", "context", "epochs", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "questions", "recovery", "sdk", "tests", "to_user", "upload_delivery"]
 
 [uses]
-"birth" = ["history", "inbox", "labels.py", "model"]
+"birth" = ["epochs", "history", "inbox", "labels.py", "model"]
+"epochs" = ["history", "messages"]
 "context" = ["history", "messages", "observation", "sdk"]
 "history" = ["incarnation", "messages", "model", "sdk"]
 "inbox" = ["messages"]

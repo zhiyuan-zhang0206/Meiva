@@ -8,6 +8,7 @@ from pathlib import Path
 from agent.graph.hooks.user_delivery import capture_keyed_items
 from agent.graph.llm_stream.harness_overlay import LiveOverlay
 from base.agents.context import MeivaContext
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.project import (
     Projected,
@@ -524,13 +525,20 @@ class ReadTimelineSink:
         self._publisher.emit(
             TimelineSnapshot(
                 agent_id=self._agent_id,
-                items=[item.item.model_dump() for item in (*carried, *sent)],
+                items=[self._published(item).model_dump() for item in (*carried, *sent)],
                 msg_count=end,
                 retires=retires,
             ).model_dump_json()
         )
         self._last = max((*carried, *sent), key=lambda item: item.offset)
         self._emit_committed_inbounds(sent)
+
+    def _published(self, projected: ProjectedItem) -> TimelineItem:
+        session = self._session_id()
+        if projected.item.kind != "agent_chat" or session is None:
+            return projected.item
+        key = reply_key(self._harness, projected.key, session)
+        return projected.item.model_copy(update={"publication_key": key})
 
     def _publish_retired(self, retires: list[str], end: int) -> None:
         if retires:

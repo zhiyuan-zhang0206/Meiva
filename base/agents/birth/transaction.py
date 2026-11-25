@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
 from base.agents.birth.harness import resolve_birth_harness
+from base.agents.epochs.write import birth_epoch
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
@@ -343,6 +344,13 @@ def _insert_fork_history(
         )
 
 
+def _birth_model(
+    config: Mapping[str, object] | None, birth_config: Mapping[str, object]
+) -> str | None:
+    model = (config or {}).get("llm_model") or birth_config.get("llm_model")
+    return model if isinstance(model, str) else None
+
+
 def insert_agent_birth(
     cur: psycopg.Cursor[tuple[object, ...]],
     *,
@@ -428,6 +436,9 @@ def insert_agent_birth(
     if launch_row is None:
         raise RuntimeError("expected exactly one row: spawn: insert agent meta")
     launch_attempt_id = launch_row.last_launch_attempt_id
+    cur.execute(
+        *birth_epoch(new_id, harness=born_harness, model=_birth_model(config, birth_config))
+    )
     _insert_fork_history(
         cur, new_id, fork_from, fork_checkpoint, fork_tail_skills, Harness(born_harness)
     )

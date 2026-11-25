@@ -150,6 +150,7 @@ def _home_ops_server(
                 catalog=catalog,
                 agent_host_port=8114,
                 home=resolve_meiva_home(),
+                environ={},
             )
         )
         return Reply({"status": "completed", "result": response.model_dump(mode="json")})

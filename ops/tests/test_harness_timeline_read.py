@@ -122,6 +122,10 @@ def test_a_real_record_is_projected_with_the_inbox_rows_that_sent_its_input(
     ]
     assert [item.inbound_id for item in window.items[:2]] == [first, second]
     assert window.size == len(FIXTURE.read_bytes()) and not window.has_more
+    keys = {item.item_id: item.publication_key for item in window.items}
+    [reply] = [item for item in window.items if item.kind == "agent_chat"]
+    assert re.fullmatch(r"harness:claude:[0-9a-f-]+", keys[reply.item_id] or "")
+    assert [key for item_id, key in keys.items() if item_id != reply.item_id] == [None] * 6
 
 
 def test_a_session_with_no_record_or_no_file_yet_has_an_empty_timeline(

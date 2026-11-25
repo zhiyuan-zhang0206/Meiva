@@ -18,7 +18,7 @@ from base.agents.messages.quote import Quote
 from base.agents.sdk.tally import SdkCall
 
 
-def _missing_reading_locator(value: object) -> bool:
+def _omitted_when_none(value: object) -> bool:
     return value is None
 
 
@@ -51,7 +51,8 @@ class TimelineItem(BaseModel):
     """
 
     item_id: str
-    reading_locator: str | None = Field(default=None, exclude_if=_missing_reading_locator)
+    reading_locator: str | None = Field(default=None, exclude_if=_omitted_when_none)
+    publication_key: str | None = Field(default=None, exclude_if=_omitted_when_none)
     quote: Quote | None = None
     activity_pending: bool | None = None
     kind: Literal[

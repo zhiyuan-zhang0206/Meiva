@@ -1,8 +1,8 @@
-exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "personal_dream.py", "personal_dream_policy.py", "shells.py", "shutdown.py", "switch_note.py", "workspace_hygiene.py", "workspace_hygiene_policy.py"]
+exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "personal_dream.py", "personal_dream_policy.py", "shells.py", "shutdown.py", "workspace_hygiene.py", "workspace_hygiene_policy.py"]
 
 [uses]
 "personal_dream.py" = ["personal_dream_policy.py"]
-"shells.py" = ["cleanup_failures.py", "switch_note.py"]
+"shells.py" = ["cleanup_failures.py"]
 "workspace_hygiene.py" = ["workspace_hygiene_policy.py"]
 
 [purity]
