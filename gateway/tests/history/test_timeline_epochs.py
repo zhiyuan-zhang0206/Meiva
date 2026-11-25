@@ -215,8 +215,9 @@ class TestTimelineEpochs(CompactHistoryCases):
         unreadable: str,
     ) -> None:
         agent = self._meiva_cli_meiva(db_conn)
-        reply = {"items": [], "has_more": False, "size": 0, "unreadable": unreadable}
-        client.app.state.rpc = EpochRunner(lambda _: reply)
+        runner = EpochRunner(lambda _: ClusterOpUnreachable("unused"))
+        runner.script({"items": [], "has_more": False, "size": 0, "unreadable": unreadable})
+        client.app.state.rpc = runner
 
         body = client.get(f"/api/agents/{agent}/timeline", params={"before": "e2.sw"}).json()
 
