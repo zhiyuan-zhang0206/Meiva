@@ -14,7 +14,7 @@ def test_the_fixture_pages_exist() -> None:
     assert len(_FILES) == 5
 
 
-@pytest.mark.parametrize("path", _FILES, ids=lambda path: path.name)
+@pytest.mark.parametrize("path", _FILES, ids=[path.name for path in _FILES])
 def test_a_fixture_page_is_in_conversation_order_with_every_id_a_cursor(path: Path) -> None:
     page = TimelineResponse.model_validate(json.loads(path.read_text())["response"])
     ids = [item.item_id for item in page.items]
