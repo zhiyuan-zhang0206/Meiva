@@ -5,7 +5,6 @@ from typing import Any, NamedTuple
 import pytest
 
 from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
-    load_groups,
     load_rules,
     rule_query_exprs,
 )
@@ -59,12 +58,6 @@ def test_the_rule_groups_by_machine_and_names_it(uid: str) -> None:
     (expr,) = rule_query_exprs(rule, "prometheus")
     assert "by (machine)" in expr
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
-
-
-@pytest.mark.parametrize("uid", sorted(_PINS))
-def test_the_rule_runs_in_the_one_minute_group(uid: str) -> None:
-    groups = {rule["uid"]: group["name"] for group in load_groups() for rule in group["rules"]}
-    assert groups[uid] == "meiva-ops"
 
 
 def test_both_free_space_tiers_judge_the_same_number() -> None:

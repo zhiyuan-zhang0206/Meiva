@@ -24,18 +24,17 @@ INFRA_RULE_METRICS = {
 # meiva:note
 # The shape is pinned; the counts are not. A literal rule count makes "bump the number" the way to
 # add a rule -- and the same edit hides a rule that disappeared, which is the failure a count was
-# meant to catch (2026-11-04). What the parse can prove instead: both groups are there with their
-# intervals, every group carries rules, and no uid appears twice (a duplicate silently replaces a
-# rule's identity in the tests that look rules up by uid). A rule that vanishes while its pinned
-# signal still exists fails in tests/scripts/test_alert_rules_signals.py, which reads uids by name.
+# meant to catch (2026-11-04). What the parse can prove instead: the one group is there with its
+# interval, it carries rules, and no uid appears twice (a duplicate silently replaces a rule's
+# identity in the tests that look rules up by uid). A rule that vanishes while its pinned signal
+# still exists fails in tests/scripts/test_alert_rules_signals.py, which reads uids by name.
 def load_groups() -> list[dict[str, Any]]:
     doc = yaml.safe_load(RULES.read_text(encoding="utf-8"))
     assert doc is not None
     groups = doc["groups"]
-    assert len(groups) == 2
-    assert [group["name"] for group in groups] == ["meiva-ops", "meiva-ops-slow"]
-    assert [group["folder"] for group in groups] == ["Meiva", "Meiva"]
-    assert [group["interval"] for group in groups] == ["1m", "5m"]
+    assert [group["name"] for group in groups] == ["meiva-ops"]
+    assert [group["folder"] for group in groups] == ["Meiva"]
+    assert [group["interval"] for group in groups] == ["1m"]
     assert all(group["rules"] for group in groups), "every alert group carries rules"
     uids = [rule["uid"] for group in groups for rule in group["rules"]]
     assert len(uids) == len(set(uids)), "alert rule uids are unique"

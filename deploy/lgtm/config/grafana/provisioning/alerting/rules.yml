@@ -107,7 +107,7 @@
 # alertname-derived dedup key.
 # Grafana owns episode recovery. A condition must remain healthy for 5m before
 # resolving; a refire during recovery stays in the same episode. Missing series
-# retain their identity for the corresponding evaluation budget (1m / 5m groups).
+# retain their identity for six evaluations of the one 1m group.
 # Native YAML aliases share these settings without a second policy registry.
 apiVersion: 1
 groups:
@@ -122,7 +122,7 @@ groups:
         condition: F
         for: 5m
         keepFiringFor: &recovery-window 5m
-        missing_series_evals_to_resolve: &fast-missing-evals 6
+        missing_series_evals_to_resolve: &missing-evals 6
         noDataState: OK
         execErrState: OK
         labels:
@@ -229,7 +229,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -334,7 +334,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -406,7 +406,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -513,7 +513,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -595,7 +595,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -669,7 +669,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -746,7 +746,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -838,7 +838,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -915,7 +915,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -981,7 +981,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1049,7 +1049,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1128,7 +1128,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1200,7 +1200,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1282,7 +1282,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1366,7 +1366,7 @@ groups:
         condition: D
         for: 15m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1444,7 +1444,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1523,7 +1523,7 @@ groups:
         condition: D
         for: 0s
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1600,7 +1600,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1689,7 +1689,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1773,7 +1773,7 @@ groups:
         # `for` would turn the documented 5m detection into ~10m.
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1861,7 +1861,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -1934,7 +1934,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2032,7 +2032,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2114,7 +2114,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2193,7 +2193,7 @@ groups:
         condition: D
         for: 2h
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2261,7 +2261,7 @@ groups:
         condition: D
         for: 2h
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2332,7 +2332,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2406,7 +2406,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2475,7 +2475,7 @@ groups:
         condition: D
         for: 3m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2550,7 +2550,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2629,7 +2629,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2711,7 +2711,7 @@ groups:
         condition: D
         for: 3m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2782,7 +2782,7 @@ groups:
         condition: D
         for: 0s
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2852,7 +2852,7 @@ groups:
         condition: D
         for: 1m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -2955,7 +2955,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3046,7 +3046,7 @@ groups:
         condition: D
         for: 2m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3120,7 +3120,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3194,7 +3194,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3268,7 +3268,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3346,7 +3346,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3416,7 +3416,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3487,7 +3487,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3564,7 +3564,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3638,7 +3638,7 @@ groups:
         condition: D
         for: 3m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3710,7 +3710,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3780,7 +3780,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3850,7 +3850,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3919,7 +3919,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -3989,7 +3989,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4060,7 +4060,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4133,7 +4133,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4212,7 +4212,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4283,7 +4283,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4357,7 +4357,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4438,7 +4438,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4509,7 +4509,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4573,14 +4573,14 @@ groups:
                     params: [C]
 
       # ── meiva-ops-root-diagnostic-browser-reach: replaces MEIVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
-      # Evaluated in the 1m fast group so 3 samples at 300s cadence inside a 15m window always have
+      # Evaluated every minute, so 3 samples at 300s cadence inside a 15m window always have
       # multiple evaluation ticks while all 3 samples are simultaneously in range.
       - uid: meiva-ops-root-diagnostic-browser-reach
         title: "Root browser-reach diagnostic failing"
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4651,7 +4651,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: Error
         labels:
@@ -4726,7 +4726,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4796,7 +4796,7 @@ groups:
         condition: D
         for: 2m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4870,7 +4870,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -4957,7 +4957,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5026,7 +5026,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5101,7 +5101,7 @@ groups:
         condition: D
         for: 3m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5182,7 +5182,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *fast-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5245,17 +5245,12 @@ groups:
                   query:
                     params: [C]
 
-  - orgId: 1
-    name: meiva-ops-slow
-    folder: Meiva
-    interval: 5m
-    rules:
       - uid: meiva-ops-inbound-consumed-unknown
         title: "claimed inbound consumed without execution evidence (15m)"
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: &slow-missing-evals 2
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5362,7 +5357,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5428,8 +5423,6 @@ groups:
                   query:
                     params: [C]
 
-      # R13 evaluates at 5m without semantic loss: any rejection in its
-      # trailing 15m window still fires; detection grows from <=1m to <=5m.
       # ── R13: LLM provider billing / quota failure (any occurrence in 15m) ──
       # The one alert in this file that is deliberately NOT threshold-gated: an
       # out-of-credit key fails EVERY turn on it, the operator action (top up /
@@ -5462,7 +5455,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5546,7 +5539,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5620,7 +5613,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5696,7 +5689,7 @@ groups:
         condition: D
         for: 10m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5769,7 +5762,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5842,7 +5835,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5913,7 +5906,7 @@ groups:
         condition: D
         for: 1h
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -5976,7 +5969,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -6045,7 +6038,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -6121,7 +6114,7 @@ groups:
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
@@ -6204,7 +6197,7 @@ groups:
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
-        missing_series_evals_to_resolve: *slow-missing-evals
+        missing_series_evals_to_resolve: *missing-evals
         noDataState: OK
         execErrState: OK
         labels:
