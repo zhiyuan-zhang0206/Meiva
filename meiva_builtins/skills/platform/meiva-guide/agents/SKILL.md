@@ -137,7 +137,7 @@ When switching harnesses on restart:
 1. The runner calls `/prepare-harness-switch`: the agent is dropped from the active runner cache and the point where the old harness's record ends is noted.
 2. The harness session records (`$MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json`) are kept, so switching back to a harness resumes the conversation it had there.
 3. If `idling`, the agent is cleanly terminated.
-4. In one transaction `agents_meta.harness` is updated and a new harness epoch is recorded (`agent_harness_epochs`: one row per stretch of an agent's life on one harness). The agent is resurrected on its new harness; the first note it reads is `[Harness switched from 'a' to 'b']` followed by your restart message.
+4. In one transaction `agents_meta.harness` is updated and a new harness epoch is recorded (`agent_harness_epochs`: one row per stretch of an agent's life on one harness). The agent is resurrected on its new harness; the first note it reads is `[Harness switched from 'a' to 'b' by <who>]`, a reminder that nothing said before the switch is visible, and then your restart message.
 
 ### What the timeline shows after a switch
 The agent's timeline (web UI, `GET /api/agents/{id}/timeline`) stays continuous across

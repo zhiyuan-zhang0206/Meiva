@@ -58,8 +58,8 @@ The project owner ruled on 2026-11-25:
    the level of a thinking or tool item: not a divider, not a reply. This is the whole of what is lifted from
    decision 8; restarts that keep the harness, lost turns, unconfirmed inputs, fork markers and the seed stay hidden.
 6. **A source that cannot be read is skipped.** The record on an offline machine, a CLI record that was cleaned
-   up, a record left behind by a transfer: the earlier epoch contributes no items and no placeholder, the page
-   serves everything else, and the gateway logs a warning event naming the agent and the epoch. For an earlier
+   up, a record left behind by a transfer: the earlier epoch contributes no history and no placeholder (its switch block still
+   stands where the epoch begins), the page serves everything else, and the gateway logs a warning event naming the agent and the epoch. For an earlier
    epoch this replaces the 503 of the 2026-11-13 consequences "a machine that is offline shows no history": the
    segment is missing from the view, the page is not refused.
 7. **Not supported for earlier epochs, for now.** Items of an earlier epoch have no `reading_locator` and are not
@@ -74,8 +74,8 @@ The project owner ruled on 2026-11-25:
    note all say this in one voice. The web UI offers no switch: its Restart keeps the harness, with a fixed
    message and no config, so a switch is started only by the agent itself (`meiva.self.restart`) or by an
    operator through the SDK, CLI or REST API.
-9. **One switch note.** The note the new harness receives (`[Harness switched from 'a' to 'b']`, the reason and
-   the reminder that nothing before the switch is visible) comes from one function; the three copies of the format
+9. **One switch note.** The note the new harness receives (`[Harness switched from 'a' to 'b' by <who>]`, the reminder that
+   nothing said before the switch is visible, then the restart message) comes from one function; the three copies of the format
    in the lifecycle text, the operator route and the runner are removed with the dead code around them
    (`claimed_harness_switch_target` and the unreachable protection in the operator route).
 10. **Backfill is best effort.** For agents that switched before the table existed, a data migration rebuilds
