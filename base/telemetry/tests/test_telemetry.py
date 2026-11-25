@@ -522,6 +522,27 @@ def test_a_late_boot_seam_replaces_the_unbound_label(
     assert telemetry.process_name() == "agent_host"
 
 
+def test_the_sdk_label_yields_to_a_real_name_and_never_the_reverse(unit_home: Path) -> None:
+    telemetry.bind_identity(now=system_clock().now, process="sdk", home=unit_home)
+
+    assert (
+        telemetry.bind_identity_if_unbound(
+            now=system_clock().now, process="main-red-watch", home=unit_home
+        )
+        is True
+    )
+    assert telemetry.process_name() == "main-red-watch"
+    assert (
+        telemetry.bind_identity_if_unbound(now=system_clock().now, process="sdk", home=unit_home)
+        is False
+    )
+    assert (
+        telemetry.bind_identity_if_unbound(now=system_clock().now, process="other", home=unit_home)
+        is False
+    )
+    assert telemetry.process_name() == "main-red-watch"
+
+
 def test_bind_identity_if_unbound_and_init_cli_process_propagate_deployed_sha(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -14,6 +14,7 @@ from schedules.jobs.entry import open_schedule_entry
 
 
 def main(home: Path, process: str | None) -> None:
+    at_import = process_name()
     with open_schedule_entry(None, home=home, process=process):
         before_sdk = process_name()
         bind_sdk_identity(home)
@@ -28,7 +29,14 @@ def main(home: Path, process: str | None) -> None:
         finally:
             provider.shutdown()
     sys.stdout.write(
-        json.dumps({"before_sdk": before_sdk, "after_sdk": after_sdk, "exported": exported})
+        json.dumps(
+            {
+                "at_import": at_import,
+                "before_sdk": before_sdk,
+                "after_sdk": after_sdk,
+                "exported": exported,
+            }
+        )
     )
 
 

@@ -23,7 +23,7 @@ from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import bind_identity_if_unbound, process_name
-from meiva.boot import clients_over
+from meiva.boot import clients_over, deferred_clock_now
 from meiva.sdk_surface import process_context
 
 __all__ = ["fresh_schedule_entry", "open_schedule_entry", "schedule_entry"]
@@ -116,12 +116,13 @@ def fresh_schedule_entry(
 # opens process logging and owns a fresh entry for the image this process loaded.
 #
 # `process` is the schedule's telemetry process (`main-red-watch`, `agent-watch`, ...), bound here
-# before any `meiva.*` call can run. Left to the SDK, the first call (a `send_message` ahead of the
-# round's own event) labels the process `sdk`, and `sdk` is a loss-only process: the OTLP
-# `MeterProvider` is then built once with a view that drops every metric, and the later
-# `init_gateway_process(name)` renames the logs but cannot rebuild it. A schedule that emits
-# a metric must name its process here; the binding never renames a process that already has a
-# name, so a runner-hosted entry keeps the runner's.
+# ahead of the first event the process writes. Left to the SDK, the process is labelled `sdk`, and
+# `sdk` is a loss-only process: the OTLP `MeterProvider` is then built once with a view that drops
+# every metric, and the later `init_gateway_process(name)` renames the logs but cannot rebuild it.
+# A launched schedule (`MEIVA_SCHEDULE_ID` in its environment, the production launch) is labelled
+# `sdk` already at its script's top-level `import meiva`, so the binding replaces that SDK label
+# as well as the unnamed state; it never renames any other name, so a runner-hosted entry keeps
+# the runner's.
 def open_schedule_entry(
     borrowed: ScheduleInputs | None, *, home: Path, process: str | None = None
 ) -> AbstractContextManager[ScheduleInputs]:
@@ -130,7 +131,7 @@ def open_schedule_entry(
         bind_identity_if_unbound(
             process=process,
             home=home,
-            now=lambda: Clock.from_settings().now(),
+            now=deferred_clock_now,
             deployed_sha=image.sha,
         )
     if borrowed is not None:

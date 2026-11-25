@@ -140,8 +140,11 @@ class ProcessState(TypedDict):
 # ruff PLW0603 the same way base/telemetry/tracing.py does.
 # meiva:note
 # No identity has named this process yet: every event it emits says so, until a boot seam or the
-# SDK's plugin load binds one (task #6347).
+# SDK's plugin load binds one (task #6347). `sdk` is the label that load binds, in a launched
+# process at `import meiva` itself: a default, not an identity, which a real name replaces
+# (`bind_identity_if_unbound`) and which `LOSS_ONLY_PROCESSES` keeps metric-free.
 UNKNOWN_PROCESS = "unknown"
+SDK_PROCESS = "sdk"
 
 process_state: ProcessState = {
     "pipeline": None,

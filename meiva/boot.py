@@ -52,6 +52,7 @@ from base.log import guard_default_logging
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.delivery.state import SDK_PROCESS
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
 from meiva.sdk_surface.process_context import ContextOutsideProcessError
@@ -367,24 +368,12 @@ def _slot_facts() -> _SlotFacts:
 
 
 # meiva:note
-# Idempotently load the plugin surface of this process; the facade `meiva.ensure_plugins_loaded`
-# forwards here. This is the place that reads the process: the installation slot, the bound
-# context and the launch environment become `LoadFacts`, `plan_load` chooses the step, and only a
-# plan that loads a surface resolves the owners it needs (`LoadInputs`) before `load_surface`
-# installs them. Every other step is settled by `settle_installed` from the step and the context
-# alone. A `clients` set the caller supplies is the one the installation meters through; none
-# supplied means the installation builds its own cold set and closes it at interpreter exit,
-# so an attachment's shorter-lived clients are never borrowed.
-SDK_PROCESS = "sdk"
-
-
-# meiva:note
 # The clock an SDK process states before it has resolved any configuration: the callable resolves
 # the settings clock the first time an event is actually stamped, so binding the identity reads no
 # settings. Importing `meiva` and sharing a boot must stay cold — a test makes `MEIVA_TIMEZONE`
 # invalid and requires the import to succeed — and a process that never stamps anything never pays
 # for the read.
-def _deferred_clock_now() -> datetime:
+def deferred_clock_now() -> datetime:
     return Clock.from_settings().now()
 
 
@@ -397,18 +386,27 @@ def bind_sdk_identity(home: Path) -> bool:
     from base.native_process.loaded_commit import LoadedCommit
 
     # meiva:note
-    # The process clock this binding establishes: `_deferred_clock_now` states how to read it
+    # The process clock this binding establishes: `deferred_clock_now` states how to read it
     # without reading it, and the load rebinds the clock it builds from its own configuration once
     # it has one. An event whose producer passed no `ts` is stamped with that clock rather than
     # with a second time source read behind the caller's back.
     return telemetry.bind_identity_if_unbound(
         process=SDK_PROCESS,
         home=home,
-        now=_deferred_clock_now,
+        now=deferred_clock_now,
         deployed_sha=LoadedCommit.capture().sha,
     )
 
 
+# meiva:note
+# Idempotently load the plugin surface of this process; the facade `meiva.ensure_plugins_loaded`
+# forwards here. This is the place that reads the process: the installation slot, the bound
+# context and the launch environment become `LoadFacts`, `plan_load` chooses the step, and only a
+# plan that loads a surface resolves the owners it needs (`LoadInputs`) before `load_surface`
+# installs them. Every other step is settled by `settle_installed` from the step and the context
+# alone. A `clients` set the caller supplies is the one the installation meters through; none
+# supplied means the installation builds its own cold set and closes it at interpreter exit,
+# so an attachment's shorter-lived clients are never borrowed.
 def ensure_plugins_loaded(
     *,
     surface: bool = True,
