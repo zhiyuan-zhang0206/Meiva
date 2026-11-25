@@ -180,7 +180,6 @@ export interface TimelineSnapshotEvent extends BaseEvent {
   readonly items: readonly BackendTimelineItem[];
 
   readonly msg_count: number;
-  /** Overlay ids (`live.<turn>.<block>`) this snapshot supersedes; absent when empty. */
   readonly retires?: readonly string[];
 }
 
