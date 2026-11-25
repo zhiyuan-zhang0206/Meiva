@@ -292,45 +292,56 @@ export function useTimelineWindow({
   // releases unmounted ones; re-creating the observer per commit re-observed
   // every row, and each observe() queues a fresh notification.
   const rowObserverRef = useRef<{ observer: ResizeObserver; nodes: Set<HTMLElement> } | null>(null);
+  // Records the height of each mounted group / expanded row. Shared by the ResizeObserver and the
+  // layout effect below: a row measured only on the next frame is still an estimate when the
+  // window slides past it in the same task, and the spacer that replaces it then disagrees with
+  // the row the anchor writer just placed against.
+  const recordHeights = useCallback((measured: readonly { node: HTMLElement; height: number }[]) => {
+    const content = contentRef.current;
+    if (!content) return;
+    let changed = false;
+    const nextHeights = new Map(heightsRef.current);
+    for (const { node, height } of measured) {
+      const groupKey = node.dataset.virtualGroup;
+      const key = groupKey
+        ? (node.querySelector('[data-turn-expanded="true"]') ? `${groupKey}:open` : groupKey)
+        : node.dataset.virtualRow;
+      if (!key) continue;
+      if (height <= 0 || Math.abs((nextHeights.get(key) ?? 0) - height) < 1) continue;
+      nextHeights.set(key, height);
+      changed = true;
+    }
+    if (!changed) return;
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (rect && enabledRef.current) keepFocusInTimeline(content, rect);
+    const groups = groupsRef.current;
+    if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
+      const live = new Set(groups.flatMap((group) => [group.key, `${group.key}:open`, ...(group.expandedRows ?? [])]));
+      for (const key of nextHeights.keys()) {
+        if (!live.has(key)) nextHeights.delete(key);
+      }
+    }
+    heightsRef.current = nextHeights;
+    if (isFollowingRef.current()) measureViewRef.current();
+    setHeights(nextHeights);
+  }, [contentRef, viewportRef]);
+
   useLayoutEffect(() => {
     if (!tracking) return;
     const content = contentRef.current;
     if (!content) return;
     const observer = new ResizeObserver((entries) => {
-      let changed = false;
-      const nextHeights = new Map(heightsRef.current);
-      for (const entry of entries) {
-        const node = entry.target as HTMLElement;
-        const groupKey = node.dataset.virtualGroup;
-        const key = groupKey
-          ? (node.querySelector('[data-turn-expanded="true"]') ? `${groupKey}:open` : groupKey)
-          : node.dataset.virtualRow;
-        if (!key) continue;
-        const height = entry.borderBoxSize[0]?.blockSize ?? node.getBoundingClientRect().height;
-        if (height <= 0 || Math.abs((nextHeights.get(key) ?? 0) - height) < 1) continue;
-        nextHeights.set(key, height);
-        changed = true;
-      }
-      if (!changed) return;
-      const rect = viewportRef.current?.getBoundingClientRect();
-      if (rect && enabledRef.current) keepFocusInTimeline(content, rect);
-      const groups = groupsRef.current;
-      if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
-        const live = new Set(groups.flatMap((group) => [group.key, `${group.key}:open`, ...(group.expandedRows ?? [])]));
-        for (const key of nextHeights.keys()) {
-          if (!live.has(key)) nextHeights.delete(key);
-        }
-      }
-      heightsRef.current = nextHeights;
-      if (isFollowingRef.current()) measureViewRef.current();
-      setHeights(nextHeights);
+      recordHeights(entries.map((entry) => ({
+        node: entry.target as HTMLElement,
+        height: entry.borderBoxSize[0]?.blockSize ?? (entry.target as HTMLElement).getBoundingClientRect().height,
+      })));
     });
     rowObserverRef.current = { observer, nodes: new Set() };
     return () => {
       observer.disconnect();
       rowObserverRef.current = null;
     };
-  }, [contentRef, tracking, viewportRef]);
+  }, [contentRef, tracking, recordHeights]);
 
   useLayoutEffect(() => {
     const rows = rowObserverRef.current;
@@ -343,12 +354,15 @@ export function useTimelineWindow({
         rows.nodes.delete(node);
       }
     }
+    const added: HTMLElement[] = [];
     for (const node of mounted) {
       if (!rows.nodes.has(node)) {
         rows.observer.observe(node);
         rows.nodes.add(node);
+        added.push(node);
       }
     }
+    recordHeights(added.map((node) => ({ node, height: node.getBoundingClientRect().height })));
   });
 
   return { range, rowRange, measureView };
