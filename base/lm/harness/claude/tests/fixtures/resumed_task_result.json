@@ -1,0 +1,16 @@
+{
+  "source": "Claude Code CLI 2.1.322 stream-json with --replay-user-messages. Stop the CLI while a background Bash sleep remains, then immediately send a new user uuid to --resume. The CLI emits a stopped task notification and a textless success for that notification before echoing the new uuid and answering it. Only the SDK frames and fields the delivery test reads are retained.",
+  "frames": {
+    "stopped_task": [
+      {"cls": "TaskNotificationMessage", "task_id": "task-1", "status": "stopped", "summary": "Background shell command didn't finish before the previous session ended"},
+      {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-haiku-4-5"}},
+      {"cls": "ResultMessage", "subtype": "success", "duration_ms": 31, "duration_api_ms": 0, "num_turns": 0, "stop_reason": null, "result": "", "usage": {}, "total_cost_usd": 0, "origin": {"kind": "task-notification"}}
+    ],
+    "new_input": [
+      {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-haiku-4-5"}},
+      {"cls": "UserMessage", "uuid": "$first", "content": "Do not use tools. Reply with exactly REPLAY PROBE."},
+      {"cls": "AssistantMessage", "blocks": [{"text": "REPLAY PROBE"}]},
+      {"cls": "ResultMessage", "subtype": "success", "result": "REPLAY PROBE", "terminal_reason": "completed"}
+    ]
+  }
+}

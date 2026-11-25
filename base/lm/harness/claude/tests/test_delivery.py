@@ -174,6 +174,39 @@ async def test_images_ride_as_base64_content_blocks(tmp_path: Path) -> None:
         await harness.stop()
 
 
+async def test_a_resumed_task_result_leaves_the_first_input_waiting_for_its_echo(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, passive=True, resume="session-1")
+    try:
+        ticket = await first_turn(harness)
+        replay(harness.client, "resumed_task_result", "stopped_task")
+        prior_result = await harness.wait_for(
+            lambda event: isinstance(event, (TurnCompleted, SessionFailed))
+        )
+        assert isinstance(prior_result, TurnCompleted)
+        [prior_turn] = harness.of(TurnStarted)
+        assert prior_turn.turn_id == prior_result.turn_id
+        assert prior_turn.origin is TurnOrigin.HARNESS
+        assert prior_turn.cause is HarnessCause.BACKGROUND_TASK
+        assert prior_turn.keys == ()
+        assert harness.of(InputInContext) == []
+
+        replay(harness.client, "resumed_task_result", "new_input", first="first")
+        outcome = await ticket.outcome()
+        _, input_turn = harness.of(TurnStarted)
+        assert input_turn.origin is TurnOrigin.INPUT
+        assert input_turn.keys == ("first",)
+        [context] = harness.of(InputInContext)
+        assert context.key == "first"
+        assert context.turn_id == input_turn.turn_id == outcome.turn_id
+        assert outcome.text == "REPLAY PROBE"
+        assert len(harness.of(TurnCompleted)) == 2
+        assert harness.of(SessionFailed) == []
+    finally:
+        await harness.stop()
+
+
 async def test_a_cli_that_does_not_echo_fails_the_session_instead_of_guessing(
     tmp_path: Path,
 ) -> None:

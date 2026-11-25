@@ -714,13 +714,17 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # A result ends the open turn, whoever began it: a turn of ours settles its ticket, a turn the CLI
     # began (a background-task answer, a revived input, a timer) completes as an observed turn and the
     # next queued submission goes after it. A result with no turn open still completes a turn: the
-    # CLI ran one that produced no content. A result that arrives when no echo was ever seen, with an
-    # input in flight, means `replay-user-messages` is not honoured, and without it nothing can be
-    # attributed, so the session fails instead of guessing.
+    # CLI ran one that produced no content. On resume, a stopped background task can emit such a
+    # result before the first input's echo. Only an unlabelled or human result can show that the
+    # first input ran without its required echo.
     # meiva:link base/lm/harness/docs/delivery.md
     def _handle_result(self, message: object) -> None:
         fields = parse_result(message)
-        if not self._echo_seen and self._ledger.keys_in(InputPhase.RECEIVED):
+        if (
+            fields.origin_kind in (None, "", "human")
+            and not self._echo_seen
+            and self._ledger.keys_in(InputPhase.RECEIVED)
+        ):
             error = "the CLI did not echo our user message; replay-user-messages is not available"
             self._emit(SessionFailed(error=error))
             return
