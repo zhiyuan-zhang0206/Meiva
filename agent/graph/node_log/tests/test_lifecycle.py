@@ -271,7 +271,7 @@ async def test_a_full_window_holds_only_the_items_of_the_current_epoch(
         stamp = f"2026-11-25T{hour:02d}:30:00+00:00"
         return AIMessage(content=text, additional_kwargs={"meiva_created_at": stamp})
 
-    history = [
+    history: list[BaseMessage] = [
         SystemMessage(content="prompt"),
         reply("before the switch", 2),
         reply("after the switch", 6),
