@@ -21,6 +21,12 @@ class EpochRunner:
         self.answer = answer
         self.calls: list[dict[str, Any]] = []
 
+    def script(self, reply: dict[str, Any] | Exception) -> None:
+        def scripted(_payload: dict[str, Any]) -> dict[str, Any] | Exception:
+            return reply
+
+        self.answer = scripted
+
     async def dispatch_to_machine(
         self, db: object, target_machine: str, kind: str, payload: dict[str, Any], **_: object
     ) -> dict[str, Any]:
@@ -240,16 +246,11 @@ class TestTimelineEpochs(CompactHistoryCases):
         assert "before" not in runner.calls[-1] or runner.calls[-1]["before"] is None
         assert "session_id" not in runner.calls[-1]
 
-        runner.answer = lambda _: {
-            "items": [],
-            "has_more": False,
-            "size": 0,
-            "unreadable": "no_session",
-        }
+        runner.script({"items": [], "has_more": False, "size": 0, "unreadable": "no_session"})
         fresh = client.get(f"/api/agents/{agent}/timeline").json()
         assert _ids(fresh) == ["e2.sw"]
 
-        runner.answer = lambda _: _window(_external_item("h100.0", "old reply", 2), size=700)
+        runner.script(_window(_external_item("h100.0", "old reply", 2), size=700))
         first = client.get(f"/api/agents/{agent}/timeline", params={"before": "e1.sw"}).json()
         assert _ids(first) == ["e0.h100.0"]
         assert first["has_more"] is False
