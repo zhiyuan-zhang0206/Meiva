@@ -390,10 +390,18 @@ describe("viewportOver", () => {
       resize: new Set(),
       scroll: new Set(),
       orientationchange: new Set(),
-      visibilitychange: new Set(),
     };
+    const documentEvents = new Set<() => void>();
     const viewport = viewportOver(
       pageOf({
+        document: documentOf({
+          addEventListener: (type, listener) => {
+            if (type === "visibilitychange") documentEvents.add(listener);
+          },
+          removeEventListener: (type, listener) => {
+            if (type === "visibilitychange") documentEvents.delete(listener);
+          },
+        }),
         visualViewport: visual,
         addEventListener: (type, listener) => void pageEvents[type].add(listener),
         removeEventListener: (type, listener) => void pageEvents[type].delete(listener),
@@ -407,7 +415,7 @@ describe("viewportOver", () => {
     expect(pageEvents.resize.size).toBe(1);
     expect(pageEvents.scroll.size).toBe(1);
     expect(pageEvents.orientationchange.size).toBe(1);
-    expect(pageEvents.visibilitychange.size).toBe(1);
+    expect(documentEvents.size).toBe(1);
     visual.fire();
     expect(heard).toBe(2);
     for (const listener of [...pageEvents.resize, ...pageEvents.scroll]) listener();
@@ -418,7 +426,7 @@ describe("viewportOver", () => {
     expect(pageEvents.resize.size).toBe(0);
     expect(pageEvents.scroll.size).toBe(0);
     expect(pageEvents.orientationchange.size).toBe(0);
-    expect(pageEvents.visibilitychange.size).toBe(0);
+    expect(documentEvents.size).toBe(0);
     visual.fire();
     expect(heard).toBe(4);
   });
@@ -439,8 +447,8 @@ function rotatingPage(content: string | null = "width=device-width, initial-scal
     resize: new Set(),
     scroll: new Set(),
     orientationchange: new Set(),
-    visibilitychange: new Set(),
   };
+  const documentEvents = { visibilitychange: new Set<() => void>() };
   const orientation = new Set<() => void>();
   const portrait = new Set<() => void>();
   const meta = content === null ? null : { content };
@@ -458,8 +466,15 @@ function rotatingPage(content: string | null = "width=device-width, initial-scal
   const pending = new Map<number, { at: number; work: () => void }>();
   let now = 0;
   let nextTimer = 1;
-  const state = { visibility: "visible" };
-  const document = documentOf();
+  const state = { visibility: "visible", portrait: true };
+  const document = documentOf({
+    addEventListener: (type, listener) => {
+      if (type === "visibilitychange") documentEvents.visibilitychange.add(listener);
+    },
+    removeEventListener: (type, listener) => {
+      if (type === "visibilitychange") documentEvents.visibilitychange.delete(listener);
+    },
+  });
   Object.defineProperty(document, "visibilityState", { get: () => state.visibility });
   const page = pageOf({
     visualViewport: viewportOf(820),
@@ -471,7 +486,9 @@ function rotatingPage(content: string | null = "width=device-width, initial-scal
     },
     matchMedia: (query) =>
       ({
-        matches: query === "(orientation: portrait)",
+        get matches() {
+          return query === "(orientation: portrait)" && state.portrait;
+        },
         addEventListener: (_type: string, listener: () => void) => void portrait.add(listener),
         removeEventListener: (_type: string, listener: () => void) => void portrait.delete(listener),
       }) as unknown as MediaQueryList,
@@ -507,6 +524,7 @@ function rotatingPage(content: string | null = "width=device-width, initial-scal
     advance,
     state,
     pageEvents,
+    documentEvents,
     orientation,
     portrait,
     pendingTimers: () => pending.size,
@@ -546,7 +564,7 @@ describe("viewportOver — rotation", () => {
     expect(causes).toEqual([
       [0, "rotated"],
       [60, "moved"],
-      [180, "recheck"],
+      [180, "rotation-recheck"],
       [350, "moved"],
       [600, "moved"],
     ]);
@@ -580,7 +598,7 @@ describe("viewportOver — rotation", () => {
       "moved",
       "rotated",
       "moved",
-      "recheck",
+      "rotation-recheck",
       "moved",
       "moved",
     ]);
@@ -610,12 +628,58 @@ describe("viewportOver — rotation", () => {
     const rotating = rotatingPage();
     const { causes, unsubscribe } = heard(rotating);
     rotating.state.visibility = "hidden";
-    rotating.fire(rotating.pageEvents.visibilitychange);
+    rotating.fire(rotating.documentEvents.visibilitychange);
     expect(causes).toEqual([]);
     rotating.state.visibility = "visible";
-    rotating.fire(rotating.pageEvents.visibilitychange);
+    rotating.fire(rotating.documentEvents.visibilitychange);
     expect(causes).toEqual([[0, "recheck"]]);
     unsubscribe();
+  });
+
+  it("treats a return to the foreground in the other orientation as a rotation, and in the same one as a recheck", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+
+    rotating.state.visibility = "hidden";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    rotating.state.portrait = false;
+    rotating.state.visibility = "visible";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([[0, "rotated"]]);
+    advance(700);
+    expect(causes.map(([, cause]) => cause)).toEqual([
+      "rotated",
+      "moved",
+      "rotation-recheck",
+      "moved",
+      "moved",
+    ]);
+
+    causes.length = 0;
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([[700, "recheck"]]);
+    unsubscribe();
+  });
+
+  it("remembers the orientation a rotation settled in, so the foreground return is not a second rotation", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+    rotating.state.portrait = false;
+    rotating.fire(rotating.portrait);
+    advance(700);
+    causes.length = 0;
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes.map(([, cause]) => cause)).toEqual(["recheck"]);
+    unsubscribe();
+  });
+
+  it("does not listen for visibilitychange on the window", () => {
+    const rotating = rotatingPage();
+    const { unsubscribe } = heard(rotating);
+    expect(Object.keys(rotating.pageEvents)).not.toContain("visibilitychange");
+    expect(rotating.documentEvents.visibilitychange.size).toBe(1);
+    unsubscribe();
+    expect(rotating.documentEvents.visibilitychange.size).toBe(0);
   });
 
   it("attaches the page's listeners once for any number of subscribers", () => {

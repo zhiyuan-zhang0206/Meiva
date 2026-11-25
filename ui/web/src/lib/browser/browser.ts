@@ -96,7 +96,7 @@ export interface ViewportReading {
   } | null;
 }
 
-export type ViewportCause = "moved" | "rotated" | "recheck";
+export type ViewportCause = "moved" | "rotated" | "rotation-recheck" | "recheck";
 
 export interface BrowserViewport {
   read(): ViewportReading;

@@ -293,6 +293,34 @@ it("rechecks a settled rotation or a returning tab, and only resets while the wi
   expect(rootWidthPin()).toEqual(["", "", "", "", ""]);
 });
 
+it("resets again 180ms into a rotation while WebKit still holds the zoom-to-fit scale, and not once it took", () => {
+  const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, LANDSCAPE) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+
+  browser.rotateViewport(stuck(LANDSCAPE, PORTRAIT, 0.7));
+  expect(browser.actions.viewportScaleResets).toBe(1);
+  browser.rotationRecheckViewport(stuck(LANDSCAPE, PORTRAIT, 0.7));
+  expect(browser.actions.viewportScaleResets).toBe(2);
+
+  browser.rotateViewport(stuck(PORTRAIT, LANDSCAPE, 1.44));
+  expect(browser.actions.viewportScaleResets).toBe(3);
+  browser.rotationRecheckViewport(stuck(PORTRAIT, LANDSCAPE, 1.44));
+  expect(browser.actions.viewportScaleResets).toBe(4);
+
+  browser.rotationRecheckViewport(stuck(LANDSCAPE, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(5);
+
+  browser.rotationRecheckViewport(stuck(PORTRAIT, PORTRAIT));
+  expect(browser.actions.viewportScaleResets).toBe(5);
+});
+
+it("never pulls back a pinch on a plain recheck", () => {
+  const browser = fakeBrowser({ viewport: stuck(PORTRAIT, PORTRAIT) });
+  renderWithBrowser(<VisualViewportHeightSync />, { browser });
+  browser.recheckViewport(stuck(PORTRAIT, PORTRAIT, 1.44));
+  expect(browser.actions.viewportScaleResets).toBe(0);
+});
+
 it("resets a viewport that is already stuck when the shell mounts", () => {
   const browser = fakeBrowser({ viewport: stuck(LANDSCAPE, PORTRAIT) });
   renderWithBrowser(<VisualViewportHeightSync />, { browser });

@@ -68,10 +68,13 @@ the foreground, and tells the subscriber why as a `ViewportCause`:
 - `rotated` — the device turned. `orientationchange`, `screen.orientation` `change` and the
   `(orientation: portrait)` media query are one rotation (signals within 50ms coalesce; a
   later one starts over), followed by re-reads at 60 / 180 / 350 / 600ms because iPadOS animates
-  the turn for up to ~600ms. The 180ms read is a `recheck`;
-- `recheck` — a later look at the same question: the settled rotation, or `visibilitychange` to
-  visible (a tab rotated in the background comes back stuck). The page's listeners are attached once
-  for all subscribers and removed with the last one.
+  the turn for up to ~600ms. The 180ms read is a `rotation-recheck`;
+- `rotation-recheck` — the 180ms read of a real rotation: the shell resets the scale again if
+  the first reset did not take (width still stuck, or scale still not 1);
+- `recheck` — a later look at the same question: mount, or `document`'s `visibilitychange` to
+  visible in the same orientation. If the orientation changed while the tab was away (a tab
+  rotated in the background comes back stuck), the return is a `rotated` instead. The page's
+  listeners are attached once for all subscribers and removed with the last one.
 
 An iPad Chrome (`CriOS`, `WKWebView`) rotation, in **either** direction, can leave the previous
 orientation's layout viewport behind and zoom the page to fit it (scale ~0.7 going to portrait,

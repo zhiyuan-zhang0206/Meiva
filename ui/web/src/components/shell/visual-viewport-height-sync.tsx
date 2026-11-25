@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 import type { ViewportCause } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
+import { isUnzoomed, pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
 
 // meiva:note
 // Keeps the app shell in step with the visual viewport while the on-screen keyboard is up (task
@@ -32,8 +32,10 @@ import { pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
 // maximum-scale=1` on the viewport meta). While the layout width still disagrees with the visual
 // width at scale 1, `pinnedShellWidth` pins <html> to the visual width as the fallback. A rotation
 // is the one moment the scale is reset without asking the reading (the event, not a scale value,
-// tells WebKit's zoom-to-fit from the reader's pinch); a `recheck` (settled rotation, tab back in
-// the foreground, mount) resets only while the width is still stuck, and a pinch is never pulled back.
+// tells WebKit's zoom-to-fit from the reader's pinch); the `rotation-recheck` 180ms later resets
+// again while the width is still stuck or the scale is still not 1 (WebKit ignored the first
+// reset); a `recheck` (tab back in the foreground in the same orientation, mount) resets only
+// while the width is still stuck, and a pinch is never pulled back.
 //
 // Renders nothing; mounted from app/layout.tsx inside <Providers> — the same file that declares the
 // Android meta — so every route, login included, is covered.
@@ -61,7 +63,12 @@ export function VisualViewportHeightSync() {
     const sync = (cause: ViewportCause) => {
       const reading = viewport.read();
       const pinnedWidth = pinnedShellWidth(reading);
-      if (cause === "rotated" || (cause === "recheck" && pinnedWidth !== null)) {
+      const stuckScale = reading.visual !== null && !isUnzoomed(reading.visual.scale);
+      if (
+        cause === "rotated" ||
+        (cause === "rotation-recheck" && (pinnedWidth !== null || stuckScale)) ||
+        (cause === "recheck" && pinnedWidth !== null)
+      ) {
         viewport.resetScale();
       }
       const pinned = pinnedShellHeight(reading);

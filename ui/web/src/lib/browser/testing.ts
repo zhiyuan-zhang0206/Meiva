@@ -81,6 +81,7 @@ export interface FakeBrowser extends Browser {
   answerViewport(reading: ViewportReading): void;
   rotateViewport(reading?: ViewportReading): void;
   recheckViewport(reading?: ViewportReading): void;
+  rotationRecheckViewport(reading?: ViewportReading): void;
   refuseStorage(refused: boolean): void;
   failStorage(area: "local" | "session", operations: "write" | "remove" | "both"): void;
   clipboardAccepts(accepts: boolean): void;
@@ -446,6 +447,10 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     recheckViewport(reading) {
       if (reading !== undefined) viewportReading = reading;
       tellViewport("recheck");
+    },
+    rotationRecheckViewport(reading) {
+      if (reading !== undefined) viewportReading = reading;
+      tellViewport("rotation-recheck");
     },
     answerMedia(query, matches) {
       const heard = answer(query);

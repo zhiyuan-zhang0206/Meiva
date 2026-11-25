@@ -33,8 +33,8 @@ export interface LiveNavigator {
 
 export interface LiveDocument {
   getSelection?(): Selection | null;
-  addEventListener?(type: "selectionchange", listener: () => void): void;
-  removeEventListener?(type: "selectionchange", listener: () => void): void;
+  addEventListener?(type: "selectionchange" | "visibilitychange", listener: () => void): void;
+  removeEventListener?(type: "selectionchange" | "visibilitychange", listener: () => void): void;
   createElement(tag: "textarea"): HTMLTextAreaElement;
   readonly body: { appendChild(node: Node): unknown; removeChild(node: Node): unknown };
   execCommand(command: "copy"): boolean;
@@ -57,12 +57,7 @@ export interface LiveResizeObserver {
   disconnect(): void;
 }
 
-export type LivePageEventType =
-  | "popstate"
-  | "resize"
-  | "scroll"
-  | "orientationchange"
-  | "visibilitychange";
+export type LivePageEventType = "popstate" | "resize" | "scroll" | "orientationchange";
 
 export interface LiveOrientation {
   addEventListener(type: "change", listener: () => void): void;
@@ -333,7 +328,18 @@ function followViewport(
   const samples = new Set<number>();
   let coalescing: number | null = null;
   const moved = () => emit("moved");
+  let portrait: Partial<MediaQueryList> | null = null;
+  try {
+    portrait = page.matchMedia("(orientation: portrait)");
+  } catch {
+    portrait = null;
+  }
+  let lastPortrait: boolean | null = portrait?.matches ?? null;
+  const noteOrientation = () => {
+    lastPortrait = portrait?.matches ?? lastPortrait;
+  };
   const onRotation = () => {
+    noteOrientation();
     if (coalescing !== null) return;
     coalescing = page.setTimeout(() => {
       coalescing = null;
@@ -344,27 +350,28 @@ function followViewport(
     for (const delayMs of ROTATION_RESAMPLE_MS) {
       const timer = page.setTimeout(() => {
         samples.delete(timer);
-        emit(delayMs === ROTATION_RECHECK_MS ? "recheck" : "moved");
+        noteOrientation();
+        emit(delayMs === ROTATION_RECHECK_MS ? "rotation-recheck" : "moved");
       }, delayMs);
       samples.add(timer);
     }
   };
   const onVisibility = () => {
-    if (page.document.visibilityState !== "hidden") emit("recheck");
+    if (page.document.visibilityState === "hidden") return;
+    const now = portrait?.matches;
+    if (now !== undefined && lastPortrait !== null && now !== lastPortrait) {
+      onRotation();
+      return;
+    }
+    emit("recheck");
   };
   const orientation = page.screenOrientation ?? null;
-  let portrait: Partial<MediaQueryList> | null = null;
-  try {
-    portrait = page.matchMedia("(orientation: portrait)");
-  } catch {
-    portrait = null;
-  }
   visual.addEventListener("resize", moved);
   visual.addEventListener("scroll", moved);
   page.addEventListener("resize", moved);
   page.addEventListener("scroll", moved);
   page.addEventListener("orientationchange", onRotation);
-  page.addEventListener("visibilitychange", onVisibility);
+  page.document.addEventListener?.("visibilitychange", onVisibility);
   orientation?.addEventListener("change", onRotation);
   portrait?.addEventListener?.("change", onRotation);
   return () => {
@@ -377,7 +384,7 @@ function followViewport(
     page.removeEventListener("resize", moved);
     page.removeEventListener("scroll", moved);
     page.removeEventListener("orientationchange", onRotation);
-    page.removeEventListener("visibilitychange", onVisibility);
+    page.document.removeEventListener?.("visibilitychange", onVisibility);
     orientation?.removeEventListener("change", onRotation);
     portrait?.removeEventListener?.("change", onRotation);
   };
