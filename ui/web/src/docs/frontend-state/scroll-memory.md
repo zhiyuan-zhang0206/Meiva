@@ -32,4 +32,12 @@ and writes. Terminal panes keep the shared `scroll-memory.ts` record, whose
 `followBottom` flag serves their tail following.
 
 
+A saved place also records the timeline response's `current_epoch` (`epoch` on the
+place and on the bookmark). A harness switch re-labels every row of the ended epoch
+with an `e<seq>.` prefix, so when the place's epoch is older than the current one the
+placement machine looks for `e<epoch>.<id>` (rank 0) instead of the id as saved; the
+older-page search then reaches it through the epoch pages. A place whose id is already
+prefixed, or a gateway that sends no `current_epoch`, is used as saved, and a row that
+never arrives falls back to the tail as before.
+
 Parent: [Frontend State Management](frontend-state.md).

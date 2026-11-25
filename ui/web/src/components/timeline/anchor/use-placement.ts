@@ -36,6 +36,7 @@ interface Args {
   loading: boolean;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
+  currentEpoch: number | null;
   onLoadOlder?: (origin: OlderLoadOrigin) => void;
   onCancelBackgroundLoadOlder?: () => boolean;
   reveal: RevealDecision;
@@ -71,14 +72,14 @@ export interface Placement {
 // bookmark. Leaving saves a reading row or, at the tail, the last conversation row as a watermark.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function usePlacement({
-  threadKey, entryKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder,
+  threadKey, entryKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder, currentEpoch,
   onLoadOlder, onCancelBackgroundLoadOlder, reveal, openingShown, anchor, filling,
 }: Args): Placement {
   const [machine] = useState(() => new PlacementMachine(initialGoal(readMemoryPlace(entryKey, threadKey), threadKey, reloadRestore), BOUNDS));
   const snapshot = useSyncExternalStore(machine.subscribe, machine.snapshot, machine.snapshot);
 
   const inputs: PlacementInputs = {
-    threadKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder,
+    threadKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder, currentEpoch,
     canLoadOlder: Boolean(onLoadOlder), reveal, now: 0, filling,
   };
   const live = useRef({ inputs, onLoadOlder, onCancelBackgroundLoadOlder });
@@ -134,7 +135,8 @@ export function usePlacement({
   const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => {
     const vp = row.clearTurnHeader ? anchor.viewport() : null;
     const hit = vp ? findRowNode(vp, row.row) : null;
-    return { identity, offset: hit && vp ? offsetOf(vp, hit.node) : row.offset };
+    const epoch = live.current.inputs.currentEpoch;
+    return { identity, offset: hit && vp ? offsetOf(vp, hit.node) : row.offset, ...(epoch !== null ? { epoch } : {}) };
   }, [anchor]);
 
   const saveFrame = useRef(0);
@@ -165,7 +167,8 @@ export function usePlacement({
     const now = anchor.current();
     const identity = identityRef.current && sameRow(identityRef.current.row, row) ? identityRef.current : { row };
     const offset = now?.kind === "row" ? now.offset : READING_TOP_PX;
-    machine.lost({ identity, offset }, current(), effects, now?.kind === "bounded-tail");
+    const epoch = live.current.inputs.currentEpoch;
+    machine.lost({ identity, offset, ...(epoch !== null ? { epoch } : {}) }, current(), effects, now?.kind === "bounded-tail");
   }, [anchor, current, effects, machine]);
 
   useLayoutEffect(() => () => {

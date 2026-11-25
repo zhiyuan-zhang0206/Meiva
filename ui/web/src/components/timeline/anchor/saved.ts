@@ -1,3 +1,6 @@
+import { isEpochItemId } from "@/lib/fold";
+import { isDisplayOnlyItemId } from "@/lib/timeline/timeline";
+
 import {
   readReloadBookmark,
   removeReloadBookmark,
@@ -18,6 +21,7 @@ import type { RowIdentity } from "./rows";
 export interface SavedPlace {
   identity: RowIdentity;
   offset: number;
+  epoch?: number;
 }
 
 export interface TailDeparture {
@@ -29,6 +33,16 @@ export interface TailDeparture {
 type MemoryPlace = SavedPlace | TailDeparture;
 
 const memory = new Map<string, { contentKey: string; place: MemoryPlace }>();
+
+export function resolvePlaceIdentity(place: SavedPlace, currentEpoch: number | null): RowIdentity {
+  const { identity, epoch } = place;
+  if (epoch === undefined || currentEpoch === null || epoch >= currentEpoch) return identity;
+  if (isEpochItemId(identity.row.itemId) || isDisplayOnlyItemId(identity.row.itemId)) return identity;
+  return {
+    row: { ...identity.row, itemId: `e${epoch}.${identity.row.itemId}`, rank: 0 },
+    ...(identity.content ? { content: identity.content } : {}),
+  };
+}
 
 export function readMemoryPlace(entryKey: string | undefined, contentKey: string | undefined): MemoryPlace | null {
   if (!entryKey || contentKey === undefined) return null;
@@ -51,6 +65,7 @@ export function readSessionPlace(contentKey: string | undefined, config: ReloadR
       ...(bookmark.readingLocator ? { locator: bookmark.readingLocator } : {}),
     },
     offset: bookmark.viewportTop,
+    ...(bookmark.epoch !== undefined ? { epoch: bookmark.epoch } : {}),
   };
 }
 
@@ -66,6 +81,7 @@ export function writeSessionPlace(contentKey: string | undefined, config: Reload
     ...(locator ? { readingLocator: locator } : {}),
     itemId: row.itemId,
     rank: row.rank,
+    ...(place.epoch !== undefined ? { epoch: place.epoch } : {}),
     ...(row.turn ? { turn: true as const } : {}),
     viewportTop: place.offset,
     scrollTop: Math.max(0, scrollTop),

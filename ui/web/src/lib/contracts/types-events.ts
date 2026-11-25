@@ -36,6 +36,7 @@ export interface TimelineResponse {
   readonly items: BackendTimelineItem[];
   readonly msg_count: number;
   readonly has_more: boolean;
+  readonly current_epoch?: number;
 }
 
 export type ConnectionEvent =

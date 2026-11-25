@@ -82,6 +82,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   retentionCappedSeq: null,
   liveCompact: null,
   hasMoreOlder: false,
+  currentEpoch: null,
   loadingOlder: false,
   olderFetchCount: 0,
 
@@ -182,7 +183,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     }
   },
 
-  reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
+  reloadSnapshot: (snapshot, msg_count, hasMoreOlder, currentEpoch = null) => {
     let applied = false;
     set((s) => {
       // A compact changes item coordinates. During the reset window only
@@ -224,6 +225,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         compactEpoch: epoch,
         compactBuffer,
         hasMoreOlder,
+        currentEpoch,
         ...(disjointGap ? { olderFetchCount: 0 } : {}),
         resetPending: crossedCompact ? false : s.resetPending,
         // Reconnect can discover the rewrite without any compact SSE event.
@@ -236,7 +238,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     return applied;
   },
 
-  switchThread: (agentId, cached, hasMoreOlder, buffer = null) => {
+  switchThread: (agentId, cached, hasMoreOlder, buffer = null, currentEpoch = null) => {
     if (buffer && buffer.threadId !== agentId) throw new Error("A retained timeline buffer must belong to its selected agent");
     set((s) => ({
       activeThreadId: agentId,
@@ -252,6 +254,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       arrivedInboundIds: [],
       liveAnchorAt: 0,
       hasMoreOlder: cached !== null && hasMoreOlder,
+      currentEpoch: cached !== null ? currentEpoch : null,
       olderFetchCount: 0,
       resetPending: false,
       liveCompact: null,

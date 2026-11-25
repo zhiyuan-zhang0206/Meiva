@@ -25,6 +25,7 @@ export interface ReloadReadingBookmark {
   readonly readingLocator?: string;
   readonly itemId: string;
   readonly rank: number;
+  readonly epoch?: number;
   readonly turn?: true;
   readonly viewportTop: number;
   readonly scrollTop: number;
@@ -76,6 +77,9 @@ function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark
   ) {
     return false;
   }
+  if (candidate.epoch !== undefined && (!Number.isSafeInteger(candidate.epoch) || (candidate.epoch as number) < 0)) {
+    return false;
+  }
   if (candidate.turn !== undefined && candidate.turn !== true) {
     return false;
   }
@@ -99,9 +103,10 @@ function readPrunedBookmarkEntries(
   for (const [agentKey, raw] of Object.entries(parsed)) {
     if (!agentKey || !isReloadReadingBookmark(raw)) continue;
     if (now - raw.savedAt > RELOAD_BOOKMARK_TTL_MS) continue;
-    const { itemId, rank, turn, readingLocator, viewportTop, scrollTop, savedAt } = raw;
+    const { itemId, rank, epoch, turn, readingLocator, viewportTop, scrollTop, savedAt } = raw;
     valid.push([agentKey, {
       itemId, rank, viewportTop, scrollTop, savedAt,
+      ...(epoch !== undefined ? { epoch } : {}),
       ...(turn ? { turn } : {}),
       ...(readingLocator ? { readingLocator } : {}),
     }]);
@@ -127,6 +132,7 @@ function sameBookmarkTarget(a: ReloadReadingBookmark, b: ReloadReadingBookmark):
   return (
     a.itemId === b.itemId &&
     a.rank === b.rank &&
+    a.epoch === b.epoch &&
     a.turn === b.turn &&
     a.readingLocator === b.readingLocator &&
     Math.abs(a.viewportTop - b.viewportTop) < 0.5 &&

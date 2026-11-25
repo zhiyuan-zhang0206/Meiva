@@ -224,6 +224,7 @@ export const TimelineView = memo(function TimelineView({
     return fill.pages < COLD_FILL_MAX_PAGES || inFlight;
   }, [canonicalItems, controls, hasMoreOlder, loading, loadingOlder, onLoadOlder]);
   const openingShown = useRef(false);
+  const currentEpoch = useTimelineStore((s) => s.currentEpoch);
   const placement = usePlacement({
     threadKey,
     entryKey: scrollMemoryKey,
@@ -233,6 +234,7 @@ export const TimelineView = memo(function TimelineView({
     loading,
     hasMoreOlder,
     loadingOlder,
+    currentEpoch,
     onLoadOlder,
     onCancelBackgroundLoadOlder,
     reveal,
