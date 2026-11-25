@@ -25,6 +25,7 @@ function inputs(overrides: Partial<PlacementInputs> = {}): PlacementInputs {
     loading: false,
     hasMoreOlder: false,
     loadingOlder: false,
+    currentEpoch: null,
     canLoadOlder: true,
     reveal: { decided: true, itemId: null },
     now: 0,
@@ -48,7 +49,7 @@ const place = (id: string, offset = -40, extra: Partial<SavedPlace> = {}): Saved
 });
 const at = (id: string, offset: number, rank = 0): ViewAnchor => ({ kind: "row", row: { itemId: id, rank }, offset });
 
-function sessionWith(id: string, extra: { readingLocator?: string; turn?: true; viewportTop?: number } = {}) {
+function sessionWith(id: string, extra: { readingLocator?: string; turn?: true; viewportTop?: number; epoch?: number } = {}) {
   const browser = fakeBrowser({ session: {} });
   saveReloadBookmark(browser.session, "42", { itemId: id, rank: 0, viewportTop: extra.viewportTop ?? -60, scrollTop: 300, savedAt: 1000, ...extra }, 1000);
   const config: ReloadRestoreConfig = { state: "enabled", session: browser.session, now: () => 2000 };
@@ -588,6 +589,56 @@ describe("reload bookmark search", () => {
     expect(fx.loadOlder).not.toHaveBeenCalled();
     pass();
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a saved place across a harness switch", () => {
+  const earlier = (...ids: string[]) => ids.map((id) => row(id, { reading_locator: undefined }));
+
+  it("finds a place saved in an epoch that has since ended by its epoch-prefixed id", () => {
+    const machine = machineFor(place("12.0", -25, { epoch: 2 }));
+    const fx = effects();
+    machine.step(inputs({ currentEpoch: 3, items: [...earlier("e2.11.0", "e2.12.0"), ...rows(40, 42)] }), fx);
+    expect(fx.place).toHaveBeenCalledWith(at("e2.12.0", -25));
+  });
+
+  it("keeps the exact id while the epoch has not changed", () => {
+    const machine = machineFor(place("12.0", -25, { epoch: 3 }));
+    const fx = effects();
+    machine.step(inputs({ currentEpoch: 3, items: [...earlier("e2.12.0"), ...rows(11, 13)] }), fx);
+    expect(fx.place).toHaveBeenCalledWith(at("12.0", -25));
+  });
+
+  it("does not relabel without a known current epoch", () => {
+    const machine = machineFor(place("12.0", -25, { epoch: 2 }));
+    const fx = effects();
+    machine.step(inputs({ currentEpoch: null, items: [...earlier("e2.12.0"), ...rows(40, 42)], hasMoreOlder: false }), fx);
+    expect(fx.place).toHaveBeenCalledWith(TAIL);
+  });
+
+  it("reads older pages for the relabelled row and falls back to the tail when it never arrives", () => {
+    const machine = machineFor(place("12.0", -25, { epoch: 2 }));
+    const fx = effects();
+    machine.step(inputs({ currentEpoch: 3, items: rows(40, 42), hasMoreOlder: true }), fx);
+    expect(fx.loadOlder).toHaveBeenCalledTimes(1);
+    machine.step(inputs({ currentEpoch: 3, items: [...earlier("e2.1.0"), ...rows(40, 42)], hasMoreOlder: false }), fx);
+    expect(fx.place).toHaveBeenCalledWith(TAIL);
+  });
+
+  it("leaves a place that already names an earlier epoch untouched", () => {
+    const machine = machineFor(place("e1.7.0", -10, { epoch: 2 }));
+    const fx = effects();
+    machine.step(inputs({ currentEpoch: 3, items: [...earlier("e1.7.0"), ...rows(40, 42)] }), fx);
+    expect(fx.place).toHaveBeenCalledWith(at("e1.7.0", -10));
+  });
+
+  it("stores the epoch with a reload bookmark and reads it back", () => {
+    const { session, config } = sessionWith("12.0", { epoch: 2 });
+    saveReloadBookmark(session, "42", { itemId: "12.0", rank: 0, epoch: 2, viewportTop: -5, scrollTop: 9, savedAt: 1000 }, 1000);
+    const machine = machineFor(null, config);
+    const fx = effects();
+    machine.step(inputs({ reloadRestore: config, currentEpoch: 3, items: [...earlier("e2.12.0"), ...rows(40, 42)] }), fx);
+    expect(fx.place).toHaveBeenCalledWith(at("e2.12.0", -5));
   });
 });
 

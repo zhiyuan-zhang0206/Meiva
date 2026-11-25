@@ -216,7 +216,7 @@ export function useTimeline(
   const compactPending = useRef(false);
 
   const lastAppliedDataRef = useRef<TimelineResponse | null>(null);
-  type ReadingWindow = Pick<ReturnType<typeof useTimelineStore.getState>, "items" | "compactBuffer" | "hasMoreOlder">;
+  type ReadingWindow = Pick<ReturnType<typeof useTimelineStore.getState>, "items" | "compactBuffer" | "hasMoreOlder" | "currentEpoch">;
 
   useLayoutEffect(() => {
     seenParseErrors.current.clear();
@@ -225,14 +225,14 @@ export function useTimeline(
       queryClient.getQueryData<TimelineResponse>(["timeline", agentId]);
     queryClient.setQueryDefaults(["timeline-reading-window"], { gcTime: CONVERSATION_RETENTION_MS });
     const retained = agentId === null ? undefined : queryClient.getQueryData<ReadingWindow>(["timeline-reading-window", agentId]);
-    switchThread(agentId, retained?.items ?? cached?.items ?? null, retained?.hasMoreOlder ?? cached?.has_more ?? false, retained?.compactBuffer);
+    switchThread(agentId, retained?.items ?? cached?.items ?? null, retained?.hasMoreOlder ?? cached?.has_more ?? false, retained?.compactBuffer, retained ? retained.currentEpoch : cached?.current_epoch ?? null);
     lastAppliedDataRef.current = cached ?? null;
     if (agentId !== null) queryClient.removeQueries({ queryKey: ["timeline-reading-window", agentId], exact: true });
     return () => {
       const view = useTimelineStore.getState();
       if (agentId !== null && view.activeThreadId === agentId && view.items.length > 0) {
         queryClient.setQueryData<ReadingWindow>(["timeline-reading-window", agentId], {
-          items: view.items, compactBuffer: view.compactBuffer, hasMoreOlder: view.hasMoreOlder,
+          items: view.items, compactBuffer: view.compactBuffer, hasMoreOlder: view.hasMoreOlder, currentEpoch: view.currentEpoch,
         });
       }
       switchThread(null, null, false);
@@ -256,7 +256,7 @@ export function useTimeline(
     const data = receipt?.data ?? timelineQuery.data;
     const completion = receipt !== null || (readRevision > selection.baseline && qualified !== selection);
     if (completion || data !== lastAppliedDataRef.current) {
-      const applied = reloadSnapshot(data.items, data.msg_count, data.has_more);
+      const applied = reloadSnapshot(data.items, data.msg_count, data.has_more, data.current_epoch ?? null);
       if (applied) {
         lastAppliedDataRef.current = data;
         if (receipt) appliedReceipt.current = receipt;

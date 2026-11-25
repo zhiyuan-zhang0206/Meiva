@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TimelineResponse } from "../../contracts/types";
+import { useTimelineStore } from "../timeline-store";
 import { useTimeline } from "../use-timeline";
 import type { UseTimelineTestContext } from "./use-timeline-context";
 
@@ -65,6 +66,7 @@ describe("useTimeline across harness epochs", () => {
       "41.1",
     ]);
     expect(result.current.hasMoreOlder).toBe(false);
+    expect(useTimelineStore.getState().currentEpoch).toBe(3);
     expect(showError).not.toHaveBeenCalled();
   });
 

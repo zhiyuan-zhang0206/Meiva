@@ -70,6 +70,8 @@ export interface TimelineState {
 
   hasMoreOlder: boolean;
 
+  currentEpoch: number | null;
+
   loadingOlder: boolean;
 
   olderFetchCount: number;
@@ -87,9 +89,16 @@ export interface TimelineState {
     snapshot: BackendTimelineItem[],
     msg_count: number,
     hasMoreOlder: boolean,
+    currentEpoch?: number | null,
   ) => boolean;
 
-  switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
+  switchThread: (
+    agentId: number | null,
+    cached: BackendTimelineItem[] | null,
+    hasMoreOlder: boolean,
+    buffer?: CompactTransitionBuffer | null,
+    currentEpoch?: number | null,
+  ) => void;
 
   applyTokenUsage: (
     input: number,

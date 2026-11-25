@@ -5,7 +5,7 @@ import { findOldestTimelineCursor } from "@/lib/timeline/timeline";
 import type { ReloadRestoreConfig } from "../model/reading-position";
 import { sameRow, TAIL, type RowRef, type ViewAnchor } from "./dom";
 import { locate } from "./rows";
-import { readSessionPlace, rowAnchor, type SavedPlace, type TailDeparture } from "./saved";
+import { readSessionPlace, resolvePlaceIdentity, rowAnchor, type SavedPlace, type TailDeparture } from "./saved";
 import { unreadBoundary } from "./unread";
 
 // meiva:note
@@ -41,6 +41,7 @@ export interface PlacementInputs {
   loading: boolean;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
+  currentEpoch: number | null;
   canLoadOlder: boolean;
   reveal: RevealDecision;
   now: number;
@@ -120,9 +121,9 @@ export class PlacementMachine {
 
   // meiva:note
   // The row a placement in flight needs mounted, given the loaded rows.
-  goalRow(inputs: Pick<PlacementInputs, "items" | "compactBuffer" | "reveal">): RowRef | null {
+  goalRow(inputs: Pick<PlacementInputs, "items" | "compactBuffer" | "reveal" | "currentEpoch">): RowRef | null {
     const goal = this.goal;
-    if (goal.kind === "row") return locate(goal.place.identity, inputs.items, inputs.compactBuffer);
+    if (goal.kind === "row") return locate(resolvePlaceIdentity(goal.place, inputs.currentEpoch), inputs.items, inputs.compactBuffer);
     if (goal.kind === "first" && inputs.reveal.decided) {
       return unreadBoundary(inputs.items, inputs.reveal, goal.departure, inputs.compactBuffer).row;
     }
@@ -163,7 +164,7 @@ export class PlacementMachine {
   // A placed row left the loaded rows: resolve it again (hidden) or move to where it went.
   lost(place: SavedPlace, inputs: PlacementInputs, effects: PlacementEffects, bounded = false): void {
     if (this.goal.kind !== "placed") return;
-    const moved = locate(place.identity, inputs.items, inputs.compactBuffer);
+    const moved = locate(resolvePlaceIdentity(place, inputs.currentEpoch), inputs.items, inputs.compactBuffer);
     if (moved) {
       if (!sameRow(moved, place.identity.row)) effects.place(bounded ? { kind: "bounded-tail", row: moved } : rowAnchor(place, moved));
       return;
@@ -279,7 +280,7 @@ export class PlacementMachine {
     return false;
   }
 
-  private publish(inputs: Pick<PlacementInputs, "items" | "compactBuffer" | "reveal" | "loading">): void {
+  private publish(inputs: Pick<PlacementInputs, "items" | "compactBuffer" | "reveal" | "loading" | "currentEpoch">): void {
     const requestedRow = this.requested?.anchor.kind === "row" ? this.requested.anchor.row : null;
     const next: PlacementSnapshot = {
       visible: this.goal.kind === "placed",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -126,14 +127,21 @@ EXPAND_JS = """
 ITEM_IDS_JS = "() => [...document.querySelectorAll('.timeline-item[data-item-id]')].map((n) => n.getAttribute('data-item-id'))"
 
 
-def _open(browser: Browser, base_url: str) -> Page:
+def _open(
+    browser: Browser,
+    base_url: str,
+    init_script: str | None = None,
+    items: Sequence[Mapping[str, object]] = HEAD_ITEMS,
+    pages: Mapping[str, object] = PAGES,
+) -> Page:
     page = open_page(
         new_context(browser, 1280),
         base_url,
         "/",
         stub_api=True,
-        timeline_items=HEAD_ITEMS,
-        timeline_pages=PAGES,
+        timeline_items=items,
+        timeline_pages=pages,
+        extra_init_script=init_script,
     )
     page.wait_for_selector(".timeline-item[data-item-id='41.1']", timeout=15_000)
     return page
@@ -168,5 +176,55 @@ def test_epoch_history_pages_in_order_with_switch_blocks_as_work_rows(
             assert row.count() == 1
             assert row.locator("xpath=ancestor::*[@data-turn-id]").count() >= 1
         assert "Harness switch" in page.locator(".timeline-item[data-item-id='e2.sw']").inner_text()
+    finally:
+        page.context.close()
+
+
+FILLER = [
+    _item(
+        f"{n}.0",
+        "agent_chat",
+        f"Filler reply {n} keeps the timeline taller than the viewport.",
+        source="agent",
+    )
+    for n in range(42, 72)
+]
+TALL_HEAD = [*HEAD_ITEMS, *FILLER]
+TALL_PAGES: dict[str, object] = {**PAGES, "": {**_page(TALL_HEAD, True), "msg_count": 72}}
+
+BOOKMARK_JS = """
+(() => {
+  sessionStorage.setItem("meiva.timeline.reading-bookmarks.v1", JSON.stringify({
+    "1": { itemId: %s, rank: 0, epoch: 0, viewportTop: 120, scrollTop: 100, savedAt: Date.now() },
+  }));
+})();
+"""
+
+IN_VIEWPORT_JS = """
+(id) => {
+  const row = document.querySelector(`.timeline-item[data-item-id="${id}"]`);
+  if (!row) return false;
+  const r = row.getBoundingClientRect();
+  return r.bottom > 0 && r.top < window.innerHeight;
+}
+"""
+
+
+@pytest.mark.parametrize("saved_id", ["6.0", "e0.6.0"])
+def test_reading_place_saved_in_an_ended_epoch_is_found_after_a_reload(
+    playwright_browser: Browser, frontend_target: str, saved_id: str
+) -> None:
+    page = _open(
+        playwright_browser,
+        frontend_target,
+        BOOKMARK_JS % json.dumps(saved_id),
+        items=TALL_HEAD,
+        pages=TALL_PAGES,
+    )
+    try:
+        page.wait_for_selector(".timeline-item[data-item-id='e0.6.0']", timeout=20_000)
+        page.wait_for_timeout(1500)
+        assert page.evaluate(IN_VIEWPORT_JS, "e0.6.0")
+        assert not page.evaluate(IN_VIEWPORT_JS, "71.0")
     finally:
         page.context.close()
