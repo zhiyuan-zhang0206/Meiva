@@ -1,0 +1,12 @@
+exports = ["room.py"]
+
+[purity]
+"chatroom_fence.py" = "strict"
+"chatroom_json.py" = "strict"
+"chatroom_render.py" = "strict"
+"chatroom_serial.py" = "strict"
+"chatroom_state.py" = "strict"
+"chatroom_wake.py" = "strict"
+
+[roots]
+"room.py" = { kinds = ["argv", "clock", "pid", "platform"], why = "Skill script entry: reads its command line, the clock, standard input and the host name once, and hands them to main() through World" }
