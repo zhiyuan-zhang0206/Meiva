@@ -234,6 +234,11 @@ EVENTS: dict[str, EventSpec] = {
         site='gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)',
     ),
     "sse_drop": telemetry_event("sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly"),
+    "timeline_epoch_unreadable": telemetry_event(
+        "timeline_epoch_unreadable",
+        "an earlier harness epoch of an agent's timeline could not be read and is skipped",
+        tier="anomaly",
+    ),
     # meiva:note
     # The alert webhook heartbeat: an unpersisted event whose only consumer is the OTLP
     # gauge (`alerts_last_ingest_timestamp_seconds`), so the dead-man rule can tell
