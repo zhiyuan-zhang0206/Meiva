@@ -234,6 +234,7 @@ async def start_health_server(
     image: LoadedCommit,
     tracer: Tracer | None = None,
     keep_alive: KeepAlive | None = None,
+    gzip_routes: frozenset[tuple[str, str]] = frozenset(),
 ) -> asyncio.Server:
     started_at = time.time()
     pid = os.getpid()
@@ -266,6 +267,7 @@ async def start_health_server(
         auth_digests=auth_digests,
         tracer=tracer,
         keep_alive=keep_alive,
+        gzip_routes=gzip_routes,
     )
 
 

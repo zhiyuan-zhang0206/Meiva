@@ -25,7 +25,9 @@ send, including when the peer disconnects or stops reading for 30 s (the
 connection is then aborted). A file that ends before its declared length closes the
 connection rather than leaving it open for a peer to misread.
 
-A JSON or text answer of 1 KiB or more is gzipped (level 5) for a client that sent
+A route the caller lists in `gzip_routes` (agent-ops lists `POST /ops`; the file routes stay
+plain, because the gateway relays their `Content-Length`) answers a JSON or text body of 1 KiB or
+more gzipped (level 5) to a client that sent
 `Accept-Encoding: gzip`: the answer carries `Content-Encoding: gzip` and
 `Vary: Accept-Encoding`, and its `Content-Length` is the compressed size. A body of
 128 KiB or more is compressed in a worker thread so the event loop does not wait. Partial

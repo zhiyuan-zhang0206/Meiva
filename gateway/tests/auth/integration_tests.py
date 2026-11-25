@@ -43,9 +43,10 @@ class _TestClientTransport(httpx.BaseTransport):
             r = self._tc.get(path, headers=headers)
         else:
             r = self._tc.request(method, path, content=content, headers=headers)
+        decoded = {k: v for k, v in r.headers.items() if k.lower() != "content-encoding"}
         return httpx.Response(
             status_code=r.status_code,
-            headers=dict(r.headers),
+            headers=decoded,
             content=r.content,
             request=request,
         )

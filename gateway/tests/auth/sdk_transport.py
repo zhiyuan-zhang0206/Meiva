@@ -51,9 +51,10 @@ class AppTransport(httpx.BaseTransport):
             raise httpx.ReadTimeout(
                 "the response was lost after the app committed", request=request
             )
+        decoded = {k: v for k, v in answer.headers.items() if k.lower() != "content-encoding"}
         return httpx.Response(
             status_code=answer.status_code,
-            headers=dict(answer.headers),
+            headers=decoded,
             content=answer.content,
             request=request,
         )
