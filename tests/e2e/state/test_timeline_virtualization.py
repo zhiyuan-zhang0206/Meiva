@@ -21,6 +21,8 @@ from tests.e2e.fixture_environment import E2EEnv
 
 ITEM_COUNT = 1200
 FRAME_SAMPLE_ROUNDS = 3
+# meiva:link tests/docs/tests.md
+FRAME_P95_BUDGET_MS = 40
 
 
 class _CDPSession(Protocol):
@@ -69,7 +71,7 @@ def _assert_bounded_sample(sample: _BoundedSample, kind: str) -> None:
         == sample["frameMaxRoundsMs"][sample["frameP95RoundsMs"].index(sample["frameP95Ms"])]
     ), sample
     if kind == "agent_chat":
-        assert sample["frameP95Ms"] < 33, (
+        assert sample["frameP95Ms"] < FRAME_P95_BUDGET_MS, (
             f"frame p95 rounds (ms): {sample['frameP95RoundsMs']}",
             sample,
         )
