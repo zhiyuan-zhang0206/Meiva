@@ -1,4 +1,4 @@
-exports = ["emit_child.py", "fake_gh.py", "fake_scan.py", "run_scripts.py", "tracker_tree.py"]
+exports = ["emit_child.py", "entry_process_child.py", "fake_gh.py", "fake_scan.py", "run_scripts.py", "tracker_tree.py"]
 
 [loads]
 "run_scripts.py" = ["schedules"]

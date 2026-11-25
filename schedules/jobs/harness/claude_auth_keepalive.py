@@ -36,7 +36,7 @@ from schedules.plans.harness.claude_keepalive import (
     login_status_argv,
 )
 
-_PROCESS_NAME = "claude-auth-keepalive"
+PROCESS_NAME = "claude-auth-keepalive"
 _EVENT_NAME = "claude_auth_keepalive_round"
 
 # meiva:note
@@ -147,11 +147,11 @@ def execute_round(
         locate=locate,
         run_command=run_command,
     )
-    print(f"[{slot.isoformat()}] {_PROCESS_NAME}: {decision.log_line}")
+    print(f"[{slot.isoformat()}] {PROCESS_NAME}: {decision.log_line}")
     emit_system_event(
         _EVENT_NAME,
         decision.telemetry_payload,
-        process=_PROCESS_NAME,
+        process=PROCESS_NAME,
         producer=inputs.producer,
         machine_reader=inputs.machine.name,
         image=inputs.image,

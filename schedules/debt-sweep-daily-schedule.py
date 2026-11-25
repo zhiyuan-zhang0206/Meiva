@@ -7,7 +7,7 @@ from pathlib import Path
 
 import base
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.debt_sweep import DebtSweep, dry_run, parse_cli, sweep_day
+from schedules.jobs.debt_sweep import PROCESS_NAME, DebtSweep, dry_run, parse_cli, sweep_day
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.plans.debt_sweep_worker import parse_worker_label
 from schedules.plans.directory_plan import report_recipient
@@ -43,5 +43,7 @@ if __name__ == "__main__":
             _REPORT_LABEL,
             os.environ.get(_REPORT_AGENT_ENV),
         )
-        with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+        with open_schedule_entry(
+            globals().get("MEIVA_SCHEDULE_INPUTS"), home=home, process=PROCESS_NAME
+        ) as inputs:
             sweep_day(slot, None, job=sweep, recipient=recipient, inputs=inputs)

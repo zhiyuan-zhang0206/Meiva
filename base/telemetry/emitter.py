@@ -55,6 +55,7 @@ from base.telemetry.delivery.serialization import (
     event_payload,
 )
 from base.telemetry.delivery.state import (
+    SDK_PROCESS,
     UNKNOWN_PROCESS,
     ambient_agent_id,
     process_state,
@@ -182,9 +183,11 @@ def bind_identity(
 # Bind `process` for a process nothing has named yet. The guard is the point: an entry that runs
 # after the process bound its real identity (the agent host, a gateway, an exec child) must not
 # rename it, while a later `init_telemetry` still wins over the label this sets (task #6347).
-# Returns True when this call is what named the process, False when it already had a name; one of
-# the bounded values is `sdk`, bound where the plugin surface loads (`meiva/boot.py`) and never at
-# `import meiva`.
+# The SDK's own label counts as unnamed: it is bound at `import meiva` in a launched process
+# (`MEIVA_SCHEDULE_ID` / `MEIVA_AGENT_ID` in the environment), before any script's `__main__` can
+# name itself, so a real name must be able to replace it — only until the first event is written,
+# because the OTLP `MeterProvider` reads the name once when it is built and `sdk` is loss-only.
+# Returns True when this call is what named the process, False when it already had a real name.
 def bind_identity_if_unbound(
     *,
     process: str,
@@ -192,7 +195,8 @@ def bind_identity_if_unbound(
     now: Callable[[], datetime],
     deployed_sha: str | None = None,
 ) -> bool:
-    if process_state["process"] != UNKNOWN_PROCESS:
+    bound = process_state["process"]
+    if bound != UNKNOWN_PROCESS and not (bound == SDK_PROCESS and process != SDK_PROCESS):
         return False
     bind_identity(process=process, home=home, now=now, deployed_sha=deployed_sha)
     return True

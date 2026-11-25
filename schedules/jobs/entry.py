@@ -22,8 +22,8 @@ from base.db.config import db_config_from_boot
 from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry import process_name
-from meiva.boot import clients_over
+from base.telemetry import bind_identity_if_unbound, process_name
+from meiva.boot import clients_over, deferred_clock_now
 from meiva.sdk_surface import process_context
 
 __all__ = ["fresh_schedule_entry", "open_schedule_entry", "schedule_entry"]
@@ -114,12 +114,29 @@ def fresh_schedule_entry(
 # A script's `__main__` hands over `MEIVA_SCHEDULE_INPUTS` (what the runner injected, or `None`
 # when the script is run by hand). Inputs from a runner are borrowed as they are; a hand run
 # opens process logging and owns a fresh entry for the image this process loaded.
+#
+# `process` is the schedule's telemetry process (`main-red-watch`, `agent-watch`, ...), bound here
+# ahead of the first event the process writes. Left to the SDK, the process is labelled `sdk`, and
+# `sdk` is a loss-only process: the OTLP `MeterProvider` is then built once with a view that drops
+# every metric, and the later `init_gateway_process(name)` renames the logs but cannot rebuild it.
+# A launched schedule (`MEIVA_SCHEDULE_ID` in its environment, the production launch) is labelled
+# `sdk` already at its script's top-level `import meiva`, so the binding replaces that SDK label
+# as well as the unnamed state; it never renames any other name, so a runner-hosted entry keeps
+# the runner's.
 def open_schedule_entry(
-    borrowed: ScheduleInputs | None, *, home: Path
+    borrowed: ScheduleInputs | None, *, home: Path, process: str | None = None
 ) -> AbstractContextManager[ScheduleInputs]:
+    if process is not None:
+        image = process_context.loaded_code_image()
+        bind_identity_if_unbound(
+            process=process,
+            home=home,
+            now=deferred_clock_now,
+            deployed_sha=image.sha,
+        )
     if borrowed is not None:
         return schedule_entry(borrowed)
     prepare_process_logging()
     return fresh_schedule_entry(
-        image=process_context.loaded_code_image(), process=process_name(), home=home
+        image=process_context.loaded_code_image(), process=process or process_name(), home=home
     )

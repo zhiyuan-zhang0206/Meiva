@@ -672,7 +672,9 @@ def watch_round(*, inputs: ScheduleInputs, home: Path, report_agent: int) -> Non
 
 if __name__ == "__main__":
     home = resolve_meiva_home()
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+    with open_schedule_entry(
+        globals().get("MEIVA_SCHEDULE_INPUTS"), home=home, process=_PROCESS_NAME
+    ) as inputs:
         watch_round(
             inputs=inputs,
             home=home,

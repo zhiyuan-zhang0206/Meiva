@@ -4,7 +4,7 @@ import os
 
 from base.host.system.hostport import Host
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.c9_report import C9Report, report_day
+from schedules.jobs.c9_report import PROCESS_NAME, C9Report, report_day
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.plans.directory_plan import report_recipient
 from schedules.plans.schedule_identity import parse_scheduled_for
@@ -16,7 +16,9 @@ _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 
 if __name__ == "__main__":
     home = resolve_meiva_home()
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+    with open_schedule_entry(
+        globals().get("MEIVA_SCHEDULE_INPUTS"), home=home, process=PROCESS_NAME
+    ) as inputs:
         from scripts.ci.pull_requests import accounting
 
         job = C9Report(

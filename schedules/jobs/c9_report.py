@@ -24,9 +24,9 @@ from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.c9_window import CiRun, MinuteRates, failure_message, summarize, window_bounds
 from schedules.plans.directory_plan import ReportRecipient
 
-__all__ = ["C9Report", "DayReconciled", "reconcile_window", "report_day"]
+__all__ = ["PROCESS_NAME", "C9Report", "DayReconciled", "reconcile_window", "report_day"]
 
-_PROCESS_NAME = "schedule-c9-daily"
+PROCESS_NAME = "schedule-c9-daily"
 
 
 # meiva:note
@@ -83,7 +83,7 @@ def report_day(
         emit_system_event(
             "ci_usage_daily",
             done.attributes,
-            process=_PROCESS_NAME,
+            process=PROCESS_NAME,
             producer=inputs.producer,
             machine_reader=inputs.machine.name,
             image=inputs.image,
