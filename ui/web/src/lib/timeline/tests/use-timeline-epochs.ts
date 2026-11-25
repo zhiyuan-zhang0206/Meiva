@@ -1,6 +1,10 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { TimelineResponse } from "../../contracts/types";
 import { useTimeline } from "../use-timeline";
 import type { UseTimelineTestContext } from "./use-timeline-context";
 
@@ -26,6 +30,44 @@ export function registerUseTimelineEpochTests(ctx: UseTimelineTestContext): void
     });
 
 describe("useTimeline across harness epochs", () => {
+  it("replays the gateway's recorded pages through paging in the gateway's own order", async () => {
+    const dir = join(__dirname, "epoch-pages");
+    const pages = readdirSync(dir).sort().map((name) => JSON.parse(readFileSync(join(dir, name), "utf8")) as {
+      request: string;
+      response: TimelineResponse;
+    });
+    timeline.queue(...pages.map((page) => resolves(page.response)));
+    const showError = vi.fn();
+
+    const { result } = renderHook(() => useTimeline(42, showError), { wrapper });
+    await waitFor(() => expect(result.current.items.length).toBeGreaterThan(0));
+    timelineReads.length = 0;
+    for (let i = 1; i < pages.length; i++) {
+      const before = result.current.items.length;
+      act(() => result.current.loadOlder("reader"));
+      await waitFor(() => expect(result.current.items.length).toBeGreaterThan(before));
+    }
+
+    expect(timelineReads.map((read) => read.before)).toEqual(["e3.sw", "e2.sw", "e1.sw", "e0.6.0"]);
+    expect(result.current.items.map((i) => i.item_id)).toEqual([
+      "e0.s1.cp7.3.0",
+      "e0.s1.cp7.4.0",
+      "e0.0.0",
+      "e0.6.0",
+      "e0.7.0",
+      "e1.sw",
+      "e2.sw",
+      "e2.h900.0",
+      "e2.h1800.0",
+      "e3.sw",
+      "40.0",
+      "41.0",
+      "41.1",
+    ]);
+    expect(result.current.hasMoreOlder).toBe(false);
+    expect(showError).not.toHaveBeenCalled();
+  });
+
   it("pages from the current epoch back through meiva -> claude_code -> meiva in one order", async () => {
     const showError = vi.fn();
     timeline.queue(
