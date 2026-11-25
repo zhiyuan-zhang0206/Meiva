@@ -63,9 +63,11 @@ back to the tail.
 The writer opens as far down as the boundary permits. The scroll target is
 `max(0, min(dockSafeEnd, boundaryTop - topSafeInset))`. The top clearance is
 56px. The resting composer band is outside the viewport. The dock-safe end
-includes the measured overlap of any footer or grown composer dock. Short
-content aligns to that safe end, including when the whole conversation fits.
-Long content keeps the boundary at the top and lets the reply continue below.
+includes the measured overlap of any footer or grown composer dock. Long
+history ending in a short reply aligns to that safe end; long content keeps the
+boundary at the top and lets the reply continue below. A conversation that
+fits inside the viewport lays out from the top as usual and is never pushed
+down to the viewport bottom.
 The writer reapplies the bound as the reply grows or layout changes. Manual
 scrolling takes over from the boundary.
 
