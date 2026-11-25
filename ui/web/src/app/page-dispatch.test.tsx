@@ -13,7 +13,7 @@ import { fakeBrowser } from "@/lib/browser/testing";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse, type UserMessageFeed } from "@/lib/contracts/types";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
+import { fakeStreamHub, streamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
 import { deferred } from "@/test-support/deferred";
 import { httpRig, noUpload, sequentialKeys } from "@/lib/transport/tests/api/api-provider";
 
@@ -241,6 +241,77 @@ describe("home loading presentation through the selected timeline reader", () =>
     await act(() => { second.resolve(response([human])); return second.promise; });
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     expect(screen.getByText("Selected prompt")).toBeTruthy();
+  });
+
+  describe("a message still in the pending strip", () => {
+    const priorHuman: BackendTimelineItem = { ...human, item_id: "1.0", inbound_id: 1, payload: "Earlier prompt", created_at: "2026-01-01T00:00:00Z" };
+    const priorWork: BackendTimelineItem = { item_id: "2.0", kind: "agent_reasoning", source: null, payload: "Earlier work", created_at: "2026-01-01T00:00:05Z", inbound_id: null, show_timestamp: false, reasoning_ms: 2000 };
+    const sent: BackendTimelineItem = { ...human, item_id: "3.0", inbound_id: 7, payload: "Fresh prompt", created_at: new Date().toISOString() };
+    const send = (...events: Parameters<NonNullable<typeof streamHandlers.system>>[0][]) => {
+      act(() => { for (const ev of events) streamHandlers.system!(ev); });
+    };
+    const arrived = { role: "inbound_arrived", agent_id: 42, inbound_id: 7, kind: "chat", source: "user", content: "Fresh prompt" } as const;
+    const picked = (items: BackendTimelineItem[]) =>
+      ({ role: "timeline_snapshot", agent_id: 42, msg_count: items.length, items }) as const;
+    const workWindow = () => screen.queryByTestId("pending-live-activity-window");
+
+    async function open(items: BackendTimelineItem[], running: boolean) {
+      transport.getTimeline.mockResolvedValue(response(items));
+      transport.getPendingMessages.mockResolvedValue([{ id: 7, content: "Fresh prompt", source: "user", created_at: new Date().toISOString(), status: "pending" } as never]);
+      const view = renderWithBrowser(surface(<Reader running={running} />));
+      await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+      await waitFor(() => expect(streamHandlers.system).toBeDefined());
+      return view;
+    }
+
+    it("an empty timeline shows no Working row until the message is on the timeline", async () => {
+      await open([], false);
+      send(arrived);
+      expect(workWindow()).toBeNull();
+      expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
+      send(picked([sent]));
+      expect(workWindow()?.textContent).toMatch(/^Working for [0-4]s$/);
+    });
+
+    it("a stale last human message does not anchor a Working row for the queued one", async () => {
+      await open([priorHuman], false);
+      send(arrived);
+      expect(workWindow()).toBeNull();
+      send(picked([priorHuman, sent]));
+      expect(workWindow()?.textContent).toMatch(/^Working for [0-4]s$/);
+    });
+
+    it("an earlier work block is not lit by a queued message", async () => {
+      await open([priorHuman, priorWork], false);
+      send(arrived);
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 2s");
+      expect(workWindow()).toBeNull();
+      send(picked([priorHuman, priorWork, sent]));
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 2s");
+      expect(workWindow()).not.toBeNull();
+    });
+
+    it("a harness that holds the message unacknowledged (roster running) shows no Working row", async () => {
+      await open([priorHuman], true);
+      send(arrived);
+      expect(workWindow()).toBeNull();
+      send(picked([priorHuman, sent]));
+      expect(workWindow()).not.toBeNull();
+    });
+
+    it("a turn that is really running stays lit when another message queues behind it", async () => {
+      await open([priorHuman, priorWork], true);
+      send({ role: "reasoning_start", agent_id: 42, item_id: "4.0" });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working");
+      send(arrived);
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working");
+    });
+
+    it("the Working row stays for a picked-up message that has not started, even with another queued", async () => {
+      await open([], false);
+      send(arrived, picked([sent]), { ...arrived, inbound_id: 8 });
+      expect(workWindow()).not.toBeNull();
+    });
   });
 
   it("a failed cold read releases the ring and exposes the existing retry action", async () => {

@@ -27,6 +27,7 @@ import type { CompactTransitionBuffer } from "../layout/compact-transition";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
 import { useAgentEventStream } from "../transport/useEventStream";
 import {
+  awaitingPickup,
   computeOlderPageLimit,
   findOldestTimelineCursor,
   hasUnsettledClock,
@@ -81,6 +82,7 @@ export interface UseTimelineResult {
    *  still shows send; accept this delay in exchange for "the message
    *  renders as a single envelope-wrap" cleanness. */
   turnActive: boolean;
+  awaitingPickup: boolean;
   // meiva:note
   // Cached rows can paint immediately. Initial loading and restoration await
   // this selection's accepted authoritative read, including an empty response.
@@ -191,6 +193,8 @@ export function useTimeline(
   const streamingCode = useTimelineStore((s) => s.streamingCode);
   const connectionState = useTimelineStore((s) => s.connectionState);
   const turnActive = useTimelineStore((s) => s.turnActive);
+  const turnRunning = useTimelineStore((s) => s.turnRunning);
+  const arrivedInboundIds = useTimelineStore((s) => s.arrivedInboundIds);
   const processSseEvent = useTimelineStore((s) => s.processSseEvent);
   const processSseEventBatch = useTimelineStore((s) => s.processSseEventBatch);
   const processConnectionEvent = useTimelineStore((s) => s.processConnectionEvent);
@@ -520,6 +524,7 @@ export function useTimeline(
     streamingCode: selected && streamingCode,
     connectionState,
     turnActive: selected && turnActive,
+    awaitingPickup: selected && awaitingPickup(turnRunning, arrivedInboundIds, items),
     sourceReady: selected && qualified === selection && snapshotReady,
     isLoading: timelineQuery.isLoading || (agentId !== null && !timelineQuery.error && (qualified !== selection || !snapshotReady)),
     isRefetching: timelineQuery.isRefetching || isReconciling,

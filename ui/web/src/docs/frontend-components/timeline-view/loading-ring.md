@@ -25,7 +25,9 @@ reader loads present only the top ring without a competing bottom `Working…` r
 Background paging retains its existing invisible presentation.
 
 Once the source is ready and no reader older-page load is active, an active turn
-with no group or only a trailing human prompt presents the inline
+whose triggering message is on the timeline (see "A queued message is not work in
+progress" in [deep collapse](deep-collapse.md)) with no group or only a trailing human
+prompt presents the inline
 `PendingLiveActivityWindow` (`Working…` with the `Layers` icon, matching
 `TurnBlock`'s collapsed header geometry without a disclosure chevron). A real
 work group keeps its expandable `TurnBlock` content and status throughout reads.

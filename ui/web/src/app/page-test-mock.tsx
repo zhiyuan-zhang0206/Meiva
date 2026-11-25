@@ -239,6 +239,7 @@ export function homePageProps(): HomePageProps {
       compactBuffer: null,
       streamingCode: false,
       turnActive: state.turnActive,
+      awaitingPickup: false,
       hasMoreOlder: false,
       loadingOlder: false,
       readerLoadingOlder: false,
