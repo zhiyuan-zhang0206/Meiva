@@ -45,7 +45,12 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
         )
 
         assert response.status_code == 200
-        assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
+        assert response.json() == {
+            "items": [],
+            "msg_count": 3,
+            "has_more": False,
+            "current_epoch": 0,
+        }
 
     def test_missing_cross_segment_target_is_terminal_even_if_an_older_boundary_exists(
         self,
@@ -168,7 +173,12 @@ class TestTimelineCompactHistoryHeadNotes(CompactHistoryCases):
             assert problem["retryable"] is True
         else:
             assert response.status_code == 200
-            assert response.json() == {"items": [], "msg_count": 3, "has_more": False}
+            assert response.json() == {
+                "items": [],
+                "msg_count": 3,
+                "has_more": False,
+                "current_epoch": 0,
+            }
 
     def test_long_conversation_keeps_standing_head_notes(
         self, db_conn: psycopg.Connection, test_client: GatewayTestClient

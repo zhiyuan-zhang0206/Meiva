@@ -59,6 +59,8 @@ async def fetch_record_window(
     before: int | None,
     reading_locator: str | None = None,
     reading_direction: ReadingDirection | None = None,
+    floor: int | None = None,
+    session_id: str | None = None,
 ) -> HarnessTimelineWindow:
     state = gateway_state(request)
     machine, mode = await asyncio.to_thread(_placement, request, agent_id)
@@ -71,6 +73,8 @@ async def fetch_record_window(
         delivery_mode=mode.value,
         reading_locator=reading_locator,
         reading_direction=reading_direction,
+        floor=floor,
+        session_id=session_id,
     )
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
@@ -91,10 +95,25 @@ async def fetch_record_window(
 
 
 def fetch_record_window_sync(
-    request: Request, agent_id: int, harness: str, *, limit: int, before: int | None
+    request: Request,
+    agent_id: int,
+    harness: str,
+    *,
+    limit: int,
+    before: int | None,
+    floor: int | None = None,
+    session_id: str | None = None,
 ) -> HarnessTimelineWindow:
     async def ask() -> HarnessTimelineWindow:
-        return await fetch_record_window(request, agent_id, harness, limit=limit, before=before)
+        return await fetch_record_window(
+            request,
+            agent_id,
+            harness,
+            limit=limit,
+            before=before,
+            floor=floor,
+            session_id=session_id,
+        )
 
     return anyio.from_thread.run(ask)
 

@@ -95,11 +95,16 @@ def test_current_antigravity_session_excludes_previous_harness_history(
     test_client.app.state.rpc = runner
     response = test_client.get(f"/api/agents/{agent}/timeline?limit={limit}")
     assert response.status_code == 200
-    assert response.json() == {"items": rows, "msg_count": 1200, "has_more": True}
+    assert response.json() == {
+        "items": rows,
+        "msg_count": 1200,
+        "has_more": True,
+        "current_epoch": 0,
+    }
     assert runner.calls[-1][2]["limit"] == limit
     older: dict[str, object] = {"items": [], "has_more": False, "size": 1200}
     runner.answer = older
     page = test_client.get(f"/api/agents/{agent}/timeline?before=h800.0&limit={limit}")
     assert page.status_code == 200
-    assert page.json() == {"items": [], "msg_count": 1200, "has_more": False}
+    assert page.json() == {"items": [], "msg_count": 1200, "has_more": False, "current_epoch": 0}
     assert runner.calls[-1][2]["before"] == 800

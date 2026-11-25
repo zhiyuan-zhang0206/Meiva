@@ -168,6 +168,7 @@ def read_window(
     load_sent: LoadSent,
     unread: UnreadRows,
     anchor: int | None = None,
+    floor: int = 0,
 ) -> Window:
     rows, start, read, size = _prepare_window(file, before, anchor)
     # meiva:note
@@ -178,7 +179,7 @@ def read_window(
     )
     spent, want = 0, BLOCK_BYTES
     while True:
-        block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read))
+        block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read, start - floor))
         rows = [*block.rows, *rows]
         grown, start = start - block.start, block.start
         read, want = read + grown, want * 2
@@ -196,7 +197,7 @@ def read_window(
         full = len(projected.items) - cut >= limit
         spent += grown if full else 0
         if (
-            start == 0
+            start <= floor
             or spent >= MAX_LOOKBACK_BYTES
             or (
                 full
@@ -208,7 +209,7 @@ def read_window(
         ):
             return Window(
                 items=projected.items[cut:],
-                has_more=start > 0 or cut > 0,
+                has_more=start > floor or cut > 0,
                 size=size,
                 turn_start=projected.turn_start,
             )

@@ -38,3 +38,13 @@ reaches the epoch's first item.
 carries `msg_count` 0 and no `reading_source`. `current_epoch` is the current epoch's
 `seq` (0 when the agent never switched). Items of an earlier epoch have no
 `reading_locator`: `/timeline/window` and quotes do not serve them.
+
+## Reading one epoch
+
+`epoch_pages.py` plans a page and assembles it; `timeline.py` reads the sources. Both are used only when the agent has two or more epochs, they form one chain ending on the agent's harness (`usable_epochs`), and the agent row names the same harness as the last one. Any other agent is read as before, with `current_epoch` 0.
+
+- **Native epoch**: the checkpoint is read as always, current segment and retained compact segments, through the [native slice](../../../../base/agents/epochs/docs/native-slice.md) of the epoch, so only the items of its time are windowed. A retained segment that holds nothing of the epoch is passed over inside the same request. The slice applies to the current epoch too when the agent has an earlier native epoch.
+- **External epoch**: one `harness_timeline_read` to the agent's machine. The epoch's byte range bounds the window: the window starts below `source_end` (or the cursor) and stops at `source_start`. A missing bound is inferred from the next or previous epoch of the same harness. When neither bound is known and the harness has another epoch, the items are filtered to `[started_at, ended_at)` by `created_at`; this is the best effort for backfilled rows. An epoch that is not current names its session, and a record whose session differs reads as unavailable.
+- **Unavailable epoch**: a machine that is offline (503) or fails the read (502), a missing or undecodable record, a session that was replaced, or a harness with no readable record. The page carries the epoch's switch block and one `history_unavailable` marker, and `has_more` continues to the epoch before it. A current epoch whose record is not written yet (no session, no file) is empty, not unavailable.
+
+`has_more` is true while the epoch holds older items, and after its last item while an earlier epoch exists. A source that reports more but returns nothing is taken as read to its head, so a page always moves the cursor on to the switch block.

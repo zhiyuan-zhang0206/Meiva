@@ -93,7 +93,7 @@ def test_a_thread_with_no_rollout_is_an_empty_timeline(
     response = client.get(f"/api/agents/{agent}/timeline")
 
     assert response.status_code == 200
-    assert response.json() == {"items": [], "msg_count": 0, "has_more": False}
+    assert response.json() == {"items": [], "msg_count": 0, "has_more": False, "current_epoch": 0}
 
 
 class RecordOperationRunner:

@@ -232,19 +232,19 @@ class TestTimelineCompactHistoryBoundaries(CompactHistoryCases):
             f"/api/agents/{tid}/timeline",
             params={"before": f"s2.{older_id}.1.0", "limit": 50},
         ).json()
-        assert blocked == {"items": [], "msg_count": 3, "has_more": False}
+        assert blocked == {"items": [], "msg_count": 3, "has_more": False, "current_epoch": 0}
 
         non_boundary = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s1.{current_id}.1.0", "limit": 50},
         ).json()
-        assert non_boundary == {"items": [], "msg_count": 3, "has_more": False}
+        assert non_boundary == {"items": [], "msg_count": 3, "has_more": False, "current_epoch": 0}
 
         invalid_rank = test_client.get(
             f"/api/agents/{tid}/timeline",
             params={"before": f"s0.{newer_id}.1.0", "limit": 50},
         ).json()
-        assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False}
+        assert invalid_rank == {"items": [], "msg_count": 3, "has_more": False, "current_epoch": 0}
 
         reconfigure(test_client, timeline_compact_history=-1)
         stale_rank = test_client.get(

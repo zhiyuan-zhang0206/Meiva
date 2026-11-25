@@ -1,3 +1,4 @@
+from enum import StrEnum
 from typing import Self
 
 from pydantic import (
@@ -20,6 +21,13 @@ def _missing_reading_metadata(value: object) -> bool:
     return value is None or value is False
 
 
+class RecordUnreadable(StrEnum):
+    NO_SESSION = "no_session"
+    FILE_MISSING = "file_missing"
+    SESSION_MISMATCH = "session_mismatch"
+    UNDECODABLE = "undecodable"
+
+
 # meiva:note
 # The gateway asks the machine an agent lives on for the newest `limit` timeline items of a harness whose record is
 # read when asked (`before` is the byte offset of the item the window ends before, the number in an `h<offset>.<n>` item
@@ -38,9 +46,17 @@ class HarnessTimelineReadRequest(BaseModel):
     reading_direction: ReadingDirection | None = None
     explicit_visibility: bool
     delivery_mode: str | None
+    floor: int | None = Field(default=None, ge=0)
+    session_id: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
     def validate_selector(self) -> Self:
+        if self.floor is not None and (
+            self.anchor_item_id is not None or self.reading_locator is not None
+        ):
+            raise ValueError("A record floor applies to a plain or `before` window")
+        if self.floor is not None and self.before is not None and self.before < self.floor:
+            raise ValueError("A record window cannot end before its floor")
         selectors = sum(
             value is not None for value in (self.before, self.anchor_item_id, self.reading_locator)
         )
@@ -57,6 +73,8 @@ class HarnessTimelineReadRequest(BaseModel):
             "anchor_item_id": self.anchor_item_id,
             "reading_locator": self.reading_locator,
             "reading_direction": self.reading_direction,
+            "floor": self.floor,
+            "session_id": self.session_id,
         }
         omitted = {name for name, value in selectors.items() if value is None}
         return self.model_dump(mode="json", exclude=omitted)
@@ -78,5 +96,6 @@ class HarnessTimelineWindow(BaseModel):
     reading_unavailable: ReadingUnavailableReason | None = Field(
         default=None, exclude_if=_missing_reading_metadata
     )
+    unreadable: RecordUnreadable | None = Field(default=None, exclude_if=_missing_reading_metadata)
     older_cursor: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
     newer_cursor: str | None = Field(default=None, exclude_if=_missing_reading_metadata)

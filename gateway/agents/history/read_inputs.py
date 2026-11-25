@@ -4,6 +4,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from base.agents.epochs.native_slice import NativeEpochSlice
 from base.agents.messages.timestamp_policy import TimestampPolicy
 
 __all__ = [
@@ -21,6 +22,7 @@ class TimelineRead:
     rendering: TimestampPolicy
     default_limit: int
     compact_history: int
+    epoch_slice: NativeEpochSlice | None = None
 
 
 # meiva:note

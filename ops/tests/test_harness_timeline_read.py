@@ -137,11 +137,13 @@ def test_a_session_with_no_record_or_no_file_yet_has_an_empty_timeline(
         _request(agent), pool=pool, home=tmp_path / "home", unread=UnreadRows(), environ=environ
     )
     assert (none.items, none.has_more, none.size) == ([], False, 0)
+    assert none.unreadable == "no_session"
     home = _session(tmp_path, agent, write_file=False)
     unwritten = read_harness_timeline(
         _request(agent), pool=pool, home=home, unread=UnreadRows(), environ=environ
     )
     assert (unwritten.items, unwritten.has_more, unwritten.size) == ([], False, 0)
+    assert unwritten.unreadable == "file_missing"
 
 
 def test_a_page_before_an_item_ends_at_that_row(
@@ -163,6 +165,37 @@ def test_a_page_before_an_item_ends_at_that_row(
     )
     assert head.has_more
     assert all(int(i.item_id.removeprefix("h").split(".")[0]) < oldest for i in page.items)
+
+
+def test_a_window_stops_at_the_floor_and_the_session_must_be_the_one_asked_for(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    home = _session(tmp_path, agent, write_file=True)
+    environ = {"HOME": str(tmp_path)}
+    whole = read_harness_timeline(
+        _request(agent, limit=1000), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
+    floor = int(whole.items[2].item_id.removeprefix("h").split(".")[0])
+    kept = read_harness_timeline(
+        _request(agent, limit=1000, floor=floor, session_id=SESSION),
+        pool=pool,
+        home=home,
+        unread=UnreadRows(),
+        environ=environ,
+    )
+    assert [item.item_id for item in kept.items] == [
+        item.item_id for item in whole.items if int(item.item_id[1:].split(".")[0]) >= floor
+    ]
+    assert kept.has_more is False
+    other = read_harness_timeline(
+        _request(agent, session_id="another-session"),
+        pool=pool,
+        home=home,
+        unread=UnreadRows(),
+        environ=environ,
+    )
+    assert (other.items, other.unreadable) == ([], "session_mismatch")
 
 
 def test_a_native_harness_is_refused_by_the_external_record_reader(

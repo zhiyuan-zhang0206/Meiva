@@ -35,12 +35,12 @@ from base.api_contracts.reading import (
     encode_reading_locator,
     encode_reading_source,
 )
-from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows, ZstdRecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir
-from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
+from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow, RecordUnreadable
 
 
 # meiva:note
@@ -62,11 +62,9 @@ def read_harness_timeline(
 ) -> HarnessTimelineWindow:
     if not reads_timeline_from_record(request.harness):
         raise ValueError(f"the timeline of harness {request.harness!r} is not read from its record")
-    record = FileSessionRegistry(harness_sessions_dir(home=home)).load(
-        request.agent_id, harness=request.harness
-    )
-    if record is None:
-        return _empty(request)
+    record = _session_of(request, home)
+    if isinstance(record, RecordUnreadable):
+        return _empty(request, record)
     path = session_file(request.harness, environ, Path(record.cwd), record.session_id)
     file: RecordFile
     if path is not None:
@@ -75,7 +73,7 @@ def read_harness_timeline(
         packed = compressed_file(request.harness, environ, record.session_id)
         if packed is None:
             _report_unreadable(request, environ, record.session_id)
-            return _empty(request)
+            return _empty(request, RecordUnreadable.FILE_MISSING)
         file = ZstdRecordFile(packed)
 
     def load_sent(until: datetime, wanted: Mapping[str, InputRow]) -> dict[str, list[TimelineItem]]:
@@ -104,14 +102,15 @@ def read_harness_timeline(
             render_tool=format_tool_use,
             load_sent=load_sent,
             unread=unread,
+            floor=request.floor or 0,
         )
     except FileNotFoundError:
-        return _empty(request)
+        return _empty(request, RecordUnreadable.FILE_MISSING)
     except zstandard.ZstdError as error:
         if request.reading_locator is not None:
             raise
         _report_unreadable(request, environ, record.session_id, reason=str(error))
-        return _empty(request)
+        return _empty(request, RecordUnreadable.UNDECODABLE)
     items = _with_record_locators(window.timeline_items, request, record.session_id, window.items)
     verified = (
         request.anchor_item_id
@@ -127,11 +126,27 @@ def read_harness_timeline(
     )
 
 
-def _empty(request: HarnessTimelineReadRequest) -> HarnessTimelineWindow:
+def _session_of(
+    request: HarnessTimelineReadRequest, home: Path
+) -> SessionRecord | RecordUnreadable:
+    record = FileSessionRegistry(harness_sessions_dir(home=home)).load(
+        request.agent_id, harness=request.harness
+    )
+    if record is None:
+        return RecordUnreadable.NO_SESSION
+    if request.session_id is not None and request.session_id != record.session_id:
+        return RecordUnreadable.SESSION_MISMATCH
+    return record
+
+
+def _empty(
+    request: HarnessTimelineReadRequest, unreadable: RecordUnreadable | None = None
+) -> HarnessTimelineWindow:
     return HarnessTimelineWindow(
         items=[],
         has_more=False,
         size=0,
+        unreadable=unreadable,
         anchor_applied=request.anchor_item_id is not None,
         reading_applied=request.reading_locator is not None,
         reading_unavailable=ReadingUnavailableReason.SOURCE

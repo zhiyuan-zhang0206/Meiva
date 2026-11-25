@@ -1,0 +1,71 @@
+# meiva:link base/agents/epochs/docs/native-slice.md
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from base.agents.epochs.model import HarnessEpoch
+from base.agents.history.timeline_item import TimelineItem
+
+NATIVE_HARNESS = "meiva"
+
+
+@dataclass(frozen=True, slots=True)
+class NativeEpochSlice:
+    not_before: datetime | None
+    before: datetime | None
+    first: bool
+
+    def holds(self, moment: datetime | None) -> bool:
+        if moment is None:
+            return self.first
+        return (self.not_before is None or moment >= self.not_before) and (
+            self.before is None or moment < self.before
+        )
+
+
+def native_slice_of(epochs: Sequence[HarnessEpoch], seq: int) -> NativeEpochSlice | None:
+    native = [epoch for epoch in epochs if epoch.harness == NATIVE_HARNESS]
+    if len(native) < 2:
+        return None
+    epoch = next(epoch for epoch in native if epoch.seq == seq)
+    return NativeEpochSlice(
+        not_before=None if epoch is native[0] else epoch.started_at,
+        before=epoch.ended_at,
+        first=epoch is native[0],
+    )
+
+
+def apply_native_slice(
+    items: Sequence[TimelineItem], epoch_slice: NativeEpochSlice
+) -> list[TimelineItem]:
+    stamps = _item_stamps(items)
+    return [item for item, stamp in zip(items, stamps, strict=True) if epoch_slice.holds(stamp)]
+
+
+def _item_stamps(items: Sequence[TimelineItem]) -> list[datetime | None]:
+    own = [moment_of(item.created_at) for item in items]
+    stamps: list[datetime | None] = []
+    previous: datetime | None = None
+    for stamp in own:
+        previous = stamp or previous
+        stamps.append(previous)
+    following: datetime | None = None
+    for index in range(len(stamps) - 1, -1, -1):
+        if own[index] is not None:
+            following = own[index]
+        elif stamps[index] is None:
+            stamps[index] = following
+    return stamps
+
+
+def moment_of(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

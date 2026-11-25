@@ -169,7 +169,7 @@ def test_a_session_with_no_record_is_an_empty_timeline(
     response = client.get(f"/api/agents/{agent}/timeline")
 
     assert response.status_code == 200
-    assert response.json() == {"items": [], "msg_count": 0, "has_more": False}
+    assert response.json() == {"items": [], "msg_count": 0, "has_more": False, "current_epoch": 0}
 
 
 @pytest.mark.parametrize("before", ["bogus", "12.0", "s1.cp.3.0"])
