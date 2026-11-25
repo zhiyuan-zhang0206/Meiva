@@ -1,4 +1,4 @@
-exports = ["extent.py", "model.py", "read.py", "write.py"]
+exports = ["extent.py", "read.py", "write.py"]
 
 [uses]
 "extent.py" = ["model.py"]
