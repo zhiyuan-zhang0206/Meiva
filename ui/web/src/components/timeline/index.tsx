@@ -429,7 +429,7 @@ export const TimelineView = memo(function TimelineView({
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
         viewportRef={viewportRef}
-        viewportClassName="[overflow-anchor:none] overscroll-y-contain data-unread-bounded:[align-content:safe_end]"
+        viewportClassName="[overflow-anchor:none] overscroll-y-contain"
         scrollbarClassName="z-30"
         scrollbarActivity="input"
       >

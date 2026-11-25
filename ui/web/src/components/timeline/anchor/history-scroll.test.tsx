@@ -595,10 +595,11 @@ describe("bounded unread return geometry", () => {
   const reply = items[2];
   const viewportHeight = 1000;
   const dockOverlap = 80;
-  const historyHeight = 2000;
+  let historyHeight = 2000;
   let replyHeight: number;
 
-  function mountReturn(initialHeight: number) {
+  function mountReturn(initialHeight: number, priorHeight = 2000) {
+    historyHeight = priorHeight;
     replyHeight = initialHeight;
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(viewportHeight);
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
@@ -699,10 +700,26 @@ describe("bounded unread return geometry", () => {
     resize();
     expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
     readerScroll(top + 150);
-    expect(viewport().hasAttribute("data-unread-bounded")).toBe(false);
     replyHeight = 2500;
     resize();
     expect(readingOffset(human.item_id)).toBe(READING_TOP_PX - 150);
+  });
+
+  it("lays a conversation that fits the viewport out from the top, never pushed to the bottom, and still holds the prompt at the safe top once the reply outgrows it", () => {
+    mountReturn(100, 300);
+    expect(viewport().hasAttribute("data-unread-bounded")).toBe(false);
+    expect(viewport().className).not.toContain("safe_end");
+    expect(viewport().scrollTop).toBe(0);
+    expect(readingOffset(history.item_id)).toBeCloseTo(0);
+    expect(readingOffset(human.item_id)).toBe(300);
+    expect(readingOffset(reply.item_id)).toBe(400);
+    replyHeight = 500;
+    resize();
+    expect(viewport().scrollTop).toBe(0);
+    expect(readingOffset(history.item_id)).toBeCloseTo(0);
+    replyHeight = 2000;
+    resize();
+    expect(readingOffset(human.item_id)).toBe(READING_TOP_PX);
   });
 });
 

@@ -148,14 +148,11 @@ export function useViewportAnchor({
   const setAnchor = useCallback((anchor: ViewAnchor, cause: AnchorChangeCause) => {
     const previous = anchorRef.current;
     anchorRef.current = anchor;
-    if ((previous?.kind === "bounded-tail") !== (anchor.kind === "bounded-tail")) {
-      viewport()?.toggleAttribute("data-unread-bounded", anchor.kind === "bounded-tail");
-    }
     const same = previous?.kind === anchor.kind && (anchor.kind === "tail" ||
       (previous.kind !== "tail" && previous.row === anchor.row &&
         (anchor.kind === "bounded-tail" || (previous.kind === "row" && previous.offset === anchor.offset && previous.clearTurnHeader === anchor.clearTurnHeader))));
     if (!same) latest.current.onChange(anchor, cause);
-  }, [viewport]);
+  }, []);
 
   const apply = useCallback(() => {
     const vp = viewport();
@@ -198,7 +195,6 @@ export function useViewportAnchor({
       else {
         freeRef.current = true;
         anchorRef.current = null;
-        vp.removeAttribute("data-unread-bounded");
         latest.current.onFree?.();
       }
       lastWrittenRef.current = vp.scrollTop;
@@ -305,7 +301,6 @@ export function useViewportAnchor({
       freeRef.current = true;
       inOverlaySlackRef.current = false;
       anchorRef.current = null;
-      vp.removeAttribute("data-unread-bounded");
       latest.current.onFree?.();
     }
   }, [naturalEnd, overlaySlackHeight, readRow, setAnchor]);
