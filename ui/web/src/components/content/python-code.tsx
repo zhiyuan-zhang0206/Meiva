@@ -3,7 +3,7 @@
 // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 "use client";
 
-import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import type { Highlight as HighlightComponentType, PrismTheme } from "prism-react-renderer";
 
 import { CopyButton } from "@/components/content/copy-button";
@@ -51,6 +51,18 @@ const theme: PrismTheme = {
     { types: ["punctuation", "operator"], style: { color: "var(--syntax-punct)" } },
   ],
 };
+
+// meiva:note
+// The streaming edge fade paints `::highlight()` ranges, where `currentColor` is not the token's
+// colour (it resolves to black). Each token therefore republishes its own syntax colour as
+// `--stream-edge-color`, so the faded tail keeps the token's hue in both themes.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/stream-reveal.md
+type EdgeColorStyle = CSSProperties & { "--stream-edge-color"?: string };
+
+function withEdgeColor(style: CSSProperties | undefined): EdgeColorStyle | undefined {
+  if (!style?.color) return style;
+  return { ...style, "--stream-edge-color": style.color };
+}
 
 interface Props {
   code: string;
@@ -101,9 +113,10 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false, co
               const lineProps = getLineProps({ line });
               return (
                 <div key={i} {...lineProps}>
-                  {line.map((token, j) => (
-                    <span key={j} {...getTokenProps({ token })} />
-                  ))}
+                  {line.map((token, j) => {
+                    const tokenProps = getTokenProps({ token });
+                    return <span key={j} {...tokenProps} style={withEdgeColor(tokenProps.style)} />;
+                  })}
                 </div>
               );
             })}

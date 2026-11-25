@@ -82,9 +82,17 @@ While revealing, the last `EDGE_FADE_TAIL_GRAPHEMES` non-space graphemes are
 painted at stepped opacity (newest faintest) with the CSS Custom Highlight API
 (`reveal/edge-fade.ts`). It styles ranges of the text nodes that React and
 react-markdown already own: no span per character, no layout change, and copy,
-selection and accessibility see the same text. Highlight colour is derived from
-the text's own colour (`color-mix(currentColor ...)`), so syntax colours in code
-survive. The edge is painted only while the reveal still has something to show. The moment the reveal catches up with the arrived text, whatever the reason (the provider paused, the turn ended before the commit snapshot arrived, the stream committed, the tab became visible again), it ages out over `EDGE_FADE_AGE_OUT_MS` and the loop stops; a new delta paints it again. A row that mounts already caught up is never painted.
+selection and accessibility see the same text. Highlight colour is
+`color-mix(in srgb, var(--stream-edge-color, var(--foreground)) <pct>%, transparent)`.
+It must not use `currentColor`: inside `::highlight()` Chromium resolves it to the
+highlight's own initial value (opaque black), not the host text's colour, which
+blends to a near-background dark in dark mode (tail invisible) and only looked right on
+white. Custom properties do inherit from the host element, so every text surface
+declares `--stream-edge-color` as its real foreground: the agent prose and reasoning
+wrappers, the plain `agent_code` `<pre>`, the `.chat-md` code / pre / blockquote /
+link / heading / strong rules in `globals.css` (with dark overrides), and each Prism
+token in `PythonCode` (its own syntax colour, so token hues survive). An undeclared
+surface falls back to `var(--foreground)`, which is legible in both themes. The edge is painted only while the reveal still has something to show. The moment the reveal catches up with the arrived text, whatever the reason (the provider paused, the turn ended before the commit snapshot arrived, the stream committed, the tab became visible again), it ages out over `EDGE_FADE_AGE_OUT_MS` and the loop stops; a new delta paints it again. A row that mounts already caught up is never painted.
 A browser without the API, and a user with `prefers-reduced-motion`, get the same
 smooth reveal without the gradient.
 

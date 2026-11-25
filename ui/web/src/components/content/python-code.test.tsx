@@ -41,6 +41,9 @@ it("highlights immediately when the chunk was already prefetched", async () => {
   const { container, rerender, browser } = renderWith(chunk, <PythonCode code={first} streaming />);
   expect(container.querySelector("pre")?.textContent).toBe(first);
   expect(container.querySelector("pre .token.string")?.textContent).toBe('"<pending>"');
+  expect(container.querySelector<HTMLElement>("pre .token.string")?.style.getPropertyValue("--stream-edge-color")).toBe(
+    "var(--syntax-string)",
+  );
   expect(container.querySelector("pre .animate-pulse")).toBeNull();
   expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
 
