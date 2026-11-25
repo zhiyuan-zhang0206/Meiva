@@ -180,7 +180,6 @@ export interface TimelineSnapshotEvent extends BaseEvent {
   readonly items: readonly BackendTimelineItem[];
 
   readonly msg_count: number;
-  readonly retires?: readonly string[];
 }
 
 export type AgentSnapshot = Schemas["AgentRow"];
