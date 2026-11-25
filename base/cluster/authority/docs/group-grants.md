@@ -16,6 +16,7 @@ table-wide UPDATE a cluster installed before that narrowing.
 Projection tables permit SELECT, INSERT and DELETE.
 Runner capture of visible assistant replies can append `agent_publications` and
 read retry receipts. Updating read state and deleting publications remain gateway operations.
+A harness switch applied on the runner closes and opens `agent_harness_epochs` rows next to its `agents_meta` update, so the runner may INSERT and UPDATE that table and never delete from it.
 The runner owns the complete `agent_shell_ttls` row lifecycle: it inserts at
 persistent-shell creation, updates on renewal, and deletes after a definitive
 local close during terminal agent cleanup. That DELETE is table-scoped; the

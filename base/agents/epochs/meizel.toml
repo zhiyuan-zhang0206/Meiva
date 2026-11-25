@@ -1,0 +1,12 @@
+exports = ["extent.py", "model.py", "read.py", "write.py"]
+
+[uses]
+"extent.py" = ["model.py"]
+"read.py" = ["model.py"]
+"tests" = ["model.py", "read.py", "write.py"]
+"write.py" = ["model.py"]
+
+[purity]
+"__init__.py" = "strict"
+"model.py" = "strict"
+"write.py" = "strict"

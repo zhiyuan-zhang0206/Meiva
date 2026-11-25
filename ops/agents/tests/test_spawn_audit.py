@@ -12,6 +12,7 @@ import psycopg
 import pytest
 
 from base.agents.birth.spawn import create_agent_row
+from base.agents.epochs.read import read_epochs
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -317,3 +318,39 @@ class TestSpawnFork:
         assert len(fork_rows) == 1
         assert fork_rows[0]["target_agent_id"] == source
         assert fork_rows[0]["source"] == f"agent:{source}"
+
+
+def test_a_spawn_and_a_fork_each_open_epoch_zero_on_their_harness(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    catalog = build_model_catalog(home=meiva_home())
+    parent, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_identity.name(),
+        catalog=catalog,
+        authority=config_authority,
+        config={"llm_model": "deepseek-flash", "reasoning_effort": "max"},
+    )
+    child, _, _, _ = create_agent_row(
+        database,
+        event_bus,
+        spawner="agent:4242",
+        fork_from=parent,
+        fork_checkpoint=_first_checkpoint(db_conn, parent),
+        machine=machine_identity.name(),
+        catalog=catalog,
+        authority=config_authority,
+    )
+
+    for agent_id in (parent, child):
+        [epoch] = read_epochs(db_conn, agent_id)
+        assert (epoch.seq, epoch.harness, epoch.model) == (0, "meiva", "deepseek-flash")
+        assert (epoch.switched_by, epoch.ended_at) == ("birth", None)
+    db_conn.commit()

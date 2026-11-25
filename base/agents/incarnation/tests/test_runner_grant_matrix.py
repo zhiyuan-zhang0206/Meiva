@@ -19,6 +19,20 @@ from base.agents.incarnation.tests.test_runner_role import (
 )
 
 
+def exercise_epoch_grants(conn: psycopg.Connection, agent_id: int) -> None:
+    conn.execute(
+        "INSERT INTO agent_harness_epochs (agent_id, seq, harness, switched_by)"
+        " VALUES (%s, 0, 'meiva', 'birth')",
+        (agent_id,),
+    )
+    conn.execute(
+        "UPDATE agent_harness_epochs SET ended_at = clock_timestamp() WHERE agent_id = %s",
+        (agent_id,),
+    )
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("DELETE FROM agent_harness_epochs WHERE agent_id = %s", (agent_id,))
+
+
 def test_runner_grant_matrix(runner_db: str) -> None:
     """The design's grant matrix, exercised as meiva_runner over the wire."""
     grant_runner(runner_db)
@@ -67,6 +81,7 @@ def test_runner_grant_matrix(runner_db: str) -> None:
         )
         # agents_meta status/liveness (SELECT + UPDATE; INSERT stays with spawn)
         conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
+        exercise_epoch_grants(conn, agent_id)
         # agents is gateway-written only: labels go through the gateway API
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))
