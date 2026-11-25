@@ -33,14 +33,12 @@ LifecycleKind = Literal["restart", "terminate"]
 
 
 # meiva:note
-# A harness change a committed restart stored: the harness the agent left, the one it now runs
-# on, who asked and the message that went with it, which the history note of the switch repeats.
+# A harness change a committed restart stored: the harness the agent left and the one it now runs
+# on. The switch is shown by the epoch rows and the note the agent reads on waking.
 @dataclass(frozen=True)
 class HarnessSwitch:
     old: str
     new: str
-    source: str
-    message: str
 
 
 # meiva:note

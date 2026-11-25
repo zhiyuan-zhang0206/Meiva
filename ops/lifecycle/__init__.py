@@ -557,14 +557,7 @@ async def _execute_harness_transition(
             preserve_shells=True,
             require_quiescent=True,
         )
-    await prepare_harness_switch(
-        agent_id,
-        old_harness=old_harness,
-        new_harness=target_harness,
-        source=body.source,
-        message=body.message,
-        host=host,
-    )
+    await prepare_harness_switch(agent_id, host=host)
     if status != "terminated" and not require_quiescent:
         _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,

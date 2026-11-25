@@ -149,8 +149,8 @@ invocation on every harness; the agent's own source is never idle, so the apply 
 the command and queues the note, in one transaction. A switch also closes the agent's current
 `agent_harness_epochs` row and opens the next one in that transaction, with the lengths of the
 record files it leaves and arrives in (read on this machine, see
-[harness epochs](../../../base/agents/epochs/docs/epochs.md)). The host writes the switch note in
-the outgoing native history just after the commit. The note is the one text `harness_switch_note`
+[harness epochs](../../../base/agents/epochs/docs/epochs.md)); nothing is written to the outgoing
+history, the epoch rows are what shows the switch. The note is the one text `harness_switch_note`
 builds (the harness left, the harness now running, who asked, that nothing said before the switch
 is visible to the new harness, and the agent's message as the handoff) for a switch, and the
 restart-accepted text for a restart that kept its harness (the session resumes).

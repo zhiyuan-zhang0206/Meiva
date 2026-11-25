@@ -2,14 +2,11 @@
 
 from pathlib import Path
 
-from base.agents.messages.timestamp_policy import TimestampSource
 from base.daemon.health import RouteHandler
-from base.host.boundary.fields import str_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
-from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory, record_switch_note
 
 
 def _json_object(body: bytes) -> dict[str, object] | None:
@@ -50,37 +47,17 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
 
 
 # meiva:note
-# A switch across display stores leaves a note in the outgoing history.
-# External harnesses share a display store and receive the switch note on arrival.
-def prepare_harness_switch_route(host: AgentHost, *, timestamps: TimestampSource) -> RouteHandler:
+# A `POST /prepare-harness-switch` handler: the agent's cached runtime is dropped before its harness
+# changes, so the next turn builds on the stored harness. The switch itself is shown by the epoch
+# table; nothing is written to the outgoing history.
+def prepare_harness_switch_route(host: AgentHost) -> RouteHandler:
 
     async def handler(body: bytes) -> tuple[int, bytes, str]:
-
         payload = _json_object(body)
-        if payload is None:
-            return 400, b'{"error":"invalid prepare-harness-switch payload"}', "application/json"
-        try:
-            agent_id = payload["agent_id"]
-            old_harness = str_field(payload, "old_harness")
-            new_harness = str_field(payload, "new_harness")
-            source = str_field(payload, "source")
-            message = str_field(payload, "message")
-        except (KeyError, TypeError):
-            return 400, b'{"error":"invalid prepare-harness-switch payload"}', "application/json"
+        agent_id = None if payload is None else payload.get("agent_id")
         if type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
-
-        await record_switch_note(
-            SwitchHistory(object_of(getattr, host, "_graph", None), timestamps.policy()),
-            agent_id,
-            old_harness=old_harness,
-            new_harness=new_harness,
-            source=source,
-            message=message,
-        )
-
         host.drop_agent(agent_id)
-
         return 200, b'{"ok":true}', "application/json"
 
     return handler

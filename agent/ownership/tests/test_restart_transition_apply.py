@@ -115,7 +115,7 @@ async def test_a_switch_is_one_commit_and_is_applied_once(
     )
 
     assert applied is not None and applied.kind == "restart"
-    assert applied.switch == HarnessSwitch("meiva", "codex", "self", "I need a real shell")
+    assert applied.switch == HarnessSwitch("meiva", "codex")
     status, owner, harness, overlay, selection, configured = _meta(db_conn, agent_id)
     assert (status, owner, harness, selection, configured) == ("idling", None, "codex", 1, True)
     assert isinstance(overlay, dict) and overlay["llm_model"] == "gpt-6.1-sol"

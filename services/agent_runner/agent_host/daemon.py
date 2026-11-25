@@ -666,9 +666,7 @@ async def run(
                 extra_routes={
                     ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid(), home=home),
                     ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
-                    ("POST", "/prepare-harness-switch"): prepare_harness_switch_route(
-                        host, timestamps=stamping
-                    ),
+                    ("POST", "/prepare-harness-switch"): prepare_harness_switch_route(host),
                 },
             ),
             serve_dispatch=run_dispatcher_group(

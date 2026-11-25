@@ -256,12 +256,7 @@ async def _apply_restart_command(
             ),
         )
     if plan.switches_harness and command.transition is not None:
-        return HarnessSwitch(
-            stored_harness,
-            command.transition.target_harness,
-            command.source,
-            command.content,
-        )
+        return HarnessSwitch(stored_harness, command.transition.target_harness)
     return None
 
 

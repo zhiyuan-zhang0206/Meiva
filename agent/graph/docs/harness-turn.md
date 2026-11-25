@@ -121,11 +121,10 @@ continuation. The shared deadlines and shutdown fallback are owned by
 [Agent-host graceful exit](../../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md).
 
 An explicit external harness restart or a harness switch delivers its restart
-message as a lifecycle system note on the selected harness. Switching away from
-the native checkpoint runtime also records a handoff marker in the outgoing
-checkpoint history; external harnesses read their timelines directly from the
-active CLI session's record, so switching away from an external harness writes
-no outgoing database timeline marker.
+message as a lifecycle system note on the selected harness. A harness switch writes nothing to
+the outgoing history, whether that is the native checkpoint or an external CLI record: the switch is
+shown by the agent's [harness epochs](../../../base/agents/epochs/docs/epochs.md), closed and
+opened in the transaction that stores the new harness.
 
 ## Cost and usage
 
