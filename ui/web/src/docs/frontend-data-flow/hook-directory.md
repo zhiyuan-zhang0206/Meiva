@@ -23,6 +23,7 @@ its key; changed content or attachments receive a new key.
 | `useHarnessAvailability*` / `useRefreshHarnessAvailability` (`lib/harness/use-harness-availability.ts`) | GET reads only the last per-machine snapshot, cached in Query with `staleTime: Infinity`; there is no sidebar warm-up. The explicit Refresh action above Spawn POSTs to `/harnesses/refresh` for all ready runner machines at once, replacing each machine’s query data as it resolves. The gateway retains the last success and coalesces concurrent refresh probes; reads and reloads never probe. |
 | `useQuestions` | the fleet's unresolved questions (`GET /api/questions`, `awaiting`), read by the question bar above the composer; question_* events invalidate-refetch |
 | ~~`usePrefetchTimelines`~~ | removed (Aw-Snap fix) — the fleet-wide full-timeline prefetch retained one ~128KB system prompt + history per agent for gcTime=30min, the dominant renderer-heap source; timelines now fetch on demand when an agent is opened |
-| `useThrottledStreaming` | streaming increment throttled batching |
+| `useStreamReveal` (`lib/timeline/reveal/use-stream-reveal.ts`) | what a streaming row displays, decoupled from what has arrived: a read pointer follows the store's text at `backlog / τ`, committed to React at the markdown/Prism parse budget (see [stream reveal](../frontend-components/timeline-view/stream-reveal.md)) |
+| `useStreamEdgeFade` | paints the soft leading edge on the revealed text (CSS Custom Highlight API; absent API or reduced motion → plain smooth reveal) |
 | `useUserSettings` | server-side user preferences (`user_settings` table) |
 | `useMediaQuery` / `useIsLarge` | responsive breakpoints |

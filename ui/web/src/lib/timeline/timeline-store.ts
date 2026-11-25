@@ -65,6 +65,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   compactEpoch: 0,
   streamingCode: false,
   turnActive: false,
+  turnRunning: false,
+  arrivedInboundIds: [],
   liveAnchorAt: 0,
   connectionState: "open",
   tokenUsage: 0,
@@ -148,6 +150,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       set((s) => ({
         streamingCode: false,
         turnActive: false,
+        turnRunning: false,
+        arrivedInboundIds: [],
         liveAnchorAt: 0,
         items: s.items.some((it) => it.partial)
           ? s.items.map((it) =>
@@ -244,6 +248,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       streamingIds: new Set(),
       streamingCode: false,
       turnActive: false,
+      turnRunning: false,
+      arrivedInboundIds: [],
       liveAnchorAt: 0,
       hasMoreOlder: cached !== null && hasMoreOlder,
       olderFetchCount: 0,
@@ -335,7 +341,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
           (it.execStartedAt != null && it.exec_ms == null) ||
           (it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       );
-      if (!s.turnActive && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock && s.liveAnchorAt === 0) {
+      if (!s.turnActive && !s.turnRunning && s.arrivedInboundIds.length === 0 && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock && s.liveAnchorAt === 0) {
         return {};
       }
       const cleaned = s.items.filter(
@@ -346,6 +352,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         : cleaned;
       return {
         turnActive: false,
+        turnRunning: false,
+        arrivedInboundIds: [],
         streamingCode: false,
         streamingIds: new Set(),
         liveAnchorAt: 0,

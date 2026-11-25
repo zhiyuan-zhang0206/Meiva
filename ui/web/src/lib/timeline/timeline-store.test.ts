@@ -11,6 +11,8 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { foldEvent, type ThreadTimelineState } from "../fold/timeline";
+import { awaitingPickup } from "./timeline-plan";
 import { useTimelineStore } from "./timeline-store";
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 
@@ -40,6 +42,8 @@ function resetStore(): void {
     streamingIds: new Set(),
     streamingCode: false,
     turnActive: false,
+    turnRunning: false,
+    arrivedInboundIds: [],
     liveAnchorAt: 0,
     connectionState: "open",
     tokenUsage: 0,
@@ -676,5 +680,54 @@ describe("readable snapshot readiness", () => {
     expect(store.reloadSnapshot(fresh, 2, false)).toBe(true);
     expect(useTimelineStore.getState().resetPending).toBe(false);
     expect(useTimelineStore.getState().items.map((row) => row.item_id)).toEqual(["1.0"]);
+  });
+});
+
+describe("awaitingPickup: a queued message is not work in progress", () => {
+  const arrived = (inbound_id: number): SystemEvent =>
+    ({ role: "inbound_arrived", agent_id: 42, inbound_id, kind: "chat", source: "user", content: "hi" });
+  const human = (item_id: string, inbound_id: number): BackendTimelineItem =>
+    ({ item_id, kind: "inbound_chat", source: "user", payload: "hi", created_at: null, inbound_id, show_timestamp: false });
+  const fold = (state: ThreadTimelineState, ...events: SystemEvent[]) =>
+    events.reduce((s, ev) => foldEvent(s, ev), state);
+  const idle: ThreadTimelineState = {
+    items: [], streamingIds: new Set(), streamingCode: false, turnActive: false,
+    turnRunning: false, arrivedInboundIds: [], hasMoreOlder: false, olderFetchCount: 0, resetPending: false,
+  };
+  const waiting = (s: ThreadTimelineState) => awaitingPickup(s.turnRunning, s.arrivedInboundIds, s.items);
+
+  it("an arrival turns the composer busy but waits for pickup until the message is on the timeline", () => {
+    const s = fold(idle, arrived(7));
+    expect(s.turnActive).toBe(true);
+    expect(waiting(s)).toBe(true);
+    expect(waiting({ ...s, items: [human("1.0", 7)] })).toBe(false);
+  });
+
+  it("any one queued message on the timeline is the turn's trigger, whichever else still waits", () => {
+    const s = fold(idle, arrived(7), arrived(8));
+    expect(waiting({ ...s, items: [human("1.0", 7)] })).toBe(false);
+    expect(waiting({ ...s, items: [human("1.0", 8)] })).toBe(false);
+    expect(waiting({ ...s, items: [human("1.0", 5)] })).toBe(true);
+  });
+
+  it.each(["chat_start", "code_start", "reasoning_start", "exec_start", "llm_keepalive"] as const)(
+    "%s is the agent running: nothing waits any more, and later arrivals queue behind a running turn",
+    (role) => {
+      const started = fold(idle, arrived(7), { role, agent_id: 42, item_id: "2.0" } as SystemEvent);
+      expect(started.turnRunning).toBe(true);
+      expect(waiting(started)).toBe(false);
+      expect(waiting(fold(started, arrived(8)))).toBe(false);
+    },
+  );
+
+  it.each([
+    { role: "llm_done", agent_id: 42 },
+    { role: "cancelled", agent_id: 42 },
+    { role: "error", agent_id: 42, content: "boom" },
+  ] as SystemEvent[])("$role ends the turn and forgets what was queued", (ev) => {
+    const ended = fold(idle, arrived(7), ev);
+    expect(ended).toMatchObject({ turnActive: false, turnRunning: false, arrivedInboundIds: [] });
+    const next = fold(ended, arrived(9));
+    expect(waiting(next)).toBe(true);
   });
 });

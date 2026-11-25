@@ -721,6 +721,8 @@ export interface ThreadTimelineState {
   streamingIds: Set<string>;
   streamingCode: boolean;
   turnActive: boolean;
+  turnRunning: boolean;
+  arrivedInboundIds: readonly number[];
   hasMoreOlder: boolean;
   /** How many times loadOlder has been called on this thread — drives
    * exponential growth of the older-window fetch limit. Reset to 0 on a
@@ -734,6 +736,8 @@ export interface ThreadTimelineState {
    * timeline_snapshot replaces the items wholesale and clears the flag. */
   resetPending: boolean;
 }
+const NO_INBOUNDS: readonly number[] = Object.freeze([]);
+
 /** Fold one SSE business event into a SINGLE thread's timeline state — the pure
  *  reducer used for both per-event and batched active-view updates.
  *  `token_usage` / `agent_spawned` / `agent_updated` never reach here — they are
@@ -776,6 +780,8 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
     return {
       ...t,
       turnActive: false,
+      turnRunning: false,
+      arrivedInboundIds: NO_INBOUNDS,
       streamingCode: false,
       streamingIds: new Set(),
       items: t.items.filter(
@@ -788,13 +794,13 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   }
 
   // turn lifecycle tracking
-  const turnStart =
-    ev.role === "inbound_arrived" ||
+  const agentStart =
     ev.role === "llm_keepalive" ||
     ev.role === "chat_start" ||
     ev.role === "code_start" ||
     ev.role === "reasoning_start" ||
     ev.role === "exec_start";
+  const turnStart = agentStart || ev.role === "inbound_arrived";
   // streaming flag
   const codeStart = ev.role === "code_start";
   const codeEnd =
@@ -837,9 +843,19 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
       ? freezeExecClocks(clearCodeClocks(freezeReasoningClocks(applied, nowMs), nowMs), nowMs)
       : applied;
 
+  const turnRunning = agentStart ? true : turnEnd ? false : t.turnRunning;
+  const arrivedInboundIds =
+    agentStart || turnEnd
+      ? NO_INBOUNDS
+      : ev.role === "inbound_arrived" && !t.turnRunning
+        ? [...t.arrivedInboundIds, ev.inbound_id]
+        : t.arrivedInboundIds;
+
   return {
     ...t,
     turnActive: turnStart ? true : turnEnd ? false : t.turnActive,
+    turnRunning,
+    arrivedInboundIds,
     streamingCode: codeStart ? true : codeEnd ? false : t.streamingCode,
     streamingIds,
     items,

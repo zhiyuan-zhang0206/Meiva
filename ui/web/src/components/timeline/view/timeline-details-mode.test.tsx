@@ -348,22 +348,21 @@ describe("agent_chat canvas prose and streaming indicators", () => {
     expect(screen.queryByText(/timeline\.agentChat/)).toBeNull();
     expect(screen.queryByText(/\{suffix\}/)).toBeNull();
   });
-  it("agent_chat partial=true → renders pulsing streaming cursor without '(streaming…)' label", () => {
+  it("agent_chat partial=true → renders no streaming dot and no '(streaming…)' label", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x", partial: true })]}
       />,
     );
-    expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
+    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/\(streaming…\)/)).toBeNull();
   });
-  it("agent_chat interrupted=true → drops streaming cursor without InterruptedNotice", () => {
+  it("agent_chat interrupted=true → no InterruptedNotice", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x", partial: true, interrupted: true })]}
       />,
     );
-    expect(screen.queryByTestId("streaming-cursor")).toBeNull();
     expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
   });
 });

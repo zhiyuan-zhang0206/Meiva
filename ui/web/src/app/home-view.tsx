@@ -97,6 +97,7 @@ type TimelineViewState = Pick<
   | "compactBuffer"
   | "streamingCode"
   | "turnActive"
+  | "awaitingPickup"
   | "hasMoreOlder"
   | "loadingOlder"
   | "readerLoadingOlder"
@@ -404,6 +405,7 @@ function HomeContent({
     compactBuffer,
     streamingCode,
     turnActive,
+    awaitingPickup,
     hasMoreOlder,
     loadingOlder,
     readerLoadingOlder,
@@ -477,6 +479,7 @@ function HomeContent({
     ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` \u00b7 ${activeAgent.label}` : ""}`
     : "\u2026";
   const agentBusy = turnActive || activeAgent?.status === "running";
+  const timelineWorking = agentBusy && !awaitingPickup;
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
   const publications = useUserMessages(activeId);
@@ -574,7 +577,7 @@ function HomeContent({
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             reloadRestore={reloadRestore}
             streamingCode={streamingCode}
-            turnActive={agentBusy}
+            turnActive={timelineWorking}
             lastEventAt={timelineStore.liveAnchorAt}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
