@@ -6,7 +6,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { LiveDocument, LiveNavigator, LivePage, LivePageEventType, LiveViewport } from "./system-browser";
+import type { ViewportCause } from "./browser";
+import type {
+  LiveDocument,
+  LiveNavigator,
+  LivePage,
+  LivePageEventType,
+  LiveViewport,
+} from "./system-browser";
 import {
   beaconOver,
   browserOver,
@@ -20,6 +27,7 @@ import {
   storageOver,
   viewOver,
   viewportOver,
+  withoutScaleLimits,
 } from "./system-browser";
 
 function warnings(): string[] {
@@ -111,6 +119,7 @@ function pageOf(overrides: Partial<LivePage> = {}): LivePage {
     }) as unknown as MediaQueryList,
     innerHeight: 900,
     visualViewport: viewportOf(900),
+    viewportMeta: () => null,
     scrollTo: () => undefined,
     navigator: navigatorOf(),
     document: documentOf(),
@@ -382,8 +391,17 @@ describe("viewportOver", () => {
       scroll: new Set(),
       orientationchange: new Set(),
     };
+    const documentEvents = new Set<() => void>();
     const viewport = viewportOver(
       pageOf({
+        document: documentOf({
+          addEventListener: (type, listener) => {
+            if (type === "visibilitychange") documentEvents.add(listener);
+          },
+          removeEventListener: (type, listener) => {
+            if (type === "visibilitychange") documentEvents.delete(listener);
+          },
+        }),
         visualViewport: visual,
         addEventListener: (type, listener) => void pageEvents[type].add(listener),
         removeEventListener: (type, listener) => void pageEvents[type].delete(listener),
@@ -397,6 +415,7 @@ describe("viewportOver", () => {
     expect(pageEvents.resize.size).toBe(1);
     expect(pageEvents.scroll.size).toBe(1);
     expect(pageEvents.orientationchange.size).toBe(1);
+    expect(documentEvents.size).toBe(1);
     visual.fire();
     expect(heard).toBe(2);
     for (const listener of [...pageEvents.resize, ...pageEvents.scroll]) listener();
@@ -407,6 +426,7 @@ describe("viewportOver", () => {
     expect(pageEvents.resize.size).toBe(0);
     expect(pageEvents.scroll.size).toBe(0);
     expect(pageEvents.orientationchange.size).toBe(0);
+    expect(documentEvents.size).toBe(0);
     visual.fire();
     expect(heard).toBe(4);
   });
@@ -415,8 +435,327 @@ describe("viewportOver", () => {
     const viewport = viewportOver(null);
     expect(viewport.read()).toEqual({ layoutHeight: 0, visual: null });
     viewport.resetScroll();
+    viewport.resetScale();
     const unsubscribe = viewport.subscribe(() => undefined);
     expect(unsubscribe()).toBeUndefined();
+  });
+});
+
+function rotatingPage(content: string | null = "width=device-width, initial-scale=1, viewport-fit=cover") {
+  const pageEvents: Record<LivePageEventType, Set<() => void>> = {
+    popstate: new Set(),
+    resize: new Set(),
+    scroll: new Set(),
+    orientationchange: new Set(),
+  };
+  const documentEvents = { visibilitychange: new Set<() => void>() };
+  const orientation = new Set<() => void>();
+  const portrait = new Set<() => void>();
+  const meta = content === null ? null : { content };
+  const writes: string[] = [];
+  const metaView = meta === null ? null : {
+    get content() {
+      return meta.content;
+    },
+    set content(next: string) {
+      writes.push(next);
+      meta.content = next;
+    },
+  };
+  const scrolls: [number, number][] = [];
+  const pending = new Map<number, { at: number; work: () => void }>();
+  let now = 0;
+  let nextTimer = 1;
+  const state = { visibility: "visible", portrait: true };
+  const document = documentOf({
+    addEventListener: (type, listener) => {
+      if (type === "visibilitychange") documentEvents.visibilitychange.add(listener);
+    },
+    removeEventListener: (type, listener) => {
+      if (type === "visibilitychange") documentEvents.visibilitychange.delete(listener);
+    },
+  });
+  Object.defineProperty(document, "visibilityState", { get: () => state.visibility });
+  const page = pageOf({
+    visualViewport: viewportOf(820),
+    addEventListener: (type, listener) => void pageEvents[type].add(listener),
+    removeEventListener: (type, listener) => void pageEvents[type].delete(listener),
+    screenOrientation: {
+      addEventListener: (_type, listener) => void orientation.add(listener),
+      removeEventListener: (_type, listener) => void orientation.delete(listener),
+    },
+    matchMedia: (query) =>
+      ({
+        get matches() {
+          return query === "(orientation: portrait)" && state.portrait;
+        },
+        addEventListener: (_type: string, listener: () => void) => void portrait.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => void portrait.delete(listener),
+      }) as unknown as MediaQueryList,
+    viewportMeta: () => metaView,
+    scrollTo: (x, y) => void scrolls.push([x, y]),
+    document,
+    setTimeout: (work, delayMs) => {
+      const handle = nextTimer++;
+      pending.set(handle, { at: now + delayMs, work });
+      return handle;
+    },
+    clearTimeout: (handle) => void pending.delete(handle),
+  });
+  const advance = (ms: number) => {
+    const until = now + ms;
+    for (;;) {
+      const due = [...pending.entries()]
+        .filter(([, timer]) => timer.at <= until)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])
+        .at(0);
+      if (due === undefined) break;
+      pending.delete(due[0]);
+      now = due[1].at;
+      due[1].work();
+    }
+    now = until;
+  };
+  return {
+    page,
+    meta,
+    writes,
+    scrolls,
+    advance,
+    state,
+    pageEvents,
+    documentEvents,
+    orientation,
+    portrait,
+    pendingTimers: () => pending.size,
+    fire: (set: Set<() => void>) => {
+      for (const listener of [...set]) listener();
+    },
+  };
+}
+
+describe("viewportOver — rotation", () => {
+  function heard(rotating: ReturnType<typeof rotatingPage>) {
+    const viewport = viewportOver(rotating.page);
+    const causes: [number, ViewportCause][] = [];
+    let clock = 0;
+    const advance = (ms: number) => {
+      for (let tick = 0; tick < ms; tick += 1) {
+        clock += 1;
+        rotating.advance(1);
+      }
+    };
+    const unsubscribe = viewport.subscribe((cause) => void causes.push([clock, cause]));
+    return { viewport, causes, advance, unsubscribe };
+  }
+
+  it("treats orientationchange, screen.orientation and the portrait media query as one rotation", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+    expect(rotating.pageEvents.orientationchange.size).toBe(1);
+    expect(rotating.orientation.size).toBe(1);
+    expect(rotating.portrait.size).toBe(1);
+
+    rotating.fire(rotating.pageEvents.orientationchange);
+    rotating.fire(rotating.orientation);
+    rotating.fire(rotating.portrait);
+    expect(causes).toEqual([[0, "rotated"]]);
+    advance(700);
+    expect(causes).toEqual([
+      [0, "rotated"],
+      [60, "moved"],
+      [180, "rotation-recheck"],
+      [350, "moved"],
+      [600, "moved"],
+    ]);
+
+    unsubscribe();
+    expect(rotating.pageEvents.orientationchange.size).toBe(0);
+    expect(rotating.orientation.size).toBe(0);
+    expect(rotating.portrait.size).toBe(0);
+    expect(rotating.pendingTimers()).toBe(0);
+  });
+
+  it("follows a rotation that only one of the three signals reports", () => {
+    for (const pick of ["orientation", "portrait"] as const) {
+      const rotating = rotatingPage();
+      const { causes, unsubscribe } = heard(rotating);
+      rotating.fire(rotating[pick]);
+      expect(causes).toEqual([[0, "rotated"]]);
+      unsubscribe();
+    }
+  });
+
+  it("starts over on a second rotation after the coalescing window and drops the old samples", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+    rotating.fire(rotating.pageEvents.orientationchange);
+    advance(100);
+    rotating.fire(rotating.pageEvents.orientationchange);
+    advance(700);
+    expect(causes.map(([, cause]) => cause)).toEqual([
+      "rotated",
+      "moved",
+      "rotated",
+      "moved",
+      "rotation-recheck",
+      "moved",
+      "moved",
+    ]);
+    unsubscribe();
+  });
+
+  it("works on a page without screen.orientation or a media query list that can listen", () => {
+    const rotating = rotatingPage();
+    const page = Object.assign(rotating.page, {
+      screenOrientation: undefined,
+      matchMedia: () => ({ matches: true }) as unknown as MediaQueryList,
+    });
+    const causes: ViewportCause[] = [];
+    const unsubscribe = viewportOver(page).subscribe((cause) => void causes.push(cause));
+    rotating.fire(rotating.pageEvents.orientationchange);
+    expect(causes).toEqual(["rotated"]);
+    unsubscribe();
+    const throwing = Object.assign(rotatingPage().page, {
+      matchMedia: () => {
+        throw new Error("no media");
+      },
+    });
+    expect(() => viewportOver(throwing).subscribe(() => undefined)()).not.toThrow();
+  });
+
+  it("asks for a recheck when the tab comes back to the foreground, not when it goes away", () => {
+    const rotating = rotatingPage();
+    const { causes, unsubscribe } = heard(rotating);
+    rotating.state.visibility = "hidden";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([]);
+    rotating.state.visibility = "visible";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([[0, "recheck"]]);
+    unsubscribe();
+  });
+
+  it("treats a return to the foreground in the other orientation as a rotation, and in the same one as a recheck", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+
+    rotating.state.visibility = "hidden";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    rotating.state.portrait = false;
+    rotating.state.visibility = "visible";
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([[0, "rotated"]]);
+    advance(700);
+    expect(causes.map(([, cause]) => cause)).toEqual([
+      "rotated",
+      "moved",
+      "rotation-recheck",
+      "moved",
+      "moved",
+    ]);
+
+    causes.length = 0;
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes).toEqual([[700, "recheck"]]);
+    unsubscribe();
+  });
+
+  it("remembers the orientation a rotation settled in, so the foreground return is not a second rotation", () => {
+    const rotating = rotatingPage();
+    const { causes, advance, unsubscribe } = heard(rotating);
+    rotating.state.portrait = false;
+    rotating.fire(rotating.portrait);
+    advance(700);
+    causes.length = 0;
+    rotating.fire(rotating.documentEvents.visibilitychange);
+    expect(causes.map(([, cause]) => cause)).toEqual(["recheck"]);
+    unsubscribe();
+  });
+
+  it("does not listen for visibilitychange on the window", () => {
+    const rotating = rotatingPage();
+    const { unsubscribe } = heard(rotating);
+    expect(Object.keys(rotating.pageEvents)).not.toContain("visibilitychange");
+    expect(rotating.documentEvents.visibilitychange.size).toBe(1);
+    unsubscribe();
+    expect(rotating.documentEvents.visibilitychange.size).toBe(0);
+  });
+
+  it("attaches the page's listeners once for any number of subscribers", () => {
+    const rotating = rotatingPage();
+    const viewport = viewportOver(rotating.page);
+    const first = viewport.subscribe(() => undefined);
+    const second = viewport.subscribe(() => undefined);
+    expect(rotating.pageEvents.orientationchange.size).toBe(1);
+    first();
+    expect(rotating.pageEvents.orientationchange.size).toBe(1);
+    second();
+    expect(rotating.pageEvents.orientationchange.size).toBe(0);
+  });
+});
+
+describe("viewportOver — resetScale", () => {
+  const original = "width=device-width, initial-scale=1, viewport-fit=cover";
+
+  it("locks the viewport meta to scale 1, restores the page's own content, scrolls to the top and tells subscribers", () => {
+    const rotating = rotatingPage(original);
+    const viewport = viewportOver(rotating.page);
+    const causes: ViewportCause[] = [];
+    const unsubscribe = viewport.subscribe((cause) => void causes.push(cause));
+
+    viewport.resetScale();
+    expect(rotating.meta?.content).toBe(`${original}, minimum-scale=1, maximum-scale=1`);
+    rotating.advance(59);
+    expect(rotating.meta?.content).toContain("maximum-scale=1");
+    expect(rotating.scrolls).toEqual([]);
+    rotating.advance(1);
+    expect(rotating.meta?.content).toBe(original);
+    expect(rotating.scrolls).toEqual([[0, 0]]);
+    expect(causes).toEqual(["moved"]);
+    unsubscribe();
+  });
+
+  it("never stacks limits on rapid resets and restores the first-seen content", () => {
+    const rotating = rotatingPage(`${original}, maximum-scale=5`);
+    const viewport = viewportOver(rotating.page);
+    const unsubscribe = viewport.subscribe(() => undefined);
+    viewport.resetScale();
+    rotating.advance(30);
+    viewport.resetScale();
+    rotating.advance(30);
+    viewport.resetScale();
+    expect(rotating.meta?.content).toBe(`${original}, minimum-scale=1, maximum-scale=1`);
+    expect(rotating.meta?.content.match(/maximum-scale/g)).toHaveLength(1);
+    rotating.advance(60);
+    expect(rotating.meta?.content).toBe(`${original}, maximum-scale=5`);
+    expect(rotating.pendingTimers()).toBe(0);
+    unsubscribe();
+  });
+
+  it("restores the content at once when the last subscriber leaves mid-lock", () => {
+    const rotating = rotatingPage(original);
+    const viewport = viewportOver(rotating.page);
+    const unsubscribe = viewport.subscribe(() => undefined);
+    viewport.resetScale();
+    unsubscribe();
+    expect(rotating.meta?.content).toBe(original);
+    expect(rotating.pendingTimers()).toBe(0);
+  });
+
+  it("does nothing without a viewport meta", () => {
+    const rotating = rotatingPage(null);
+    const viewport = viewportOver(rotating.page);
+    viewport.resetScale();
+    expect(rotating.pendingTimers()).toBe(0);
+  });
+
+  it("strips only the scale limits from a viewport meta", () => {
+    expect(withoutScaleLimits("width=device-width, Minimum-Scale = 0.5 ,maximum-scale=3, initial-scale=1")).toEqual([
+      "width=device-width",
+      "initial-scale=1",
+    ]);
+    expect(withoutScaleLimits("")).toEqual([]);
   });
 });
 

@@ -19,7 +19,14 @@
 
 import { createElement, type ReactNode } from "react";
 
-import type { Browser, MediaQuery, PageLocation, StorageRead, ViewportReading } from "./browser";
+import type {
+  Browser,
+  MediaQuery,
+  PageLocation,
+  StorageRead,
+  ViewportCause,
+  ViewportReading,
+} from "./browser";
 import { pageLocation } from "./browser";
 import { BrowserProvider } from "./browser-provider";
 
@@ -38,6 +45,7 @@ export interface FakeActions {
   traversals: number;
   backs: number;
   viewportScrollResets: number;
+  viewportScaleResets: number;
 }
 
 export interface FakeStore {
@@ -71,6 +79,9 @@ export interface FakeBrowser extends Browser {
   // meiva:note
   // Answer the next viewport read, and tell whoever subscribed that it moved.
   answerViewport(reading: ViewportReading): void;
+  rotateViewport(reading?: ViewportReading): void;
+  recheckViewport(reading?: ViewportReading): void;
+  rotationRecheckViewport(reading?: ViewportReading): void;
   refuseStorage(refused: boolean): void;
   failStorage(area: "local" | "session", operations: "write" | "remove" | "both"): void;
   clipboardAccepts(accepts: boolean): void;
@@ -172,7 +183,10 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     ]),
   );
   const traverseListeners = new Set<() => void>();
-  const viewportListeners = new Set<() => void>();
+  const viewportListeners = new Set<(cause: ViewportCause) => void>();
+  const tellViewport = (cause: ViewportCause) => {
+    for (const listener of [...viewportListeners]) listener(cause);
+  };
   const sizeWatches: FakeSizeWatch[] = [];
   const idleRequests: FakeIdleRequest[] = [];
   const idleMode = options.idle ?? "live";
@@ -204,6 +218,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     traversals: 0,
     backs: 0,
     viewportScrollResets: 0,
+    viewportScaleResets: 0,
   };
 
   const failures = { local: { write: false, remove: false }, session: { write: false, remove: false } };
@@ -327,6 +342,9 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
       resetScroll() {
         actions.viewportScrollResets += 1;
       },
+      resetScale() {
+        actions.viewportScaleResets += 1;
+      },
       subscribe(onChange) {
         viewportListeners.add(onChange);
         return () => {
@@ -420,7 +438,19 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
     },
     answerViewport(reading) {
       viewportReading = reading;
-      for (const listener of [...viewportListeners]) listener();
+      tellViewport("moved");
+    },
+    rotateViewport(reading) {
+      if (reading !== undefined) viewportReading = reading;
+      tellViewport("rotated");
+    },
+    recheckViewport(reading) {
+      if (reading !== undefined) viewportReading = reading;
+      tellViewport("recheck");
+    },
+    rotationRecheckViewport(reading) {
+      if (reading !== undefined) viewportReading = reading;
+      tellViewport("rotation-recheck");
     },
     answerMedia(query, matches) {
       const heard = answer(query);

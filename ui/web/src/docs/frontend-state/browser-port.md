@@ -59,19 +59,43 @@ focus jump scroll through `browser.view`; the shared-context panel moves through
 
 `browser.viewport.read()` answers a fresh `ViewportReading`: the layout height
 and width the shell's `100%` resolves against, and the visual band the reader sees
-(or `null` where the browser has none). `subscribe` follows both the visual viewport
-(which a keyboard, a toolbar or a pinch moves) and the page's own `resize`, `scroll`
-and `orientationchange` events (which orientation changes and `WKWebView` keyboard
-insets move). A phone or tablet keyboard shrinks only the visual height, and an iPad
-Chrome (`CriOS`) landscape-to-portrait rotation can shrink the unzoomed visual width
-while leaving `innerWidth` stuck at the landscape width, so `lib/browser/viewport.ts`
-decides whether the shell is pinned to it — `pinnedShellHeight` and `pinnedShellWidth`
-— and `VisualViewportHeightSync` applies the answer to `<html>` (`style.height`,
-`--visual-viewport-height`, `--safe-area-bottom: 0px`, and `style.width` / `maxWidth` /
-`--visual-viewport-width`, removing them when unpinned) and resets the root page scroll
-via `browser.viewport.resetScroll()`.
-That decision is a pure function of the reading, so a test asserts it directly
-and never installs a stub on `innerHeight` or `visualViewport`.
+(or `null` where the browser has none). `subscribe(onChange)` follows the visual viewport
+(which a keyboard, a toolbar or a pinch moves), the page's own `resize` and `scroll`
+(`WKWebView` keyboard insets), every rotation signal the page has, and the tab returning to
+the foreground, and tells the subscriber why as a `ViewportCause`:
+
+- `moved` — any geometry change, including the late samples after a rotation;
+- `rotated` — the device turned. `orientationchange`, `screen.orientation` `change` and the
+  `(orientation: portrait)` media query are one rotation (signals within 50ms coalesce; a
+  later one starts over), followed by re-reads at 60 / 180 / 350 / 600ms because iPadOS animates
+  the turn for up to ~600ms. The 180ms read is a `rotation-recheck`;
+- `rotation-recheck` — the 180ms read of a real rotation: the shell resets the scale again if
+  the first reset did not take (width still stuck, or scale still not 1);
+- `recheck` — a later look at the same question: mount, or `document`'s `visibilitychange` to
+  visible in the same orientation. If the orientation changed while the tab was away (a tab
+  rotated in the background comes back stuck), the return is a `rotated` instead. The page's
+  listeners are attached once for all subscribers and removed with the last one.
+
+An iPad Chrome (`CriOS`, `WKWebView`) rotation, in **either** direction, can leave the previous
+orientation's layout viewport behind and zoom the page to fit it (scale ~0.7 going to portrait,
+~1.44 going to landscape). `browser.viewport.resetScale()` re-asks for scale 1 in the current
+orientation: it holds `<meta name="viewport">` at `minimum-scale=1, maximum-scale=1` for 60ms
+and then restores the content the page had (saved once, so rapid calls never stack limits and
+unsubscribing the last subscriber restores at once), scrolls to `(0, 0)`, and tells subscribers
+`moved`. The reader's own pinch zoom is never locked.
+
+`lib/browser/viewport.ts` decides what the shell does with a reading, as pure functions:
+`pinnedShellHeight` and `pinnedShellWidth` pin to the visual size when an unzoomed viewport
+(`|scale - 1| <= VIEWPORT_SCALE_EPSILON`, so `0.99999` counts and a pinch to `1.25` does not)
+differs from the layout viewport by more than a keyboard (150px) or a scrollbar (24px) — wider
+or narrower. `VisualViewportHeightSync` applies the answer to `<html>` (`style.height`,
+`--visual-viewport-height`; `style.width` / `minWidth` / `maxWidth` / `overflowX` /
+`--visual-viewport-width`; `--safe-area-bottom: 0px` only for a keyboard, i.e. when the width is
+not also stuck), resets the root page scroll via `browser.viewport.resetScroll()`, and calls
+`resetScale()` on `rotated`, and on `recheck` (and at mount) only while the width is still stuck.
+The decision is a pure function of the reading and the causes are values a fake can
+emit (`answerViewport`, `rotateViewport`, `recheckViewport`; `actions.viewportScaleResets`
+counts resets), so a test never installs a stub on `innerHeight`, `visualViewport` or the meta tag.
 
 ## The page's own question
 
