@@ -292,10 +292,6 @@ export function useTimelineWindow({
   // releases unmounted ones; re-creating the observer per commit re-observed
   // every row, and each observe() queues a fresh notification.
   const rowObserverRef = useRef<{ observer: ResizeObserver; nodes: Set<HTMLElement> } | null>(null);
-  // Records the height of each mounted group / expanded row. Shared by the ResizeObserver and the
-  // layout effect below: a row measured only on the next frame is still an estimate when the
-  // window slides past it in the same task, and the spacer that replaces it then disagrees with
-  // the row the anchor writer just placed against.
   const recordHeights = useCallback((measured: readonly { node: HTMLElement; height: number }[]) => {
     const content = contentRef.current;
     if (!content) return;
