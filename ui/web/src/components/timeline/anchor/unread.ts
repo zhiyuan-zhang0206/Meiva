@@ -1,6 +1,6 @@
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
+import { isDisplayOnlyItemId, isLiveOverlayId, isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 
 import { isSilentTimelineItem } from "../model/runs";
 import type { RowRef } from "./dom";
@@ -8,7 +8,8 @@ import { identify, rankOf } from "./rows";
 import type { TailDeparture } from "./saved";
 
 const isHumanMessage = (item: BackendTimelineItem) => item.kind === "inbound_chat" && item.source === "user";
-const isReply = (item: BackendTimelineItem) => item.kind === "agent_chat" && item.user_facing !== false && item.payload.length > 0;
+const isReply = (item: BackendTimelineItem) => item.kind === "agent_chat" && item.user_facing !== false && item.payload.length > 0 &&
+  !isLiveOverlayId(item.item_id);
 const sourceBlock = (item: BackendTimelineItem) => item.source_block_idx ?? parseItemIdParts(item.item_id)?.block;
 const refOf = (item: BackendTimelineItem, buffer: CompactTransitionBuffer | null): RowRef => ({
   itemId: item.item_id,
@@ -16,7 +17,7 @@ const refOf = (item: BackendTimelineItem, buffer: CompactTransitionBuffer | null
 });
 
 export function tailDeparture(items: readonly BackendTimelineItem[], buffer: CompactTransitionBuffer | null): TailDeparture {
-  const last = items.findLast((item) => !item.item_id.startsWith("_") && !isSilentTimelineItem(item) && (isHumanMessage(item) || isReply(item)));
+  const last = items.findLast((item) => !isDisplayOnlyItemId(item.item_id) && !isSilentTimelineItem(item) && (isHumanMessage(item) || isReply(item)));
   return last ? {
     last: identify(refOf(last, buffer), items, buffer),
     ...(last.partial ? { partialPayload: last.payload } : {}),

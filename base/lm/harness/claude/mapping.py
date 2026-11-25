@@ -64,7 +64,21 @@ class AssistantError:
     api_error_status: int | None
 
 
-def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
+class StreamedMessage:
+    def __init__(self) -> None:
+        self.message_id: str | None = None
+
+    def block(self, index: object) -> str | None:
+        if self.message_id is None or not isinstance(index, int) or isinstance(index, bool):
+            return None
+        return f"{self.message_id}:{index}"
+
+
+def map_message(
+    message: object, *, turn_id: str | None, streamed: StreamedMessage | None = None
+) -> list[BridgeEvent]:
+    if type(message).__name__ == "StreamEvent":
+        return _stream(message, turn_id, streamed)
     handler = _HANDLERS.get(type(message).__name__)
     if handler is None:
         return []
@@ -177,25 +191,33 @@ def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
     ]
 
 
-def _stream(message: object, turn_id: str | None) -> list[BridgeEvent]:
-    if turn_id is None or _parent_tool_use_id(message) is not None:
+def _stream(
+    message: object, turn_id: str | None, streamed: StreamedMessage | None
+) -> list[BridgeEvent]:
+    if _parent_tool_use_id(message) is not None:
         return []
     event = _as_dict(getattr(message, "event", None))
-    if event.get("type") != "content_block_delta":
+    if event.get("type") == "message_start":
+        if streamed is not None:
+            ident = _as_dict(event.get("message")).get("id")
+            streamed.message_id = ident if isinstance(ident, str) and ident else None
         return []
-    delta = _as_dict(event.get("delta"))
-    delta_type = delta.get("type")
-    if delta_type == "thinking_delta":
+    if turn_id is None or event.get("type") != "content_block_delta":
+        return []
+    block = None if streamed is None else streamed.block(event.get("index"))
+    return _delta(_as_dict(event.get("delta")), turn_id, block)
+
+
+def _delta(delta: dict[str, object], turn_id: str, block: str | None) -> list[BridgeEvent]:
+    if delta.get("type") == "thinking_delta":
         thinking = delta.get("thinking")
-        if not isinstance(thinking, str) or not thinking:
-            return []
-        return [ReasoningDelta(turn_id=turn_id, text=thinking)]
-    if delta_type != "text_delta":
-        return []
-    text = delta.get("text")
-    if not isinstance(text, str) or not text:
-        return []
-    return [TextDelta(turn_id=turn_id, text=text)]
+        if isinstance(thinking, str) and thinking:
+            return [ReasoningDelta(turn_id=turn_id, text=thinking, block=block)]
+    elif delta.get("type") == "text_delta":
+        text = delta.get("text")
+        if isinstance(text, str) and text:
+            return [TextDelta(turn_id=turn_id, text=text, block=block)]
+    return []
 
 
 def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
@@ -323,7 +345,6 @@ def _origin_kind(raw: object) -> str | None:
 _HANDLERS = {
     "SystemMessage": _system,
     "TaskNotificationMessage": _task_notification,
-    "StreamEvent": _stream,
     "AssistantMessage": _assistant,
     "UserMessage": _user,
     "RateLimitEvent": _rate_limit,

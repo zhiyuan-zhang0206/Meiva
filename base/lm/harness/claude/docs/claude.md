@@ -14,6 +14,7 @@ decides differently from another provider.
 | Module | Owns |
 |---|---|
 | `session.py` | the effect shell of `ClaudeSession`: start / resume / close, `deliver()`, the observed-turn model, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
+| `mapping.py` | how one SDK message maps to bridge events. `StreamedMessage` holds the one fact a delta lacks: `message_start` names the API message and a delta gives only a block index, so the delta's `block` is `<message.id>:<index>`, which is what the record's rows carry as `message.id` and `apiBlockIndex` ([streaming reconciliation](../../docs/streaming-reconciliation.md)) |
 | `inbound.py` | what one inbound message is (dispatch by class name), what an input is sent as and which echo opens a turn (`delivery.py`), what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
 | `options.py` | the keyword values handed to the SDK's option class, including the two that ride only when resolved or supported |
 | `settle.py` | how one result settles a turn: the stream event, the new session id and the running totals |

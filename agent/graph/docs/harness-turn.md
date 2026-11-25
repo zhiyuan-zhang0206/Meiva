@@ -39,6 +39,14 @@ An external agent's timeline is not written to a database table: it is read from
 `harness_timeline_read` operation, the projection is in [reading a record](../../../base/lm/harness/docs/transcript-projection.md)).
 `reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) covers all external harnesses (`claude_code`, `codex`, `antigravity`):
 
+- The text the adapter streams (`TextDelta`, `ReasoningDelta`) is shown by `LiveOverlay` (`harness_overlay.py`), which the sink
+  feeds every event: it emits `chat_start` / `chat_delta` / `reasoning_start` / `reasoning_delta` under temporary ids
+  `live.<turn id>.<block>` (the same coalescing and visibility fields as a built-in agent's stream) and keeps nothing
+  that is stored, projected, delivered or counted. A snapshot that commits a block lists its live id in `retires`, found by
+  the adapter's block id, else by the committed text starting with the streamed text; the end of a turn, an interruption or a
+  fault (`finish`) reads the record once more and retires what is left, in a snapshot of its own. Pending deltas are sent
+  before every retirement and a retired block's later deltas are dropped. Decision:
+  [the streaming overlay](../../../docs/decisions/agents/graph/2026-11-25-external-harness-streaming-overlay.md).
 - The live sink is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
   sink dirty, and after half a second it reads the bytes the CLI appended since its last read, projects them with the
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot

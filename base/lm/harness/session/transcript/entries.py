@@ -89,6 +89,7 @@ class AgentText(Entry):
     text: str
     message_ref: str | None = None
     complete: bool = True
+    block: str | None = None
 
 
 # meiva:note
@@ -98,6 +99,7 @@ class AgentText(Entry):
 class Reasoning(Entry):
     text: str
     duration_ms: int | None = None
+    block: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

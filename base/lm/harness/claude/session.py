@@ -42,6 +42,7 @@ from base.lm.harness.claude.inbound import (
     started_identity,
 )
 from base.lm.harness.claude.mapping import (
+    StreamedMessage,
     is_subagent_message,
     map_message,
     parse_assistant_error,
@@ -185,6 +186,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._claimed_by_background: frozenset[int] = frozenset()
         self._scheduled = ScheduledWork()
         self._open: OpenTurn | None = None
+        self._streamed = StreamedMessage()
         self._uuid_keys: dict[str, str] = {}
         self._echo_seen = False
         self._pending_cause: HarnessCause | None = None
@@ -464,7 +466,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if subagent and self._open is None and self._pending_cause is None:
             self._pending_cause = HarnessCause.BACKGROUND_TASK
         turn = self._open or self._open_harness_turn(None)
-        mapped = self._labelled(map_message(message, turn_id=turn.turn_id))
+        mapped = self._labelled(map_message(message, turn_id=turn.turn_id, streamed=self._streamed))
         self._open = turn.with_parts(
             assistant_texts(mapped),
             stepped=counts_as_step(type(message).__name__, mapped),
