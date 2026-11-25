@@ -55,6 +55,14 @@ def with_git_shim(path: str | None) -> str:
     return os.pathsep.join([shim, *entries])
 
 
+def without_git_shim(path: str | None) -> str:
+    return os.pathsep.join(
+        entry
+        for entry in (path or "").split(os.pathsep)
+        if entry and not (Path(entry).parent / "git_zero_trace_guard.py").is_file()
+    )
+
+
 _SYSTEM_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
 

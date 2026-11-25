@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -12,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from base.host.env.harness import git_zero_trace_guard as guard
-from base.host.env.harness_binaries import GIT_SHIM_DIR, meiva_python_env, with_git_shim
+from base.host.env.harness_binaries import (
+    GIT_SHIM_DIR,
+    meiva_python_env,
+    with_git_shim,
+    without_git_shim,
+)
 
 SELF_ID = 8720
 HANDLE_ENV = guard.HANDLE_ENV
@@ -101,11 +107,55 @@ def _blocked(result: subprocess.CompletedProcess[str]) -> bool:
     return result.returncode == guard.BLOCKED_EXIT_CODE and "zero-trace guard" in result.stderr
 
 
+def _machine_git() -> str:
+    found = shutil.which("git", path=without_git_shim(os.environ["PATH"]))
+    assert found is not None, "no git outside the shim on PATH"
+    return found
+
+
 def test_the_shim_is_first_on_path_and_is_not_entered_twice() -> None:
     path = with_git_shim("/usr/bin")
     assert path.split(os.pathsep)[0] == str(GIT_SHIM_DIR.resolve())
     assert with_git_shim(path) == path
     assert os.access(GIT_SHIM_DIR / "git", os.X_OK)
+
+
+def test_the_machines_own_git_is_found_past_every_copy_of_the_shim(tmp_path: Path) -> None:
+    installed = tmp_path / "installed" / "harness" / "bin"
+    installed.mkdir(parents=True)
+    (installed.parent / "git_zero_trace_guard.py").write_text("")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    path = os.pathsep.join([str(installed), str(GIT_SHIM_DIR.resolve()), str(plain)])
+    assert without_git_shim(path) == str(plain)
+    assert without_git_shim(None) == ""
+    assert Path(_machine_git()).name == "git"
+    assert Path(_machine_git()).parent != GIT_SHIM_DIR.resolve()
+
+
+def test_a_minimal_path_needs_the_machines_git_and_not_a_link_to_the_shim(
+    world: World, tmp_path: Path
+) -> None:
+    shim_only = tmp_path / "shim-only"
+    shim_only.mkdir()
+    (shim_only / "git").symlink_to(GIT_SHIM_DIR.resolve() / "git")
+    machine_only = tmp_path / "machine-only"
+    machine_only.mkdir()
+    (machine_only / "git").symlink_to(_machine_git())
+
+    def version(minimal: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603
+            [str(minimal / "git"), "--version"],
+            env={**world.env(), "PATH": str(minimal)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert version(machine_only).stdout.startswith("git version")
+    refused = version(shim_only)
+    assert refused.returncode == 127
+    assert "found no other git on PATH" in refused.stderr
 
 
 def test_nothing_is_configured_so_the_shim_runs_git_untouched(world: World) -> None:
@@ -292,10 +342,7 @@ def test_another_remotes_tracking_refs_do_not_hide_a_first_push(world: World) ->
 def test_a_push_is_refused_when_nothing_can_run_the_guard(world: World, tmp_path: Path) -> None:
     git_dir = tmp_path / "only-git"
     git_dir.mkdir()
-    real = subprocess.run(
-        ["sh", "-c", "command -v git"], capture_output=True, text=True, check=True
-    ).stdout.strip()
-    (git_dir / "git").symlink_to(real)
+    (git_dir / "git").symlink_to(_machine_git())
     bare_path = f"{GIT_SHIM_DIR.resolve()}:{git_dir}"
     env = {**world.env({"MEIVA_ZERO_TRACE_GIT_REMOTES": PATTERN}), "PATH": bare_path}
     env["MEIVA_PYTHON"] = str(tmp_path / "missing-python")
