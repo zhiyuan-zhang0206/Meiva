@@ -37,7 +37,7 @@ describe("model waiting keepalives", () => {
   ])("removes waiting on $role", (event) => {
     const state: ThreadTimelineState = {
       items: waiting(), streamingIds: new Set(), streamingCode: false,
-      turnActive: true, hasMoreOlder: false, olderFetchCount: 0, resetPending: false,
+      turnActive: true, turnRunning: true, arrivedInboundIds: [], hasMoreOlder: false, olderFetchCount: 0, resetPending: false,
     };
     expect(foldEvent(state, event, 3000).items.some((item) => item.llmWaiting)).toBe(false);
   });

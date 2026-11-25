@@ -41,6 +41,7 @@ export const hooksState = {
   loadOlder: vi.fn(),
   connectionState: "open" as ConnectionState,
   turnActive: false,
+  awaitingPickup: false,
   spawn: vi.fn().mockResolvedValue(7),
   fork: vi.fn().mockResolvedValue(8),
   terminate: vi.fn().mockResolvedValue(undefined),
@@ -239,6 +240,7 @@ export function homePageProps(): HomePageProps {
       compactBuffer: null,
       streamingCode: false,
       turnActive: state.turnActive,
+      awaitingPickup: state.awaitingPickup,
       hasMoreOlder: false,
       loadingOlder: false,
       readerLoadingOlder: false,
@@ -373,6 +375,7 @@ export async function resetHomePageTestState() {
   hooksState.timelineFetching = false;
   hooksState.connectionState = "open";
   hooksState.turnActive = false;
+  hooksState.awaitingPickup = false;
   hooksState.settings = { "display.timeline_width_px": 768 };
   hooksState.setSetting = vi.fn();
   hooksState.setMobileInspectorOpen = vi.fn();

@@ -37,6 +37,8 @@ export interface TimelineState {
 
   streamingCode: boolean;
   turnActive: boolean;
+  turnRunning: boolean;
+  arrivedInboundIds: readonly number[];
   // meiva:note
   // Page-clock time of the active turn's last received event (0 when idle or none yet).
   // Maintained only while `turnActive` is true and reset to 0 on settle/turn-end/close so a
@@ -367,6 +369,8 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         streamingIds: state.streamingIds,
         streamingCode: state.streamingCode,
         turnActive: state.turnActive,
+        turnRunning: state.turnRunning,
+        arrivedInboundIds: state.arrivedInboundIds,
         hasMoreOlder: state.hasMoreOlder,
         olderFetchCount: state.olderFetchCount,
         // The selected thread owns the compact reset window.
@@ -379,6 +383,8 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       (ev.role === "llm_keepalive" || (ev.role === "exec_output_chunk" && ev.keepalive === true)) &&
       next.items === state.items &&
       next.turnActive === state.turnActive &&
+      next.turnRunning === state.turnRunning &&
+      next.arrivedInboundIds === state.arrivedInboundIds &&
       next.streamingCode === state.streamingCode &&
       next.streamingIds === state.streamingIds &&
       state.liveAnchorAt > 0;
@@ -405,6 +411,8 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       streamingIds: next.streamingIds,
       streamingCode: next.streamingCode,
       turnActive: next.turnActive,
+      turnRunning: next.turnRunning,
+      arrivedInboundIds: next.arrivedInboundIds,
       liveAnchorAt: nextLiveAnchorAt,
       hasMoreOlder: next.hasMoreOlder,
       liveCompact: retireLiveCompact(state.liveCompact, next.items),

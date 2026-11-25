@@ -23,6 +23,15 @@ export function startsTurn(event: SystemEvent): boolean {
   );
 }
 
+export function awaitingPickup(
+  turnRunning: boolean,
+  arrivedInboundIds: readonly number[],
+  items: readonly BackendTimelineItem[],
+): boolean {
+  if (turnRunning || arrivedInboundIds.length === 0) return false;
+  return !items.some((it) => it.inbound_id !== null && arrivedInboundIds.includes(it.inbound_id));
+}
+
 export function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolean {
   for (const it of items) {
     if (
