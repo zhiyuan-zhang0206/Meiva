@@ -76,11 +76,21 @@ class TimelineResponse(BaseModel):
     The endpoint returns only a tail window (newest `limit` items); `before`
     pages further back for scroll-up history. `has_more` reports whether
     older items exist before the returned window.
+
+    A harness switch ends an epoch and opens the next. The current epoch's items
+    keep their unprefixed ids; an earlier epoch's items are prefixed `e<seq>.`
+    (`e0.12.0`, `e0.s1.<checkpoint>.3.0`, `e1.h123.0`), its switch block is
+    `e<seq>.sw` and its placeholder, when its history cannot be read,
+    `e<seq>.unavailable`. A page reads one epoch; the response's `current_epoch`
+    is the seq of the epoch whose ids are unprefixed (0 for an agent that never
+    switched). `msg_count` describes the current epoch and is 0 on a page of an
+    earlier epoch.
     """
 
     items: list[TimelineItem]
     msg_count: int
     has_more: bool
+    current_epoch: int = 0
     reading_source: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
 
 
@@ -467,7 +477,13 @@ def get_timeline(
     # task #3696 exception inventory); the default *window* is
     # display.timeline_default_limit.
     limit: int | None = Query(default=None, ge=1, le=1000),
-    before: str | None = Query(default=None),
+    before: str | None = Query(
+        default=None,
+        description=(
+            "The oldest item id the client holds, verbatim: any id this endpoint returns, including"
+            " `e<seq>.sw` and `e<seq>.unavailable` of an earlier harness epoch."
+        ),
+    ),
 ) -> TimelineResponse:
     """Timeline = raw view of LangGraph state.messages, one window at a time.
 
@@ -481,6 +497,16 @@ def get_timeline(
     One checkpoint segment is built at a time; windowing trims the payload +
     the frontend render. A checkpoint read failure returns 503. Retained
     compact boundaries remain independently readable via /timeline/retained.
+
+    Across harness switches the timeline is one conversation read epoch by epoch.
+    The current epoch is served as above with unchanged ids. A `before` cursor at
+    the head of an epoch continues into the previous one: its items carry the
+    `e<seq>.` id prefix, its start is a `harness_switch` system marker
+    `e<seq>.sw`, and a page reads one epoch only. An epoch whose history cannot be
+    read (its machine is offline, its record was removed or moved) is one
+    `history_unavailable` marker `e<seq>.unavailable`; it never fails the page.
+    Items of an earlier epoch have no `reading_locator`, are not served by
+    `/timeline/window`, and cannot be quoted.
     """
     read = request_timeline_read(request)
     if limit is None:
@@ -497,7 +523,7 @@ def _retained_cursor(before: str | None, checkpoint_id: str | None) -> TimelineC
     if before is None:
         return None
     cursor = parse_cursor(before)
-    if cursor is None or cursor.checkpoint_id is None:
+    if cursor is None or cursor.checkpoint_id is None or cursor.epoch is not None:
         raise HTTPException(status_code=400, detail="Retained history requires a historical cursor")
     if checkpoint_id is not None and cursor.checkpoint_id != checkpoint_id:
         raise HTTPException(status_code=400, detail="Retained boundary and cursor do not match")

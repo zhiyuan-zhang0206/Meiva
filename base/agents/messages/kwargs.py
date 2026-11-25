@@ -73,6 +73,9 @@ class NoteTag(StrEnum):
     WORKSPACE_HYGIENE = "workspace_hygiene"
     PERSONAL_DREAM = "personal_dream"
     AGENT_TERMINATED = "agent_terminated"
+    # meiva:link gateway/agents/history/docs/epoch-timeline.md
+    HARNESS_SWITCH = "harness_switch"
+    HISTORY_UNAVAILABLE = "history_unavailable"
 
 
 class MeivaUsage(TypedDict, total=False):

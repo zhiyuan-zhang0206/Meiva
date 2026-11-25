@@ -3680,6 +3680,7 @@ export interface components {
             items: components["schemas"]["TimelineItem"][];
             msg_count: number;
             has_more: boolean;
+            current_epoch: number;
             reading_source?: string | null;
         };
         TimelineUploadFile: {

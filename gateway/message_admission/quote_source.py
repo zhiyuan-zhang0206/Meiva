@@ -174,6 +174,8 @@ async def validate_quote_source(request: Request, agent_id: int, quote: Quote | 
     cursor = parse_cursor(quote.source_item_id)
     if cursor is None:
         raise HTTPException(422, "This quote source is no longer locatable; select it again")
+    if cursor.epoch is not None:
+        raise HTTPException(422, "Quotes from an earlier harness session are not supported")
     context = await asyncio.to_thread(_admission_context, request, agent_id)
     if (context[0] != "meiva") != cursor.is_harness:
         raise HTTPException(422, "Quote source does not belong to this timeline")

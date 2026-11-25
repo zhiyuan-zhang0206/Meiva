@@ -6,7 +6,7 @@ exports = ["configuration.py", "conversation.py", "inbound.py", "reading_api.py"
 "record_timeline.py" = ["configuration.py"]
 "timeline.py" = ["configuration.py", "native_reading_window.py", "paging.py", "read_inputs.py", "record_timeline.py"]
 "reading_api.py" = ["configuration.py", "native_reading_window.py", "record_timeline.py"]
-"tests" = ["paging.py", "read_inputs.py"]
+"tests" = ["paging.py", "read_inputs.py", "timeline.py"]
 "understanding.py" = ["configuration.py", "read_inputs.py"]
 
 [purity]

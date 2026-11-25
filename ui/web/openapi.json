@@ -2181,7 +2181,7 @@
     "/api/agents/{agent_id}/timeline": {
       "get": {
         "summary": "Get Timeline",
-        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure returns 503. Retained\ncompact boundaries remain independently readable via /timeline/retained.",
+        "description": "Timeline = raw view of LangGraph state.messages, one window at a time.\n\nDefault (no `before`) returns the newest `limit` items; an omitted\n`limit` resolves to the configured `display.timeline_default_limit`\n(50 by default). Pass\n`before=<oldest item_id you hold>` to fetch the previous window for\nscroll-up history loading. `has_more` reports whether older items exist\nbefore the returned window.\n\nOne checkpoint segment is built at a time; windowing trims the payload +\nthe frontend render. A checkpoint read failure returns 503. Retained\ncompact boundaries remain independently readable via /timeline/retained.\n\nAcross harness switches the timeline is one conversation read epoch by epoch.\nThe current epoch is served as above with unchanged ids. A `before` cursor at\nthe head of an epoch continues into the previous one: its items carry the\n`e<seq>.` id prefix, its start is a `harness_switch` system marker\n`e<seq>.sw`, and a page reads one epoch only. An epoch whose history cannot be\nread (its machine is offline, its record was removed or moved) is one\n`history_unavailable` marker `e<seq>.unavailable`; it never fails the page.\nItems of an earlier epoch have no `reading_locator`, are not served by\n`/timeline/window`, and cannot be quoted.",
         "operationId": "get_timeline_api_agents__agent_id__timeline_get",
         "parameters": [
           {
@@ -2224,8 +2224,10 @@
                   "type": "null"
                 }
               ],
+              "description": "The oldest item id the client holds, verbatim: any id this endpoint returns, including `e<seq>.sw` and `e<seq>.unavailable` of an earlier harness epoch.",
               "title": "Before"
-            }
+            },
+            "description": "The oldest item id the client holds, verbatim: any id this endpoint returns, including `e<seq>.sw` and `e<seq>.unavailable` of an earlier harness epoch."
           }
         ],
         "responses": {
@@ -17481,6 +17483,11 @@
             "type": "boolean",
             "title": "Has More"
           },
+          "current_epoch": {
+            "type": "integer",
+            "title": "Current Epoch",
+            "default": 0
+          },
           "reading_source": {
             "anyOf": [
               {
@@ -17500,7 +17507,7 @@
           "has_more"
         ],
         "title": "TimelineResponse",
-        "description": "Cold-load timeline payload: one window of rendered items + the\nauthoritative `msg_count` (len(state.messages)) + `has_more`.\n\n`msg_count` is surfaced (not inferred frontend-side from max rendered\nmsg_idx) so the merge that preserves the single streaming \"future\npartial\" uses the exact boundary — a trailing message that renders to\nnothing would otherwise make an inferred count too low.\n\nThe endpoint returns only a tail window (newest `limit` items); `before`\npages further back for scroll-up history. `has_more` reports whether\nolder items exist before the returned window."
+        "description": "Cold-load timeline payload: one window of rendered items + the\nauthoritative `msg_count` (len(state.messages)) + `has_more`.\n\n`msg_count` is surfaced (not inferred frontend-side from max rendered\nmsg_idx) so the merge that preserves the single streaming \"future\npartial\" uses the exact boundary — a trailing message that renders to\nnothing would otherwise make an inferred count too low.\n\nThe endpoint returns only a tail window (newest `limit` items); `before`\npages further back for scroll-up history. `has_more` reports whether\nolder items exist before the returned window.\n\nA harness switch ends an epoch and opens the next. The current epoch's items\nkeep their unprefixed ids; an earlier epoch's items are prefixed `e<seq>.`\n(`e0.12.0`, `e0.s1.<checkpoint>.3.0`, `e1.h123.0`), its switch block is\n`e<seq>.sw` and its placeholder, when its history cannot be read,\n`e<seq>.unavailable`. A page reads one epoch; the response's `current_epoch`\nis the seq of the epoch whose ids are unprefixed (0 for an agent that never\nswitched). `msg_count` describes the current epoch and is 0 on a page of an\nearlier epoch."
       },
       "TimelineUploadFile": {
         "properties": {
