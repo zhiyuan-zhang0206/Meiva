@@ -132,14 +132,15 @@ export interface TurnSummary {
   // so idle gaps between turns inside one work block are excluded (user ruling 2026-11-22).
   // - `settledActiveMs`: sum of durations of all segments containing agent output, or null
   //   if none exist or any active segment lacks timestamps.
-  // - `priorActiveMs`: sum of durations of completed active segments before the trailing
-  //   live segment (0 when none; null if any completed active segment lacks timestamps).
+  // - `priorActiveMs`: lower bound of the live Working total: sum of the measurable durations
+  //   of completed active segments before the trailing live segment (0 when none; a segment
+  //   without timestamps contributes 0 so the live clock never stops counting).
   // - `liveSegmentStartMs`: start timestamp of the open trailing segment, or null when
   //   the trailing segment is already closed (hidden agent_chat, lifecycle_terminate /
   //   lifecycle_interrupt, or trailing non-wake marker) or lacks a start timestamp.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly settledActiveMs: number | null;
-  readonly priorActiveMs: number | null;
+  readonly priorActiveMs: number;
   readonly liveSegmentStartMs: number | null;
   readonly sdkCalls: readonly SdkCall[];
 }
@@ -405,9 +406,17 @@ function sumActiveSegments(
   return { totalMs: total, activeCount };
 }
 
+function sumMeasuredActiveMs(segments: readonly ComputedSegment[]): number {
+  let total = 0;
+  for (const seg of segments) {
+    if (seg.hasAgentOutput && seg.durationMs !== null) total += seg.durationMs;
+  }
+  return total;
+}
+
 function summarizeActiveTiming(items: readonly BackendTimelineItem[]): {
   readonly settledActiveMs: number | null;
-  readonly priorActiveMs: number | null;
+  readonly priorActiveMs: number;
   readonly liveSegmentStartMs: number | null;
 } {
   const eventItems = items.filter((it) => !isStandingContextItem(it));
@@ -417,16 +426,15 @@ function summarizeActiveTiming(items: readonly BackendTimelineItem[]): {
 
   const lastSeg = segments.length > 0 ? segments[segments.length - 1] : null;
   if (lastSeg !== null && !lastSeg.closed) {
-    const prior = sumActiveSegments(segments.slice(0, -1));
     return {
       settledActiveMs,
-      priorActiveMs: prior.totalMs,
+      priorActiveMs: sumMeasuredActiveMs(segments.slice(0, -1)),
       liveSegmentStartMs: lastSeg.startMs,
     };
   }
   return {
     settledActiveMs,
-    priorActiveMs: all.totalMs,
+    priorActiveMs: sumMeasuredActiveMs(segments),
     liveSegmentStartMs: null,
   };
 }

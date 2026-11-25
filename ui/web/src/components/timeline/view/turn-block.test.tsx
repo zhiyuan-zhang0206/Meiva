@@ -143,7 +143,7 @@ describe("TurnBlock component", () => {
     expect(pending.getAttribute("data-live-activity-window")).toBe("true");
     expect(pending.getAttribute("role")).toBe("status");
     expect(pending.className).not.toContain("rounded-xl");
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toBe("Working for 1s");
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(pending.querySelector("button")).toBeNull();
@@ -493,7 +493,8 @@ describe("Work block active-segment duration semantics (#7533)", () => {
       />,
     );
     expect(screen.getByText("Working for 10m")).toBeTruthy();
-    expect(vi.getTimerCount()).toBe(0);
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(screen.getByText("Working for 10m 2s")).toBeTruthy();
 
     rerender(
       <TurnBlock
@@ -506,7 +507,7 @@ describe("Work block active-segment duration semantics (#7533)", () => {
         lastEventAt={t0 + 70 * MIN}
       />,
     );
-    expect(screen.getByText("Working for 10m 5s")).toBeTruthy();
+    expect(screen.getByText("Working for 10m 7s")).toBeTruthy();
 
     const settledWithHeartbeat = [
       ...closedSeg1,
@@ -684,7 +685,7 @@ describe("Work block active-segment duration semantics (#7533)", () => {
     vi.setSystemTime(startMs + 5_000);
 
     const { rerender } = render(<PendingLiveActivityWindow />);
-    expect(screen.getByText("Working…")).toBeTruthy();
+    expect(screen.getByText("Working for 1s")).toBeTruthy();
 
     rerender(<PendingLiveActivityWindow startedAt={startMs} />);
     expect(screen.getByText("Working for 5s")).toBeTruthy();
@@ -734,6 +735,103 @@ describe("Work block active-segment duration semantics (#7533)", () => {
       />,
     );
     expect(screen.getByText("Worked for 9s")).toBeTruthy();
+  });
+});
+
+describe("Working header always counts seconds while the turn is active", () => {
+  const MIN = 60_000;
+  const t0 = Date.parse("2026-11-25T10:00:00.000Z");
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  function renderLive(items: BackendTimelineItem[], lastEventAt = 0) {
+    return render(
+      <TurnBlock
+        id={items[0].item_id}
+        memberIds={items.map((it) => it.item_id)}
+        summary={summarizeTurn(items)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive
+        lastEventAt={lastEventAt}
+      />,
+    );
+  }
+
+  function headerText(): string {
+    return screen.getByTestId("turn-toggle").textContent;
+  }
+
+  it("native: counts when an earlier one-item active segment has no measurable duration", () => {
+    vi.useFakeTimers();
+    const items = [
+      blockItem("agent_chat", "5.0", { created_at: iso(t0) }),
+      blockItem("inbound_chat", "6.0", { source: "human", created_at: iso(t0 + 60 * MIN) }),
+      blockItem("agent_reasoning", "7.0", {
+        created_at: iso(t0 + 60 * MIN + 1_000),
+        reasoningStartedAt: t0 + 60 * MIN + 1_000,
+      }),
+    ];
+    expect(summarizeTurn(items).liveSegmentStartMs).toBe(t0 + 60 * MIN);
+    vi.setSystemTime(t0 + 60 * MIN + 5_000);
+    renderLive(items);
+    expect(headerText()).toBe("Working for 5s");
+    act(() => { vi.advanceTimersByTime(3_000); });
+    expect(headerText()).toBe("Working for 8s");
+  });
+
+  it("external harness: counts across unmeasured tool-call segments without adding the idle gap", () => {
+    vi.useFakeTimers();
+    const items = [
+      blockItem("agent_code", "h10.0", { created_at: iso(t0) }),
+      blockItem("agent_chat", "h10.1", { created_at: iso(t0) }),
+      blockItem("inbound_chat", "h20.0", { source: "human", created_at: iso(t0 + 60 * MIN) }),
+      blockItem("agent_code", "h30.0", { created_at: iso(t0 + 60 * MIN + 2_000), activity_pending: true }),
+    ];
+    expect(summarizeTurn(items).settledActiveMs).toBeNull();
+    vi.setSystemTime(t0 + 60 * MIN + 7_000);
+    renderLive(items);
+    expect(headerText()).toBe("Working for 7s");
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(headerText()).toBe("Working for 9s");
+  });
+
+  it("counts from the moment it went live when the open segment has no timestamps and no event anchor exists", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+    const items = [blockItem("agent_code", "h0.0"), blockItem("code_output", "h1.0")];
+    expect(summarizeTurn(items).liveSegmentStartMs).toBeNull();
+    renderLive(items);
+    expect(headerText()).toBe("Working for 1s");
+    act(() => { vi.advanceTimersByTime(4_000); });
+    expect(headerText()).toBe("Working for 4s");
+  });
+
+  it("keeps counting from the prior total when the trailing segment is already closed", () => {
+    vi.useFakeTimers();
+    const items = [
+      blockItem("agent_reasoning", "1.0", { created_at: iso(t0 + 10 * MIN), reasoning_ms: 10 * MIN }),
+      blockItem("agent_chat", "1.1", { created_at: iso(t0 + 10 * MIN) }),
+    ];
+    expect(summarizeTurn(items).liveSegmentStartMs).toBeNull();
+    vi.setSystemTime(t0 + 90 * MIN);
+    renderLive(items);
+    expect(headerText()).toBe("Working for 10m");
+    act(() => { vi.advanceTimersByTime(3_000); });
+    expect(headerText()).toBe("Working for 10m 3s");
+  });
+
+  it("pending row counts when neither the prompt timestamp nor an event anchor is known", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+    render(<PendingLiveActivityWindow />);
+    expect(screen.getByTestId("pending-live-activity-window").textContent).toBe("Working for 1s");
+    act(() => { vi.advanceTimersByTime(5_000); });
+    expect(screen.getByTestId("pending-live-activity-window").textContent).toBe("Working for 5s");
   });
 });
 
@@ -820,7 +918,7 @@ describe("Working title Silver Glint shimmer", () => {
       const shimmerEl = pending.querySelector(".timeline-title-working");
       expect(shimmerEl).not.toBeNull();
       expect(shimmerEl?.tagName).toBe("SPAN");
-      expect(shimmerEl?.textContent).toBe("Working…");
+      expect(shimmerEl?.textContent).toBe("Working for 1s");
       expect(pending.querySelectorAll(".timeline-title-working")).toHaveLength(1);
       expect(pending.querySelector("svg")?.classList.contains("timeline-title-working")).toBe(false);
 

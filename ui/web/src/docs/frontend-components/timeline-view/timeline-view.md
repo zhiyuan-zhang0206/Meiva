@@ -20,7 +20,7 @@ identity. A send moves nothing: see [sending and the bottom edge](send-anchor.md
 The centered down arrow takes the reader to the current tail ([sending and the
 bottom edge](send-anchor.md)). Older paging
 presents its top pull circle, and initial source qualification — including gating
-the inline first-step `Working…` row until the source is ready — follows
+the inline first-step `Working for Xs` row until the source is ready — follows
 [the loading ring contract](loading-ring.md).
 
 ## Scroll ownership and one scrollport
