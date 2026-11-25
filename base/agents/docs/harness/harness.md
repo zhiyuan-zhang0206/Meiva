@@ -66,7 +66,8 @@ Harness is a property of the agent initialized at birth and switchable on restar
 
 ## Epochs and what a switch shares
 
-`agents_meta.harness` is the harness the agent runs on now. `agent_harness_epochs` keeps the
+`agents_meta.harness` is the harness the agent runs on now. `agent_harness_epochs`
+([columns, writes and backfill](../../epochs/docs/epochs.md)) keeps the
 history of it: one row per stretch of the agent's life on one harness (seq from 0, the harness and
 model, the CLI session id once bound, `started_at` / `ended_at` with NULL for the current epoch,
 the byte range of the CLI record that belongs to the epoch when there is one, who switched, and the

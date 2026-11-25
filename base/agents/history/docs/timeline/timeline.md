@@ -113,7 +113,7 @@ deleted and must not cause a fallback viewport to overwrite it.
 
 An agent's timeline is continuous across its harness switches, and its context is not shared (the
 [decision](../../../../../docs/decisions/agents/timeline/2026-11-25-continuous-timeline-across-harness-switch.md);
-the facts are in `agent_harness_epochs`, see [harness identity](../../../docs/harness/harness.md#epochs-and-what-a-switch-shares)).
+the facts are in `agent_harness_epochs` ([epochs](../../../epochs/docs/epochs.md)), see [harness identity](../../../docs/harness/harness.md#epochs-and-what-a-switch-shares)).
 The page of the current epoch is exactly what it was: the same ids, so the live stream, the sink and the streaming
 overlay are untouched. A `before=` cursor that reaches the head of the current epoch continues into the previous
 one, and so on, composed when asked for from that epoch's source (the checkpoint cut by time for the built-in
