@@ -20,7 +20,8 @@ continues to reconcile against Grafana. A site can also send operational alerts 
   Alertmanager can send a group containing both firing and resolved instances. Per-instance text
   keeps that status visible and works with the standard webhook shape.
 - Retire the shadow escalation loop and its age, cooldown and mode settings. The database ledger
-  stays during the rollout window. [Follow-up](../../../../future/infra/data/alert-escalations-drop.md)
+  (`alert_escalations`) stayed through the rollout window and was dropped with the other alert
+  tables by migration `20261124T171356_drop-alert-tables`.
 
 ## Delivery boundary
 

@@ -626,79 +626,6 @@ COMMENT ON COLUMN api_idempotency.request_hash IS
 COMMENT ON COLUMN api_idempotency.op_status IS
     'Ops-channel outcome status (''completed''/''failed''); NULL for HTTP middleware rows. The HTTP channel stores its HTTP code in `status` instead.';
 
--- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
--- One row = one alert instance, in the Alertmanager standard webhook payload
--- shape (status + labels + annotations + startsAt/endsAt + fingerprint +
--- generatorURL). One writer: the Grafana embedded-Alertmanager webhook contact
--- point (POST /api/alerts, source='grafana'); rows from before 2026-10-04 also
--- carry the retired in-process writers' tags. Alert is fully separate
--- from Notice: own table, own UI section — nothing here
--- enters the notices queue.
--- severity: critical / warning / error.
--- status: unresolved / resolved only — no ack, no escalation.
--- Dedup key (fingerprint, starts_at): Alertmanager re-sends the same instance
--- while firing according to notification policy, and once more on resolution. fingerprint
--- is the Alertmanager-standard fnv-1a hash over sorted labels; the ingest
--- computes it when a direct writer omits it. notified_at stamped a landed IM send (retired 2026-11-08; no writer, historical rows keep it).
-CREATE TABLE alerts (
-    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    status       TEXT NOT NULL DEFAULT 'unresolved',
-    severity     TEXT NOT NULL DEFAULT 'warning',
-    alertname    TEXT NOT NULL,
-    labels       JSONB NOT NULL DEFAULT '{}'::jsonb,
-    annotations  JSONB NOT NULL DEFAULT '{}'::jsonb,
-    starts_at    TIMESTAMPTZ NOT NULL,
-    ends_at      TIMESTAMPTZ,
-    fingerprint  TEXT NOT NULL,
-    generator_url TEXT NOT NULL DEFAULT '',
-    -- Provenance: 'grafana' (webhook default), 'health-probe', 'machine-probe'.
-    source       TEXT NOT NULL DEFAULT 'grafana',
-    notified_at  TIMESTAMPTZ,
-    notified_revision BIGINT NOT NULL DEFAULT 0 CHECK (notified_revision >= 0),
-    notification_revision BIGINT NOT NULL DEFAULT 0 CHECK (notification_revision >= 0),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT alerts_fingerprint_starts UNIQUE (fingerprint, starts_at),
-    CONSTRAINT alerts_status_check CHECK (status IN ('unresolved', 'resolved')),
-    CONSTRAINT alerts_severity_check CHECK (severity IN ('critical', 'warning', 'error'))
-);
-
-COMMENT ON COLUMN alerts.source IS
-    'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe''.';
-
-CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
-
-COMMENT ON COLUMN alerts.notification_revision IS
-    'Current shadow notification transition revision, not provider acceptance or completion.';
-
-CREATE TABLE alert_notification_groups (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    status TEXT NOT NULL CHECK (status IN ('unresolved','resolved')),
-    alertname TEXT NOT NULL,
-    language TEXT NOT NULL CHECK (language IN ('zh','en')),
-    render_version TEXT NOT NULL CHECK (render_version = 'alert-group-v1'),
-    text TEXT NOT NULL,
-    origin TEXT NOT NULL DEFAULT 'shadow' CHECK (origin IN ('shadow','native-v1')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE alert_notification_groups IS
-    'Immutable ingest groups. Only native-v1 creation origin qualifies for new acceptance; shadow history is never promoted or automatically dispatched.';
-
-CREATE TABLE alert_notification_members (
-    alert_id BIGINT NOT NULL CHECK (alert_id > 0),
-    notification_revision BIGINT NOT NULL CHECK (notification_revision > 0),
-    group_id BIGINT NOT NULL REFERENCES alert_notification_groups(id),
-    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-    reason TEXT NOT NULL CHECK (reason IN ('fresh_firing','refire','escalation','resolution','legacy_unconfirmed')),
-    fingerprint TEXT NOT NULL,
-    starts_at TIMESTAMPTZ NOT NULL,
-    source JSONB NOT NULL,
-    PRIMARY KEY (alert_id, notification_revision),
-    UNIQUE (group_id, ordinal)
-);
-COMMENT ON TABLE alert_notification_members IS
-    'One immutable group membership per shadow instance transition; snapshots survive alert retention and are not delivery receipts.';
-
 CREATE TABLE agent_shell_ttls (
     agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     session_id      BIGINT NOT NULL,
@@ -1988,8 +1915,6 @@ CREATE TABLE agent_launch_retry_receipts (
 COMMENT ON TABLE agent_launch_retry_receipts IS
 'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
 
-COMMENT ON COLUMN alerts.notified_revision IS
-    'Native revision completed by at least one real SENT channel; legacy notified_at never populates this fact.';
 CREATE TABLE upload_delivery_batches (
     batch_id text PRIMARY KEY CHECK (batch_id ~ '^[0-9a-f]{32}$'),
     operation_key text NOT NULL UNIQUE,
@@ -2261,49 +2186,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS signal_state_open_key_idx
 CREATE INDEX IF NOT EXISTS signal_state_open_last_seen_idx
     ON signal_state (last_seen)
     WHERE resolved_at IS NULL;
-
--- ─────────────── alert_escalations ───────────────
--- The escalation ledger: who was told about a condition, when, and how it went. It is
--- deliberately not a second copy of the condition — severity, whether it still fires and
--- when it started are read from the source row on every pass. `source_kind` names which
--- condition table `source_id` belongs to, so one ledger serves both while the two tables
--- still exist.
-CREATE TABLE IF NOT EXISTS alert_escalations (
-    id                    BIGSERIAL PRIMARY KEY,
-    source_kind           TEXT NOT NULL CHECK (source_kind IN ('alerts', 'signal_state')),
-    source_id             BIGINT NOT NULL,
-    -- Escalations actually delivered to a person. A shadow decision is not one of them.
-    escalation_count      INTEGER NOT NULL DEFAULT 0 CHECK (escalation_count >= 0),
-    -- Would-be escalations recorded while the loop runs without sending, so the volume a
-    -- live gate would produce is measurable before the gate opens.
-    shadow_escalations    INTEGER NOT NULL DEFAULT 0 CHECK (shadow_escalations >= 0),
-    last_delivery_at      TIMESTAMPTZ,
-    last_delivery_result  TEXT CHECK (last_delivery_result IN ('shadow', 'sent', 'held', 'failed')),
-    -- No escalation before this instant, whatever the source says: the rate limit lives on
-    -- the ledger so a restart cannot reset it.
-    cooldown_until        TIMESTAMPTZ,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- One ledger row per source episode: the same condition escalating twice updates this row.
-CREATE UNIQUE INDEX IF NOT EXISTS alert_escalations_source_idx
-    ON alert_escalations (source_kind, source_id);
-
-COMMENT ON TABLE alert_escalations IS
-    'The escalation ledger: who was told about a condition, when, and how it went. Condition facts are read from the source row every pass, never copied here.';
-
-COMMENT ON COLUMN alert_escalations.source_kind IS
-    'Which condition table source_id refers to: alerts (Grafana-sourced episodes) or signal_state (detector-sourced episodes).';
-
-COMMENT ON COLUMN alert_escalations.escalation_count IS
-    'Escalations delivered to a person. Only the escalation loop writes it, and only when a delivery was accepted.';
-
-COMMENT ON COLUMN alert_escalations.shadow_escalations IS
-    'Would-be escalations recorded while the mode is shadow: the loop decides and logs but sends nothing, so the volume is measurable before the gate opens.';
-
-COMMENT ON COLUMN alert_escalations.cooldown_until IS
-    'No escalation before this instant. The rate limit is stored here rather than in memory so a restart cannot reset it.';
 
 CREATE TABLE reply_suggestion_offers (
     id BIGSERIAL PRIMARY KEY,

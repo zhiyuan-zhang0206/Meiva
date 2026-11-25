@@ -201,7 +201,6 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
     assert _snapshot(db_conn, "laptop") == (True, 0, "sha-1", True)
     assert _snapshot(db_conn, "retired") == (False, 1, None, False)
     assert _judged(db_conn) == ["target"]
-    assert db_conn.execute("SELECT count(*) FROM alerts").fetchone() == (0,)
 
 
 def test_paused_and_non_runner_machines_are_not_probed(
