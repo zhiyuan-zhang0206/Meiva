@@ -147,6 +147,24 @@ def _forked_graceful_child(child_file: str, ready: str, closed: str, close_s: st
     time.sleep(60)
 
 
+def _drains_beside_group_child(child_file: str, report: str, ready: str) -> None:
+    child_pid = os.fork()
+    if child_pid == 0:
+        time.sleep(60)
+        os._exit(0)
+    pathlib.Path(child_file).write_text(str(child_pid))
+
+    def drain(*_: object) -> None:
+        time.sleep(0.3)
+        reaped, _status = os.waitpid(child_pid, os.WNOHANG)
+        pathlib.Path(report).write_text("child-ended" if reaped else "child-running")
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, drain)
+    pathlib.Path(ready).touch()
+    time.sleep(60)
+
+
 def _detached_late_child(child_file: str, ready: str) -> None:
 
     def finish(*_: object) -> None:
@@ -206,6 +224,7 @@ _SCENARIOS = {
     "restart_down": _restart_down,
     "forked_late_child": _forked_late_child,
     "forked_graceful_child": _forked_graceful_child,
+    "drains_beside_group_child": _drains_beside_group_child,
     "detached_late_child": _detached_late_child,
     "code_gate_exit": _code_gate_exit,
     "exit_soon": _exit_soon,

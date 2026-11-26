@@ -6,7 +6,11 @@ macOS signed-helper permission ancestry. The captured `OwnedProcess` birth
 protects ordinary signaling from a PID now naming another process.
 
 Stop sends TERM to the known leader's group only while that birth remains live
-and still leads that group. A leader no longer in its original group receives
+and still leads that group, except for a unit that declares `term_leader_only`
+(manifest field, part of the digest): its graceful TERM goes to the leader's pid alone,
+so children in its group stay alive while the leader drains them. Once that leader has
+exited, root sends TERM to what remains of the group, and the window's SIGKILL of the
+group still applies. Force always signals the group. A leader no longer in its original group receives
 an identity-checked direct signal. Root never signals its own process group.
 Concrete identity and OS failures propagate; an already-gone process is normal.
 There is no process-table scan, descendant capture, durable spawning record,

@@ -206,6 +206,14 @@ def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_
     assert "stop_timeout_s" not in units["svc-b"]
 
 
+def test_only_the_agent_host_terms_its_leader_alone() -> None:
+    units = _real_units()
+    assert units["agent-host"]["term_leader_only"] is True
+    assert [unit_id for unit_id, unit in units.items() if "term_leader_only" in unit] == [
+        "agent-host"
+    ]
+
+
 def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -> None:
     """Root never waits for a unit less long than the unit's own cleanup may take."""
     from services.supervision.roster.composition import build_services

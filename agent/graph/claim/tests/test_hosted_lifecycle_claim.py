@@ -143,6 +143,11 @@ async def test_an_idle_agent_stays_idle_and_reads_the_acceptance_marker(
             "system:restart",
             id="halted-by-an-interrupt-and-asked-by-the-system",
         ),
+        pytest.param(
+            AgentState(halted=True, interrupted_by_restart=True),
+            "system:restart",
+            id="external-harness-turn-interrupted-with-no-checkpoint-history",
+        ),
         pytest.param(_history(halted=True), "self", id="restart-from-the-agents-own-code"),
         pytest.param(AgentState(), "self", id="self-restart-with-no-history"),
     ],
