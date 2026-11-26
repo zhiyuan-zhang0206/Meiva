@@ -51,12 +51,18 @@ configuration code:
 - **Which machine runs the service.** The roster's `embeddinggemma` unit is gated to the one
   machine whose own `MEIVA_MACHINE_HOST` equals the placement host (gateway, runner or both).
   Every other machine reports `EmbeddingGemma is hosted on <host>, not on this machine`. A
-  hosting machine whose revision is not a 64-hex SHA256 is refused with that reason instead of
-  crash-looping.
+  hosting machine whose revision is not a 64-hex SHA256, or whose other settings are invalid
+  (empty bind address, non-positive input length, port out of range, blank paths), is refused
+  with that reason instead of crash-looping or failing `meiva start`/`meiva status`. Values are
+  judged only on the hosting machine; a loopback alias (`localhost`, `127.0.0.1`, `::1`) is
+  the same address as any other.
 - **Where clients dial.** When `MEIVA_EMBEDDINGGEMMA_ENDPOINT` is unset, the gateway and the
   memory indexer derive `http://<host>:<MEIVA_EMBEDDINGGEMMA_PORT>/v1/embeddings`; on the hosting
   machine itself the host becomes `127.0.0.1`. An explicit endpoint always wins (an external
-  server keeps working, and the managed unit can run beside it).
+  server keeps working, and the managed unit can run beside it). The converse matters when
+  the host moves: moving `MEIVA_EMBEDDINGGEMMA_HOST` to another machine does not move a client
+  that still carries an explicit `MEIVA_EMBEDDINGGEMMA_ENDPOINT`, so clear the old explicit
+  endpoint in the same change.
 - **Model locator.** When `MEIVA_EMBEDDINGGEMMA_MODEL` is unset, server and clients use the
   device-independent locator `embeddinggemma-2`. A deployment that already sets a locator,
   including the legacy `<path>,cpu` / `<path>,gpu` form, keeps it: the managed server accepts
@@ -123,11 +129,22 @@ the package.
 - At startup the server hashes the model file and refuses to serve unless it equals the
   revision, then opens the engine on the chosen device and computes one warm-up embedding
   before it listens. `SIGTERM` runs a graceful shutdown that closes the engine.
-- It has no authentication of its own except an optional bearer token: when
+- It has no authentication of its own except an optional bearer token. When
   `MEIVA_EMBEDDINGGEMMA_API_KEY` is configured the roster launches the server with
-  `--require-api-key`, and the server refuses to start unless that variable is also present in its own
-  process environment. Prefer `MEIVA_EMBEDDINGGEMMA_BIND_HOST` on a private address, or
-  `127.0.0.1` when every client is on the hosting machine.
+  `--require-api-key` and the server reads the key itself, from its process environment or else
+  from `$MEIVA_HOME/.env` on the hosting machine. The key never appears in the unit's command
+  line or in the root manifests, which carry no sensitive values. A cluster-pinned key reaches a
+  gateway host's `.env` as a matter of course; on a runner host (which fetches cluster values
+  at process start instead of keeping them in its `.env`) put the same line in that machine's
+  `.env`, otherwise the unit refuses to start and says so. Prefer
+  `MEIVA_EMBEDDINGGEMMA_BIND_HOST` on a private address, or `127.0.0.1` when every client is
+  on the hosting machine.
+- The unit's stop window is `SHUTDOWN_CEILING_S` (30 s): uvicorn drains in-flight inference for
+  up to 25 s, then the engine is closed, so a restart does not SIGKILL a batch mid-way.
+
+A macOS hosting machine with the application firewall on prompts for, or blocks, inbound
+connections to the interpreter that serves the port; allow it (or bind to loopback when every
+client is local) before relying on a remote host there.
 
 ### Migrating from a hand-run service
 

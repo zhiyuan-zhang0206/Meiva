@@ -27,7 +27,7 @@ def main() -> None:
     def open_engine(_config: ServerConfig) -> OpenedEngine:
         return OpenedEngine(engine, (1,), 0.0)
 
-    daemon.serve(config, open_engine=open_engine, environ={})
+    daemon.serve(config, open_engine=open_engine, api_key=None)
 
 
 if __name__ == "__main__":

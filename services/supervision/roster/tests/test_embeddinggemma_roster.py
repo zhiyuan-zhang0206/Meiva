@@ -4,20 +4,15 @@ import shlex
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
-
 from base.cluster.machine import MachineFacts
 from base.daemon.health import DaemonProbe
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import meiva_home
 from services.derived.embeddinggemma.config import MODULE, parse_args
-from services.derived.embeddinggemma.contract import DEFAULT_MODEL
+from services.derived.embeddinggemma.contract import DEFAULT_MODEL, SHUTDOWN_CEILING_S
+from services.derived.embeddinggemma.launch import EmbeddingGemmaSettings
 from services.supervision.roster import composition, spec
-from services.supervision.roster.embeddinggemma_unit import (
-    EmbeddingGemmaSettings,
-    embeddinggemma_service,
-    probe_host,
-)
+from services.supervision.roster.embeddinggemma_unit import embeddinggemma_service, probe_host
 from services.supervision.roster.service_spec import BOTH
 
 REVISION = "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c"
@@ -97,9 +92,11 @@ def test_switching_the_device_changes_only_the_device_in_the_command() -> None:
     assert cpu[cpu.index("--device") + 1] == "cpu"
 
 
-def test_an_unknown_device_cannot_be_rendered() -> None:
-    with pytest.raises(ValueError, match="unsupported EmbeddingGemma device"):
-        _unit(_settings(device="cuda"))
+def test_an_unknown_device_is_refused_and_never_rendered() -> None:
+    assert _unit(_settings(device="cuda")).cmd == f".venv/bin/python -m {MODULE}"
+    reason = _gate(HOST, self_host=HOST, device="cuda")
+    assert reason is not None
+    assert "unsupported EmbeddingGemma device" in reason
 
 
 def test_another_machine_keeps_a_bare_declaration_and_never_validates_the_launch() -> None:
@@ -135,12 +132,15 @@ def test_the_identity_probe_carries_what_the_unit_was_launched_with() -> None:
     }
 
 
-def _gate(host: str, *, self_host: str, revision: str | None = REVISION) -> str | None:
+def _gate(
+    host: str, *, self_host: str, revision: str | None = REVISION, **changes: object
+) -> str | None:
     unit = next(
         s for s in composition.build_services(home=meiva_home()) if s.session == "embeddinggemma"
     )
+    base = composition.gate_settings()
     gate_settings = replace(
-        composition.gate_settings(), embeddinggemma_host=host, embeddinggemma_revision=revision
+        base, embeddinggemma=replace(base.embeddinggemma, host=host, revision=revision, **changes)
     )
     return spec.gate_reason(
         unit,
@@ -152,7 +152,7 @@ def _gate(host: str, *, self_host: str, revision: str | None = REVISION) -> str 
 
 
 def test_the_default_deployment_has_no_managed_service(unit_home: Path) -> None:
-    assert composition.gate_settings().embeddinggemma_host == ""
+    assert composition.gate_settings().embeddinggemma.host == ""
     reason = _gate("", self_host=HOST)
     assert reason is not None
     assert "MEIVA_EMBEDDINGGEMMA_HOST" in reason
@@ -162,3 +162,23 @@ def test_the_start_roster_holds_the_unit_only_on_the_placed_machine(unit_home: P
     assert _gate(HOST, self_host=HOST) is None
     assert _gate(HOST, self_host=OTHER) is not None
     assert _gate(HOST, self_host=HOST, revision=None) is not None
+
+
+def test_a_misconfigured_hosting_machine_is_refused_with_a_reason_and_still_renders_the_roster() -> (
+    None
+):
+    reason = _gate(HOST, self_host=HOST, bind_host="", max_input_length=0)
+    assert reason is not None
+    assert reason.startswith("invalid EmbeddingGemma configuration")
+
+
+def test_every_bad_value_still_declares_a_unit_on_every_machine() -> None:
+    for changes in ({"port": 0}, {"port": 70000}, {"bind_host": ""}, {"max_input_length": 0}):
+        for self_host in (HOST, OTHER):
+            unit = _unit(_settings(**changes), self_host=self_host)
+            assert unit.session == "embeddinggemma"
+            assert unit.cmd == f".venv/bin/python -m {MODULE}"
+
+
+def test_the_unit_is_given_time_to_finish_inflight_work_and_close_the_engine() -> None:
+    assert _unit(_settings()).stop_ceiling_s == SHUTDOWN_CEILING_S

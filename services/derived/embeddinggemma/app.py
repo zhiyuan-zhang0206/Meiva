@@ -47,8 +47,9 @@ def create_app(
 ) -> FastAPI:
     if config.require_api_key and not api_key:
         raise RuntimeError(
-            "the unit requires an API key but its environment carries none; "
-            "export MEIVA_EMBEDDINGGEMMA_API_KEY to the process that hosts the service"
+            "the unit requires an API key but neither its environment nor $MEIVA_HOME/.env carries one; "
+            "set MEIVA_EMBEDDINGGEMMA_API_KEY in the hosting machine's $MEIVA_HOME/.env "
+            "(or in the service process environment)"
         )
     serving = _Serving()
 

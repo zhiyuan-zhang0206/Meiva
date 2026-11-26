@@ -118,11 +118,7 @@ def _gate_fact(
         case "bridge":
             return _bridge_fact(machine, settings=settings, host=host, home=home)
         case "embeddinggemma":
-            return EmbeddingGemmaFact(
-                host=settings.embeddinggemma_host,
-                self_host=machine.host(),
-                revision=settings.embeddinggemma_revision,
-            )
+            return EmbeddingGemmaFact(settings=settings.embeddinggemma, self_host=machine.host())
         case "none":
             return None
         case _:

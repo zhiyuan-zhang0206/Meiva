@@ -1,10 +1,11 @@
-exports = ["config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py"]
+exports = ["config.py", "contract.py", "daemon.py", "engine.py", "launch.py", "placement.py", "probe.py"]
 
 [uses]
 "app.py" = ["config.py", "contract.py", "engine.py"]
 "config.py" = ["contract.py"]
-"daemon.py" = ["app.py", "config.py", "engine.py"]
+"daemon.py" = ["app.py", "config.py", "contract.py", "engine.py"]
 "engine.py" = ["config.py", "contract.py"]
+"launch.py" = ["config.py", "contract.py", "placement.py"]
 "placement.py" = ["contract.py"]
 "tests" = ["app.py", "config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py"]
 
@@ -15,6 +16,7 @@ exports = ["config.py", "contract.py", "daemon.py", "engine.py", "placement.py",
 "__init__.py" = "strict"
 "config.py" = "strict"
 "contract.py" = "strict"
+"launch.py" = "strict"
 "placement.py" = "strict"
 
 [roots]

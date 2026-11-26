@@ -10,7 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
-from services.derived.embeddinggemma.placement import hosting_problem
+from services.derived.embeddinggemma.launch import EmbeddingGemmaSettings, launch_problem
+from services.supervision.roster.embeddinggemma_settings import embeddinggemma_settings
 
 __all__ = [
     "BridgeFact",
@@ -45,8 +46,7 @@ class GateSettings:
     permissions_helper_enabled: bool
     heartbeat_enabled: bool
     delivery_watchdog_enabled: bool
-    embeddinggemma_host: str
-    embeddinggemma_revision: str | None
+    embeddinggemma: EmbeddingGemmaSettings
     db_url: str
     redis_url: str
 
@@ -61,15 +61,10 @@ class GateSettings:
             permissions_helper_enabled=bool(read_field("permissions_helper_enabled")),
             heartbeat_enabled=bool(read_field("heartbeat_enabled")),
             delivery_watchdog_enabled=bool(read_field("delivery_watchdog_enabled")),
-            embeddinggemma_host=str(read_field("embeddinggemma_host")),
-            embeddinggemma_revision=_optional_text(read_field("embeddinggemma_revision")),
+            embeddinggemma=embeddinggemma_settings(read_field),
             db_url=str(read_field("db_url")),
             redis_url=str(read_field("redis_url")),
         )
-
-
-def _optional_text(value: object) -> str | None:
-    return None if value is None else str(value)
 
 
 # meiva:note
@@ -123,9 +118,8 @@ class BridgeFact:
 
 @dataclass(frozen=True)
 class EmbeddingGemmaFact:
-    host: str
+    settings: EmbeddingGemmaSettings
     self_host: str
-    revision: str | None
 
 
 GateFact = (
@@ -201,8 +195,8 @@ def _placement_reason(
             return None if allowed else _COLLECTOR_REFUSED
         case BridgeFact(unconfigured=unconfigured, has_endpoint=has_endpoint):
             return _bridge_reason(unconfigured, has_endpoint=has_endpoint)
-        case EmbeddingGemmaFact(host=host, self_host=self_host, revision=revision):
-            return hosting_problem(host, self_host=self_host, revision=revision)
+        case EmbeddingGemmaFact(settings=settings, self_host=self_host):
+            return launch_problem(settings, self_host=self_host)
         case _:
             assert_never(fact)
 

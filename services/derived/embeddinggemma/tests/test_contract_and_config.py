@@ -34,6 +34,10 @@ def test_placement_matches_the_machines_own_reachable_address() -> None:
     assert placement.hosted_here("Mac-Mini", self_host="mac-mini")
     assert not placement.hosted_here("10.64.0.2", self_host=SELF)
     assert not placement.hosted_here("", self_host="")
+    for alias in ("127.0.0.1", "::1", "[::1]", "localhost", "LOCALHOST", "ip6-localhost"):
+        assert placement.hosted_here(alias, self_host="127.0.0.1"), alias
+        assert placement.hosted_here(alias, self_host=""), alias
+    assert not placement.hosted_here("127.0.0.1", self_host=SELF)
     assert placement.hosted_here("localhost", self_host="")
     assert not placement.hosted_here(SELF, self_host="")
 
@@ -132,3 +136,27 @@ def test_an_unknown_device_flag_ends_the_launch() -> None:
     args[args.index("--device") + 1] = "cuda"
     with pytest.raises(SystemExit):
         server_config.parse_args(args)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("MEIVA_EMBEDDINGGEMMA_API_KEY=plain", "plain"),
+        ("MEIVA_EMBEDDINGGEMMA_API_KEY='quoted value'", "quoted value"),
+        ('export MEIVA_EMBEDDINGGEMMA_API_KEY="dq"', "dq"),
+        ("MEIVA_EMBEDDINGGEMMA_API_KEY=abc # trailing", "abc"),
+        ("# MEIVA_EMBEDDINGGEMMA_API_KEY=commented", None),
+        ("MEIVA_EMBEDDINGGEMMA_API_KEY_OTHER=x", None),
+        ("MEIVA_EMBEDDINGGEMMA_API_KEY=", None),
+        ("A=1\nMEIVA_EMBEDDINGGEMMA_API_KEY=first\nMEIVA_EMBEDDINGGEMMA_API_KEY=last", "last"),
+    ],
+)
+def test_the_api_key_is_read_from_env_file_text(text: str, expected: str | None) -> None:
+    assert server_config.env_file_value(text, "MEIVA_EMBEDDINGGEMMA_API_KEY") == expected
+
+
+def test_the_environment_beats_the_file_and_a_blank_value_falls_through() -> None:
+    name = "MEIVA_EMBEDDINGGEMMA_API_KEY"
+    assert server_config.api_key_from({name: " e "}, f"{name}=f") == "e"
+    assert server_config.api_key_from({name: " "}, f"{name}=f") == "f"
+    assert server_config.api_key_from({}, None) is None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from base.cluster.listener_plan import LOOPBACK_ALIASES
 from base.host.net.url_secret import url_with_host
 from services.derived.embeddinggemma.contract import (
     DEFAULT_MODEL,
@@ -14,7 +15,8 @@ _SELF_UNSET = "localhost"
 
 
 def _normalize(host: str) -> str:
-    return host.strip().lower().removeprefix("[").removesuffix("]")
+    bare = host.strip().lower().removeprefix("[").removesuffix("]")
+    return _SELF_UNSET if bare in LOOPBACK_ALIASES else bare
 
 
 def hosted_here(host: str, *, self_host: str) -> bool:

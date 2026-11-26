@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
+from services.derived.embeddinggemma.launch import EmbeddingGemmaSettings
 from services.supervision.roster.gate_plan import (
     BridgeFact,
     BrowserFact,
@@ -131,15 +134,30 @@ def test_the_relay_is_gated_by_its_declaration_and_its_endpoint(
 _SHA = "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c"
 
 
+def _gemma(host: str, *, self_host: str, **changes: object) -> EmbeddingGemmaFact:
+    base = EmbeddingGemmaSettings(
+        host=host,
+        port=9379,
+        device="cpu",
+        revision=_SHA,
+        model=None,
+        model_path="/models/model.litertlm",
+        cache_dir="/models/cache",
+        python="",
+        litert_path="",
+        bind_host="0.0.0.0",  # noqa: S104
+        max_input_length=8192,
+        api_key_configured=False,
+    )
+    return EmbeddingGemmaFact(settings=replace(base, **changes), self_host=self_host)
+
+
 def test_embeddinggemma_runs_only_on_the_machine_whose_address_is_the_placement_host() -> None:
-    here = EmbeddingGemmaFact(host="10.64.0.7", self_host="10.64.0.7", revision=_SHA)
-    elsewhere = EmbeddingGemmaFact(host="10.64.0.9", self_host="10.64.0.7", revision=_SHA)
-    unmanaged = EmbeddingGemmaFact(host="", self_host="10.64.0.7", revision=_SHA)
-    assert gate_reason("embeddinggemma", here) is None
-    assert gate_reason("embeddinggemma", elsewhere) == (
+    assert gate_reason("embeddinggemma", _gemma("10.64.0.7", self_host="10.64.0.7")) is None
+    assert gate_reason("embeddinggemma", _gemma("10.64.0.9", self_host="10.64.0.7")) == (
         "EmbeddingGemma is hosted on 10.64.0.9, not on this machine"
     )
-    assert gate_reason("embeddinggemma", unmanaged) == (
+    assert gate_reason("embeddinggemma", _gemma("", self_host="10.64.0.7")) == (
         "no managed EmbeddingGemma service (MEIVA_EMBEDDINGGEMMA_HOST is empty)"
     )
 
@@ -148,7 +166,35 @@ def test_a_placement_naming_this_machine_needs_a_revision_the_model_can_be_verif
     None
 ):
     for revision in (None, "", "f9972ac22e696a105c482202646979e33e4b5a1e"):
-        fact = EmbeddingGemmaFact(host="h", self_host="h", revision=revision)
-        reason = gate_reason("embeddinggemma", fact)
+        reason = gate_reason("embeddinggemma", _gemma("h", self_host="h", revision=revision))
         assert reason is not None
         assert "64-hex SHA256" in reason
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"bind_host": ""},
+        {"max_input_length": 0},
+        {"max_input_length": -1},
+        {"port": 0},
+        {"port": 70000},
+        {"model_path": ""},
+        {"cache_dir": " "},
+        {"model": ""},
+        {"device": "cuda"},
+    ],
+)
+def test_an_invalid_value_on_the_hosting_machine_is_a_refusal_not_an_exception(
+    changes: dict[str, object],
+) -> None:
+    reason = gate_reason("embeddinggemma", _gemma("h", self_host="h", **changes))
+    assert reason is not None
+    assert "invalid EmbeddingGemma configuration" in reason or "device" in reason
+
+
+def test_an_invalid_value_is_never_judged_on_another_machine() -> None:
+    fact = _gemma("elsewhere", self_host="h", bind_host="", max_input_length=0)
+    assert gate_reason("embeddinggemma", fact) == (
+        "EmbeddingGemma is hosted on elsewhere, not on this machine"
+    )

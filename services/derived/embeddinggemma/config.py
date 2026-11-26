@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import get_args
 
@@ -48,6 +48,28 @@ class ServerConfig:
             raise ValueError(f"EmbeddingGemma port {self.port} is out of range")
         if self.litert_path is not None and not self.litert_path.strip():
             raise ValueError("EmbeddingGemma litert path must be omitted or non-empty")
+
+
+def env_file_value(text: str, name: str) -> str | None:
+    value: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip().removeprefix("export ").lstrip()
+        key, separator, rest = line.partition("=")
+        if not separator or key.strip() != name:
+            continue
+        rest = rest.strip()
+        if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in {"'", '"'}:
+            value = rest[1:-1]
+        else:
+            value = rest.split(" #", 1)[0].strip()
+    return value or None
+
+
+def api_key_from(environ: Mapping[str, str], env_file_text: str | None) -> str | None:
+    key = environ.get(API_KEY_ENV, "").strip()
+    if key:
+        return key
+    return None if env_file_text is None else env_file_value(env_file_text, API_KEY_ENV)
 
 
 def server_args(config: ServerConfig) -> list[str]:

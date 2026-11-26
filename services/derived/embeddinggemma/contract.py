@@ -11,6 +11,9 @@ DEFAULT_MODEL: Final = "embeddinggemma-2"
 
 DEFAULT_PORT: Final = 9379
 
+DRAIN_S: Final = 25
+SHUTDOWN_CEILING_S: Final = DRAIN_S + 5.0
+
 Device = Literal["cpu", "gpu"]
 
 LOOPBACK: Final = "127.0.0.1"
