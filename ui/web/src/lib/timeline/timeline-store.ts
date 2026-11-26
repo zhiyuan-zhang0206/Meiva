@@ -15,7 +15,7 @@ import {
   captureCompactTransition,
   type CompactTransitionBuffer,
 } from "../layout/compact-transition";
-import { dropLiveOverlays, isLiveOverlayId } from "../fold/overlay-id";
+import { dropLiveOverlays, isLiveOverlayId } from "../fold";
 import {
   clearCodeClocks,
   freezeExecClocks,

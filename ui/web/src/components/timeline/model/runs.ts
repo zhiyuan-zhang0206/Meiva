@@ -7,7 +7,7 @@
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { isLiveOverlayId } from "@/lib/fold/overlay-id";
+import { isLiveOverlayId } from "@/lib/fold";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
