@@ -174,7 +174,7 @@ class GatewayServerState(
     AppointmentAppState,
     auth_router.AuthAppState,
 ):
-    pass
+    usage_receipts: UsageReceiptDelivery | None = None
 
 
 # meiva:note
@@ -250,7 +250,9 @@ def _build_request_resources(
     releases.push_async_callback(insights_client.aclose)
 
 
-def _start_usage_receipts(receipts: UsageReceiptDelivery, releases: AsyncExitStack) -> None:
+def _start_usage_receipts(receipts: UsageReceiptDelivery | None, releases: AsyncExitStack) -> None:
+    if receipts is None:
+        return
     receipts.start()
     _ = releases.callback(receipts.stop, timeout=1.0)
 
@@ -262,7 +264,6 @@ async def lifespan(
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
     runtime_process: psutil.Process,
-    usage_receipts: UsageReceiptDelivery,
 ) -> AsyncGenerator[None]:
     state = app_state_as(app, GatewayServerState)
 
@@ -310,7 +311,7 @@ async def lifespan(
             db_pool = state.db.pool(max_size=state.gateway_config.db_pool_max_size)
             state.db_pool = db_pool
             releases.callback(db_pool.close)
-            _start_usage_receipts(usage_receipts, releases)
+            _start_usage_receipts(state.usage_receipts, releases)
             await asyncio.to_thread(plugins_router.initialize_plugins, db_pool, home=process.home)
             state.sessions = SessionStore(db_pool)
             state.session_keys = SessionKeys(state.gateway_config.rng)
@@ -476,7 +477,6 @@ def create_app(
             # The process the runtime monitor samples is this gateway's own; the root builds it here
             # so no async body reaches for psutil.
             runtime_process=psutil.Process(),
-            usage_receipts=usage_receipts,
         ),
         docs_url=None,
         redoc_url=None,
@@ -490,6 +490,7 @@ def create_app(
             excluded_urls=r"/api/health(?:\?|$)",
         )
     state = GatewayServerState()
+    state.usage_receipts = usage_receipts
     app.state = state
     state.gateway_config = config
     state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
