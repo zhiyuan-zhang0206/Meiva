@@ -60,6 +60,7 @@
 import { DISPLAY_TO_USER, HIDE_FROM_USER, USER_REPLY_HEADER } from "../contracts/constants-generated";
 import type { BackendTimelineItem, ChatStartEvent, SystemEvent } from "../contracts/types";
 import { parseItemId, sortByItemId } from "./item-id";
+import { isLiveOverlayId } from "./overlay-id";
 
 export { parseItemId, parseItemIdParts, sortByItemId, type ItemIdParts } from "./item-id";
 
@@ -788,6 +789,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
         (it) =>
           !it.llmWaiting &&
           !t.streamingIds.has(it.item_id) &&
+          !isLiveOverlayId(it.item_id) &&
           !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       ),
     };

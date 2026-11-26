@@ -689,4 +689,32 @@ describe("summarizeTurn — external harness items", () => {
     expect(s.priorActiveMs).toBe(0);
     expect(s.liveSegmentStartMs).toBe(Date.parse("2026-10-25T01:02:00.500Z"));
   });
+
+  it("bounds a segment by the rows of the record once it holds one, so an unretired overlay row cannot pull its start back", () => {
+    const t0 = Date.parse("2026-11-26T04:08:00.000Z");
+    const MIN = 60_000;
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const stale = item("agent_reasoning", null, "live.t1.msg_a:0", {
+      created_at: iso(t0 - 22 * MIN),
+      reasoningElapsedMs: 62_000,
+    });
+    const run = [
+      stale,
+      item("agent_reasoning", null, "h10.0", { created_at: iso(t0 + 10_000), reasoning_ms: 2_000 }),
+      item("agent_code", null, "h11.0", { created_at: iso(t0 + 10_400), code_elapsed_ms: 40 }),
+    ];
+    const s = summarizeTurn(run);
+    expect(s.liveSegmentStartMs).toBe(t0 + 8_000);
+    expect(s.settledActiveMs).toBe(2_400);
+    expect(s.thinking).toBe(2);
+  });
+
+  it("anchors a segment on its overlay rows until the first row of the record lands", () => {
+    const t0 = Date.parse("2026-11-26T04:08:00.000Z");
+    const live = item("agent_reasoning", null, "live.t1.msg_a:0", {
+      created_at: new Date(t0).toISOString(),
+      reasoningStartedAt: t0,
+    });
+    expect(summarizeTurn([live]).liveSegmentStartMs).toBe(t0);
+  });
 });

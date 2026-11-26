@@ -1,5 +1,6 @@
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 import {
+  isLiveOverlayId,
   isReattachedTimelineContext,
   isSyntheticEpochItemId,
   parseEpochItemId,
@@ -44,7 +45,8 @@ export function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolea
       (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
       it.codeStartedAt != null ||
       (it.kind === "agent_code" && it.activity_pending === true && it.code_elapsed_ms == null) ||
-      (it.execStartedAt != null && it.exec_ms == null)
+      (it.execStartedAt != null && it.exec_ms == null) ||
+      isLiveOverlayId(it.item_id)
     ) {
       return true;
     }

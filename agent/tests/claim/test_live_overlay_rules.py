@@ -7,7 +7,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.project import ProjectedItem
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.lm.harness import AssistantText, TextDelta, ToolUse
+from base.lm.harness import AssistantText, ReasoningDelta, TextDelta, ToolUse
 
 
 def _committed(kind: str, text: str, *, block: str | None = None) -> ProjectedItem:
@@ -105,3 +105,25 @@ async def test_pending_deltas_are_sent_before_the_retirement_is_returned() -> No
     assert [e["role"] for e in sent] == ["chat_start"]
     _ = overlay.retire_all()
     assert [e["role"] for e in sent] == ["chat_start", "chat_delta"]
+
+
+async def test_a_committed_block_retires_the_unmatched_earlier_blocks_of_its_message() -> None:
+    overlay, _ = _overlay()
+    overlay.on_event(ReasoningDelta(turn_id="t1", text="unreadable", block="m1:0"))
+    overlay.on_event(TextDelta(turn_id="t1", text="Hello", block="m1:1"))
+    overlay.on_event(TextDelta(turn_id="t1", text="Later", block="m1:2"))
+    overlay.on_event(ReasoningDelta(turn_id="t1", text="Other", block="m2:0"))
+    assert overlay.superseded([_committed("chat", "Hello", block="m1:1")]) == [
+        "live.t1.m1:0",
+        "live.t1.m1:1",
+    ]
+    assert overlay.live_ids == ["live.t1.m1:2", "live.t1.m2:0"]
+
+
+async def test_a_late_delta_of_a_block_retired_as_unmatched_shows_nothing() -> None:
+    overlay, sent = _overlay()
+    overlay.on_event(ReasoningDelta(turn_id="t1", text="unreadable", block="m1:0"))
+    assert overlay.superseded([_committed("chat", "Hello", block="m1:1")]) == ["live.t1.m1:0"]
+    sent.clear()
+    overlay.on_event(ReasoningDelta(turn_id="t1", text="more", block="m1:0"))
+    assert sent == [] and overlay.live_ids == []

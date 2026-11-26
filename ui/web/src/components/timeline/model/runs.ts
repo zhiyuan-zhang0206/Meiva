@@ -7,6 +7,7 @@
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { isLiveOverlayId } from "@/lib/fold/overlay-id";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
 import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
@@ -350,20 +351,27 @@ function hasMeasuredDuration(items: readonly BackendTimelineItem[]): boolean {
   );
 }
 
+// meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
+function timedBasis(items: readonly BackendTimelineItem[]): readonly BackendTimelineItem[] {
+  const recorded = items.filter((it) => !isLiveOverlayId(it.item_id));
+  return recorded.some((it) => itemStartMs(it) !== null) ? recorded : items;
+}
+
 function computeSegment(seg: ActiveSegment): ComputedSegment {
+  const items = timedBasis(seg.items);
   let startMs: number | null = null;
-  if (seg.items.length > 0) {
-    const firstStart = itemStartMs(seg.items[0]);
+  if (items.length > 0) {
+    const firstStart = itemStartMs(items[0]);
     if (firstStart !== null) {
       startMs = firstStart;
-      for (let i = 1; i < seg.items.length; i++) {
-        const s = itemStartMs(seg.items[i]);
+      for (let i = 1; i < items.length; i++) {
+        const s = itemStartMs(items[i]);
         if (s !== null && s < startMs) startMs = s;
       }
     }
   }
 
-  const settledItems = seg.items.filter((it) => !it.llmWaiting);
+  const settledItems = items.filter((it) => !it.llmWaiting);
   let endMs: number | null = null;
   if (settledItems.length > 0) {
     const lastEnd = itemEndMs(settledItems[settledItems.length - 1]);
