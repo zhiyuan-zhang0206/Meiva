@@ -477,7 +477,7 @@ class ForegroundRun:
                 self.interrupted = True
             else:
                 done = LLMDone(agent_id=self._agent_id).model_dump_json()
-                self._projector.post(partial(self._publisher.emit, done))
+                self._projector.post_terminal(partial(self._publisher.emit, done))
                 await persist_last_active(self._ctx, self._agent_id, turn.text)
 
     async def _settle(self, settlement: Settlement) -> None:

@@ -8,15 +8,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime
+from pathlib import Path
 
 import psycopg
 import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.harness_interrupt import announce_interrupt
+from agent.graph.claim.harness_interrupt import TimelineNotifications, announce_interrupt
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node, run_harness_turn
 from agent.graph.claim.tests.harness_support import (
@@ -26,6 +29,7 @@ from agent.graph.claim.tests.harness_support import (
     in_a_turn,
     input_key,
     insert_row,
+    publications,
     read_recorded_items,
     row_status,
     silent_engine,
@@ -37,8 +41,11 @@ from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted
 from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.history.transcript_timeline.record.harness import reply_key
 from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED
 from base.agents.tests.langgraph_views import command_update
+from base.agents.to_user.delivery.store import publish
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.fakes import clock_over
 from base.clock.tests.manual_timers import ManualTimers
 from base.db.code_version_gate import ProcessDbGate
@@ -536,37 +543,29 @@ async def test_terminal_projection_can_wait_while_correction_and_next_input_are_
     assert row_status(db_conn, first) == row_status(db_conn, second) == "done"
 
 
-@pytest.mark.parametrize("real_timeline", [False, True])
-@pytest.mark.parametrize("restore_readability", [False, True])
-async def test_unreadable_transcript_preserves_execution_and_publication_floor(
-    db_conn: psycopg.Connection,
-    harness_runtime: RuntimeFixture,
-    loguru_records: LogRecords,
-    *,
-    real_timeline: bool,
-    restore_readability: bool,
-) -> None:
-    agent_id = agent_row(db_conn)
-    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+def _seed_reply_history(
+    db_conn: psycopg.Connection, agent_id: int, created_at: datetime, *, other_session: bool
+) -> list[str]:
+    prior = [("assistant:old-publication", "Previous reply.")]
+    if other_session:
+        key = reply_key("antigravity", "agy:0", "a-prior-session")
+        prior.append((key, "Prior session's canonical reply."))
+    for key, content in prior:
+        _ = publish(
+            db_conn,
+            agent_id,
+            key,
+            PublishMessage(content=content, suggestions=[]),
+            mode=UserDeliveryMode.PREFIX,
+            created_at=created_at,
+        )
+    db_conn.commit()
+    return [content for _, content in prior]
 
-    class Engine(FakeEngine):
-        async def deliver(
-            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
-        ) -> None:
-            if restore_readability:
-                path.chmod(0o600)
-            await super().deliver(inputs, compaction_note=compaction_note)
 
-    engine = Engine()
-    ctx = harness_runtime(engine, agent_id=agent_id).context
-    record = engine.record
-    publisher = ctx.event_publisher
-    assert record is not None and publisher is not None
-    record.write("PLANNER_RESPONSE", content="MEIVA_DISPLAY_TO_USER\nPrevious reply.")
-    path = record.path
-    if not restore_readability:
-        engine.record = None
-    path.chmod(0o000)
+@contextmanager
+def _unreadable(path: Path, denied_path: Path, mode: int) -> Generator[None]:
+    denied_path.chmod(0o000)
     try:
         try:
             _ = path.read_bytes()
@@ -576,17 +575,162 @@ async def test_unreadable_transcript_preserves_execution_and_publication_floor(
             denied = False
         if not denied:
             pytest.skip("the test process can read files with mode 000")
+        yield
+    finally:
+        denied_path.chmod(mode)
+
+
+@pytest.mark.parametrize("real_timeline", [False, True])
+@pytest.mark.parametrize(
+    ("restore_readability", "stat_available", "other_session"),
+    [(False, True, False), (True, True, True), (True, False, True), (True, False, False)],
+)
+async def test_unreadable_transcript_preserves_execution_and_publication_floor(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+    *,
+    real_timeline: bool,
+    restore_readability: bool,
+    stat_available: bool,
+    other_session: bool,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+
+    class Engine(FakeEngine):
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
+            if restore_readability:
+                denied_path.chmod(mode)
+            await super().deliver(inputs, compaction_note=compaction_note)
+
+    engine = Engine()
+    ctx = harness_runtime(engine, agent_id=agent_id).context
+    record = engine.record
+    publisher = ctx.event_publisher
+    assert record is not None and publisher is not None
+    record.write("PLANNER_RESPONSE", content="MEIVA_DISPLAY_TO_USER\nPrevious reply.")
+    path = record.path
+    expected = _seed_reply_history(
+        db_conn, agent_id, ctx.require_clock().now(), other_session=other_session
+    )
+    if not restore_readability:
+        engine.record = None
+    denied_path, mode = (path, 0o600) if stat_available else (path.parent, 0o700)
+    with _unreadable(path, denied_path, mode):
         command = await run_harness_turn(
             AgentState(), ctx, agent_id, publisher, timeline=None if real_timeline else NoTimeline()
         )
-    finally:
-        path.chmod(0o600)
 
     assert command.goto == "claim"
     assert [key for _, key in engine.submitted] == [input_key(row)]
     assert row_status(db_conn, row) == "done"
     assert bool(loguru_records.events("harness_live_timeline_failed")) == real_timeline
-    publications = db_conn.execute(
-        "SELECT content FROM agent_publications WHERE agent_id = %s", (agent_id,)
-    ).fetchall()
-    assert publications == ([("the answer",)] if real_timeline and restore_readability else [])
+    if real_timeline and restore_readability:
+        expected.append("the answer")
+    assert [content for _, content in publications(db_conn, agent_id)] == expected
+    if real_timeline:
+        sink = ReadTimelineSink(
+            ctx, agent_id, publisher, non_human_wake=False, session_id=lambda: record.session
+        )
+        await sink.finish()
+        assert [content for _, content in publications(db_conn, agent_id)] == expected
+
+
+@pytest.mark.parametrize("scenario", ["normal", "abort", "graceful_exit"])
+async def test_a_blocked_closing_row_poll_cannot_hold_turn_exit(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+    scenario: str,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+    polling = asyncio.Event()
+    stop_poll = asyncio.Event()
+
+    class PollTimers(ManualTimers):
+        async def asleep(self, seconds: float) -> None:
+            polling.set()
+            _ = await stop_poll.wait()
+
+    class Engine(FakeEngine):
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
+            if scenario == "graceful_exit":
+                _ = insert_row(db_conn, agent_id, "restart", "system:restart", "")
+            await super().deliver(inputs, compaction_note=compaction_note)
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        if scenario == "normal":
+            return in_a_turn([item.key for item in inputs], "")
+        return [TextDelta("t1", "Partial"), SessionFailed("child exited 143")]
+
+    engine = Engine(script=script)
+    ctx = replace(
+        harness_runtime(engine, agent_id=agent_id).context,
+        host_exiting=lambda: scenario == "graceful_exit",
+    )
+    publisher = ctx.event_publisher
+    assert publisher is not None
+    clock = clock_over(PollTimers())
+    sink = ReadTimelineSink(
+        replace(ctx, clock_factory=lambda: clock),
+        agent_id,
+        publisher,
+        non_human_wake=False,
+        session_id=lambda: engine.session_id,
+    )
+    work = run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=sink)
+    async with asyncio.timeout(4):
+        if scenario == "abort":
+            with pytest.raises(FatalLLMStreamError, match="child exited 143"):
+                _ = await work
+        else:
+            command = await work
+            assert command.goto == "claim"
+            assert command_update(command).get("interrupted_by_restart", False) == (
+                scenario == "graceful_exit"
+            )
+
+    assert polling.is_set()
+    assert row_status(db_conn, row) == "done"
+    assert not any(t.get_name() == f"harness-projection-{agent_id}" for t in asyncio.all_tasks())
+    events = loguru_records.extras(event="harness_live_timeline_failed")
+    assert [event.get("reason") for event in events] == ["timeout"]
+
+
+async def test_cancelled_projection_publishes_the_terminal_notification_and_reports_drain(
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = 91235
+    projection = TimelineNotifications(agent_id, NoTimeline())
+    active = asyncio.Event()
+    terminal: list[str] = []
+
+    async def blocked_effect() -> None:
+        active.set()
+        _ = await asyncio.Event().wait()
+
+    async def invocation() -> None:
+        async with projection.running():
+            projection.post(blocked_effect)
+            projection.post_terminal(lambda: terminal.append("done"))
+            _ = await asyncio.Event().wait()
+
+    task = asyncio.create_task(invocation())
+    try:
+        async with asyncio.timeout(4):
+            _ = await active.wait()
+    finally:
+        _ = task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert terminal == ["done"]
+    assert not any(t.get_name() == f"harness-projection-{agent_id}" for t in asyncio.all_tasks())
+    (event,) = loguru_records.extras(event="harness_live_timeline_failed")
+    assert event["reason"] == "cancelled"
+    assert event["queued_notifications"] == 1

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager, suppress
 from functools import partial
@@ -49,6 +50,7 @@ class HarnessTimeline(Protocol):
     ) -> None: ...
 
 
+TIMELINE_DRAIN_SECONDS = 2.0
 TimelineEffect = Callable[[], Awaitable[None] | None]
 
 
@@ -58,29 +60,77 @@ class TimelineNotifications:
         self.sink = sink
         self._agent_id = agent_id
         self._pending = asyncio.Queue[TimelineEffect | None]()
+        self._applying = False
+        self._terminals: deque[Callable[[], None]] = deque()
 
     def post(self, effect: TimelineEffect) -> None:
         self._pending.put_nowait(effect)
 
+    def post_terminal(self, emit: Callable[[], None]) -> None:
+        self._terminals.append(emit)
+        self.post(self._emit_terminal)
+
+    def _emit_terminal(self) -> None:
+        emit = self._terminals.popleft()
+        emit()
+
     @asynccontextmanager
     async def running(self) -> AsyncGenerator[None]:
         outcome: BaseException | None = None
-        async with asyncio.TaskGroup() as tasks:
-            worker = tasks.create_task(self._consume(), name=f"harness-projection-{self._agent_id}")
-            try:
-                yield
-            except BaseException as error:
-                outcome = error
-                if isinstance(error, asyncio.CancelledError):
-                    _ = worker.cancel()
-            finally:
-                self._pending.put_nowait(None)
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                worker = tasks.create_task(
+                    self._consume(), name=f"harness-projection-{self._agent_id}"
+                )
+                try:
+                    yield
+                except BaseException as error:
+                    outcome = error
+                if isinstance(outcome, asyncio.CancelledError):
+                    self._stop(worker, reason="cancelled", queued=self._pending.qsize())
+                else:
+                    await self._drain(worker)
+        finally:
+            while self._terminals:
+                await self._apply(self._emit_terminal)
         if outcome is not None:
             raise outcome
 
+    async def _drain(self, worker: asyncio.Task[None]) -> None:
+        self._pending.put_nowait(None)
+        try:
+            async with asyncio.timeout(TIMELINE_DRAIN_SECONDS):
+                await asyncio.shield(worker)
+        except TimeoutError:
+            self._stop(worker, reason="timeout", queued=max(0, self._pending.qsize() - 1))
+        except asyncio.CancelledError:
+            self._stop(worker, reason="cancelled", queued=max(0, self._pending.qsize() - 1))
+            raise
+
+    def _stop(self, worker: asyncio.Task[None], *, reason: str, queued: int) -> None:
+        if worker.done():
+            return
+        _ = worker.cancel()
+        if not queued and not self._applying:
+            return
+        logger.warning(
+            "harness timeline drain {reason}; stopping unfinished projection work",
+            event="harness_live_timeline_failed",
+            agent_id=self._agent_id,
+            reason=reason,
+            queued_notifications=queued,
+            notification_in_flight=self._applying,
+            terminal_notifications=len(self._terminals),
+            drain_budget_seconds=TIMELINE_DRAIN_SECONDS,
+        )
+
     async def _consume(self) -> None:
         while (effect := await self._pending.get()) is not None:
-            await self._apply(effect)
+            self._applying = True
+            try:
+                await self._apply(effect)
+            finally:
+                self._applying = False
 
     async def flush_text(self) -> None:
         await self._apply(self.sink.flush_text)

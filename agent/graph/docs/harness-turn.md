@@ -52,12 +52,14 @@ An external agent's timeline is not written to a database table: it is read from
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
   carries the item published before it and every call still running). A single consumer applies
   notifications in order and waits up to two seconds for a closing row. The foreground keeps
-  settling events and steering while that consumer waits. The invocation drains the notification
-  queue after choosing its outcome. The sink's state is in memory only. A reply the sink could
-  not deliver is retried by the next invocation when it reads the last turn and delivers by key.
-  When the starting record cannot be opened, the sink uses its initial file size as an upper
-  bound on historical rows. If even the starting boundary is unknown, migration-era delivery
-  waits for a later invocation to establish it. Existing keyed publications can still deduplicate.
+  settling events and steering while that consumer waits. After the outcome is chosen, the
+  entire queue has two seconds to drain. A timeout or cancellation stops the consumer and
+  logs unfinished work. Queued terminal events are sent once the consumer stops. The sink's state is in memory only.
+  A readable start can retry the last turn from the latest exact canonical publication key
+  in the record block before startup. A start with a size but no readable contents keeps that
+  initial size as a boundary. When size is also unknown, the first record row matching an input
+  sent by this invocation establishes the boundary after access recovers. Publications are
+  deduplicated by stable key.
 - The foreground folds adapter events into `TurnProtocol` for abort handling, input handback,
   wake polarity and reply correction. It commits inbox settlements before notifying the live sink.
   A normal completion with activity or reply text must have a live-readable adapter record. The

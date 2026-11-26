@@ -22,7 +22,6 @@ from base.agents.history.transcript_timeline.record.harness import (
     input_wire_ids,
     record_file,
     reply_key,
-    reply_key_prefix,
     session_file,
     wire_id,
 )
@@ -39,7 +38,6 @@ from base.agents.history.transcript_timeline.sent import (
 )
 from base.agents.messages.harness_input_key import recorded_input_key
 from base.agents.messages.inbound import InboundKind
-from base.agents.to_user.delivery.store import has_keyed_publication
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_all
@@ -53,6 +51,7 @@ from base.lm.harness import (
 )
 from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.entries import AgentText, HumanInput
 from base.lm.harness.session.transcript.record_file import (
     FileRow,
     RecordFile,
@@ -76,9 +75,8 @@ from base.paths import harness_sessions_dir, workspace_dir
 # What the sink delivers: the replies of the items it projects, once each. A reply's publication key is the CLI's own id
 # of the row that holds it (`harness:claude:<row uuid>`, `harness:codex:<message id>`), the same however often and from wherever it is read, so a
 # repeated read, a restart and a replay never publish it twice. A reply read from before this sink began is offered
-# again (a crash may have ended the process before it was delivered) once the agent has a publication under this
-# key scheme; the first sink of an agent that has none is at the switch from the old keys, and delivers only what the
-# record gains from its start (`_delivery_floor`). A turn's end is waited for in the record (`finish`), the turn's
+# again (a crash may have ended the process before it was delivered) when an earlier reply in the same record
+# has an exact canonical publication key. Otherwise delivery starts at the initial record boundary. A turn's end is waited for in the record (`finish`), the turn's
 # closing row, for at most `END_WAIT_SECONDS`. A reply the sink could not
 # deliver (a database error in `_deliver`) is not retried by the sink, the read position having moved on: the next
 # invocation reads the record's last turn again and delivers it by key. A row of a kind the parser does not know is
@@ -99,6 +97,11 @@ class _InboundKeyRow:
     id: int
     kind: str
     payload: object
+
+
+@dataclass(frozen=True)
+class _PublicationKeyRow:
+    source_key: str
 
 
 class ReadTimelineSink:
@@ -153,6 +156,7 @@ class ReadTimelineSink:
         self._busy = asyncio.Lock()
         self._closed_turns = 0
         self._history_end: int | None = None
+        self._startup_readable = False
         self._seen_stat: tuple[int, ...] | None = None
         with self._log_projection_failure():
             self._snapshot_start()
@@ -352,6 +356,16 @@ class ReadTimelineSink:
         self._timing_needed = needs_native_timing_refresh(self._harness, block.rows)
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
+        if self._history_end is None:
+            current = {wire_id(self._harness, key) for key in self._input_keys}
+            self._history_end = min(
+                (
+                    entry.order.seq
+                    for entry in entries
+                    if isinstance(entry, HumanInput) and entry.wire_id in current
+                ),
+                default=None,
+            )
         projected = self._projector.feed(
             entries, tail=self._parser.pending_calls, release_held=False
         )
@@ -426,6 +440,7 @@ class ReadTimelineSink:
             return
         self._history_end = file.size()
         self._history_end = file.complete_end()
+        self._startup_readable = True
         self._seen_stat = file.watch_signature()
 
     def _publish(self, projected: Projected, end: int) -> None:
@@ -510,26 +525,38 @@ class ReadTimelineSink:
             await capture_keyed_items(self._ctx, self._agent_id, replies, tolerate_conflicts=True)
 
     # meiva:note
-    # Where delivery starts, decided once per sink. An agent that has no publication under the new key scheme yet is at
-    # the switch from the old one: the replies before this sink's start were delivered under the old keys (or are not
-    # worth delivering now), so only what the record gains from here is. An agent that has one is past the switch, and
-    # everything is offered, which the key makes a no-op for what was delivered. A Claude Code fork never falls below
-    # its persisted fork floor, because its record carries the parent's pre-fork rows and key-dedup cannot filter rows
-    # this child never published.
+    # Only an exact publication key in the initial bytes of this same record
+    # can authorize replay before a readable start. A degraded start keeps its
+    # initial size or waits for a row matching an input sent by this invocation.
     async def _delivery_floor(self) -> int | None:
         if self._floor is None:
-
-            def switched() -> bool:
-                with self._ctx.require_db().connect() as conn:
-                    return has_keyed_publication(
-                        conn, self._agent_id, reply_key_prefix(self._harness)
-                    )
-
-            base = 0 if await asyncio.to_thread(switched) else self._history_end
+            base = self._history_end
             if base is None:
                 return None
-            self._floor = max(base, self._fork_floor or 0)
+            if base and self._startup_readable and self._file is not None:
+                base = await asyncio.to_thread(self._published_floor, self._file, base)
+            self._floor = base
         return max(self._floor, self._fork_floor or 0)
+
+    def _published_floor(self, file: RecordFile, start: int) -> int:
+        block = file.rows_before(start)
+        parser = entry_reader(self._harness, self._unread)
+        session = self._session_id()
+        offsets = {
+            reply_key(self._harness, entry.key, session): entry.order.seq
+            for entry in parser.entries(block.rows)
+            if isinstance(entry, AgentText)
+        }
+        if not offsets:
+            return start
+        with self._ctx.require_db().connect() as conn:
+            rows = query_all(
+                conn,
+                _PublicationKeyRow,
+                "SELECT source_key FROM agent_publications WHERE agent_id=%s AND source_key=ANY(%s)",
+                (self._agent_id, list(offsets)),
+            )
+        return max((offsets[row.source_key] for row in rows), default=start)
 
     def _fork_source(self) -> int | None:
         if not self._fork_source_loaded:

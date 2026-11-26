@@ -414,7 +414,7 @@ async def _run_foreground(
     projector.post(partial(projector.sink.finish, interrupted=run.interrupted))
     _apply_wake_polarity(state, run, extra_updates)
     if run.interrupted:
-        projector.post(partial(announce_interrupt, ctx, agent_id))
+        projector.post_terminal(partial(announce_interrupt, ctx, agent_id))
     return Command[HarnessGoto](
         update={
             **extra_updates,
