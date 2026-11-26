@@ -1,6 +1,7 @@
 # meiva:link base/host/env/docs/bootstrap-mirror.md
 
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -142,3 +143,80 @@ def test_pre_stage_failed_rename_keeps_the_previous_mirror(tmp_path: Path) -> No
         == original
     )
     assert [path.name for path in (tmp_path / "run").iterdir()] == ["bootstrap-mirror.json"]
+
+
+@pytest.mark.parametrize(("status", "uses_mirror"), [(503, True), (401, False), (403, False)])
+def test_stale_but_authorized_mirror_during_refresh(
+    tmp_path: Path, status: int, uses_mirror: bool
+) -> None:
+    payload = issue_config_mirror(_values(), bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    _ = stage_config_mirror(payload, home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    with serve_json({}, status=status) as gateway:
+        env = {
+            "MEIVA_GATEWAY_URL": gateway.url,
+            "MEIVA_MACHINE_HOST": _HOST,
+            "MEIVA_API_TOKEN": _TOKEN,
+        }
+        now = _NOW + _TUNING.snapshot_fresh_s + 1
+        if uses_mirror:
+            result = bootstrap.resolve_bootstrap_config(env, home=tmp_path, now=now, tuning=_TUNING)
+            assert result.source == "authorized_mirror"
+            assert result.generation == payload["generation"]
+        else:
+            with pytest.raises(bootstrap.BootstrapFetchError, match=f"HTTP {status}"):
+                _ = bootstrap.resolve_bootstrap_config(env, home=tmp_path, now=now, tuning=_TUNING)
+        assert len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize("online", [False, True], ids=["offline-v4", "online-flat"])
+def test_removing_the_mirror_does_not_reenable_unsigned_config(
+    tmp_path: Path, online: bool
+) -> None:
+    signed = issue_config_mirror(_values(), bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    _ = stage_config_mirror(signed, home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    (tmp_path / "run" / "bootstrap-mirror.json").unlink()
+    with serve_json(_values()) as gateway:
+        env = {
+            "MEIVA_GATEWAY_URL": gateway.url if online else closed_port_url(),
+            "MEIVA_MACHINE_HOST": _HOST,
+            "MEIVA_API_TOKEN": _TOKEN,
+        }
+        _ = bootstrap.snapshot_path(tmp_path).write_text(
+            json.dumps(
+                {
+                    "v": bootstrap.SNAPSHOT_VERSION,
+                    "base_url": env["MEIVA_GATEWAY_URL"],
+                    "written_at": _NOW,
+                    "values": _values(),
+                }
+            )
+        )
+        with pytest.raises(bootstrap.BootstrapFetchError) as problem:
+            _ = bootstrap.resolve_bootstrap_config(env, home=tmp_path, now=_NOW, tuning=_TUNING)
+    assert problem.value.mirror_state == "invalid"
+    assert "unsigned" in str(problem.value) or "missing" in str(problem.value)
+
+
+@pytest.mark.parametrize("nested_carrier", [False, True], ids=["envelope", "plugin-projection"])
+def test_gateway_recovers_a_deeply_nested_local_mirror(
+    tmp_path: Path, nested_carrier: bool
+) -> None:
+    signed = issue_config_mirror(_values(), bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    _ = stage_config_mirror(signed, home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    depth = sys.getrecursionlimit() + 100
+    nested_json = "[" * depth + "]" * depth
+    bad_body = (
+        json.dumps(dict(signed, values={PLUGIN_CLUSTER_CONFIG_ENV: nested_json}))
+        if nested_carrier
+        else nested_json
+    )
+    _ = (tmp_path / "run" / "bootstrap-mirror.json").write_text(bad_body)
+    with serve_json(signed) as gateway:
+        env = {
+            "MEIVA_GATEWAY_URL": gateway.url,
+            "MEIVA_MACHINE_HOST": _HOST,
+            "MEIVA_API_TOKEN": _TOKEN,
+        }
+        result = bootstrap.resolve_bootstrap_config(env, home=tmp_path, now=_NOW, tuning=_TUNING)
+    assert result.source == "live_bootstrap"
+    assert read_config_mirror(home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW) == signed

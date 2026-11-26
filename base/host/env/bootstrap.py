@@ -204,22 +204,14 @@ _SNAPSHOT_NAME = "bootstrap-snapshot.json"
 SNAPSHOT_VERSION = 4
 
 
-# Transport-level httpx failures mean "gateway unreachable / mid-restart" —
-# the class that may fall back to a stale snapshot. Auth and status failures
-# (401 wrong secret, 400, 5xx) still fail loud: a runner the gateway rejects
-# must not keep running on old config.
+# Network failures can use a local snapshot. An HTTP 5xx can use an authorized
+# mirror. Authentication failures and malformed responses refuse startup.
 def _transport_failures() -> tuple[type[BaseException], ...]:
     """Transport-level httpx failure classes (lazy import: httpx stays off the
     settings-import path until an actual fetch is attempted)."""
     import httpx
 
-    return (
-        httpx.ConnectError,
-        httpx.ConnectTimeout,
-        httpx.ReadTimeout,
-        httpx.RemoteProtocolError,
-        httpx.PoolTimeout,
-    )
+    return (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)
 
 
 # The maintenance-verb opt-out (settings-lite). `meiva stop` / `meiva status` / the
@@ -342,6 +334,20 @@ def _mirror_path(home: Path) -> Path:
     return home / "run" / "bootstrap-mirror.json"
 
 
+def _mirror_enrollment_path(home: Path) -> Path:
+    return home / "bootstrap-mirror-enrolled"
+
+
+def _mirror_enrollment_recorded(home: Path) -> bool:
+    try:
+        _ = _mirror_enrollment_path(home).lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def read_config_mirror(
     *, home: Path, bearer: str, machine_host: str, now: float
 ) -> BootstrapEnvelope | None:
@@ -350,6 +356,10 @@ def read_config_mirror(
     try:
         mode = path.lstat().st_mode
     except FileNotFoundError:
+        if _mirror_enrollment_recorded(home):
+            raise MirrorRejectedError(
+                "installed mirror is missing after mirror enrollment"
+            ) from None
         return None
     except OSError:
         raise MirrorRejectedError("could not inspect the installed mirror") from None
@@ -357,7 +367,7 @@ def read_config_mirror(
         raise MirrorRejectedError("installed mirror must be a regular 0600 file")
     try:
         payload = object_of(json.loads, path.read_bytes())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         raise MirrorRejectedError("could not read the installed mirror JSON") from None
     return validate_config_mirror(payload, bearer=bearer, machine_host=machine_host, now=now)
 
@@ -376,6 +386,8 @@ def stage_config_mirror(
     path = _mirror_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     writer = AtomicWriter(SYSTEM_FS) if writer is None else writer
+    if not _mirror_enrollment_recorded(home):
+        writer.write_bytes(_mirror_enrollment_path(home), b"1\n", mode=0o600, sync_parent=True)
     writer.write_bytes(path, json.dumps(envelope, sort_keys=True).encode(), mode=0o600)
     return envelope
 
@@ -400,7 +412,7 @@ def read_config_snapshot(
         if not stat.S_ISREG(mode):
             return None
         raw = object_of(json.loads, path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return None
     if not _is_object_dict(raw):
         return None
@@ -417,7 +429,7 @@ def read_config_snapshot(
         return None
     try:
         values = validated_bootstrap_config(raw.get("values"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return None
     return values, now - written_at
 
@@ -512,7 +524,6 @@ def _offline_resolution(
     mirror: BootstrapEnvelope | MirrorRejectedError | None,
     legacy: tuple[dict[str, str], float] | None,
     *,
-    base_url: str,
     now: float,
 ) -> BootstrapResolution:
     from base.log import logger
@@ -537,8 +548,8 @@ def _offline_resolution(
         )
         return BootstrapResolution(legacy[0], "legacy_fallback")
     raise BootstrapFetchError(
-        f"could not fetch cluster config from {base_url}; this runner has no snapshot "
-        "or authorized mirror. Check gateway reachability and retry."
+        "could not fetch cluster config. This runner has no snapshot or authorized mirror. "
+        "Check MEIVA_GATEWAY_URL and gateway reachability, then retry."
     )
 
 
@@ -584,12 +595,62 @@ def _accept_live(
     return BootstrapResolution(envelope["values"], "live_bootstrap", envelope["generation"])
 
 
+def _refresh_bootstrap(
+    env: Mapping[str, str],
+    mirror: BootstrapEnvelope | MirrorRejectedError | None,
+    legacy: tuple[dict[str, str], float] | None,
+    *,
+    home: Path,
+    now: float,
+    tuning: BootstrapFetch,
+) -> BootstrapResolution:
+    import httpx
+
+    from base.host.net.auth import delivered_token
+
+    bearer = delivered_token(env)
+    started = time.monotonic()
+    try:
+        payload = _fetch_bootstrap_payload(
+            _gateway_base_url(env),
+            bearer=bearer,
+            machine_host=env.get("MEIVA_MACHINE_HOST") if bearer else None,
+            tuning=tuning,
+        )
+        return _accept_live(
+            payload,
+            home=home,
+            env=env,
+            now=now,
+            started=started,
+            allow_legacy=mirror is None,
+        )
+    except _transport_failures():
+        return _offline_resolution(mirror, legacy, now=now + (time.monotonic() - started))
+    except MirrorRejectedError as exc:
+        raise BootstrapFetchError(
+            f"gateway bootstrap rejected: {exc}", mirror_state=exc.state
+        ) from None
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 500 <= status < 600 and mirror is not None:
+            return _offline_resolution(mirror, None, now=now + (time.monotonic() - started))
+        raise BootstrapFetchError(f"gateway bootstrap failed with HTTP {status}") from None
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise BootstrapFetchError(
+            f"invalid bootstrap configuration ({type(exc).__name__})"
+        ) from None
+    except Exception as exc:
+        raise BootstrapFetchError(
+            f"could not use gateway bootstrap ({type(exc).__name__}). "
+            "Check MEIVA_GATEWAY_URL and the runner API token."
+        ) from None
+
+
 def resolve_bootstrap_config(
     env: Mapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
 ) -> BootstrapResolution:
     """Resolve the boot projection and expose which source authorized it."""
-    import httpx
-
     from base.host.net.auth import delivered_token
     from base.log import guard_default_logging
 
@@ -608,33 +669,7 @@ def resolve_bootstrap_config(
     if legacy is not None and legacy[1] <= tuning.snapshot_fresh_s:
         return BootstrapResolution(legacy[0], "legacy_fallback")
 
-    started = time.monotonic()
-    try:
-        payload = _fetch_bootstrap_payload(
-            base_url, bearer=bearer, machine_host=machine_host if bearer else None, tuning=tuning
-        )
-        return _accept_live(
-            payload,
-            home=home,
-            env=env,
-            now=now,
-            started=started,
-            allow_legacy=mirror is None,
-        )
-    except _transport_failures():
-        return _offline_resolution(
-            mirror, legacy, base_url=base_url, now=now + (time.monotonic() - started)
-        )
-    except MirrorRejectedError as exc:
-        raise BootstrapFetchError(
-            f"gateway bootstrap rejected: {exc}", mirror_state=exc.state
-        ) from None
-    except httpx.HTTPStatusError as exc:
-        raise BootstrapFetchError(
-            f"gateway bootstrap failed with HTTP {exc.response.status_code}"
-        ) from None
-    except Exception as exc:
-        raise BootstrapFetchError(f"could not use gateway bootstrap: {exc}") from None
+    return _refresh_bootstrap(env, mirror, legacy, home=home, now=now, tuning=tuning)
 
 
 def resolve_bootstrap_values(

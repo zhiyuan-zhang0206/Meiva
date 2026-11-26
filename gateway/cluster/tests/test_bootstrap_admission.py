@@ -21,7 +21,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.host.db_authority.model import GenerationSecret
 from base.host.env import bootstrap
-from base.host.env.boot_policy import BootstrapFetch
+from base.host.env.boot_policy import MIRROR_HOST_PARAM, BootstrapFetch
 from base.host.net.auth import bearer_header
 from base.host.net.tests.local_http import serve_asgi
 from base.lm.catalog import ModelCatalog
@@ -139,6 +139,15 @@ def test_bootstrap_admission_preserves_auth(
     gateway_client.headers.pop("Authorization", None)
     response = gateway_client.get("/api/bootstrap", headers=headers)
     assert response.status_code == 401
+
+
+def test_signed_bootstrap_requires_the_runner_credential(gateway_client: TestClient) -> None:
+    response = gateway_client.get(
+        "/api/bootstrap",
+        params={MIRROR_HOST_PARAM: "192.0.2.20"},
+        headers=bearer_header(_SECRET),
+    )
+    assert response.status_code == 403
 
 
 # meiva:note

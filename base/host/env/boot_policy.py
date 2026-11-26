@@ -248,6 +248,6 @@ def _validate_mirror_claims(
         raise MirrorRejectedError("invalid mirror issue time")
     try:
         values = validated_bootstrap_config(payload.get("values"), require_plugin_config=True)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         raise MirrorRejectedError("invalid mirror configuration projection") from None
     return _claims(values, bearer=bearer, machine_host=machine_host, issued_at=issued_at)

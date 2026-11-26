@@ -340,6 +340,27 @@ def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -
     return _check_schema(start, live=live)
 
 
+def _probe_gateway_for_start(start: _Start) -> int:
+    url = start.resolved["gateway_url"]
+    access = gateway_access_from_boot(start.command.config)
+    boot = start.command.config.view.env_boot
+    if boot.bootstrap_source != "authorized_mirror":
+        return _repo.probe_gateway_or_die(url, access=access, timers=start.command.timers)
+    status = _repo.probe_gateway_once(url, access=access).status
+    if status == 200:
+        print("  \u2713 gateway reachable")
+        return 0
+    if status is None or 500 <= status < 600:
+        reason = "unreachable" if status is None else f"temporarily unavailable (HTTP {status})"
+        print(
+            f"  \u26a0 gateway {reason}; continuing with the authorized configuration mirror",
+            file=sys.stderr,
+        )
+        return 0
+    print(f"  \u2717 unexpected status {status} from gateway.", file=sys.stderr)
+    return 1
+
+
 # meiva:note
 # Register this host centrally, and (pure runner) probe the gateway before bring-up.
 def _register_and_probe(start: _Start) -> int | None:
@@ -362,11 +383,7 @@ def _register_and_probe(start: _Start) -> int | None:
         # cluster status; catching a broken path now puts the failure on this stdout.
         print("\n\u2192 probe gateway")
         with start_trace.phase("gateway probe"):
-            rc = _repo.probe_gateway_or_die(
-                start.resolved["gateway_url"],
-                access=gateway_access_from_boot(start.command.config),
-                timers=start.command.timers,
-            )
+            rc = _probe_gateway_for_start(start)
         if rc != 0:
             return rc
     return None

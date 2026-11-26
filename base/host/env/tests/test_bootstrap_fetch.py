@@ -144,10 +144,9 @@ def test_inject_without_gateway_url_fails_fast(home: Path) -> None:
 
 
 def test_inject_wraps_fetch_failure(home: Path) -> None:
-    # The raw httpx error is wrapped with the operator's remedy; the process
-    # must not start with no config.
+    # Startup failure includes the operator's remedy without printing the raw URL.
     url = closed_port_url()
-    with pytest.raises(bootstrap.BootstrapFetchError, match=url.removeprefix("http://")):
+    with pytest.raises(bootstrap.BootstrapFetchError, match="Check MEIVA_GATEWAY_URL"):
         _inject({"MEIVA_GATEWAY_URL": url}, home)
 
 
@@ -343,7 +342,7 @@ def test_rejects_a_fleet_projection_with_retired_fields_before_writing(home: Pat
 
     with (
         serve_json({PLUGIN_CLUSTER_CONFIG_ENV: _fleet_projection(legacy=True)}) as gateway,
-        pytest.raises(bootstrap.BootstrapFetchError, match="meiva_fleet"),
+        pytest.raises(bootstrap.BootstrapFetchError, match="invalid bootstrap configuration"),
     ):
         _resolve({"MEIVA_GATEWAY_URL": gateway.url}, home)
     assert not bootstrap.snapshot_path(home).exists()
