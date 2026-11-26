@@ -532,13 +532,13 @@ def _offline_resolution(
         raise BootstrapFetchError(
             f"cannot boot offline: {mirror.state} configuration mirror ({mirror})",
             mirror_state=mirror.state,
-        )
+        ) from None
     if mirror is not None:
         if now >= mirror["expires_at"]:
             raise BootstrapFetchError(
                 "cannot boot offline: configuration mirror expired during refresh",
                 mirror_state="expired",
-            )
+            ) from None
         return _mirror_resolution(mirror)
     if legacy is not None:
         logger.warning(
@@ -550,7 +550,7 @@ def _offline_resolution(
     raise BootstrapFetchError(
         "could not fetch cluster config. This runner has no snapshot or authorized mirror. "
         "Check MEIVA_GATEWAY_URL and gateway reachability, then retry."
-    )
+    ) from None
 
 
 def _accept_live(

@@ -4,6 +4,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
+from traceback import format_exception
 from typing import Literal
 
 import pytest
@@ -220,3 +221,21 @@ def test_gateway_recovers_a_deeply_nested_local_mirror(
         result = bootstrap.resolve_bootstrap_config(env, home=tmp_path, now=_NOW, tuning=_TUNING)
     assert result.source == "live_bootstrap"
     assert read_config_mirror(home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW) == signed
+
+
+def test_expired_mirror_failure_hides_raw_http_status_traceback(tmp_path: Path) -> None:
+    payload = issue_config_mirror(_values(), bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    _ = stage_config_mirror(payload, home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    url_marker = "synthetic-private-route-component"
+    with serve_json({}, status=503) as gateway:
+        env = {
+            "MEIVA_GATEWAY_URL": f"{gateway.url}/{url_marker}",
+            "MEIVA_MACHINE_HOST": _HOST,
+            "MEIVA_API_TOKEN": _TOKEN,
+        }
+        with pytest.raises(bootstrap.BootstrapFetchError) as problem:
+            _ = bootstrap.resolve_bootstrap_config(
+                env, home=tmp_path, now=float(payload["expires_at"]), tuning=_TUNING
+            )
+    assert problem.value.mirror_state == "expired"
+    assert url_marker not in "".join(format_exception(problem.value))
