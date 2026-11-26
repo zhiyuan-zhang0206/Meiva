@@ -1,23 +1,22 @@
 # meiva:note
-# The merge gate for the pyright/debt lanes: five conditions, one fail-closed verdict.
+# The merge gate for the pyright/debt lanes: four conditions, one fail-closed verdict.
 #
 # `python3 scripts/ci/pull_requests/gate/merge_gate.py <PR number|url>`, from a checkout of the
 # repository whose pull requests it judges -- the `repos/{owner}/{repo}` call resolves from the
 # current directory, so a wrapper has to start inside a checkout. It prints the evidence per
 # condition and one verdict line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.
 #
-#   1 head    the PR body carries a `diff-checks/v1 @<headRefOid>` receipt stating `verdict=pass`
-#   2 checks  every check run is green (Trunk queue rows ignored; no check run at all = NO-GO)
-#   3 files   the files the PR touches and the files main moved since the PR's base are disjoint,
+#   1 checks  every check run is green (Trunk queue rows ignored; no check run at all = NO-GO)
+#   2 files   the files the PR touches and the files main moved since the PR's base are disjoint,
 #             except the owed-pyright list and the generated pyproject region (`SHARED_ALLOWED`);
 #             a compare truncated at GitHub's 300-file cap cannot be trusted
-#   4 text    the body carries a where_used line and a behaviour section
-#   5 lane    the commit trailers name an agent `lane-agents.txt` covers. The ordinary pyright
+#   3 text    the body carries a where_used line and a behaviour section
+#   4 lane    the commit trailers name an agent `lane-agents.txt` covers. The ordinary pyright
 #             pull requests are the user's own Claude Code line and are not this lane's to merge,
 #             however green they look.
 #
-# `--selftest` runs condition 5's cases. `MEIVA_MERGE_REVIEWER=1` merges outside the lanes and
-# waives 1, 4 and 5.
+# `--selftest` runs condition 4's cases. `MEIVA_MERGE_REVIEWER=1` merges outside the lanes and
+# waives 3 and 4.
 #
 # Environment: `MEIVA_REAL_GH` (absolute path to the real `gh`; default: `gh` on PATH),
 # `MEIVA_LANE_FILE` (the grant, default `lane-agents.txt` beside this module), `MEIVA_LANE_AGENTS`
@@ -160,7 +159,7 @@ def lane_verdict(
     trailers: set[str], harness: set[str], lanes: set[str], *, handed_over: bool, reviewer: bool
 ) -> str | None:
     # meiva:note
-    # Condition 5 as a pure function, so `--selftest` can pin every branch.
+    # Condition 4 as a pure function, so `--selftest` can pin every branch.
     #
     #     Returns None when the pull request belongs to a lane the grant covers, else the reason it
     #     does not. The trailer decides authorship; the handed-over ladder is the only case that may
@@ -275,7 +274,7 @@ def red_runs(runs: Iterable[CheckRun]) -> list[CheckRun]:
 
 def intersection_verdict(shared: Iterable[str], *, truncated: bool) -> str | None:
     # meiva:note
-    # Condition 3: the overlap the merge may carry, or the reason it may not.
+    # Condition 2: the overlap the merge may carry, or the reason it may not.
     overlap = sorted(shared)
     if truncated:
         return (
@@ -286,87 +285,9 @@ def intersection_verdict(shared: Iterable[str], *, truncated: bool) -> str | Non
     if extra:
         return (
             f"{len(overlap)} file(s) touched by both sides, including {extra[:3]} outside the "
-            f"generated-region pair - rebase on current main and re-run preflight"
+            f"generated-region pair - rebase on current main and re-run the gate"
         )
     return None
-
-
-class DiffChecksReceipt(NamedTuple):
-    # meiva:note
-    # One `diff-checks/v1` receipt line parsed from a pull-request body.
-
-    sha: str
-    tokens: tuple[str, ...]
-    raw_line: str
-
-
-_RECEIPT_RE = re.compile(r"diff-checks/v1 @([0-9a-fA-F]+)(?:\s+([^\n`]*))?")
-_PREFLIGHT_PIN_RE = re.compile(r"Preflight on head\s+`?([0-9a-fA-F]{7,40})`?")
-_RETIRED_TRUNK_MARKER = "PREFLIGHT PASS: /trunk merge is allowed"
-_RECEIPT_GENERATOR = "scripts/hooks/diff_checks.py"
-
-
-def diff_checks_receipts(body: str) -> list[DiffChecksReceipt]:
-    receipts: list[DiffChecksReceipt] = []
-    for line in body.splitlines():
-        found = _RECEIPT_RE.search(line)
-        if found is None:
-            continue
-        rest = (found.group(2) or "").strip()
-        tokens = tuple(part for part in rest.split() if part)
-        receipts.append(DiffChecksReceipt(sha=found.group(1), tokens=tokens, raw_line=line))
-    return receipts
-
-
-# meiva:note
-# Condition 1 trusts one field. The producer (`scripts/hooks/diff_checks.py`) computes `verdict=`
-# from every field it prints (`pass`, `fail` or `incomplete`), so the gate does not read the
-# individual fields back: a spelling the producer starts to print can only change the verdict the
-# producer states, never slip past a list kept here. A receipt without `verdict=` comes from an
-# older `diff_checks.py`; it is refused like any other non-pass and asks for a re-run.
-def receipt_failure(receipt: DiffChecksReceipt) -> str | None:
-    fields: dict[str, str] = {}
-    for token in receipt.tokens:
-        key, sep, value = token.partition("=")
-        if sep:
-            fields[key] = value
-    if fields.get("generated") != _RECEIPT_GENERATOR:
-        return f"diff-checks/v1 receipt on current head is missing generated={_RECEIPT_GENERATOR}"
-    verdict = fields.get("verdict")
-    if verdict is None:
-        return (
-            "diff-checks/v1 receipt on current head has no verdict= "
-            "(produced by an older diff_checks.py: rebase on main and re-run it)"
-        )
-    if verdict != "pass":
-        return f"diff-checks/v1 receipt on current head reports verdict={verdict}"
-    return None
-
-
-# meiva:note
-# Conditions 1 and 4 read the pull-request body, which is where this repository records both the
-# `diff-checks/v1` receipt and authorship: a squash merge keeps the body and drops the head commit
-# message. See `trailer_sets` for the authorship half.
-def preflight_verdict(body: str, head_sha: str, *, reviewer: bool) -> str | None:
-    if reviewer:
-        return None
-    receipts = diff_checks_receipts(body)
-    current = [receipt for receipt in receipts if receipt.sha == head_sha]
-    if current:
-        return receipt_failure(current[-1])
-    if receipts:
-        pinned = receipts[-1].sha[:12]
-        return f"diff-checks/v1 receipt is not pinned to the current head (body pins {pinned}...)"
-    if _RETIRED_TRUNK_MARKER in body:
-        return (
-            "retired PREFLIGHT PASS is no longer accepted; "
-            "attach a diff-checks/v1 receipt for the current head"
-        )
-    stale_pins = [match.group(1) for match in _PREFLIGHT_PIN_RE.finditer(body)]
-    if stale_pins:
-        pinned = stale_pins[-1][:12]
-        return f"diff-checks/v1 receipt is not pinned to the current head (body pins {pinned}...)"
-    return "diff-checks/v1 receipt is not pinned to the current head"
 
 
 # meiva:note
@@ -442,7 +363,7 @@ def granted_lanes(env_value: str | None, *, lane_file: Path = DEFAULT_LANE_FILE)
 
 class PullRequest(NamedTuple):
     # meiva:note
-    # The fields the five conditions read, decoded once.
+    # The fields the four conditions read, decoded once.
 
     number: int
     full_name: str
@@ -517,7 +438,7 @@ def report_header(pull: PullRequest) -> None:
 
 
 # meiva:note
-# A closed or merged pull request must not fall through to the five conditions: `base..head`
+# A closed or merged pull request must not fall through to the four conditions: `base..head`
 # against a main that already contains the squash intersects every file, so the gate would say
 # "rebase and re-run" for a pull request that is already in. Merged means the intent is
 # satisfied; closed-unmerged means there is nothing to merge.
@@ -531,28 +452,8 @@ def closed_verdict(pull: PullRequest) -> int | None:
     return 1
 
 
-def report_preflight(pull: PullRequest, *, reviewer: bool) -> str | None:
-    print("\n[1] head-pinned diff-checks/v1 receipt")
-    verdict = preflight_verdict(pull.body, pull.head_sha, reviewer=False)
-    receipts = diff_checks_receipts(pull.body)
-    head_ok = any(receipt.sha == pull.head_sha for receipt in receipts)
-    receipt_ok = verdict is None
-    print(f"    head receipt present: {head_ok} | receipt valid: {receipt_ok}")
-    printed = [
-        line
-        for line in pull.body.splitlines()
-        if _RECEIPT_RE.search(line) is not None or line.startswith("Preflight on head")
-    ]
-    for line in printed[-3:]:
-        print(f"    body: {line}")
-    if reviewer and not receipt_ok:
-        print("    WAIVED: no preflight convention outside the lanes -- reviewed by hand")
-        return None
-    return verdict
-
-
 def report_checks(api: GhApi, full_name: str, head_sha: str) -> str | None:
-    print("\n[2] check runs")
+    print("\n[1] check runs")
     payload = json_object(
         api.json(f"repos/{full_name}/commits/{head_sha}/check-runs?per_page=100"), "check-runs"
     )
@@ -571,7 +472,7 @@ def report_checks(api: GhApi, full_name: str, head_sha: str) -> str | None:
 
 
 def report_intersection(api: GhApi, pull: PullRequest) -> tuple[str, str | None]:
-    print("\n[3] file intersection (PR base..head  x  base..current main)")
+    print("\n[2] file intersection (PR base..head  x  base..current main)")
     head_files, head_truncated = compare_files(api, pull.full_name, pull.base_sha, pull.head_sha)
     main_sha = text_field(
         json_object(api.json(f"repos/{pull.full_name}/commits/{pull.base_ref}"), "commit"),
@@ -597,7 +498,7 @@ def report_intersection(api: GhApi, pull: PullRequest) -> tuple[str, str | None]
 
 
 def report_body_text(pull: PullRequest, *, reviewer: bool) -> list[str]:
-    print("\n[4] body text")
+    print("\n[3] body text")
     has_where, has_behaviour = body_text_findings(pull.body)
     print(f"    where_used: {has_where} | behaviour section: {has_behaviour}")
     if reviewer:
@@ -608,7 +509,7 @@ def report_body_text(pull: PullRequest, *, reviewer: bool) -> list[str]:
 def report_authorship(
     api: GhApi, pull: PullRequest, *, env: Mapping[str, str], reviewer: bool
 ) -> str | None:
-    print("\n[5] lane authorship (grant = every worker 405 spawned)")
+    print("\n[4] lane authorship (grant = every worker 405 spawned)")
     lane_file = Path(env.get("MEIVA_LANE_FILE") or DEFAULT_LANE_FILE).expanduser().absolute()
     lanes = granted_lanes(env.get("MEIVA_LANE_AGENTS"), lane_file=lane_file)
     messages = [*commit_messages(api, pull.full_name, pull.number), pull.body]
@@ -635,11 +536,11 @@ def report_verdict(reasons: list[str], *, reviewer: bool, head_sha: str, main_sh
         return 1
     if reviewer:
         print(
-            f"{OK} (reviewer merge): conditions 2 (checks) and 3 (file intersection) hold; "
-            f"1/4/5 waived above -- head {head_sha[:12]}, main {main_sha[:12]}"
+            f"{OK} (reviewer merge): conditions 1 (checks) and 2 (file intersection) hold; "
+            f"3/4 waived above -- head {head_sha[:12]}, main {main_sha[:12]}"
         )
     else:
-        print(f"{OK}: four conditions hold (head {head_sha[:12]}, main {main_sha[:12]})")
+        print(f"{OK}: all four conditions hold (head {head_sha[:12]}, main {main_sha[:12]})")
     return 0
 
 
@@ -652,9 +553,6 @@ def main(pr: int, env: Mapping[str, str], *, gh: str) -> int:
     if closed is not None:
         return closed
     reasons: list[str] = []
-    preflight = report_preflight(pull, reviewer=reviewer)
-    if preflight:
-        reasons.append(preflight)
     checks = report_checks(api, pull.full_name, pull.head_sha)
     if checks:
         reasons.append(checks)

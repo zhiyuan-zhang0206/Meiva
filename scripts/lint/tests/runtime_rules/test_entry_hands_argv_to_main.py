@@ -51,7 +51,7 @@ _ENTRIES = [
     ("scripts/content_lint/lint_no_tailnet.py", None),
     ("scripts/data_plane_ops/rotate_cluster_secret.py", None),
     ("scripts/data_plane_ops/rotate_data_plane_secrets.py", None),
-    ("scripts/hooks/diff_checks.py", None),
+    ("scripts/hooks/affected_tests.py", None),
     ("scripts/host_ops/guard_editable_venv.py", None),
     ("scripts/host_ops/host_memory_sample.py", None),
     ("scripts/host_ops/onboarding/harness_onboarding.py", None),
@@ -113,7 +113,7 @@ _CASES = [(guard, definer, "main") for guard, definer in _ENTRIES]
 # Parsers that a `main` hands its argument list to; they too take it as a required parameter, so
 # that `None` cannot reach argparse and make it read `sys.argv` there.
 _PARSERS = [
-    ("scripts/hooks/diff_checks.py", "parse_args"),
+    ("scripts/hooks/affected_tests.py", "parse_args"),
     ("services/redis_bridge/relay.py", "_parse_args"),
 ]
 

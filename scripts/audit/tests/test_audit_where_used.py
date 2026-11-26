@@ -394,7 +394,7 @@ def test_render_footer_warns_that_one_hop_is_not_full_test_surface_without_affec
     rendered = render(_report("pkg.engine"), None)
     footer = rendered.splitlines()[-1]
     assert "1-hop" in footer
-    assert "diff_checks" in footer
+    assert "affected_tests" in footer
     assert "test_selector" in footer
 
     assert shell.main(["pkg.engine", "--json"], repo_root=audit_checkout) == 0

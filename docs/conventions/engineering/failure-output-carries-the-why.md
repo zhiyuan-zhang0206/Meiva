@@ -131,231 +131,47 @@ candidate, not something this document smuggles in.
   stops being structurally possible. `#7910` (2026-10-31) is the specimen: seven red tests were in the
   tree the whole time; PR CI was off, so nothing ran them.
 
-### The checklist
+### Where the mandatory run lives
 
-The body of this arm is `#7230`'s checklist (2026-10-31), rendered in English here because of the same
-no-CJK rule; the checklist's own text is the authority and its structure, numbers and decisions are
-reproduced, not summarised.
+- **The mapper already exists.** `scripts/ci/test_selector.py` turns "which files changed" into "which
+  tests must run" through the import closure. Run on `#7910`'s real change surface (22 files) it
+  selected 645 tests, and those contained the three files that were missed
+  (`cli/commands/agents/tests/test_relay_command.py` and `test_relay_connection_retry.py`). So the
+  answer to a signature change is *run the selection*, never *build a detector for the shape*.
+- **CI makes the run mandatory.** The pull-request checks in `ci.yml` run the selected tests and the
+  whole-tree type check, and `main`'s branch protection requires them, so "present but unrun" stops
+  being structurally possible. The release train re-runs the full suite on `main`.
+- **A local run is optional and uses the same mapper.** `scripts/hooks/affected_tests.py` runs the
+  selected files before a push (see [contributing](../../contributing.md#local-checks-before-a-push)).
+  Everything else a local run might repeat (ruff, lints, `meizel`, changed-file BasedPyright) is
+  already a pre-commit or pre-push hook.
+- **A blind spot is never green.** When the selector reports `blind_changed` files, or cannot bound the
+  change at all, its decision is `FULL`: CI runs the whole suite, and the local script prints
+  `NOT RUN` and exits non-zero rather than reporting a pass for a selection it does not trust.
+  BasedPyright, which resolves real types, closes the type-level blind spots the selector cannot see;
+  the two complement each other and no third mechanism is needed.
 
-**Status (2026-10-31 19:44, updated 2026-11-01)**: the change-scoped runner
-`scripts/hooks/diff_checks.py` landed in `#7230`; per §6, the temporary pull-request-body receipt
-checker and merge-receipt audit retired once CI returned, while `scripts/hooks/diff_checks.py`
-continues as the local `--mode incremental|full` check runner. This section preserves the
-specification they were built against; where the build moved a decision (the location, the
-type-check attribution), the text says so in place.
+### The retired receipt runner
 
-#### 0. The finding: the mapper exists, what is missing is somebody running it
+`scripts/hooks/diff_checks.py` (landed in `#7230`, 2026-10-31) derived layers from a diff, ran
+BasedPyright, ruff, `meizel` and pytest, and printed a `diff-checks/v1` receipt that the merge gate
+required in the pull-request body. It was removed on 2026-11-26, together with the gate condition that
+read the receipt:
 
-`scripts/ci/test_selector.py` already turns "which files changed" into "which tests must run" through
-the import closure. Run on `#7910`'s real change surface (22 files) it selected 645 tests, and those
-**contain the three files that were missed**:
+- it repeated pre-commit, pre-push and CI, so a green receipt added no evidence CI did not already
+  carry, and a hand-written receipt was the same offence as a hand-written test result;
+- it started BasedPyright and several pytest workers at once, which exhausted the memory of a shared
+  host when several agents ran it concurrently;
+- its sub-check cache and scratch-directory ownership logic were a second system to keep correct next
+  to the three that already judge the change.
 
-```
-cli/commands/agents/tests/test_relay_command.py
-cli/commands/agents/tests/test_relay_connection_retry.py   (decision=SELECTED, 645 tests)
-```
+The specification it was built against is in git history (`git show bdbccae228:docs/conventions/engineering/failure-output-carries-the-why.md`).
 
-So: do not write a detector for signature changes. Selecting by "who imports this module" is more
-conservative than a signature or AST check. The real blind spots (dynamic imports, `**kwargs`
-forwarding, non-literal imports) are reported by the selector itself through `blind_changed` /
-`diagnostics`, and what closes those is a full-tree `basedpyright` (real type resolution). The two
-complement each other; no third mechanism.
-
-#### 1. Layers and costs (ubuntu, measured 2026-10-31)
-
-| layer | command | cost | catches | whose job is the blind spot |
-|---|---|---|---|---|
-| **L0** full-tree static | `.venv/bin/basedpyright --threads 2` (whole tree) | 1m50s | missing required arguments, cross-layer types, call sites behind `**kwargs`/dynamic imports | — |
-| **L0'** format | `ruff check` (the changed files) | seconds | anything red at commit | — |
-| **L1–L3** impact tests | `python scripts/ci/test_selector.py --changed-files <diff> --base-ref <base> --json`, then run its `tests` | 7m14s for 152 files / 3618 tests | cross-layer construction (CLI tests), integration layer, domain unit tests | types: L0; selector: the blind-spot loop in §4.5 |
-| **L3'** frontend | `vitest run --dir src/app` (any `ui/web` change; 331 tests in 6.9s) | seconds | the app router's own tests, which no selector picks whole | visual is not in the mandatory set (§2) |
-| **L4** repository gates | `python -m meizel check` (every change); `python -m meizel debt diff --against <base> --on-growth warn` (a manifest change) | 22s; 2m50s | manifest/fact drift, a mis-written ledger | — |
-| **L4'** document checks | `scripts/content_lint/check_doc_references.py` (a `.md` change) | 0.2s | a doc naming a flag or file that no longer exists | — |
-
-A whole run on a Python change measured **13m36s** (815.83 s) on 2026-10-31, of which the test
-segment was 7m14s; `--skip-tests` measured **5m18s**. The long poles are the test segment and
-`meizel debt diff`, not pyright — which is why the debt comparison is scheduled for a manifest change
-and no other (`meizel check` already refuses a violation that is not recorded, and the only way to
-record one is to edit a manifest).
-
-**L3 takes vitest only, never visual** (405): visual needs a browser, is screenshot comparison by
-nature and is flaky by nature; putting it in the mandatory set teaches everyone to ignore a red visual.
-Visual belongs to the ten-PR checkpoint's full run.
-
-**L2 is the contract call surface**: the layer where a signature changed in one package meets a caller
-in another. Two specimens from 2026-10-31, both red on `main` with nothing running them —
-`cli/commands/observability/lgtm.py` (`backend_urls()` called with no argument after `4f3cac513` gave
-it one; fixed by `#7932`) and `cli/commands/agents/tests/test_relay_command.py` (the only test
-that constructs the relay command with the argument `#7910` added). Both are ordinary L1–L3
-selections. That is the point: the selector already includes them, so the answer is *run it*, never
-*detect the shape*.
-
-#### 2. Where it lives: `scripts/hooks/diff_checks.py`, not inside meizel
-
-The runner is named for what it decides — which checks this diff owes — and deliberately **not**
-`preflight`: the repository already has a `cli/preflight.py`, the guard that decides which checkout may
-operate on a home on every `meiva` invocation. One name for two jobs invites the wrong reader (405,
-2026-10-31).
-
-- **Why not inside meizel**: meizel is a static checker (it reads the tree); the runner is an
-  orchestrator (derive layers → call pyright/ruff/pytest/meizel). Putting it inside meizel mixes two
-  jobs, and meizel is itself called by the runner (L4) — a cycle.
-- **Why `scripts/hooks/` and not `scripts/ci/`** (moved while building, 2026-10-31): two gates decide
-  this. `scripts/ci` may not reach `scripts/audit` — `scripts/audit` already reaches
-  `scripts/ci` through `impact_census.py`, so that edge closes a cycle `meizel` refuses; and
-  `scripts/ci` already holds its twenty direct entries, the cap `lint-code-structure` enforces.
-  `scripts/hooks` is the pre-push family the runner unifies (`prepush-pyright-files.sh`,
-  `prepush-meizel.sh`), so the location the gates force is also the one that reads right.
-- **Hard constraint**: the runner depends only on meizel's *command-line contract* (`check`,
-  `debt diff` output and exit codes) and never imports `meizel.*` internals; a change inside meizel
-  must not be able to break the runner.
-- Same family as the pre-push hooks it replaces; anyone can read it.
-
-#### 3. The receipt (versioned, machine-checked)
-
-One line, in the PR body. The example below is a real run at `3cd7ef34` — a documentation-only
-change, the shape that says why each layer does not apply instead of printing nothing about it:
-
-```
-diff-checks/v1 @3cd7ef3439056b6558e13b253734467b5c3902ae base=23bdc7ece90bcc13046cb4d301212718709e9a4b scope=docs pyright=n/a(no-python-touched) err_in_this_diff=n/a(no-python-touched) closure=n/a(no-python-touched) ruff=n/a(no-python-touched) selector=SELECTED:74files tests=skipped(--skip-tests) passed=n/a(no-test-ran) failed=n/a(no-test-ran) errors=n/a(no-test-ran) blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76771edges)(16s) debt=n/a(no-manifest-changed) docs-refs=ok(1593docs,0dangling)(3s) docs-okf=ok(757files,0errors,4warnings)(2s) generated=scripts/hooks/diff_checks.py
-```
-
-**The vocabulary is the whole contract** (405, 2026-10-31: a receipt of nothing but `none` proved
-nothing and looked like a pass):
-
-| value | means |
-|---|---|
-| `ok(<evidence>)(<time>)`, `0err(...)`, `645tests(...)` | the layer ran; the parentheses carry what it measured — counts, coverage, duration |
-| `n/a(<why>)` | this change cannot need the layer; `<why>` names the file kind it does not touch (`n/a(no-python-touched)`) |
-| `skipped(<why>)` | the layer applies and was deliberately not run (`skipped(--skip-tests)`) |
-| `BLIND(<files>)` | the selector admits it cannot map these changed files; the fallback must run |
-| `unreadable(<why>)` | the layer ran but its output could not be read — never a pass |
-
-**`verdict=pass|fail|incomplete` is the receipt's one conclusion, and the producer computes it from
-every field above** (`fail`: a layer ran and was red; `incomplete`: a layer could not be read or did
-not happen as asked, an unfilled field, or a blind selection whose fallback did not run green;
-`skipped(...)` and `n/a(...)` are not a verdict). The merge gate reads only the sha, `generated=` and
-`verdict=pass`. The runner's exit code reflects only its blocking runs, so a local reader decides
-"passed" by `verdict=`, not by the exit code.
-
-**There is no bare `none` in a receipt.** "Did not apply" and "ran, found nothing" are different
-claims, and a line that prints both the same way is a line a reviewer cannot use. Values carry no
-spaces either, so a reason joins its words with `-`.
-
-`debt=` gives both the absolute numbers and the delta (405): the absolute numbers are what shows drift
-against main in a receipt pinned to a sha; the delta only says what this change did. With one half
-missing, every reader has to recompute. The columns are read by position, not by the reference's name,
-so a receipt pinned to a sha (a replay, or a pull request's base) reads the same numbers as one pinned
-to `origin/main`.
-
-**A historical receipt checker** (landed beside the runner during the CI outage and retired per §6
-once CI returned)
-compared: the `sha` equals the PR head; every field of the vocabulary is present; no field is bare
-`none`; no field says `unreadable`; a skipped run reports no count and a run that executed tests
-reports both counts with their unit; a blind selection names the fallback it ran. **The checker did
-not judge whether a reason was good**, which would become subjective and teach people to pad reasons.
-
-**What it stops**: a stale receipt (sha mismatch), a missing field, an absence with no reason, a
-skipped run that still claims a count, a layer whose output could not be read, a blind selection
-without its fallback.
-**What it does not stop**: a hand-written fake receipt. Hence the `generated=` field and the fixed
-`diff-checks/v1` literal, and one sentence in this convention: **a hand-written receipt is the same
-offence as a hand-written test result.**
-
-#### 4. The trigger table (what changed ⇒ what must run)
-
-| the change | must run |
-|---|---|
-| any change | L4 `meizel check` + the selector (L1–L3) |
-| any `.py` | + L0 + L0' |
-| a parameter added without a default / deleted / renamed / a return type changed | the same — **no extra detection needed**: the selector picks by import closure and covers cross-layer construction sites by construction |
-| migration / schema | all of the above + the integration layer against a real Postgres (migration smoke) |
-| gateway routes, request handling, configuration value objects | all of the above (the selector pulls `gateway/tests`) + that domain's e2e |
-| configuration fields / `meizel.toml` | + `meizel debt diff --against <base>` + the touched domain's L1 |
-| `ui/web/**` | additionally `vitest-app` (the whole `src/app` test tree), and the production build when the change can cross the RSC boundary |
-| documentation or comments only | the document check (L4'): dangling references (`check_doc_references.py`), reporting how many documents it read |
-
-The last row is the one that produced the all-`none` receipt 405 and 7138 rejected: documentation was
-scheduled nothing at all, so the line a reviewer trusts carried no evidence about the change it
-described. A change kind this table does not name still owes L4, and every layer it cannot need is
-printed `n/a(<why>)` rather than dropped.
-
-#### 4.5 Closing the blind spots (405, hard rule)
-
-The selector's blind spots **must appear in the receipt, and may never be counted as green** — this is
-stronger than "run full-tree pyright"; they are not the same thing: pyright closes *type-level* blind
-spots, `blind_changed` names *selector-level* ones (dynamic imports, non-literal imports — edges the
-selector cannot see at all).
-
-- **`blind_changed` non-empty** ⇒ the receipt says `selector=BLIND(<files>)`, and the fallback layer
-  (that domain's full suite, or the whole suite) **must** run; the receipt records `fallback=RAN(<scope>)`.
-- **No fallback ⇒ the PR cannot merge.** Not because the author was lazy, but because **the selector
-  itself said it cannot see**.
-- `diagnostics` is handled separately (the whole repository has **34** of them today; "non-empty ⇒ full
-  run" would make every PR run everything and thereby defeat itself): the receipt records
-  `diagnostics=<n>`, and **one diagnostic pointing at a file this change touches** carries the same
-  weight as `blind_changed` — the fallback must run.
-- **A ratchet on `diagnostics` (405)**: the count may only fall. **34 is a ceiling, not a starting
-  point**; a new one requires two statements in the PR body — why this dependency edge is invisible,
-  and why it cannot be removed. Each one means "the selector is blind to this file's edge", and nobody
-  notices when 34 quietly becomes 60.
-
-#### 5. Making people actually run it (without relying on discipline)
-
-1. `python scripts/hooks/diff_checks.py` derives the layers from `git diff --name-only origin/main...HEAD`, runs
-   them and prints the receipt; `--dry-run` prints what would run, at zero cost.
-2. **The receipt goes into the PR body and a merger accepts only PRs that carry one**; skipped layers
-   need a reason, and **a skip is not green**.
-3. Optional second phase: put L0 + L4 into the existing pre-push hook (currently 4–5 minutes) so a red
-   refuses the push; L1–L3 are too expensive and stay in the runner.
-4. **Every child runs in CI's environment contract**, which is the caller's environment minus the
-   `MEIVA_*` namespace CI's runner never carries (`#5907`). A child that inherits an agent host's shell
-   answers about that shell: the suite's session upgrade drops the cluster-scope keys its own `.env`
-   does not declare, and the environment guard compares the live environment with the snapshot it
-   took before the drop — three receipts red on
-   `tests/harness/test_home_isolation.py` while CI and `main` were green. Nothing else is filtered:
-   `PATH`, `HOME` and each toolchain's own variables must locate *this* box's tools.
-
-#### 6. The expiry rule (what happens when CI comes back)
-
-- **ci-mode is machine-decidable**: the runner reads the PR head sha's check-runs
-  (`gh api .../commits/<sha>/check-runs`); empty ⇒ `ci-mode=off`, and the receipt says "this run was
-  mandatory because ci-mode=off".
-- **When CI returns, every layer with an equivalent CI job degrades out of the mandatory set** (L0
-  pyright, L0' ruff, L1–L3 pytest, L3' vitest); the runner survives as an optional accelerator (a result
-  in five local minutes versus a CI round trip).
-- **Three families stay mandatory** because CI does not cover them structurally, or covers them more
-  narrowly: the fallback when `blind_changed` is non-empty (CI is blind in the same place); the real
-  resource integration layers behind a skip (with no local database they must be named in `skipped=`,
-  never left empty); and the ledger's **whole-repository** reading (`debt diff`) — CI runs only
-  `meizel-check-changed`.
-- The expiry rule itself must be reviewed: on the merge that restores CI, the merger checks this table
-  and updates this document.
-
-#### 7. Today's evidence
-
-- **`#7910`**: on its change surface the selector picked 645 tests, including the three files that were
-  missed; full-tree pyright listed the 7 missing arguments in 3m13s. Neither ran ⇒ main went red. This
-  time `blind_changed=[]` and `diagnostics=34` (all pre-existing, none pointing at this change), i.e.
-  the fallback was not needed — running the selector would have been enough.
-- **The ledger**: without `debt prune` after a change, `meizel check` reports only `[debt-paid]` while
-  `debt diff` still shows +0; after the prune it is −2. Skipping L4 writes a wrong ledger into the PR
-  body.
-
-#### 8. Decided (405, 2026-10-31 16:34)
-
-- The runner is `scripts/hooks/diff_checks.py` and the receipt is `diff-checks/v1` (405, 16:50: the
-  old name `scripts/preflight.py` collides with `cli/preflight.py`, the home-ownership guard). The
-  checker sits beside it; the location moved from `scripts/ci/` for the two gates named in §2.
-- `debt=` carries both the absolute numbers and the delta.
-- The blind-spot loop is §4.5.
-
-#### 9. One sentence
+### One sentence
 
 **The answer to a process error is not a new tool; it is making the existing tool mandatory before a
-merge.** `scripts/ci/test_selector.py` has been there all along, and run on `#7910`'s real change
-surface it selects 645 tests including the three files that were missed — this is exactly where the
-principle is easiest to get wrong: seeing a miss and going looking for a new mechanism.
+merge.** The selector was there all along; seeing a miss and going looking for a new mechanism is
+exactly where the principle is easiest to get wrong.
 
 ## What this does not replace
 
