@@ -96,6 +96,21 @@ async def settle_stale_interrupts(ctx: MeivaContext, agent_id: int) -> None:
         )
 
 
+async def restart_owed(ctx: MeivaContext, agent_id: int) -> bool:
+    pool = ctx.ops_pool
+    if pool is None:
+        return False
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM inbound_messages WHERE agent_id=%s "
+                "AND kind='restart' AND status IN ('pending','claimed'))",
+                (agent_id,),
+            )
+        ).fetchone()
+    return row is not None and row[0] is True
+
+
 async def peek_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedInbound]:
     pool = ctx.ops_pool
     if pool is None:

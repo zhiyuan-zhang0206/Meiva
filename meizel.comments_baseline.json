@@ -3410,7 +3410,7 @@
   "services/agent_runner/agent_host/dispatcher.py": 39,
   "services/agent_runner/agent_host/exec_memory_guard.py": 10,
   "services/agent_runner/agent_host/health_routes.py": 5,
-  "services/agent_runner/agent_host/host.py": 38,
+  "services/agent_runner/agent_host/host.py": 37,
   "services/agent_runner/agent_host/host_beat.py": 11,
   "services/agent_runner/agent_host/invocation/__init__.py": 5,
   "services/agent_runner/agent_host/invocation/completion_decisions.py": 8,

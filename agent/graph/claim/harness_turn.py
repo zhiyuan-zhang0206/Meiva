@@ -10,7 +10,7 @@ from langgraph.types import Command
 
 from agent import state as _state
 from agent.graph.claim.harness_activity import log_turn_usage
-from agent.graph.claim.harness_inbox import settle_stale_interrupts
+from agent.graph.claim.harness_inbox import restart_owed, settle_stale_interrupts
 from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_run import ForegroundRun
@@ -250,6 +250,14 @@ def _session_died(exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSet
     return _halt_reason(exc) is None
 
 
+async def _cut_by_host_exit(
+    ctx: MeivaContext,
+    agent_id: int,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+) -> bool:
+    return ctx.host_exiting() and _session_died(exc) and await restart_owed(ctx, agent_id)
+
+
 async def _settle_exit_cut(
     ctx: MeivaContext,
     agent_id: int,
@@ -261,13 +269,17 @@ async def _settle_exit_cut(
     extra_updates: dict[str, object],
 ) -> Command[HarnessGoto]:
     await bridge.retire(reason="session unavailable")
-    await run.retire_unconfirmed()
+    produced_output = projector.has_activity
+    marked = await run.retire_unconfirmed()
     await projector.finish(interrupted=True)
+    if marked and not produced_output:
+        report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     logger.info(
         "harness session died during the host's graceful exit; the turn is handed to the "
         "restart the exit wrote ({detail})",
         agent_id=agent_id,
         harness=ctx.harness.value,
+        retired_inputs=marked,
         detail=sanitize_error_text(str(exc)) or type(exc).__name__,
     )
     _apply_wake_polarity(state, projector, extra_updates)
@@ -339,7 +351,7 @@ async def _run_harness_turn(
                 },
                 goto=CLAIM,
             )
-        if ctx.host_exiting() and _session_died(exc):
+        if await _cut_by_host_exit(ctx, agent_id, exc):
             return await _settle_exit_cut(
                 ctx, agent_id, state, bridge, projector, run, exc, extra_updates
             )

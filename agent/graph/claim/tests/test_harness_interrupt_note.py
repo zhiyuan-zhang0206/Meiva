@@ -231,6 +231,7 @@ async def test_a_session_killed_during_the_hosts_graceful_exit_is_handed_to_the_
     loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
+    insert_row(db_conn, agent_id, "restart", "system:restart", "")
     engine = _CliKilledEngine()
     rt = harness_runtime(engine, agent_id=agent_id)
     exiting = Runtime(context=replace(rt.context, host_exiting=lambda: True))
@@ -260,6 +261,22 @@ async def test_a_session_killed_outside_a_graceful_exit_is_still_a_fatal_stream_
         await harness_turn_node(
             AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}]),
             harness_runtime(_CliKilledEngine(), agent_id=agent_id),
+            config(agent_id),
+        )
+    assert not [m for m in loguru_records.messages() if "graceful exit" in m]
+
+
+async def test_a_session_killed_before_the_exit_wrote_its_restart_is_still_a_fatal_stream_abort(
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+    rt = harness_runtime(_CliKilledEngine(), agent_id=agent_id)
+    exiting = Runtime(context=replace(rt.context, host_exiting=lambda: True))
+
+    with pytest.raises(FatalLLMStreamError, match="exit code 143"):
+        await harness_turn_node(
+            AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}]),
+            exiting,
             config(agent_id),
         )
     assert not [m for m in loguru_records.messages() if "graceful exit" in m]

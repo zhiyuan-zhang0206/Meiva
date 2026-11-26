@@ -71,7 +71,8 @@ When unit memory budgets (`agent-host`, `exec-host`) are configured on Linux,
 installs the `systemd-run --user` launch rewrite only when the probe succeeds;
 each unit's own `manifest.env` still overrides those defaults.
 The scope carries `MemoryMax`, `MemorySwapMax` and `OOMPolicy=continue` (one argument
-list serves the launch and the probe). The default policy, `stop`, makes systemd tear the
+list serves the launch and the probe, and both capped units, `agent-host` and `exec-host`:
+one job's OOM kill no longer takes the rest of the `exec-host` scope with it). The default policy, `stop`, makes systemd tear the
 whole scope down with SIGTERM to every member after the kernel OOM-kills a single one,
 which ends the agent-host and its external-harness children together (the 2026-11-26
 16:01 `basedpyright` incident); `continue` leaves the kill to the one process. The

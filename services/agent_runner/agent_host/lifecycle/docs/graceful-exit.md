@@ -108,14 +108,26 @@ new is written at boot.
 Root's leader-only TERM is not the only way an exit can reach a harness child: if the
 host's cgroup scope is torn down (systemd stops a scope after an OOM kill unless it
 carries `OOMPolicy=continue`) or something signals the group, the CLI dies (exit 143)
-while the host is draining. The scheduler's `in_stop` is true from the moment admission
-closes, and each turn's `MeivaContext.host_exiting` reads it. A turn whose session died
-in that window (`HarnessClosedError`, a failed setup, or a fault naming no completed
-turn; quota exhaustion and stalls keep their halts) is handed to the restart the exit
-writes: it ends halted and marked `interrupted_by_restart`, like a turn a restart
-interrupted, so the claim that takes the restart queues the continuation note on the next
-host. It raises no `FatalLLMStreamError`, renders no error and stamps no corpse. A turn
-that finished in error, or a session that dies with no exit in progress, is still a crash.
+while the host is draining. A turn whose session died is handed to the restart, as one
+the restart interrupted, only when **both** hold: the host has begun its exit
+(`TurnScheduler.in_stop`, true from the moment admission closes, read as
+`MeivaContext.host_exiting`) **and** the agent has a pending or claimed `restart` row
+(`harness_inbox.restart_owed`). The session death is `HarnessClosedError`, a failed
+setup, or a fault naming no completed turn; quota exhaustion and stalls keep their halts.
+The turn then ends halted and marked `interrupted_by_restart`, so the claim that takes
+the restart queues the continuation note on the next host: no `FatalLLMStreamError`, no
+error on the timeline, no corpse stamp. Inputs the harness never confirmed are retired
+and named in a `turn_fault_lost_inbound` record, as in a crash.
+
+The second condition is what keeps a turn from being lost silently. The exit writes the
+restarts one agent at a time, and a write can fail (`host_exit_restart_failed`); a CLI
+that dies before its agent's row exists would end at the claim with nothing to take, and
+the next host would read an idle agent. In that window, and for a session that dies
+before the exit began (the SIGTERM broadcast reaching the CLI ahead of the host's own
+handler), the turn takes the original path: `FatalLLMStreamError`, an error on the
+timeline, the corpse stamp that the next host's restart reads, and the continuation. A
+turn that finished in error, or a session that dies with no exit in progress, is a crash
+as before.
 
 ## Bounds
 

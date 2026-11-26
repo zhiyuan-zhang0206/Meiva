@@ -541,14 +541,13 @@ class AgentHost:
             raise RuntimeError("this host already has a wake bound")
         self._wake = wake
 
-    # meiva:note
-    # The scheduler's answers to "is this host in an exit an operator asked for" (read when a turn's
-    # abort is settled) and "has it begun its graceful exit at all" (every turn's `host_exiting`). A
-    # host built without a scheduler (tests) is never in an exit.
     def bind_stop(self, scheduler: TurnScheduler) -> None:
         if self._stop is not None:
             raise RuntimeError("this host already has a scheduler bound for its stop")
         self._stop = scheduler
+
+    def exiting(self) -> bool:
+        return self._stop is not None and self._stop.in_stop()
 
     # meiva:note
     # An inbound wake for an agent whose invocation is running reaches its external harness engine, so
@@ -640,7 +639,7 @@ class AgentHost:
             extensions=self._extensions,
             commands=self._commands,
             turn_progress=self.turn_progress,
-            host_exiting=lambda: self._stop is not None and self._stop.in_stop(),
+            host_exiting=self.exiting,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             original_incarnation=incarnation,
             hosted_resources=resources,
