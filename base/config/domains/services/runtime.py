@@ -484,7 +484,7 @@ class ServiceRuntimeSettings(EnvSettings):
             "writable": True,
             "sensitive": False,
             "scope": "host",
-            "remote_writable": True,
+            "remote_writable": False,
         },
     )
 
