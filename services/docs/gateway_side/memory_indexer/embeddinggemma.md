@@ -139,8 +139,11 @@ the package.
   `.env`, otherwise the unit refuses to start and says so. Prefer
   `MEIVA_EMBEDDINGGEMMA_BIND_HOST` on a private address, or `127.0.0.1` when every client is
   on the hosting machine.
-- The unit's stop window is `SHUTDOWN_CEILING_S` (30 s): uvicorn drains in-flight inference for
-  up to 25 s, then the engine is closed, so a restart does not SIGKILL a batch mid-way.
+- The supervisor gives the process `SHUTDOWN_CEILING_S` (30 s) to stop. Uvicorn
+  spends up to `DRAIN_S` (25 s) draining HTTP handlers. Lifespan teardown then
+  waits up to 5 s for the inference worker to finish its active native call
+  and close the engine. The supervisor can force-stop the process when the
+  30 s window expires.
 
 A macOS hosting machine with the application firewall on prompts for, or blocks, inbound
 connections to the interpreter that serves the port; allow it (or bind to loopback when every
@@ -166,6 +169,16 @@ The supported wire behavior follows
 That handler sends `input` directly to `compute_embedding_batch`; it does not
 add task prefixes. A compatible server must preserve this raw-input behavior.
 A server that adds its own prefixes is incompatible with this adapter.
+
+Inference runs on one LiteRT worker. Pending single-input requests (a string
+or a one-element list) and multi-input requests each run in arrival order
+within their queue. When both queues first contend, a single input runs next.
+The queues then alternate while both have work, so a steady stream of single
+inputs still leaves slots for batches. A native call already in progress runs
+to completion. A client disconnect or handler cancellation removes queued
+work. On shutdown the server rejects any work still queued after the HTTP
+drain and closes the engine on the same worker, subject to the supervisor's
+shutdown ceiling.
 
 The adapter owns the checkpoint model card's two text templates:
 

@@ -18,7 +18,6 @@ class StoreBackend:
         self.store = MemoryStore(data_file, dim=dim, fingerprint=fingerprint)
 
     def reopen(self, fingerprint: str) -> StoreBackend:
-        self.store.save()
         reopened = StoreBackend(self._data_file, dim=self._dim, fingerprint=fingerprint)
         reopened.store.load()
         return reopened
@@ -26,11 +25,7 @@ class StoreBackend:
     def rows(self, path: Path) -> set[tuple[str, int]]:
         target = str(path.resolve())
         return {
-            (kind, idx)
-            for row_path, kind, idx in zip(
-                self.store._paths, self.store._kinds, self.store._chunk_idx, strict=True
-            )
-            if row_path == target
+            (row.kind, row.chunk_idx) for row in self.store._snapshot.rows if row.path == target
         }
 
     def connect(self) -> None:

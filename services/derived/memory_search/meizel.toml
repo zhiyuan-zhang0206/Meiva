@@ -2,6 +2,8 @@ exports = ["app.py", "daemon.py"]
 
 [uses]
 "app.py" = ["store.py"]
+"store.py" = ["cache.py", "snapshot.py"]
+"cache.py" = ["snapshot.py"]
 "daemon.py" = ["app.py", "config.py", "store.py"]
 "tests" = ["app.py", "config.py", "daemon.py", "store.py"]
 

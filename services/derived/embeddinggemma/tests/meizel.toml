@@ -5,3 +5,4 @@
 "test_daemon.py" = ["fakes.py", "serve_child.py"]
 "test_engine.py" = ["fakes.py"]
 "test_probe.py" = ["fakes.py"]
+"test_socket_disconnect.py" = ["fakes.py"]

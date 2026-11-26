@@ -1,13 +1,13 @@
 exports = ["config.py", "contract.py", "daemon.py", "engine.py", "launch.py", "placement.py", "probe.py"]
 
 [uses]
-"app.py" = ["config.py", "contract.py", "engine.py"]
+"app.py" = ["config.py", "contract.py", "engine.py", "scheduler.py"]
 "config.py" = ["contract.py"]
 "daemon.py" = ["app.py", "config.py", "contract.py", "engine.py"]
 "engine.py" = ["config.py", "contract.py"]
 "launch.py" = ["config.py", "contract.py", "placement.py"]
 "placement.py" = ["contract.py"]
-"tests" = ["app.py", "config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py"]
+"tests" = ["app.py", "config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py", "scheduler.py"]
 
 [external]
 "engine.py" = "imports the LiteRT-LM runtime (`litert_lm`) by name at startup: it is installed outside the repository environment, in the interpreter or directory the host configures"
