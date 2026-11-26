@@ -392,6 +392,8 @@ async def test_shutdown_timeout_logs_inflight_queued_and_late_receipts(tmp_path:
     store = UsageReceiptStore(tmp_path, "cluster")
     seed = _entry("seed")
     store.stage(seed)
+    [(seed_id, _)] = store.pending(after=0, limit=1)
+    store.acknowledge(seed_id)
     initial = (replace(seed, call_id="inflight"), replace(seed, call_id="queued"))
     late = replace(seed, call_id="late")
     owner = UsageReceiptRuntime(store, _ledger(lambda _: False))
@@ -426,7 +428,7 @@ async def test_shutdown_timeout_logs_inflight_queued_and_late_receipts(tmp_path:
 
     for payload in captured:
         store.recover(payload.encode())
-    expected = [seed, *initial, late]
+    expected = [*initial, late]
     recovered = [decode_receipt(payload) for _, payload in store.pending(after=0, limit=8)]
     assert sorted(recovered, key=lambda entry: entry.call_id) == sorted(
         expected, key=lambda entry: entry.call_id
