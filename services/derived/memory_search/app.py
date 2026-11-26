@@ -111,44 +111,37 @@ def _mount_mutations(
                 status_code=422, detail=f"batch of {size} rows exceeds the limit {max_batch_rows}"
             )
 
-    @app.post("/upsert")
-    async def upsert(body: UpsertBody) -> dict[str, str]:
-        vector = np.asarray(body.vector, dtype=np.float32)
+    def upsert_rows(rows: list[UpsertBody]) -> None:
+        store.upsert_many(
+            [
+                (
+                    row.path,
+                    row.mtime,
+                    row.content_hash,
+                    np.asarray(row.vector, dtype=np.float32),
+                    row.kind,
+                    row.chunk_idx,
+                )
+                for row in rows
+            ]
+        )
+
+    async def commit_upserts(rows: list[UpsertBody]) -> dict[str, str]:
         try:
             async with writer_admission:
-                await asyncio.to_thread(
-                    store.upsert,
-                    body.path,
-                    body.mtime,
-                    body.content_hash,
-                    vector,
-                    kind=body.kind,
-                    chunk_idx=body.chunk_idx,
-                )
+                await asyncio.to_thread(upsert_rows, rows)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok"}
 
+    @app.post("/upsert")
+    async def upsert(body: UpsertBody) -> dict[str, str]:
+        return await commit_upserts([body])
+
     @app.post("/upsert_batch")
     async def upsert_batch(body: UpsertBatchBody) -> dict[str, str]:
         check_batch(len(body.rows))
-        rows = [
-            (
-                row.path,
-                row.mtime,
-                row.content_hash,
-                np.asarray(row.vector, dtype=np.float32),
-                row.kind,
-                row.chunk_idx,
-            )
-            for row in body.rows
-        ]
-        try:
-            async with writer_admission:
-                await asyncio.to_thread(store.upsert_many, rows)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"status": "ok"}
+        return await commit_upserts(body.rows)
 
     @app.post("/delete")
     async def delete(body: DeleteBody) -> dict[str, str]:
