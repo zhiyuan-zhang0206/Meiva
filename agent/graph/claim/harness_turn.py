@@ -266,7 +266,6 @@ async def _settle_exit_cut(
     logger.info(
         "harness session died during the host's graceful exit; the turn is handed to the "
         "restart the exit wrote ({detail})",
-        event="harness_turn_cut_by_host_exit",
         agent_id=agent_id,
         harness=ctx.harness.value,
         detail=sanitize_error_text(str(exc)) or type(exc).__name__,

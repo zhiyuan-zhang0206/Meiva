@@ -247,8 +247,8 @@ async def test_a_session_killed_during_the_hosts_graceful_exit_is_handed_to_the_
     assert update["interrupted_by_restart"] is True
     assert update["harness_inputs"] == []
     assert "session unavailable" in engine.retired, "the dead session is retired, not reused"
-    cut = loguru_records.events("harness_turn_cut_by_host_exit")
-    assert len(cut) == 1 and "exit code 143" in cut[0]["extra"]["detail"]
+    [cut] = [m for m in loguru_records.messages() if "graceful exit" in m]
+    assert "exit code 143" in cut
 
 
 async def test_a_session_killed_outside_a_graceful_exit_is_still_a_fatal_stream_abort(
@@ -262,4 +262,4 @@ async def test_a_session_killed_outside_a_graceful_exit_is_still_a_fatal_stream_
             harness_runtime(_CliKilledEngine(), agent_id=agent_id),
             config(agent_id),
         )
-    assert loguru_records.events("harness_turn_cut_by_host_exit") == []
+    assert not [m for m in loguru_records.messages() if "graceful exit" in m]
