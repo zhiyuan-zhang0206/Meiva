@@ -207,6 +207,21 @@ async def test_a_turn_that_dies_with_the_host_is_resumed_by_the_restart_the_next
     await second.close()
 
 
+@pytest.mark.parametrize("planned", [True, False])
+async def test_the_host_reads_as_exiting_from_the_request_on_planned_or_not(
+    cluster: Cluster, planned: bool
+) -> None:
+    agent_id, script, first = await _in_flight_turn(cluster, drain_s=30, planned=planned)
+    assert first.host.exiting() is False
+    serving = first.serve()
+    first.graceful.request()
+    assert first.host.exiting() is True, "`host_exiting` of every turn's context reads this"
+    await _until(lambda: cluster.inbound(agent_id, "restart"))
+    script.release.set()
+    await asyncio.wait_for(serving, 30)
+    await first.close()
+
+
 async def test_an_unfinished_lifecycle_command_is_kept_instead_of_adding_a_restart(
     cluster: Cluster, loguru_records: LogRecords
 ) -> None:

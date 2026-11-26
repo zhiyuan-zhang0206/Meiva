@@ -457,6 +457,8 @@ def test_the_launch_rewrite_wraps_only_the_capped_units() -> None:
         "MemoryMax=18432M",
         "-p",
         "MemorySwapMax=0M",
+        "-p",
+        "OOMPolicy=continue",
         "--",
         *argv,
     ]
@@ -470,6 +472,8 @@ def test_the_launch_rewrite_wraps_only_the_capped_units() -> None:
         "MemoryMax=18944M",
         "-p",
         "MemorySwapMax=0M",
+        "-p",
+        "OOMPolicy=continue",
         "--",
         *exec_argv,
     ]
@@ -520,6 +524,8 @@ def test_can_scope_units_passes_explicit_env_and_largest_budgets_to_runner() -> 
         "MemoryMax=18944M",
         "-p",
         "MemorySwapMax=256M",
+        "-p",
+        "OOMPolicy=continue",
         "true",
     )
     assert commands.calls[0].kwargs["env"] == probe_env
@@ -614,6 +620,8 @@ async def test_bind_memory_budget_repairs_launch_env_for_both_scope_probe_and_sp
             "MemoryMax=18432M",
             "-p",
             "MemorySwapMax=0M",
+            "-p",
+            "OOMPolicy=continue",
             "--",
             *agent_plain,
         )

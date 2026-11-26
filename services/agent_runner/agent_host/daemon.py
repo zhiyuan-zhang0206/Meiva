@@ -638,7 +638,7 @@ async def run(
             on_active_wake=host.notify_inbound,
         )
         host.bind_wake(scheduler.wake)
-        host.bind_planned_stop(scheduler.in_planned_stop)
+        host.bind_stop(scheduler)
         wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)
         browser_server = await serve_browser_authority(home, browser_authority)
         handed_off = True

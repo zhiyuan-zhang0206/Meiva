@@ -215,6 +215,9 @@ class TurnScheduler:
     def in_planned_stop(self) -> bool:
         return self._stopping and self._planned_stop
 
+    def in_stop(self) -> bool:
+        return self._stopping
+
     def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         """Record a wake and return its turn task for caller accounting.
 

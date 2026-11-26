@@ -213,34 +213,45 @@ def unit_memory_caps(
 
 
 # meiva:note
-# The launch rewrite the root supervisor applies: only the unit carrying a budget is
-# wrapped, and everything else keeps the manifest's argv byte for byte. Two limits go
-# together -- a MemoryMax without a swap cap lets an over-budget tree page forever,
-# which protects nothing and still fills the disk.
-def memory_scoped_argv(
-    unit_id: str, argv: Sequence[str], *, caps: Mapping[str, UnitMemoryCap]
-) -> list[str]:
-    cap = caps.get(unit_id)
-    if cap is None:
-        return list(argv)
+# The launch rewrite the root supervisor applies (`memory_scoped_argv`): only the unit carrying a
+# budget is wrapped, and everything else keeps the manifest's argv byte for byte. The `systemd-run`
+# arguments up to the command are shared by the launch and its probe so the probe
+# can never test a different scope than the one launched. Two limits go together -- a MemoryMax
+# without a swap cap lets an over-budget tree page forever, which protects nothing and still
+# fills the disk. `OOMPolicy=continue` is the third: a scope's default policy is `stop`, so the
+# kernel's OOM kill of ONE process in it (a worker's `basedpyright`) makes systemd tear the
+# whole scope down with SIGTERM to every member, the agent-host and all its external-harness
+# children included, whatever `term_leader_only` says about root's own stop. With `continue` the
+# kernel kills the one process and the rest keep running. A cgroup-wide OOM is the only
+# event this changes; the limits themselves are untouched.
+def _scope_argv(max_mb: int, swap_max_mb: int) -> list[str]:
     return [
         "systemd-run",
         "--user",
         "--scope",
         "--collect",
         "-p",
-        f"MemoryMax={cap.max_mb}M",
+        f"MemoryMax={max_mb}M",
         "-p",
-        f"MemorySwapMax={cap.swap_max_mb}M",
-        "--",
-        *argv,
+        f"MemorySwapMax={swap_max_mb}M",
+        "-p",
+        "OOMPolicy=continue",
     ]
+
+
+def memory_scoped_argv(
+    unit_id: str, argv: Sequence[str], *, caps: Mapping[str, UnitMemoryCap]
+) -> list[str]:
+    cap = caps.get(unit_id)
+    if cap is None:
+        return list(argv)
+    return [*_scope_argv(cap.max_mb, cap.swap_max_mb), "--", *argv]
 
 
 # meiva:note
 # The probe carries the SAME attributes and environment the launch will use. A bare
 # `systemd-run ... true` or an ambient-env probe proves neither that this systemd accepts
-# MemoryMax/MemorySwapMax nor that the child's own launch environment reaches the user bus.
+# MemoryMax/MemorySwapMax/OOMPolicy nor that the child's own launch environment reaches the user bus.
 def _systemd_user_scope_available(
     max_mb: int,
     swap_max_mb: int,
@@ -250,17 +261,7 @@ def _systemd_user_scope_available(
 ) -> bool:
     try:
         done = run(
-            [
-                "systemd-run",
-                "--user",
-                "--scope",
-                "--collect",
-                "-p",
-                f"MemoryMax={max_mb}M",
-                "-p",
-                f"MemorySwapMax={swap_max_mb}M",
-                "true",
-            ],
+            [*_scope_argv(max_mb, swap_max_mb), "true"],
             capture_output=True,
             timeout=_SCOPE_PROBE_TIMEOUT_S,
             env=dict(env),

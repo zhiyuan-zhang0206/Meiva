@@ -372,3 +372,10 @@ async def test_a_planned_stop_is_read_only_after_admission_closes_with_it() -> N
     unplanned = TurnScheduler(Recorder(), timers=SYSTEM_TIMERS)
     unplanned.stop_admission(planned=False)
     assert unplanned.in_planned_stop() is False
+
+
+async def test_the_stop_is_read_from_the_moment_admission_closes_planned_or_not() -> None:
+    scheduler = TurnScheduler(Recorder(), timers=SYSTEM_TIMERS)
+    assert scheduler.in_stop() is False
+    scheduler.stop_admission(planned=False)
+    assert scheduler.in_stop() is True
