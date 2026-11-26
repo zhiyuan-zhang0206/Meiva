@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
@@ -85,6 +85,8 @@ class UsageOptions:
 
 
 _DEFAULT_USAGE_OPTIONS = UsageOptions()
+
+type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +205,7 @@ def log_usage_fields(
     usage_kind: str,
     catalog: ModelCatalog,
     now: datetime,
+    submit_receipt: UsageReceiptSubmitter | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Log raw provider usage; absent cache metering stays absent, including on decisions.
@@ -227,7 +230,8 @@ def log_usage_fields(
             unpriced_already_reported=fields.unpriced_already_reported,
             catalog=catalog,
             now=now,
-        )
+        ),
+        submit_receipt=submit_receipt,
     )
 
 
@@ -311,6 +315,7 @@ def _log_usage(
     event: _UsageEvent,
     *,
     record_out: dict[str, object] | None = None,
+    submit_receipt: UsageReceiptSubmitter | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
@@ -348,7 +353,7 @@ def _log_usage(
     }
     vendor = vendor_of_model(event.model, catalog=event.catalog)
     try:
-        inserted = _book_usage(event, priced, vendor, record)
+        emit_observation = _book_usage(event, priced, vendor, record, submit_receipt)
     except UsageLedgerConflictError:
         raise
     except UsageLedgerWriteError:
@@ -356,7 +361,7 @@ def _log_usage(
         raise
     if record_out is not None:
         record_out.update(record)
-    if inserted:
+    if emit_observation:
         _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
     return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
@@ -401,7 +406,11 @@ def _unpriced_cause(event: _UsageEvent) -> tuple[str, str]:
 
 
 def _book_usage(
-    event: _UsageEvent, priced: CostQuote | None, vendor: str | None, record: dict[str, object]
+    event: _UsageEvent,
+    priced: CostQuote | None,
+    vendor: str | None,
+    record: dict[str, object],
+    submit_receipt: UsageReceiptSubmitter | None,
 ) -> bool:
     resolve_ledger = event.catalog.usage_ledger
     ledger = resolve_ledger() if resolve_ledger is not None else None
@@ -421,7 +430,11 @@ def _book_usage(
     if priced is not None and priced.exact_usd is not None:
         record["cost_usd_exact"] = str(priced.exact_usd)
     record["complete"] = event.complete
-    return _write_usage(ledger, call_id, event, priced, vendor)
+    entry = _ledger_entry(ledger, call_id, event, priced, vendor)
+    if submit_receipt is None:
+        return ledger.write(entry)
+    submit_receipt(entry)
+    return True
 
 
 def _emit_usage_observation(
@@ -479,13 +492,13 @@ def _utc_usage_time(now: datetime) -> datetime:
     return now.astimezone(UTC)
 
 
-def _write_usage(
+def _ledger_entry(
     ledger: UsageLedger,
     call_id: str,
     event: _UsageEvent,
     priced: CostQuote | None,
     vendor: str | None,
-) -> bool:
+) -> UsageLedgerEntry:
     price_snapshot: dict[str, float | str] = {}
     if priced is not None:
         price_snapshot.update(_price_snapshot(priced))
@@ -494,33 +507,31 @@ def _write_usage(
         provenance = event.catalog.prices.provenance(event.model)
         if provenance is not None:
             price_snapshot["source_url"], price_snapshot["source_checked_at"] = provenance
-    return ledger.write(
-        UsageLedgerEntry(
-            call_id=call_id,
-            occurred_at=_utc_usage_time(event.now),
-            agent_id=event.for_agent_id if event.for_agent_id is not None else ambient_agent_id(),
-            machine=ledger.machine(),
-            cluster=ledger.cluster,
-            source=event.source,
-            billing=harness_billing_of_source(event.source).value,
-            usage_kind=event.usage_kind,
-            model=event.model,
-            requested_model=event.requested_model,
-            provider=vendor,
-            provider_request_id=event.provider_request_id,
-            calls=event.calls,
-            complete=event.complete,
-            tokens_in=event.in_total,
-            tokens_out=event.out_total,
-            tokens_reasoning=event.reasoning,
-            cache_read=event.cache_read,
-            cache_write_5m=event.cache_write_5m or None,
-            cache_write_1h=event.cache_write_1h or None,
-            cache_write_30m=event.cache_write_30m or None,
-            cost_usd=priced.exact_usd if priced is not None else None,
-            price_snapshot=price_snapshot,
-            price_source="live" if priced is not None else None,
-        )
+    return UsageLedgerEntry(
+        call_id=call_id,
+        occurred_at=_utc_usage_time(event.now),
+        agent_id=event.for_agent_id if event.for_agent_id is not None else ambient_agent_id(),
+        machine=ledger.machine(),
+        cluster=ledger.cluster,
+        source=event.source,
+        billing=harness_billing_of_source(event.source).value,
+        usage_kind=event.usage_kind,
+        model=event.model,
+        requested_model=event.requested_model,
+        provider=vendor,
+        provider_request_id=event.provider_request_id,
+        calls=event.calls,
+        complete=event.complete,
+        tokens_in=event.in_total,
+        tokens_out=event.out_total,
+        tokens_reasoning=event.reasoning,
+        cache_read=event.cache_read,
+        cache_write_5m=event.cache_write_5m or None,
+        cache_write_1h=event.cache_write_1h or None,
+        cache_write_30m=event.cache_write_30m or None,
+        cost_usd=priced.exact_usd if priced is not None else None,
+        price_snapshot=price_snapshot,
+        price_source="live" if priced is not None else None,
     )
 
 

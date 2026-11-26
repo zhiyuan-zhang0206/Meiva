@@ -18,7 +18,7 @@
 
 Exactly one layer owns a call's row. The factory owns it by default. A caller that emits the row itself — with its own `usage_kind`, `source` or agent id — builds with `meter=False`, or strips the meter from an injected build with `unmeter(model)`. The meter also stamps `msg.additional_kwargs["meiva_usage"]`, and `log_usage_from_message` refuses a message that already carries the stamp, so a caller that logs the same response cannot produce a second row.
 
-`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). Each exhausted ledger write or conflicting replay emits one `llm_usage_ledger_write_failed` warning before propagating as a failed step. The OTLP logs lane sends the full event to Loki. Count exhausted writes and replay conflicts in Grafana with LogQL `sum(count_over_time({event_name="llm_usage_ledger_write_failed"}[5m]))` and inspect `reason`, `error_type`, and `call_id` in the event payload. It is a log-derived count under the explicit metric allowlist.
+`attribution` says how a row's agent identity was established: `caller` (the emitter supplied `for_agent_id`), `process` (the identity bound at telemetry startup), or `unattributed` (no identity was available, `agent_id` is NULL). Each exhausted ledger write or conflicting replay emits one `llm_usage_ledger_write_failed` warning. The direct write path propagates that failure. The receipt consumer retains the affected receipt. The OTLP logs lane sends the full event to Loki. Count exhausted writes and replay conflicts in Grafana with LogQL `sum(count_over_time({event_name="llm_usage_ledger_write_failed"}[5m]))` and inspect `reason`, `error_type`, and `call_id` in the event payload. It is a log-derived count under the explicit metric allowlist.
 
 ## Notes
 
@@ -39,8 +39,8 @@ Exactly one layer owns a call's row. The factory owns it by default. A caller th
 
 ## Database commit and history
 
-Cluster process boot supplies the database and machine identity. The usage path
-commits before the caller advances, using a separate transaction where the
+Cluster process boot supplies the database and machine identity. Direct usage writers
+commit before the caller advances, using a separate transaction where the
 caller has no checkpoint transaction to share. The first committed report owns
 its time, machine and price snapshot. A replay of matching usage acknowledges
 that row. Conflicting provider facts raise. Meiva receipts use the provider and
@@ -51,7 +51,7 @@ in the session registry, the local turn ID, and the step index. The generation
 advances when the same session resumes in a new process.
 
 The writer retries a transient database failure once with the same frozen
-report. An exhausted commit still emits `llm_usage` with the same ID, original
+report. On the direct path, an exhausted commit still emits `llm_usage` with the same ID, original
 occurrence time, and exact quoted cost for historical recovery. The error
 propagates after a completed harness turn finishes projecting its output. A
 process killed after the provider bills and before Postgres commits can leave a
@@ -76,6 +76,45 @@ tokens summed together cannot be priced by a per-call tier). The dry run found n
 subscription calls and none partly priced. The day tables were archived and dropped afterwards.
 Reports have no retention expiry; the
 Loki `llm_usage` stream is the operational copy and keeps seven days.
+
+## Replayable usage receipts
+
+Gemini document and query embeddings pass `UsageReceiptDelivery.submit` to
+`log_usage_fields(..., submit_receipt=...)`. Both submission paths share the
+same call ID allocator and ledger-entry builder. The receipt freezes the original
+time, attribution, machine, token counts, exact decimal cost and price snapshot
+before returning control for vector validation. The caller emits the existing
+`llm_usage` event and billing span for the provider response. Ledger delivery
+runs independently and replay emits no second observation.
+
+A versioned, checksummed receipt is atomically written and synced in
+`$MEIVA_HOME/usage-receipts` on the calling host. A process-owned consumer scans at Gemini provider startup, then wakes on new
+submissions. Shutdown signals the worker and bounds the join, leaving any
+unfinished delivery on disk.
+The handoff waits for local storage. It can return while a ledger write is
+blocked, including on the gateway's async query path.
+
+- `*.v1.json` is pending. On a delivery failure the consumer retains the file
+  and retries after 30 seconds to limit reconnections during an outage. Use
+  `llm_usage_ledger_write_failed` to count failed database writes in Loki. The
+  `Usage receipt pending` warning includes the call ID and the local path.
+- A successful insert or matching replay acknowledges the receipt and removes
+  it. If a process stops between commit and removal, the ledger's existing
+  `call_id` check acknowledges the same row on restart.
+- `*.v1.conflict` preserves a rejected or unreadable receipt for investigation.
+  The `Usage receipt conflict retained` error records its path and reason.
+  Other valid receipts continue through the consumer.
+
+With the same cluster's configured ledger, the hosting process can also run
+`UsageReceiptStore(directory).replay(ledger)` to attempt pending files
+directly. Replay uses the archived entry without querying the provider or
+repricing it. Files remain on the host where they were staged.
+
+If local storage fails, the producer reports a `Usage receipt storage failed`
+error and still emits the existing usage event with its call ID and exact
+cost for reconciliation. A host failure before receipt staging or loss of the
+receipt volume still requires reconciliation against the available usage events
+and provider bill.
 
 ## Unpriced calls
 

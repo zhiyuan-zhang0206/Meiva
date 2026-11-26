@@ -18,8 +18,7 @@
 # and `langchain-google-genai` (LLM factory), but nothing on the
 # indexer / gateway path imports it now.
 #
-# Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
-# always-on indexer only after a successful provider call, never at module load.
+# The usage receipt boundary is loaded only by a configured billing path.
 #
 # The API key, the per-attempt timeout and the endpoint are values the caller passes in: the
 # service root reads `GEMINI_API_KEY` (prod injects it via `~/.meiva/.env`) and
@@ -38,6 +37,7 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import random
 from collections.abc import Awaitable, Callable
@@ -47,6 +47,7 @@ import httpx
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError
 
+from base.api_contracts.usage import UsageLedgerEntry
 from base.host.boundary.untyped import object_of
 from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
@@ -59,6 +60,7 @@ from base.host.net.resilience import (
     retry_sleep,
 )
 from base.lm.catalog import ModelCatalog
+from base.paths import meiva_home
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, row_vectors
 from services.derived.memory_indexer.embeddings.sync_call import run_sync
 
@@ -176,13 +178,32 @@ def _vectors_from_body(body: object, texts: list[str]) -> np.ndarray:
     return vectors
 
 
-def _emit_billing(body: object, *, catalog: ModelCatalog, now: datetime) -> None:
-    """Account for a completed request before validating its vectors.
+type _ReceiptSubmitter = Callable[[UsageLedgerEntry], None]
 
-    Gemini bills malformed-but-successful responses too. Accounting failures
-    propagate to the operation owner after the successful network request;
-    this stage never retries that request.
-    """
+
+def _receipt_submitter(catalog: ModelCatalog) -> _ReceiptSubmitter | None:
+    resolve_ledger = catalog.usage_ledger
+    if resolve_ledger is None:
+        return None
+    ledger = resolve_ledger()
+    if ledger is None:
+        return None
+    from base.lm.usage.receipt import UsageReceiptDelivery, UsageReceiptStore
+
+    store = UsageReceiptStore(meiva_home() / "usage-receipts")
+    delivery = UsageReceiptDelivery(store, ledger)
+    _ = atexit.register(delivery.stop, timeout=1.0)
+    return delivery.submit
+
+
+def _emit_billing(
+    body: object,
+    *,
+    catalog: ModelCatalog,
+    now: datetime,
+    submit_receipt: _ReceiptSubmitter | None,
+) -> None:
+    """Stage usage for a completed request before validating its vectors."""
     from base.lm.usage import UsageFields, log_usage_fields
 
     try:
@@ -190,12 +211,13 @@ def _emit_billing(body: object, *, catalog: ModelCatalog, now: datetime) -> None
     except ValidationError as exc:
         raise EmbeddingAPIError(f"malformed embed response: {exc!r}") from exc
     tok_in = (usage.prompt_tokens if usage is not None else None) or 0
-    log_usage_fields(
+    _ = log_usage_fields(
         model=MODEL_ID,
         fields=UsageFields(tok_in=tok_in, tok_out=0),
         usage_kind="embedding",
         catalog=catalog,
         now=now,
+        submit_receipt=submit_receipt,
     )
 
 
@@ -229,6 +251,7 @@ def embed(
     task_type: str,
     *,
     catalog: ModelCatalog,
+    submit_receipt: _ReceiptSubmitter | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -273,7 +296,7 @@ def embed(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog, now=now())
+    _emit_billing(body, catalog=catalog, now=now(), submit_receipt=submit_receipt)
     return _vectors_from_body(body, texts)
 
 
@@ -282,6 +305,7 @@ async def embed_async(
     task_type: str,
     *,
     catalog: ModelCatalog,
+    submit_receipt: _ReceiptSubmitter | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -321,7 +345,9 @@ async def embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    await asyncio.to_thread(_emit_billing, body, catalog=catalog, now=now())
+    await asyncio.to_thread(
+        _emit_billing, body, catalog=catalog, now=now(), submit_receipt=submit_receipt
+    )
     return _vectors_from_body(body, texts)
 
 
@@ -330,8 +356,8 @@ class GeminiEmbeddingProvider:
 
     Owns the endpoint, payload, auth, per-site network retry policies,
     dim and shape validation. The service
-    root supplies the catalog used by accounting; unknown setup, request
-    and accounting failures propagate to that operation owner.
+    root supplies the catalog used by accounting. Ledger delivery runs
+    independently after the usage receipt is staged.
     """
 
     name = "gemini"
@@ -346,6 +372,7 @@ class GeminiEmbeddingProvider:
         self,
         catalog: ModelCatalog,
         *,
+        submit_receipt: _ReceiptSubmitter | None = None,
         timeout_s: float,
         api_key: str | None,
         endpoint: str = ENDPOINT,
@@ -356,6 +383,7 @@ class GeminiEmbeddingProvider:
         rng: random.Random,
     ) -> None:
         self._catalog = catalog
+        self._submit_receipt = submit_receipt or _receipt_submitter(catalog)
         self._timeout_s = timeout_s
         self._api_key = api_key
         self._endpoint = endpoint
@@ -371,6 +399,7 @@ class GeminiEmbeddingProvider:
             texts,
             task_type="RETRIEVAL_DOCUMENT",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,
@@ -386,6 +415,7 @@ class GeminiEmbeddingProvider:
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,
@@ -403,6 +433,7 @@ class GeminiEmbeddingProvider:
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,

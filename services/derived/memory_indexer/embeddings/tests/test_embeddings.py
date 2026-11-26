@@ -40,6 +40,7 @@ import httpx
 import numpy as np
 import pytest
 
+from base.api_contracts.usage import UsageLedgerEntry
 from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.net.resilience import retry_asleep, retry_sleep
@@ -70,6 +71,7 @@ def _now() -> datetime:
 def build_provider(
     *,
     catalog: ModelCatalog | None = None,
+    submit_receipt: Callable[[UsageLedgerEntry], None] | None = None,
     timeout_s: float = TIMEOUT_S,
     api_key: str | None = API_KEY,
     endpoint: str = ENDPOINT,
@@ -81,6 +83,7 @@ def build_provider(
     active_catalog = build_model_catalog(home=meiva_home()) if catalog is None else catalog
     return GeminiEmbeddingProvider(
         active_catalog,
+        submit_receipt=submit_receipt,
         timeout_s=timeout_s,
         api_key=api_key,
         endpoint=endpoint,
