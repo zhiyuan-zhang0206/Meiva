@@ -34,7 +34,7 @@ from base.host.system.cron.health_job import register_os_cron
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.lm.catalog import ModelCatalog
-from base.lm.usage.receipt import UsageReceiptDelivery, UsageReceiptStore
+from base.lm.usage.receipt import UsageReceiptRuntime, UsageReceiptStore
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
 from base.paths.scratch import SYSTEM_SCRATCH
@@ -174,7 +174,7 @@ class GatewayServerState(
     AppointmentAppState,
     auth_router.AuthAppState,
 ):
-    usage_receipts: UsageReceiptDelivery | None = None
+    usage_receipts: UsageReceiptRuntime
 
 
 # meiva:note
@@ -250,11 +250,11 @@ def _build_request_resources(
     releases.push_async_callback(insights_client.aclose)
 
 
-def _start_usage_receipts(receipts: UsageReceiptDelivery | None, releases: AsyncExitStack) -> None:
-    if receipts is None:
-        return
-    receipts.start()
-    _ = releases.callback(receipts.stop, timeout=1.0)
+def _start_usage_receipts(state: GatewayServerState, releases: AsyncExitStack) -> None:
+    if hasattr(state, "usage_receipts"):
+        receipts = state.usage_receipts
+        receipts.start()
+        _ = releases.callback(receipts.stop, timeout=1.0)
 
 
 @asynccontextmanager
@@ -311,7 +311,7 @@ async def lifespan(
             db_pool = state.db.pool(max_size=state.gateway_config.db_pool_max_size)
             state.db_pool = db_pool
             releases.callback(db_pool.close)
-            _start_usage_receipts(state.usage_receipts, releases)
+            _start_usage_receipts(state, releases)
             await asyncio.to_thread(plugins_router.initialize_plugins, db_pool, home=process.home)
             state.sessions = SessionStore(db_pool)
             state.session_keys = SessionKeys(state.gateway_config.rng)
@@ -465,7 +465,7 @@ def create_app(
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
     ledger = bind_usage_ledger(process.database, process.machine.name, process.home)
-    usage_receipts = UsageReceiptDelivery(UsageReceiptStore(process.home, ledger.cluster), ledger)
+    usage_receipts = UsageReceiptRuntime(UsageReceiptStore(process.home, ledger.cluster), ledger)
     application = TraceIngressApp if process.tracer_provider is not None else FastAPI
     app = application(
         title="Meiva",
@@ -506,6 +506,7 @@ def create_app(
             now=state.clock.now,
             rng=config.rng,
             submit_receipt=usage_receipts.submit,
+            reserve_receipt=usage_receipts.reserve,
         )
     state.catalog = catalog
     state.command_catalog = CommandCatalog.system(

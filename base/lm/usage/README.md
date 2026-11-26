@@ -81,27 +81,34 @@ Loki `llm_usage` stream is the operational copy and keeps seven days.
 
 The gateway and indexer own a `UsageReceiptDelivery` for their explicit home and
 ledger. Each starts the consumer with the service, including when it uses a
-different embedding backend. Shutdown signals the consumer and waits up to one
-second for the current operation. Receipts already staged remain recoverable
-across forced process exit.
+different embedding backend. Overlapping Gateway lifespans keep the same
+receipt workers until the last lifespan exits. Shutdown closes admission,
+gives staging and delivery one second each to finish, and reports unfinished
+work. Receipts already staged remain recoverable across forced process exit.
 
 Gemini passes the service's `UsageReceiptSubmitter` to `log_usage_fields`.
-As soon as a successful response has been parsed, the adapter runs the short
-local staging operation synchronously before the next cancellable await. The
-service acknowledges staging even if the request has just been cancelled and
-the default executor is saturated. SQLite's lock wait is limited to 50 ms per
-operation. Staging uses local durable storage and involves filesystem sync.
-The caller emits the existing usage event and billing span. Ledger delivery
-runs independently, using the original occurrence, attribution, machine,
-token counts, exact decimal cost, price snapshot and `call_id`. Delivery
-emits no second usage observation.
+Before making an async provider request, Gemini reserves one of the service's
+256 outstanding staging slots. This bounds memory during sustained local I/O
+failure and rejects new work before it incurs a provider charge. Immediately
+after a successful response has been parsed, Gemini queues billing on the
+dedicated staging thread before the next cancellable await. The request's
+shielded wait can end when the request is cancelled. The service retains the
+accepted job and completes staging independently of the default executor.
+Indexer batch staging runs on its existing synchronous caller thread. Both
+paths emit the usual usage event and billing span for the provider response.
+Postgres delivery uses the original occurrence, attribution, machine, tokens,
+exact decimal cost, price snapshot and `call_id` and emits no second usage
+observation.
 
 The SQLite spool lives at `$MEIVA_HOME/usage-receipts.v1.sqlite3` under the
 same service home used to bind the ledger. The producer limits admission to
 4,096 rows of up to 8 KiB, including quarantined rows, and limits the database
 to 32,768 pages. These defaults bound the footprint of a prolonged outage
 while reserving space for a substantial local backlog. Concurrent writers
-share admission through a SQLite write transaction. Each consumer processes
+share admission through a SQLite write transaction in WAL mode. Each staged
+write can wait up to five seconds for a lock. Three bounded backoff retries
+cover transient `SQLITE_BUSY` and `SQLITE_LOCKED` errors, including concurrent
+spool initialization. Each consumer processes
 at most 16 rows per batch. Submissions wake the local consumer immediately.
 It rescans at least every 30 seconds when idle, which finds receipts from
 other processes even if their producers exited without signalling.
@@ -126,7 +133,9 @@ storage or capacity failure required the log fallback. The fallback record's
 API key, request text and returned vectors. Extract that field as raw JSON from
 the failure log. Once storage is healthy and capacity is available, run the
 following from the deployed checkout with its Python environment, supplying the
-actual service home and ledger cluster as arguments:
+actual service home and ledger cluster as arguments. Manual recovery can
+admit a receipt larger than the automatic 8 KiB limit. The spool's row count,
+ownership and SQLite page limits still apply.
 
 ```bash
 python -c 'import sys; from pathlib import Path; from base.lm.usage.receipt import UsageReceiptStore; UsageReceiptStore(Path(sys.argv[1]), sys.argv[2]).recover(sys.stdin.buffer.read())'   "$MEIVA_HOME" "<ledger-cluster>" < receipt.json

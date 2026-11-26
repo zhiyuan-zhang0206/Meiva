@@ -7,7 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
+from sqlite3 import connect
 from threading import Event
 
 import pytest
@@ -24,12 +26,14 @@ from base.db.usage_ledger import usage_writer
 from base.host.proc import run_bounded
 from base.lm.usage.receipt import (
     UsageReceiptDelivery,
+    UsageReceiptStaging,
     UsageReceiptStore,
     decode_receipt,
     encode_receipt,
 )
 from base.packages.plugin_providers import build_model_catalog
-from services.derived.memory_indexer.embeddings.gemini import DIM, MODEL_ID
+from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.derived.memory_indexer.embeddings.gemini import DIM, MODEL_ID, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     AsyncClient,
     build_provider,
@@ -88,7 +92,13 @@ def test_billed_embedding_survives_ledger_outage(
     store = UsageReceiptStore(tmp_path, ledger.cluster)
     delivery = UsageReceiptDelivery(store, ledger)
     transport = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    provider = build_provider(catalog=catalog, transport=transport, submit_receipt=delivery.submit)
+    staging = UsageReceiptStaging()
+    provider = build_provider(
+        catalog=catalog,
+        transport=transport,
+        submit_receipt=delivery.submit,
+        reserve_receipt=staging.reserve,
+    )
     sink = logger.add(
         lambda _: failure_reported.set(),
         filter=lambda record: record["extra"].get("call_id") == "api:fixture",
@@ -106,6 +116,7 @@ def test_billed_embedding_survives_ledger_outage(
     finally:
         unblock.set()
         logger.remove(sink)
+        assert staging.stop(timeout=5)
         assert delivery.stop(timeout=5)
 
     original = decode_receipt(payload)
@@ -164,15 +175,23 @@ def _assert_replayed_once(
     ]
 
 
-def test_cancel_after_response_with_saturated_executor(tmp_path: Path, database: Database) -> None:
-    def unexpected_write(entry: UsageLedgerEntry) -> bool:
-        raise AssertionError(entry.call_id)
-
-    ledger = _ledger(unexpected_write)
+def test_cancel_after_response_with_sqlite_lock_and_saturated_executor(
+    tmp_path: Path, database: Database
+) -> None:
+    ledger = _ledger(lambda _: False)
     store = UsageReceiptStore(tmp_path, ledger.cluster)
+    store.stage(_entry("seed"))
+    [(seed, _)] = store.pending(after=0, limit=2)
+    store.acknowledge(seed)
     delivery = UsageReceiptDelivery(store, ledger)
+    staging = UsageReceiptStaging()
     catalog = replace(build_model_catalog(home=tmp_path), usage_ledger=lambda: ledger)
     transport = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    entered = Event()
+
+    def submit(entry: UsageLedgerEntry) -> ReceiptSubmission:
+        entered.set()
+        return delivery.submit(entry)
 
     def cancel_after_parse() -> datetime:
         task = asyncio.current_task()
@@ -184,27 +203,42 @@ def test_cancel_after_response_with_saturated_executor(tmp_path: Path, database:
         catalog=catalog,
         transport=transport,
         now=cancel_after_parse,
-        submit_receipt=delivery.submit,
+        submit_receipt=submit,
+        reserve_receipt=staging.reserve,
     )
-
-    async def exercise() -> None:
-        release = Event()
-        pool = ThreadPoolExecutor(max_workers=1)
-        loop = asyncio.get_running_loop()
-        loop.set_default_executor(pool)
-        occupied = pool.submit(release.wait)
-        try:
-            task = asyncio.create_task(provider.embed_query_async("hello"))
-            with pytest.raises(asyncio.CancelledError):
-                await task
-            assert not occupied.done()
-            assert store.backlog().pending == 1
-        finally:
-            release.set()
-
-    asyncio.run(exercise())
+    try:
+        with connect(store.path) as locked:
+            _ = locked.execute("BEGIN IMMEDIATE")
+            asyncio.run(_cancel_with_saturated_executor(provider, entered))
+    finally:
+        assert staging.stop(timeout=5)
+    assert entered.is_set()
+    assert store.backlog().pending == 1
     assert len(transport.calls) == 1
     _replay_to_postgres(store, database)
+
+
+async def _cancel_with_saturated_executor(
+    provider: GeminiEmbeddingProvider, entered: Event
+) -> None:
+    release = Event()
+    pool = ThreadPoolExecutor(max_workers=1)
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(pool)
+    occupied = pool.submit(release.wait)
+    heartbeat = asyncio.Event()
+    try:
+        task = asyncio.create_task(provider.embed_query_async("hello"))
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        async with asyncio.timeout(2):
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+            _ = loop.call_later(0.005, heartbeat.set)
+            await heartbeat.wait()
+        assert not occupied.done()
+    finally:
+        release.set()
 
 
 def test_isolated_homes_skip_foreign_receipts_and_keep_healthy_rows(tmp_path: Path) -> None:
@@ -299,3 +333,53 @@ def test_capacity_and_disk_fallback_emit_recoverable_receipt(tmp_path: Path) -> 
     store.acknowledge(seq)
     store.recover(messages[0].encode())
     assert [decode_receipt(payload) for _, payload in store.pending(after=0, limit=2)] == [overflow]
+
+
+def test_eight_processes_stage_all_receipts_without_busy_fallback(tmp_path: Path) -> None:
+    store = UsageReceiptStore(tmp_path, "cluster")
+    child = str(Path(__file__).with_name("receipt_child.py"))
+    payload = encode_receipt(_entry("unused"))
+    invoke = partial(run_bounded, input=payload, capture_output=True, timeout=40)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        jobs = [
+            pool.submit(invoke, [sys.executable, child, str(tmp_path), str(index)])
+            for index in range(8)
+        ]
+        for job in jobs:
+            result = job.result()
+            assert result.returncode == 0, result.stderr
+    assert store.backlog().pending == 800
+
+
+def test_oversized_fallback_is_recovered_and_posted(tmp_path: Path, database: Database) -> None:
+    store = UsageReceiptStore(tmp_path, "cluster")
+    delivery = UsageReceiptDelivery(store, _ledger(lambda _: False))
+    entry = replace(_entry("large"), price_snapshot={"snapshot": "x" * 8192})
+    messages: list[str] = []
+    sink = logger.add(
+        lambda message: messages.append(str(message.record["extra"]["receipt_json"])),
+        filter=lambda record: "receipt_json" in record["extra"],
+    )
+    try:
+        assert delivery.submit(entry) == ReceiptSubmission.FALLBACK_LOGGED
+    finally:
+        logger.remove(sink)
+    [fallback] = messages
+    assert len(fallback.encode()) > store.max_payload_bytes
+    store.recover(fallback.encode())
+    _replay_to_postgres(store, database)
+    with database.connect() as conn:
+        rows = conn.execute("SELECT call_id, price_snapshot FROM llm_usage_ledger").fetchall()
+    assert rows == [(entry.call_id, entry.price_snapshot)]
+
+
+def test_staging_capacity_refuses_before_gemini_call() -> None:
+    staging = UsageReceiptStaging(max_outstanding=1)
+    transport = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
+    provider = build_provider(transport=transport, reserve_receipt=staging.reserve)
+    try:
+        with staging.reserve(), pytest.raises(EmbeddingAPIError, match="at capacity"):
+            asyncio.run(provider.embed_query_async("hello"))
+    finally:
+        assert staging.stop(timeout=5)
+    assert transport.calls == []

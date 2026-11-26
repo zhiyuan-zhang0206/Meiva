@@ -14,6 +14,8 @@ import asyncio
 import threading
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.api_contracts.usage import ReceiptSubmission, UsageLedgerEntry
 from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
@@ -28,6 +31,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.lm.usage.receipt import UsageReceiptStore
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home, repo_root
 from gateway import app as gateway_app
@@ -71,6 +75,68 @@ async def test_overlapping_lifespans_join_their_original_flushers(
         assert all(task.done() for task in original)
         assert not pipeline.stopped
     assert pipeline.stopped
+
+
+def _gateway_receipt(call_id: str, cluster: str) -> UsageLedgerEntry:
+    return UsageLedgerEntry(
+        call_id=call_id,
+        occurred_at=datetime(2026, 8, 17, tzinfo=UTC),
+        agent_id=None,
+        machine="test",
+        cluster=cluster,
+        source=None,
+        billing="api",
+        usage_kind="embedding",
+        model="gemini-embedding-2",
+        requested_model=None,
+        provider="google",
+        provider_request_id=None,
+        calls=1,
+        complete=True,
+        tokens_in=123,
+        tokens_out=0,
+        tokens_reasoning=0,
+        cache_read=None,
+        cache_write_5m=None,
+        cache_write_1h=None,
+        cache_write_30m=None,
+        cost_usd=Decimal("0.000001"),
+        price_snapshot={"price_miss": 0.01},
+        price_source="live",
+    )
+
+
+async def _wait_for_posted_receipt(
+    db_conn: psycopg.Connection[Any], store: UsageReceiptStore, call_id: str
+) -> None:
+    async with asyncio.timeout(5):
+        while (
+            db_conn.execute(
+                "SELECT count(*) FROM llm_usage_ledger WHERE call_id = %s", (call_id,)
+            ).fetchone()
+            != (1,)
+            or store.backlog().pending
+        ):
+            await asyncio.sleep(0.01)
+
+
+async def test_gateway_lifespan_replays_and_keeps_consumer_across_overlap(
+    db_conn: psycopg.Connection[Any], *, machine_identity: MachineIdentityReader
+) -> None:
+    with gateway_test_process(machine=machine_identity) as process:
+        app = gateway_test_app(process=process)
+        store = UsageReceiptStore(process.home, process.home.name)
+        before_start = _gateway_receipt("api:before_gateway_start", store.cluster)
+        after_overlap = replace(before_start, call_id="api:after_gateway_overlap")
+        store.stage(before_start)
+        async with app.router.lifespan_context(app):
+            await _wait_for_posted_receipt(db_conn, store, before_start.call_id)
+            async with app.router.lifespan_context(app):
+                assert store.backlog().pending == 0
+            assert app.state.usage_receipts.submit(after_overlap) is ReceiptSubmission.STAGED
+            await _wait_for_posted_receipt(db_conn, store, after_overlap.call_id)
+        async with app.router.lifespan_context(app):
+            assert store.backlog().pending == 0
 
 
 async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(

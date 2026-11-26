@@ -1,27 +1,35 @@
 # meiva:link base/lm/usage/README.md
 
-from collections.abc import Generator
-from contextlib import closing, contextmanager, suppress
+from collections.abc import Callable, Generator
+from concurrent.futures import Future
+from contextlib import AbstractContextManager, closing, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from sqlite3 import Connection, connect
+from queue import SimpleQueue
+from sqlite3 import SQLITE_BUSY, SQLITE_LOCKED, Connection, OperationalError, connect
 from sqlite3 import Error as SQLiteError
 from threading import Event, Lock, Thread
 
 from loguru import logger
+from opentelemetry import context as trace_context
 from pydantic import TypeAdapter
 
 from base.api_contracts.usage import (
+    ReceiptStagingUnavailableError,
     ReceiptSubmission,
+    ScheduleUsageReceipt,
     UsageLedger,
     UsageLedgerConflictError,
     UsageLedgerEntry,
     UsageLedgerRejectedError,
 )
 from base.host.boundary.untyped import object_of
+from base.host.net.resilience import retry_sleep
 
 _ENTRY = TypeAdapter(UsageLedgerEntry)
 _COUNT = TypeAdapter(tuple[int])
+_JOURNAL_MODE = TypeAdapter(tuple[str])
+_BUSY_RETRY_DELAYS = (0.02, 0.05, 0.1)
 _PENDING = TypeAdapter(list[tuple[int, bytes]])
 _BACKLOG = TypeAdapter(tuple[int, int, str | None])
 _SCHEMA = """
@@ -60,7 +68,7 @@ class UsageReceiptStore:
     cluster: str
     max_receipts: int = 4096
     max_payload_bytes: int = 8192
-    busy_seconds: float = 0.05
+    busy_seconds: float = 5.0
 
     @property
     def path(self) -> Path:
@@ -69,24 +77,42 @@ class UsageReceiptStore:
     @contextmanager
     def _open(self) -> Generator[Connection]:
         with closing(connect(self.path, timeout=self.busy_seconds)) as conn, conn:
-            _ = conn.execute("PRAGMA synchronous=EXTRA")
+            journal_mode = conn.execute("PRAGMA journal_mode")
+            (mode,) = _JOURNAL_MODE.validate_python(object_of(journal_mode.fetchone), strict=True)
+            if mode != "wal":
+                changed = conn.execute("PRAGMA journal_mode=WAL")
+                (mode,) = _JOURNAL_MODE.validate_python(object_of(changed.fetchone), strict=True)
+                if mode != "wal":
+                    raise OSError("usage receipt spool requires SQLite WAL mode")
+            _ = conn.execute("PRAGMA synchronous=FULL")
             _ = conn.execute("PRAGMA max_page_count=32768")
             _ = conn.execute(_SCHEMA)
             yield conn
 
     def stage(self, entry: UsageLedgerEntry) -> None:
-        if entry.cluster != self.cluster:
-            raise ValueError("usage receipt belongs to another cluster")
-        self._stage(entry, encode_receipt(entry))
+        payload = encode_receipt(entry)
+        if len(payload) > self.max_payload_bytes:
+            raise ReceiptCapacityError("usage receipt exceeds the automatic payload limit")
+        self._stage(entry, payload)
 
     def recover(self, payload: bytes) -> None:
-        if len(payload) > self.max_payload_bytes:
-            raise ReceiptCapacityError("usage receipt exceeds the payload limit")
-        self.stage(decode_receipt(payload))
+        self._stage(decode_receipt(payload), payload)
 
     def _stage(self, entry: UsageLedgerEntry, payload: bytes) -> None:
-        if len(payload) > self.max_payload_bytes:
-            raise ReceiptCapacityError("usage receipt exceeds the payload limit")
+        if entry.cluster != self.cluster:
+            raise ValueError("usage receipt belongs to another cluster")
+        for delay in _BUSY_RETRY_DELAYS:
+            try:
+                self._insert(entry, payload)
+            except OperationalError as exc:
+                if getattr(exc, "sqlite_errorcode", 0) & 0xFF not in (SQLITE_BUSY, SQLITE_LOCKED):
+                    raise
+                retry_sleep(delay)
+            else:
+                return
+        self._insert(entry, payload)
+
+    def _insert(self, entry: UsageLedgerEntry, payload: bytes) -> None:
         with self._open() as conn:
             _ = conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM receipts WHERE payload = ?", (payload,)).fetchone():
@@ -160,13 +186,10 @@ class UsageReceiptDelivery:
         self._thread.start()
 
     def submit(self, entry: UsageLedgerEntry) -> ReceiptSubmission:
-        try:
-            self._store.stage(entry)
-        except (OSError, SQLiteError) as exc:
-            _log_fallback(self._store, entry, exc)
-            return ReceiptSubmission.FALLBACK_LOGGED
-        self._wake.set()
-        return ReceiptSubmission.STAGED
+        result = _submit(self._store, entry)
+        if result is ReceiptSubmission.STAGED:
+            self._wake.set()
+        return result
 
     def stop(self, *, timeout: float) -> bool:
         with self._lifecycle_lock:
@@ -258,6 +281,15 @@ class UsageReceiptDelivery:
         logger.error("Usage receipt {} quarantined at {} ({})", seq, self._store.path, reason)
 
 
+def _submit(store: UsageReceiptStore, entry: UsageLedgerEntry) -> ReceiptSubmission:
+    try:
+        store.stage(entry)
+    except (OSError, SQLiteError) as exc:
+        _log_fallback(store, entry, exc)
+        return ReceiptSubmission.FALLBACK_LOGGED
+    return ReceiptSubmission.STAGED
+
+
 def _log_fallback(
     store: UsageReceiptStore, entry: UsageLedgerEntry, exc: OSError | SQLiteError
 ) -> None:
@@ -277,3 +309,146 @@ def _log_fallback(
         available=backlog.available if backlog is not None else None,
         receipt_json=encode_receipt(entry).decode(),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _StagingJob:
+    call: Callable[[], None]
+    result: Future[None]
+    trace: trace_context.Context
+
+
+class UsageReceiptStaging:
+    def __init__(self, *, max_outstanding: int = 256) -> None:
+        self._max_outstanding = max_outstanding
+        self._outstanding = 0
+        self._jobs: SimpleQueue[_StagingJob | None] = SimpleQueue()
+        self._lock = Lock()
+        self._stop_requested = Event()
+        self._error: BaseException | None = None
+        self._thread = Thread(target=self._run, name="usage-receipt-staging", daemon=True)
+        self._thread.start()
+
+    @contextmanager
+    def reserve(self) -> Generator[ScheduleUsageReceipt]:
+        with self._lock:
+            if self._stop_requested.is_set() or self._error is not None:
+                raise ReceiptStagingUnavailableError("usage receipt staging is stopped")
+            if self._outstanding >= self._max_outstanding:
+                raise ReceiptStagingUnavailableError("usage receipt staging is at capacity")
+            self._outstanding += 1
+        scheduled = False
+
+        def schedule(call: Callable[[], None]) -> Future[None]:
+            nonlocal scheduled
+            if scheduled:
+                raise RuntimeError("usage receipt slot was already scheduled")
+            job = _StagingJob(call, Future(), trace_context.get_current())
+            self._jobs.put(job)
+            scheduled = True
+            return job.result
+
+        try:
+            yield schedule
+        finally:
+            if not scheduled:
+                self._release()
+
+    def _release(self) -> None:
+        with self._lock:
+            self._outstanding -= 1
+            if self._outstanding == 0 and self._stop_requested.is_set():
+                self._jobs.put(None)
+
+    def stop(self, *, timeout: float) -> bool:
+        with self._lock:
+            self._stop_requested.set()
+            if self._outstanding == 0:
+                self._jobs.put(None)
+        self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            logger.warning(
+                "Usage receipt staging stop unfinished ({} outstanding)", self._outstanding
+            )
+            return False
+        if self._error is not None:
+            raise self._error
+        return True
+
+    def _run(self) -> None:
+        try:
+            while not self._stop_requested.is_set() or self._outstanding:
+                job = self._jobs.get()
+                if job is None:
+                    return
+                self._execute(job)
+        except BaseException as exc:
+            self._error = exc
+            logger.opt(exception=exc).error("Usage receipt staging worker stopped")
+
+    def _execute(self, job: _StagingJob) -> None:
+        try:
+            if job.result.set_running_or_notify_cancel():
+                token = trace_context.attach(job.trace)
+                try:
+                    job.call()
+                finally:
+                    trace_context.detach(token)
+                job.result.set_result(None)
+        except Exception as exc:
+            job.result.set_exception(exc)
+            logger.opt(exception=exc).error("Accepted provider usage receipt staging failed")
+        finally:
+            self._release()
+
+
+class UsageReceiptRuntime:
+    def __init__(self, store: UsageReceiptStore, ledger: UsageLedger) -> None:
+        self._store = store
+        self._ledger = ledger
+        self._lock = Lock()
+        self._owners = 0
+        self._staging: UsageReceiptStaging | None = None
+        self._delivery: UsageReceiptDelivery | None = None
+
+    def start(self) -> None:
+        with self._lock:
+            if self._owners == 0:
+                delivery = UsageReceiptDelivery(self._store, self._ledger)
+                delivery.start()
+                try:
+                    self._staging = UsageReceiptStaging()
+                except BaseException:
+                    _ = delivery.stop(timeout=1.0)
+                    raise
+                self._delivery = delivery
+            self._owners += 1
+
+    def stop(self, *, timeout: float) -> None:
+        with self._lock:
+            self._owners -= 1
+            if self._owners:
+                return
+            staging, delivery = self._staging, self._delivery
+            self._staging = self._delivery = None
+        try:
+            if staging is not None:
+                _ = staging.stop(timeout=timeout)
+        finally:
+            if delivery is not None:
+                _ = delivery.stop(timeout=timeout)
+
+    def reserve(self) -> AbstractContextManager[ScheduleUsageReceipt]:
+        with self._lock:
+            if self._staging is None:
+                raise ReceiptStagingUnavailableError(
+                    "usage receipt staging has no active service owner"
+                )
+            return self._staging.reserve()
+
+    def submit(self, entry: UsageLedgerEntry) -> ReceiptSubmission:
+        with self._lock:
+            delivery = self._delivery
+        if delivery is None:
+            return _submit(self._store, entry)
+        return delivery.submit(entry)

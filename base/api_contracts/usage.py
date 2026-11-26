@@ -1,5 +1,7 @@
 # meiva:link base/lm/usage/README.md
 from collections.abc import Callable
+from concurrent.futures import Future
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -60,3 +62,11 @@ class ReceiptSubmission(StrEnum):
 
 
 type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], ReceiptSubmission]
+
+
+type ScheduleUsageReceipt = Callable[[Callable[[], None]], Future[None]]
+type ReserveUsageReceipt = Callable[[], AbstractContextManager[ScheduleUsageReceipt]]
+
+
+class ReceiptStagingUnavailableError(RuntimeError):
+    pass
