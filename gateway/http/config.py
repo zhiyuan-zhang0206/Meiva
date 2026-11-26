@@ -379,6 +379,9 @@ def gateway_config_from_boot(
                     if services.embeddinggemma_api_key is None
                     else services.embeddinggemma_api_key.get_secret_value()
                 ),
+                placement_host=services.embeddinggemma_host,
+                placement_port=services.embeddinggemma_port,
+                self_host=machine.host(),
             ),
         ),
         heartbeat=HeartbeatTiming(

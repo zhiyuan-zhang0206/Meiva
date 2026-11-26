@@ -1,4 +1,5 @@
-exports = ["insights", "labeler", "memory_indexer", "memory_search"]
+exports = ["embeddinggemma", "insights", "labeler", "memory_indexer", "memory_search"]
 
 [uses]
+"memory_indexer" = ["embeddinggemma"]
 "memory_search" = ["memory_indexer"]

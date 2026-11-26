@@ -10,11 +10,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from services.derived.embeddinggemma.launch import EmbeddingGemmaSettings, launch_problem
+from services.supervision.roster.embeddinggemma_settings import embeddinggemma_settings
+
 __all__ = [
     "BridgeFact",
     "BrowserFact",
     "CollectorFact",
     "ComputerFact",
+    "EmbeddingGemmaFact",
     "FlagFact",
     "GateFact",
     "GateKind",
@@ -24,7 +28,9 @@ __all__ = [
     "gate_reason",
 ]
 
-GateKind = Literal["flag", "browser", "computer-mcp", "station", "collector", "bridge", "none"]
+GateKind = Literal[
+    "flag", "browser", "computer-mcp", "station", "collector", "bridge", "embeddinggemma", "none"
+]
 
 
 # meiva:note
@@ -40,6 +46,7 @@ class GateSettings:
     permissions_helper_enabled: bool
     heartbeat_enabled: bool
     delivery_watchdog_enabled: bool
+    embeddinggemma: EmbeddingGemmaSettings
     db_url: str
     redis_url: str
 
@@ -54,6 +61,7 @@ class GateSettings:
             permissions_helper_enabled=bool(read_field("permissions_helper_enabled")),
             heartbeat_enabled=bool(read_field("heartbeat_enabled")),
             delivery_watchdog_enabled=bool(read_field("delivery_watchdog_enabled")),
+            embeddinggemma=embeddinggemma_settings(read_field),
             db_url=str(read_field("db_url")),
             redis_url=str(read_field("redis_url")),
         )
@@ -108,7 +116,21 @@ class BridgeFact:
     has_endpoint: bool
 
 
-GateFact = FlagFact | BrowserFact | ComputerFact | StationFact | CollectorFact | BridgeFact
+@dataclass(frozen=True)
+class EmbeddingGemmaFact:
+    settings: EmbeddingGemmaSettings
+    self_host: str
+
+
+GateFact = (
+    FlagFact
+    | BrowserFact
+    | ComputerFact
+    | StationFact
+    | CollectorFact
+    | BridgeFact
+    | EmbeddingGemmaFact
+)
 
 _FLAG_REASONS = {
     "heartbeat": "disabled (MEIVA_HEARTBEAT_ENABLED off)",
@@ -132,6 +154,8 @@ def gate_kind(session: str) -> GateKind:
             return "collector"
         case "redis-bridge":
             return "bridge"
+        case "embeddinggemma":
+            return "embeddinggemma"
         case _:
             return "none"
 
@@ -157,12 +181,22 @@ def gate_reason(session: str, fact: GateFact | None) -> str | None:
             if has_remote_targets:
                 return None
             return incapability if helper_enabled else _HELPER_OFF
+        case _:
+            return _placement_reason(fact)
+
+
+def _placement_reason(
+    fact: StationFact | CollectorFact | BridgeFact | EmbeddingGemmaFact,
+) -> str | None:
+    match fact:
         case StationFact(is_station=is_station):
             return None if is_station else "this home is not an observability station"
         case CollectorFact(allowed=allowed):
             return None if allowed else _COLLECTOR_REFUSED
         case BridgeFact(unconfigured=unconfigured, has_endpoint=has_endpoint):
             return _bridge_reason(unconfigured, has_endpoint=has_endpoint)
+        case EmbeddingGemmaFact(settings=settings, self_host=self_host):
+            return launch_problem(settings, self_host=self_host)
         case _:
             assert_never(fact)
 

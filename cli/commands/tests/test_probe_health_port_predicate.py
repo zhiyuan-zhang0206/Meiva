@@ -8,7 +8,14 @@ from cli.commands.probe import occupied_health_ports
 from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 
-_NOT_DAEMON_PORTS = ("gateway", "browser", "frontend", "memory-search", "otel-collector")
+_NOT_DAEMON_PORTS = (
+    "gateway",
+    "browser",
+    "frontend",
+    "memory-search",
+    "otel-collector",
+    "embeddinggemma",
+)
 
 
 def _by_session() -> dict[str, ServiceSpec]:

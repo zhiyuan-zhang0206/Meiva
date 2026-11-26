@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 
@@ -430,6 +431,161 @@ class ServiceRuntimeSettings(EnvSettings):
             "writable": True,
             "sensitive": True,
             "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_host: str = Field(
+        title="EmbeddingGemma managed host",
+        default="",
+        alias="MEIVA_EMBEDDINGGEMMA_HOST",
+        description=(
+            "Reachable address of the machine that hosts the managed EmbeddingGemma 2 service, "
+            "written exactly as that machine's MEIVA_MACHINE_HOST. Empty (default) = no managed "
+            "service: the endpoint and model must be given explicitly. Non-empty = meiva-root "
+            "starts the service on the machine whose own MEIVA_MACHINE_HOST equals this value "
+            "(and on no other), and every client that names no MEIVA_EMBEDDINGGEMMA_ENDPOINT "
+            "derives http://<host>:<MEIVA_EMBEDDINGGEMMA_PORT>/v1/embeddings from it "
+            "(127.0.0.1 on the hosting machine itself). With no MEIVA_EMBEDDINGGEMMA_MODEL the "
+            "device-independent locator 'embeddinggemma-2' is served and sent."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_port: int = Field(
+        title="EmbeddingGemma managed port",
+        default=9379,
+        alias="MEIVA_EMBEDDINGGEMMA_PORT",
+        description="TCP port the managed EmbeddingGemma service listens on and clients derive their endpoint with.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    embeddinggemma_device: Literal["cpu", "gpu"] = Field(
+        title="EmbeddingGemma device",
+        default="cpu",
+        alias="MEIVA_EMBEDDINGGEMMA_DEVICE",
+        description=(
+            "Inference device of the managed EmbeddingGemma service on this host: 'cpu' or 'gpu'. "
+            "Switching it and restarting meiva-root changes only the compute device; the served "
+            "artifact, the model locator and the embedding-space fingerprint (derived from "
+            "MEIVA_EMBEDDINGGEMMA_REVISION) stay the same, so no client change and no reindex."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_model_path: Path = Field(
+        title="EmbeddingGemma model file",
+        default_factory=lambda: unit_home() / "embeddinggemma" / "model.litertlm",
+        alias="MEIVA_EMBEDDINGGEMMA_MODEL_PATH",
+        description=(
+            "LiteRT-LM model file the managed service loads on this host. Its SHA256 must equal "
+            "MEIVA_EMBEDDINGGEMMA_REVISION, checked at every start."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_python: str = Field(
+        title="EmbeddingGemma interpreter",
+        default="",
+        alias="MEIVA_EMBEDDINGGEMMA_PYTHON",
+        description=(
+            "Python interpreter that runs the managed EmbeddingGemma service. Empty (default) = "
+            "the checkout's own .venv/bin/python. LiteRT-LM is not a dependency of the checkout: "
+            "name an interpreter that has litert-lm, fastapi and uvicorn installed, or keep the "
+            "default and set MEIVA_EMBEDDINGGEMMA_LITERT_PATH."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_litert_path: str = Field(
+        title="EmbeddingGemma LiteRT-LM path",
+        default="",
+        alias="MEIVA_EMBEDDINGGEMMA_LITERT_PATH",
+        description=(
+            "Optional directory holding the litert_lm package (for example a pip --target "
+            "install). It is appended to the service's sys.path, so the interpreter's own "
+            "packages keep precedence. Empty = rely on the interpreter's installed litert-lm."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_cache_dir: Path = Field(
+        title="EmbeddingGemma cache directory",
+        default_factory=lambda: unit_home() / "embeddinggemma" / "cache",
+        alias="MEIVA_EMBEDDINGGEMMA_CACHE_DIR",
+        description="Directory where the LiteRT-LM runtime keeps its compiled program and weight caches.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_bind_host: str = Field(
+        title="EmbeddingGemma bind address",
+        default="0.0.0.0",  # noqa: S104 - clients on other machines dial the managed service
+        alias="MEIVA_EMBEDDINGGEMMA_BIND_HOST",
+        description=(
+            "Address the managed EmbeddingGemma service listens on. The default accepts clients "
+            "on other machines of a private network; use 127.0.0.1 for a single-machine "
+            "deployment or a private address to narrow it. The service has no authentication "
+            "unless MEIVA_EMBEDDINGGEMMA_API_KEY is set in its process environment."
+        ),
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
+    embeddinggemma_max_input_length: int = Field(
+        title="EmbeddingGemma max input length",
+        default=8192,
+        alias="MEIVA_EMBEDDINGGEMMA_MAX_INPUT_LENGTH",
+        description="Maximum tokens per input the managed service accepts; a longer input is rejected, never truncated.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
         },
     )
 

@@ -1,19 +1,23 @@
-exports = ["__main__.py", "composition.py", "frontend_prebuild.py", "field_values.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+exports = ["__main__.py", "composition.py", "embeddinggemma_unit.py", "frontend_prebuild.py", "field_values.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
 
 [uses]
 "__init__.py" = ["healthz.py", "service_spec.py"]
-"composition.py" = ["field_values.py", "gate_plan.py", "healthz.py", "listeners.py", "plugin_services.py", "service_spec.py"]
+"composition.py" = ["embeddinggemma_settings.py", "embeddinggemma_unit.py", "field_values.py", "gate_plan.py", "healthz.py", "listeners.py", "plugin_services.py", "service_spec.py"]
 "__main__.py" = ["composition.py"]
+"embeddinggemma_settings.py" = ["field_values.py"]
+"embeddinggemma_unit.py" = ["service_spec.py"]
+"gate_plan.py" = ["embeddinggemma_settings.py"]
 "frontend_prebuild.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
 "spec.py" = ["composition.py", "gate_plan.py", "plugin_services.py", "service_spec.py"]
-"tests" = ["__init__.py", "composition.py", "field_values.py", "frontend_prebuild.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
+"tests" = ["__init__.py", "composition.py", "embeddinggemma_unit.py", "field_values.py", "frontend_prebuild.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
 
 [external]
 "plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 
 [purity]
+"embeddinggemma_settings.py" = "strict"
 "field_values.py" = "strict"
 "gate_plan.py" = "strict"
 

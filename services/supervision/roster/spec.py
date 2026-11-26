@@ -57,6 +57,7 @@ from services.supervision.roster.gate_plan import (
     BrowserFact,
     CollectorFact,
     ComputerFact,
+    EmbeddingGemmaFact,
     FlagFact,
     GateFact,
     GateKind,
@@ -116,6 +117,8 @@ def _gate_fact(
             )
         case "bridge":
             return _bridge_fact(machine, settings=settings, host=host, home=home)
+        case "embeddinggemma":
+            return EmbeddingGemmaFact(settings=settings.embeddinggemma, self_host=machine.host())
         case "none":
             return None
         case _:

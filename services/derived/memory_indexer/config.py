@@ -74,6 +74,9 @@ class MemoryIndexerInputs:
                 model=services.embeddinggemma_model,
                 revision=services.embeddinggemma_revision,
                 api_key=None if gemma_key is None else gemma_key.get_secret_value(),
+                placement_host=services.embeddinggemma_host,
+                placement_port=services.embeddinggemma_port,
+                self_host=boot.view.general.machine_host,
             )
         return cls(
             embedding_name=services.embedding_backend,
