@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from os import scandir
 from pathlib import Path
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
@@ -21,6 +22,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     entry_reader,
     input_wire_ids,
     record_file,
+    record_location,
     reply_key,
     session_file,
     wire_id,
@@ -102,6 +104,19 @@ class _InboundKeyRow:
 @dataclass(frozen=True)
 class _PublicationKeyRow:
     source_key: str
+
+
+def _check_rollout_directories(directory: Path, levels: int) -> None:
+    try:
+        with scandir(directory) as children:
+            if levels == 0:
+                _ = next(children, None)
+                return
+            for child in children:
+                if child.is_dir():
+                    _check_rollout_directories(Path(child.path), levels - 1)
+    except (FileNotFoundError, NotADirectoryError):
+        return
 
 
 class ReadTimelineSink:
@@ -433,8 +448,15 @@ class ReadTimelineSink:
     # Snapshot the old history before any input is delivered. When the record
     # cannot be opened, its size is a conservative upper bound on the old
     # complete rows. A failed lookup leaves the publication boundary unknown.
+    # Codex's glob skips inaccessible directories, so a miss for a known session
+    # is evidence of absence only after checking the sessions/YYYY/MM/DD search.
     def _snapshot_start(self) -> None:
         file = self._resolve()
+        if file is None and self._harness == Harness.CODEX.value and self._session_id() is not None:
+            workspace = workspace_dir(self._agent_id, home=self._ctx.require_meiva_home())
+            sessions = record_location(self._harness, self._ctx.require_environ(), workspace)
+            _check_rollout_directories(Path(sessions), levels=3)
+            file = self._resolve()
         if file is None:
             self._history_end = 0
             return

@@ -57,8 +57,9 @@ An external agent's timeline is not written to a database table: it is read from
   logs unfinished work. Queued terminal events are sent once the consumer stops. The sink's state is in memory only.
   A readable start can retry the last turn from the latest exact canonical publication key
   in the record block before startup. A start with a size but no readable contents keeps that
-  initial size as a boundary. When size is also unknown, the first record row matching an input
-  sent by this invocation establishes the boundary after access recovers. Publications are
+  initial size as a boundary. A miss for a known Codex session counts as an empty start only
+  if the dated rollout directories can be searched. When size is unknown, the first record
+  row matching an input sent by this invocation establishes the boundary after access recovers. Publications are
   deduplicated by stable key.
 - The foreground folds adapter events into `TurnProtocol` for abort handling, input handback,
   wake polarity and reply correction. It commits inbox settlements before notifying the live sink.

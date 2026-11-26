@@ -27,6 +27,7 @@ from agent.graph.claim.tests.harness_support import (
     completed,
     config,
     in_a_turn,
+    publications,
     runtime,
     silent_engine,
 )
@@ -38,8 +39,10 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.langgraph_views import command_update
+from base.agents.to_user.delivery.store import publish
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.usage import UsageLedgerWriteError
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -541,3 +544,77 @@ def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable(
 def test_modes_without_a_visibility_prefix_never_correct() -> None:
     protocol = TurnProtocol(non_human_wake=False, explicit_visibility=False)
     assert _verdict(protocol, (_text("The answer."),)) is False
+
+
+@pytest.mark.parametrize("parent_denied", [False, True])
+async def test_codex_start_distinguishes_denied_rollout_directory_from_new_rollout(
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    harness_runtime: RuntimeFixture,
+    live_events: LiveEvents,
+    *,
+    parent_denied: bool,
+) -> None:
+    agent_id = agent_row(db_conn)
+    session = "known-codex-session"
+    codex_home = tmp_path / "codex"
+    day = codex_home / "sessions/2026/11/27"
+    day.mkdir(parents=True)
+    path = day / f"rollout-{session}.jsonl"
+    ctx = replace(
+        harness_runtime(FakeEngine(), agent_id=agent_id).context,
+        harness=Harness.CODEX,
+        agent=AgentSlices.resolve({"user_delivery_mode": "naive"}, default_reader=defaults()),
+        environ={"HOME": str(tmp_path), "CODEX_HOME": str(codex_home)},
+    )
+    now = ctx.require_clock().now()
+    row = {
+        "timestamp": now.isoformat(),
+        "type": "event_msg",
+        "payload": {
+            "type": "item_completed",
+            "turn_id": "turn-1",
+            "started_at_ms": int(now.timestamp() * 1000),
+            "item": {
+                "type": "AgentMessage",
+                "id": "msg_1",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": "The answer."}],
+            },
+        },
+    }
+    expected_key = "harness:codex:msg_1"
+    if parent_denied:
+        _ = path.write_text(json.dumps(row) + "\n")
+        expected_key = "harness:h5.0"
+        _ = publish(
+            db_conn,
+            agent_id,
+            expected_key,
+            PublishMessage(content="The answer.", suggestions=[]),
+            mode=UserDeliveryMode.NAIVE,
+            created_at=now,
+        )
+        db_conn.commit()
+        day.chmod(0o000)
+    try:
+        if parent_denied:
+            try:
+                _ = path.stat()
+            except PermissionError:
+                denied = True
+            else:
+                denied = False
+            if not denied:
+                pytest.skip("the test process can search a directory with mode 000")
+        sink = ReadTimelineSink(
+            ctx, agent_id, live_events.publisher, non_human_wake=False, session_id=lambda: session
+        )
+    finally:
+        day.chmod(0o700)
+    if not parent_denied:
+        _ = path.write_text(json.dumps(row) + "\n")
+
+    await sink.finish()
+
+    assert publications(db_conn, agent_id) == [(expected_key, "The answer.")]
