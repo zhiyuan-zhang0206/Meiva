@@ -76,36 +76,23 @@ def emit_memory_search_stats(rows: int, last_save_seconds: float | None) -> None
     telemetry.emit("telemetry", "memory_search_stats", attributes=attributes)
 
 
-async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
-    """Sample the store's stats every `_STATS_FLUSH_INTERVAL_S` and emit.
-
-    Runs as a lifespan background task, cancelled on teardown. The read
-    takes the mutation lock so rows + last_save_seconds are one consistent
-    snapshot (save runs in a worker thread under that same lock); a failed
-    emit never kills the loop — a dropped sample is only a monitoring gap.
-    """
+async def _stats_flusher(store: MemoryStore) -> None:
+    """Emit periodic stats from a single committed snapshot."""
     while True:
         await asyncio.sleep(_STATS_FLUSH_INTERVAL_S)
         try:
-            async with lock:
-                rows = len(store)
-                last_save_seconds = store.last_save_seconds
-        except Exception:
-            _log.warning("[memory_search] stats read failed", exc_info=True)
-            continue
-        try:
-            emit_memory_search_stats(rows, last_save_seconds)
+            emit_memory_search_stats(*store.stats())
         except Exception:
             _log.warning("[memory_search] stats emit failed", exc_info=True)
 
 
 def _mount_mutations(
-    app: APIRouter, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int, embedding_dim: int
+    app: APIRouter, store: MemoryStore, max_batch_rows: int, embedding_dim: int
 ) -> None:
     """The four protocol write endpoints (upsert / upsert_batch / delete /
     delete_stale_batch) — extracted so build_app stays a router, not a wall
     of handlers. Each mutation persists the npz before responding."""
-    from fastapi import HTTPException
+    writer_admission = asyncio.Lock()
 
     class UpsertBody(BaseModel):
         path: str
@@ -128,8 +115,9 @@ def _mount_mutations(
     async def upsert(body: UpsertBody) -> dict[str, str]:
         vector = np.asarray(body.vector, dtype=np.float32)
         try:
-            async with lock:
-                store.upsert(
+            async with writer_admission:
+                await asyncio.to_thread(
+                    store.upsert,
                     body.path,
                     body.mtime,
                     body.content_hash,
@@ -137,7 +125,6 @@ def _mount_mutations(
                     kind=body.kind,
                     chunk_idx=body.chunk_idx,
                 )
-                await asyncio.to_thread(store.save)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok"}
@@ -157,53 +144,44 @@ def _mount_mutations(
             for row in body.rows
         ]
         try:
-            async with lock:
-                store.upsert_many(rows)
-                await asyncio.to_thread(store.save)
+            async with writer_admission:
+                await asyncio.to_thread(store.upsert_many, rows)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"status": "ok"}
 
     @app.post("/delete")
     async def delete(body: DeleteBody) -> dict[str, str]:
-        async with lock:
-            store.delete(body.path)
-            await asyncio.to_thread(store.save)
+        async with writer_admission:
+            await asyncio.to_thread(store.delete, body.path)
         return {"status": "ok"}
 
     @app.post("/delete_stale_batch")
     async def delete_stale_batch(body: DeleteStaleBatchBody) -> dict[str, str]:
-        """Tail-cleanup companion to /upsert_batch (issue #1946): one lock +
-        one npz save for every path the current files no longer fully cover."""
+        """Persist tail cleanup for all supplied paths in one npz save."""
         check_batch(len(body.entries))
-        async with lock:
-            store.delete_stale_rows([(row.path, row.kind_limits) for row in body.entries])
-            await asyncio.to_thread(store.save)
+        async with writer_admission:
+            await asyncio.to_thread(
+                store.delete_stale_rows, [(row.path, row.kind_limits) for row in body.entries]
+            )
         return {"status": "ok"}
 
 
 def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) -> FastAPI:
-    """Wire the store into a FastAPI app. One mutation lock serializes every
-    operation (search included) — the store is pure in-memory state and a
-    full exact scan is microseconds, so the lock is the whole concurrency
-    story at this scale. The stats flusher runs as a lifespan task so the
-    metrics stream lives and dies with the serving process. `max_batch_rows` is
-    the cluster's batch-size bound (`services.memory_search_max_batch_rows`)."""
+    """Serve committed snapshots while writers build and persist the next one."""
 
     class SearchBody(BaseModel):
         vector: list[float] = Field(max_length=embedding_dim)
         k: int = Field(ge=1, le=MAX_K)
 
-    lock = asyncio.Lock()
-
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         async with asyncio.TaskGroup() as background:
-            flusher = background.create_task(_stats_flusher(store, lock))
+            flusher = background.create_task(_stats_flusher(store))
             try:
                 yield
             finally:
-                flusher.cancel()
+                _ = flusher.cancel()
 
     app = FastAPI(title="meiva-memory-search", lifespan=lifespan)
 
@@ -213,8 +191,8 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
 
     @app.get("/stats")
     async def stats() -> dict[str, int | float | None]:
-        async with lock:
-            return {"rows": len(store), "last_save_seconds": store.last_save_seconds}
+        rows, elapsed = store.stats()
+        return {"rows": rows, "last_save_seconds": elapsed}
 
     async def require_space(request: Request) -> None:
         try:
@@ -223,24 +201,20 @@ def build_app(store: MemoryStore, max_batch_rows: int, *, embedding_dim: int) ->
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     protocol = APIRouter(prefix=INDEX_API_PREFIX, dependencies=[Depends(require_space)])
-    _mount_mutations(protocol, store, lock, max_batch_rows, embedding_dim)
+    _mount_mutations(protocol, store, max_batch_rows, embedding_dim)
 
     @protocol.get("/meta")
-    async def meta() -> dict[str, tuple[float, str, str]]:
+    def meta() -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — same shape
         the backend protocol's `all_meta` returns (the reconcile key)."""
-        async with lock:
-            return store.all_meta()
+        return store.all_meta()
 
     @protocol.post("/search")
-    async def search(body: SearchBody) -> dict[str, list[dict[str, str | int | float]]]:
+    def search(body: SearchBody) -> dict[str, list[dict[str, str | int | float]]]:
         vector = np.asarray(body.vector, dtype=np.float32)
         try:
-            async with lock:
-                hits = store.search_topk(vector, body.k)
+            hits = store.search_topk(vector, body.k)
         except ValueError as exc:
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"hits": [hit._asdict() for hit in hits]}
 

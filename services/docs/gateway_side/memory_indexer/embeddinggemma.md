@@ -167,6 +167,15 @@ That handler sends `input` directly to `compute_embedding_batch`; it does not
 add task prefixes. A compatible server must preserve this raw-input behavior.
 A server that adds its own prefixes is incompatible with this adapter.
 
+Inference runs on one LiteRT worker. Pending single-input requests (a string
+or a one-element list) and multi-input requests each run in arrival order
+within their queue. When both queues first contend, a single input runs next.
+The queues then alternate while both have work, so a steady stream of single
+inputs still leaves slots for batches. A native call already in progress runs
+to completion. Cancelling a queued handler removes its work. On shutdown the
+server rejects any work still queued after the HTTP drain and closes the
+engine on the same worker, subject to the supervisor's shutdown ceiling.
+
 The adapter owns the checkpoint model card's two text templates:
 
 - Query: `task: search result | query: {text}`.

@@ -127,16 +127,19 @@ def test_upsert_many_empty_is_noop(tmp_path: Path) -> None:
     assert (store.all_meta(), len(store), store.search_topk(_vec(0), 10)) == before
 
 
-def test_upsert_many_grows_the_matrix_only_for_new_rows(tmp_path: Path) -> None:
+def test_upsert_many_preserves_the_old_snapshot_when_overwriting(tmp_path: Path) -> None:
     new_rows = [_row(f"/{idx}.md", 1.0, str(idx), idx) for idx in range(5)]
     update_rows = [_row(f"/{idx}.md", 2.0, f"new-{idx}", idx + 10) for idx in range(5)]
     store = _store(tmp_path)
     store.upsert_many(new_rows)
-    grown = store._matrix
-    assert grown.shape == (5, _DIM)
+    old = store._snapshot
+    assert old.matrix.shape == (5, _DIM)
+    assert not old.matrix.flags.writeable
 
     store.upsert_many(update_rows)
-    assert store._matrix is grown
+    assert store._snapshot.matrix.shape == old.matrix.shape
+    np.testing.assert_array_equal(old.matrix[0], _vec(0))
+    assert old.rows[0].content_hash == "0"
     assert store.all_meta()["/0.md"] == (2.0, "new-0", _FP)
     assert [hit.path for hit in store.search_topk(_vec(10), 1)] == ["/0.md"]
 
@@ -262,24 +265,6 @@ def test_last_save_seconds_none_until_first_save(tmp_path: Path) -> None:
     store = _store(tmp_path)
     assert store.last_save_seconds is None
     store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
-    assert store.last_save_seconds is None  # upsert alone does not persist
-    store.save()
-    assert store.last_save_seconds is not None
-    assert store.last_save_seconds >= 0.0
-
-
-# meiva:note
-# Every successful save refreshes the recorded duration — the stats
-# surface always reads the most recent persistence cost, never the first
-# one (write-once would silently hide a growing npz cost). A sentinel the
-# real clock can never produce stands in for the previous duration.
-def test_last_save_seconds_is_the_latest_save(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
-    store.save()
-    store._last_save_seconds = -1.0
-    store.upsert("/b.md", 2.0, "hb", _vec(1), kind="body", chunk_idx=0)
-    store.save()
     assert store.last_save_seconds is not None
     assert store.last_save_seconds >= 0.0
 
@@ -290,7 +275,6 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     ones = np.ones(_DIM, dtype=np.float32)
     store.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
     store.upsert("/a.md", 1.0, "ha", 0.5 * ones, kind="body", chunk_idx=1)
-    store.save()
 
     fresh = _store(tmp_path)
     fresh.load()
@@ -401,7 +385,6 @@ def test_fingerprint_roundtrips_through_npz(tmp_path: Path) -> None:
     rebuild — the reconcile key's third element is durable."""
     store = _store(tmp_path)
     store.upsert("/a.md", 1.0, "ha", _vec(0), kind="body", chunk_idx=0)
-    store.save()
 
     fresh = _store(tmp_path)
     fresh.load()
@@ -412,7 +395,6 @@ def test_same_dimension_different_space_starts_empty(tmp_path: Path) -> None:
     path = tmp_path / "space-switch.npz"
     first = MemoryStore(path, dim=8, fingerprint="old-space")
     first.upsert("/old.md", 1.0, "hash", np.ones(8, dtype=np.float32))
-    first.save()
     switched = MemoryStore(path, dim=8, fingerprint="new-space")
     switched.load()
     assert switched.all_meta() == {}

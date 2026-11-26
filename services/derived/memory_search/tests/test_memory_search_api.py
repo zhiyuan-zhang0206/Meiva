@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import pytest
@@ -337,3 +339,79 @@ def test_legacy_clients_have_no_mutating_or_query_route(tmp_path: Path, path: st
         assert client.post(path, json={}).status_code == 404
         assert client.get("/meta").status_code == 404
         assert client.get("/stats").json()["rows"] == 0
+
+
+def test_reads_keep_serving_the_committed_snapshot_during_save(tmp_path: Path) -> None:
+    replacing = Event()
+    release = Event()
+
+    def slow_replace(source: Path, target: Path) -> None:
+        if target.exists():
+            replacing.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release the writer")
+        _ = source.replace(target)
+
+    store = MemoryStore(tmp_path / "vectors.npz", _DIM, _FP, replace_file=slow_replace)
+    with (
+        TestClient(
+            build_app(store, _MAX_BATCH_ROWS, embedding_dim=_DIM),
+            headers={"x-meiva-embedding-space": _FP},
+        ) as client,
+        ThreadPoolExecutor(max_workers=8) as requests,
+    ):
+        assert client.post("/v1/upsert", json=_upsert_body("/a.md", 0)).status_code == 200
+        query = {"vector": _vec(0).tolist(), "k": 5}
+        old_hits = client.post("/v1/search", json=query).json()
+        old_stats = client.get("/stats").json()
+        rows = [_upsert_body("/a.md", 1, mtime=2), _upsert_body("/b.md", 2)]
+        write = requests.submit(client.post, "/v1/upsert_batch", json={"rows": rows})
+        try:
+            assert replacing.wait(5)
+            reads = [requests.submit(client.post, "/v1/search", json=query) for _ in range(24)]
+            meta = requests.submit(client.get, "/v1/meta")
+            stats = requests.submit(client.get, "/stats")
+            assert all(read.result(timeout=0.5).json() == old_hits for read in reads)
+            assert meta.result(timeout=0.5).json() == {"/a.md": [1.0, "hash-0", _FP]}
+            assert stats.result(timeout=0.5).json() == old_stats
+            assert not write.done()
+        finally:
+            release.set()
+        assert write.result(timeout=5).status_code == 200
+        hits = client.post("/v1/search", json=query).json()["hits"]
+        assert {hit["path"] for hit in hits} == {"/a.md", "/b.md"}
+        assert client.get("/v1/meta").json()["/a.md"] == [2.0, "hash-1", _FP]
+        assert client.get("/stats").json()["rows"] == 2
+
+
+def test_failed_replace_leaves_live_and_persisted_snapshot_intact(tmp_path: Path) -> None:
+    fail = False
+
+    def replace_file(source: Path, target: Path) -> None:
+        if fail:
+            raise OSError("injected replace failure")
+        _ = source.replace(target)
+
+    store = MemoryStore(tmp_path / "vectors.npz", _DIM, _FP, replace_file=replace_file)
+    with TestClient(
+        build_app(store, _MAX_BATCH_ROWS, embedding_dim=_DIM),
+        headers={"x-meiva-embedding-space": _FP},
+        raise_server_exceptions=False,
+    ) as client:
+        assert client.post("/v1/upsert", json=_upsert_body("/a.md", 0)).status_code == 200
+        query = {"vector": _vec(0).tolist(), "k": 5}
+        old_hits = client.post("/v1/search", json=query).json()
+        old_stats = client.get("/stats").json()
+        old_meta = client.get("/v1/meta").json()
+        fail = True
+        rows = [_upsert_body("/a.md", 1, mtime=2), _upsert_body("/b.md", 2)]
+        assert client.post("/v1/upsert_batch", json={"rows": rows}).status_code == 500
+        assert client.post("/v1/search", json=query).json() == old_hits
+        assert client.get("/v1/meta").json() == old_meta
+        assert client.get("/stats").json() == old_stats
+        reopened = _store(tmp_path)
+        reopened.load()
+        assert reopened.all_meta() == store.all_meta()
+        fail = False
+        assert client.post("/v1/upsert", json=_upsert_body("/c.md", 3)).status_code == 200
+        assert set(client.get("/v1/meta").json()) == {"/a.md", "/c.md"}
