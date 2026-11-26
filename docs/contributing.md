@@ -74,38 +74,37 @@ checks pass: `gh pr merge <n> --auto --squash`. Auto-merge waits for the same tw
 checks and bypasses none of them (the repository allows it since 2026-11-03). Do not add
 `--subject` here either, for the reason above.
 
-**Scoped local checks.** Run `.venv/bin/python scripts/hooks/diff_checks.py` for an
-optional change-scoped local check summary before pushing (`--mode incremental` by
-default, running `meizel`'s transitive reverse-import closure typecheck,
-`meizel check --changed` when manifests and policy are untouched, JUnit XML pytest
-counting, and clean-tree sub-check caching across `git commit --amend`; pass
-`--mode full` for a pre-release whole-tree sweep or `--no-cache` to bypass the cache).
-Comment ratchet and `meiva:link` checks run inside `meizel check` and `meizel check --changed`;
+### Local checks before a push
+
+Four layers check a change, each in one place, and none repeats another:
+
+1. **pre-commit** runs the fast, file-scoped hooks (ruff, the lints, repository gates) on what
+   you commit.
+2. **pre-push** re-runs those over the branch contribution (`merge-base(origin/main, HEAD)..HEAD`),
+   type-checks only the changed Python files with BasedPyright, and runs `meizel`. A full-repository
+   BasedPyright or pytest never runs at push time (user ruling 2026-09-22).
+3. **Affected tests, on demand.** `.venv/bin/python scripts/hooks/affected_tests.py` runs the pytest
+   files the CI selector (`scripts/ci/test_selector.py`) maps from everything that differs from
+   the merge-base: commits, staged and unstaged edits and untracked files. It is the only local
+   test runner this repository ships. It starts at most four pytest-xdist workers (`--workers`,
+   default 2), refuses a selection above `--max-files` (default 400), kills the whole process
+   group at `--timeout` (default 1800 seconds), and prints one verdict line: `PASS`, `FAIL` (the
+   `FAILED`/`ERROR` lines above it name the tests) or `NOT RUN` (the selector cannot bound the
+   change, or the selection is too large; CI runs it). `--dry-run` prints the selection. Run
+   explicit files or node IDs instead when you already know the scope.
+4. **CI** is the gate: the full test matrix, whole-tree BasedPyright and every required check run
+   there, and a merge waits for them.
+
+There is no receipt to produce and none to paste into the description. `scripts/hooks/diff_checks.py`,
+which printed a `diff-checks/v1` receipt and which the merge gate once required, was removed on
+2026-11-26: it repeated what layers 1, 2 and 4 already run, started BasedPyright
+and several pytest workers together, and exhausted the memory of a shared host when several agents
+ran it at once. A merge now rests on the green CI checks the gate reads from GitHub (see the
+[merge gate](../scripts/ci/pull_requests/docs/merge-gate.md)).
+
+The comment ratchet and `meiva:link` checks run inside `meizel check` and `meizel check --changed`;
 after removing legacy comments, run `uv run python -m meizel comments prune` to tighten
 `meizel.comments_baseline.json`.
-
-Each test run owns a unique scratch directory under the caller's private
-`$TMPDIR/pytest-of-<user>` (or `/tmp/pytest-of-<user>`). Pytest receives its own
-basetemp there; the runner reads JUnit and stores eligible cache evidence before
-removing only this run's scratch. Small failed-run JUnit and bounded log output
-are printed before removal. Cleanup failures are visible on stderr and fail an otherwise successful run.
-An existing interruption remains the primary exit when cleanup also fails.
-The pytest-specific owner handles TERM by stopping and waiting for its own child
-and confirms its group is absent before cleanup, then preserves the interruption. KILL cannot run cleanup: it can
-leave both scratch and a child. The directory shape matches the existing macmini
-basetemp reaper, whose quiet/age/ownership gates still apply; this does not install
-that reaper on another machine or promise immediate reclamation. An unconfirmed
-child exit or remaining group after leader exit retains scratch for diagnosis rather than deleting under the child.
-
-The `tests=` field in `diff_checks.py` reports three states: `RAN(<n>files)` with
-counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run,
-and `broken(<why>)` when pytest wrote no report (`no-report`) or produced fewer results
-than files were selected (`short-run`). A `broken` run exits non-zero rather than
-passing as green. When `--skip-tests` is passed, `literal-tests=` scans the selected test
-files for distinctive literals and backtick identifiers removed from production hunks and
-automatically runs pytest when `1..10` files match (`MAX_LITERAL_AUTO_TESTS`), failing the
-receipt if any matched test fails; above 10 files it prints a stderr preview without running
-locally, and `--skip-literal-tests` opts out explicitly.
 
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from

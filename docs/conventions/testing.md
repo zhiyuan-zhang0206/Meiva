@@ -42,6 +42,11 @@ Run explicit files or node IDs, including relevant consumer tests:
 .venv/bin/pytest -n 2 <selected-test-files-or-node-ids>
 ```
 
+To run what the CI selector maps from your branch's changes (commits, edits and untracked files
+since the merge-base with `origin/main`), use `.venv/bin/python scripts/hooks/affected_tests.py`. It
+bounds workers and wall time and never runs the whole suite; see
+[contributing](../contributing.md#local-checks-before-a-push).
+
 For the owned audit, content lint, lint, structure, CI, path and PTY screen
 unit contracts, run
 `.venv/bin/pytest --test-environment=static`. This scoped process refuses native

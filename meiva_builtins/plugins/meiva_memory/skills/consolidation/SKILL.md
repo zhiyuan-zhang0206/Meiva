@@ -216,7 +216,7 @@ still find it.
      valid YAML mapping without unquoted `' #'` or `': '` truncation, and lightly
      validates `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings) if
      present. A `sources` key is forbidden, including null or empty values. Put
-     source links in the body, for example `[verification script](/repos/meiva/scripts/hooks/diff_checks.py)`.
+     source links in the body, for example `[verification script](/repos/meiva/scripts/hooks/affected_tests.py)`.
    - Every note must be valid UTF-8 and stay within `8000` characters.
 3. **Optional Directory `index.md` (High-Level Description)**:
    - `index.md` is an optional folder-level high-level description, not a

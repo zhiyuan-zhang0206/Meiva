@@ -7,15 +7,22 @@ truncated comparison refuses the merge rather than passing it.
 
 | # | Condition | Why it exists |
 |---|---|---|
-| 1 | The body carries a `diff-checks/v1 @<headRefOid>` receipt with `verdict=pass` | A `diff-checks/v1` receipt belongs to one commit; it proves local static gates (`pyright`/`ruff`/`meizel`/`debt`/`docs-refs`) and absence of unbacked `BLIND(...)` selector gaps, while condition 2 enforces the full CI test matrix |
-| 2 | Every check run is green | Trunk queue rows are skipped (the queue is retired); one name keeps only its latest run by `started_at`, so an older cancelled duplicate cannot block a head a newer run passed |
-| 3 | The pull request and current main touch disjoint files | An empty intersection makes the merge trivially clean |
-| 4 | The body carries a where_used line and a behaviour section | Both are lane conventions the reviewer would otherwise check by hand |
-| 5 | The trailers name a granted agent | The ordinary pyright pull requests are the user's own Claude Code line and are not this lane's to merge, however green they look |
+| 1 | Every check run is green | Trunk queue rows are skipped (the queue is retired); one name keeps only its latest run by `started_at`, so an older cancelled duplicate cannot block a head a newer run passed. CI is the one place the full test matrix and the whole-tree type check run |
+| 2 | The pull request and current main touch disjoint files | An empty intersection makes the merge trivially clean |
+| 3 | The body carries a where_used line and a behaviour section | Both are lane conventions the reviewer would otherwise check by hand |
+| 4 | The trailers name a granted agent | The ordinary pyright pull requests are the user's own Claude Code line and are not this lane's to merge, however green they look |
+
+There is no condition for a locally produced receipt. Until 2026-11-26 the gate also required a
+`diff-checks/v1 @<head>` line in the body, produced by `scripts/hooks/diff_checks.py`; that script
+re-ran what pre-commit, pre-push and CI already run, started `basedpyright` and several pytest
+workers together (it exhausted the memory of a shared host), and a hand-pasted receipt proved
+nothing CI did not. The gate now trusts the checks it can read from GitHub rather than a line in
+the body. See [contributing](../../../../docs/contributing.md#local-checks-before-a-push) for the
+local flow that replaced it.
 
 ## The grant is data, not code
 
-Condition 5 reads a grant file: one agent id per line, `#` comments allowed,
+Condition 4 reads a grant file: one agent id per line, `#` comments allowed,
 refreshed with the query recorded in that file. `MEIVA_LANE_FILE` names it
 (default `lane-agents.txt` beside the module); `MEIVA_LANE_AGENTS` overrides it
 with a comma list for a one-off run. The criterion is "405 spawned this agent",
@@ -36,15 +43,15 @@ the coordinator handed that whole line over, so its commits have that shape by
 construction. `MEIVA_HANDED_OVER_PREFIX` sets the branch prefix; the residual
 risk is a pull request opened by the user's own session on that same prefix.
 
-## Two records the gate reads in the body
+## Where the gate reads authorship
 
 A squash merge keeps the pull-request body and drops the head commit message, and
-this repository records authorship and the `diff-checks/v1` receipt in the body. The
-trailer scan therefore reads the commit messages and the body together: scanning
-commits alone reported "no trailer" for a pull request whose body ended with one.
-Widening what counts cannot refuse a lane the gate used to accept.
+this repository records authorship in the body. The trailer scan therefore reads the
+commit messages and the body together: scanning commits alone reported "no trailer"
+for a pull request whose body ended with one. Widening what counts cannot refuse a
+lane the gate used to accept.
 
-## The one overlap condition 3 allows
+## The one overlap condition 2 allows
 
 Every "make one prefix strict" pull request touches the owed pyright-test list
 (one line) and the generated `pyproject.toml` region (a few lines) by
@@ -58,14 +65,14 @@ only that observes the result.
 
 ## Reviewer merges
 
-`MEIVA_MERGE_REVIEWER=1` merges outside the lanes: conditions 1, 4 and 5 are
-waived and 2 and 3 still must hold, since those are the two the machine can prove
+`MEIVA_MERGE_REVIEWER=1` merges outside the lanes: conditions 3 and 4 are
+waived and 1 and 2 still must hold, since those are the two the machine can prove
 about any pull request.
 
 ## What a NO-GO does and does not mean
 
-A NO-GO says this lane may not merge that pull request: either one of the four
-machine-checkable conditions fails, or condition 5 says the grant does not cover
+A NO-GO says this lane may not merge that pull request: either one of the three
+machine-checkable conditions fails, or condition 4 says the grant does not cover
 its author. It is **not** a claim that the pull request is bad, and it does not
 bind anyone else. A pull request from outside the grant can be perfectly good and
 still be refused here by construction; the coordinator merges those on green CI
@@ -105,24 +112,3 @@ A host installs them once:
 3. Keep a checkout of this repository at `~/.meiva/source` (deployed) or `~/Meiva`
    (development): the shell resolves `merge_gate.py` from there, deployed first, and prints the
    chosen module with its short HEAD sha on stderr. `MEIVA_GATE_MODULE` overrides both.
-
-`scripts/hooks/diff_checks.py` produces the `diff-checks/v1 @<headRefOid>` receipt that
-condition 1 checks. Boundary with condition 2:
-
-- Condition 1 reads only `@<headRefOid>`, `generated=scripts/hooks/diff_checks.py` and
-  `verdict=pass`. The producer computes `verdict=` (`pass` / `fail` / `incomplete`) from every
-  field it prints: `fail` is a red run (a `failed(...)` field, a nonzero `failed` / `errors` test
-  count, a nonzero `err_in_this_diff` or `in-closure` pyright count); `incomplete` is a check that
-  could not be read or did not happen (`unreadable(...)`, `broken(...)`, an unfilled field,
-  `closure=unknown`, or a selector blind spot (`selector=BLIND(...)` / `blind=BLIND(...)`) whose
-  fallback is not `fallback=RAN(...)` with `failed=0tests` and `errors=0tests`). The gate does not
-  re-derive any of this, so a new field spelling cannot slip past a list kept in the gate. A
-  receipt with no `verdict=` was produced by an older `diff_checks.py`: rebase on main and re-run it.
-  `diff_checks.py`'s exit code reflects only its blocking runs; the verdict is what to read.
-- `tests=skipped(--skip-tests)` is accepted in condition 1 per
-  `docs/conventions/engineering/failure-output-carries-the-why.md` §6 when GitHub Actions CI
-  covers the test matrix; condition 2 (`check runs`) hard-gates that the full CI suite on the
-  current head is green.
-
-The retired Trunk-era `preflight.sh` and `PREFLIGHT PASS: /trunk merge is allowed` literal are
-no longer accepted.

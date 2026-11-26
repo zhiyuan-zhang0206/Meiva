@@ -1,5 +1,5 @@
 # meiva:note
-# `scripts/ci/pull_requests/gate/merge_gate.py`: the five conditions, driven over a fake `gh`.
+# `scripts/ci/pull_requests/gate/merge_gate.py`: the four conditions, driven over a fake `gh`.
 #
 # The gate decides whether this lane may merge a pull request, so its verdicts are checked
 # end-to-end rather than through its helpers: the module runs as a process with `MEIVA_REAL_GH`
@@ -69,50 +69,9 @@ def green_runs() -> dict[str, Any]:
     }
 
 
-def passing_receipt(
-    head: str = HEAD,
-    *,
-    overrides: Mapping[str, str] | None = None,
-    verdict: str | None = "pass",
-    include_generator: bool = True,
-) -> str:
-    fields: dict[str, str] = {
-        "scope": "python",
-        "pyright": "0err(0s)",
-        "err_in_this_diff": "0",
-        "closure": "n/a(the-tree-was-green)",
-        "ruff": "ok(0s)",
-        "selector": "SELECTED:1files",
-        "tests": "RAN(1files)",
-        "passed": "20tests(1s)",
-        "failed": "0tests",
-        "errors": "0tests",
-        "blind": "n/a(no-changed-file-was-invisible)",
-        "fallback": "n/a(the-selection-was-not-blind)",
-        "vitest-app": "n/a(no-web-tree-file)",
-        "next-build": "n/a(not-the-app-router)",
-        "meizel": "ok(exit=0,779manifests,1edges)(0s)",
-        "debt": "n/a(no-manifest-changed)",
-        "docs-refs": "n/a(no-doc-touched)",
-    }
-    if overrides:
-        fields.update(overrides)
-    parts = [f"diff-checks/v1 @{head}", f"base={BASE}"]
-    if verdict is not None:
-        parts.append(f"verdict={verdict}")
-    parts.extend(f"{key}={value}" for key, value in fields.items())
-    if include_generator:
-        parts.append("generated=scripts/hooks/diff_checks.py")
-    return " ".join(parts)
-
-
-def passing_body(
-    trailer: str = "Co-authored-by: Meiva #7381", *, receipt: str | None = None
-) -> str:
-    line = passing_receipt() if receipt is None else receipt
+def passing_body(trailer: str = "Co-authored-by: Meiva #7381") -> str:
     return (
-        f"{line}\n"
-        "\nwhere_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
+        "where_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
         "\n## Behaviour\n\nthe gate refuses what it cannot read\n"
         f"\n{trailer}\n"
     )
@@ -171,10 +130,18 @@ def run_gate(
     )
 
 
-def test_a_lane_pull_request_with_five_conditions_holds_is_go(tmp_path: Path) -> None:
+def test_a_lane_pull_request_with_four_conditions_holding_is_go(tmp_path: Path) -> None:
     done = run_gate(tmp_path, world(pull=view(body=passing_body())))
     assert done.returncode == 0, done.stdout + done.stderr
-    assert f"GO: four conditions hold (head {HEAD[:12]}, main {MAIN[:12]})" in done.stdout
+    assert f"GO: all four conditions hold (head {HEAD[:12]}, main {MAIN[:12]})" in done.stdout
+
+
+def test_the_body_needs_no_pre_push_receipt(tmp_path: Path) -> None:
+    body = passing_body()
+    assert "diff-checks" not in body
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "receipt" not in done.stdout
 
 
 def test_a_trailer_in_the_body_alone_still_authors_the_lane(tmp_path: Path) -> None:
@@ -249,93 +216,8 @@ def test_a_truncated_compare_is_refused(tmp_path: Path) -> None:
     assert "compare truncated at 300 files" in done.stdout
 
 
-def test_a_preflight_pinned_to_another_head_is_refused(tmp_path: Path) -> None:
-    body = passing_body(receipt=passing_receipt(head="9" * 40))
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 1
-    assert "body pins 999999999999..." in done.stdout
-
-
-def test_a_missing_receipt_is_refused(tmp_path: Path) -> None:
-    body = (
-        "\nwhere_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
-        "\n## Behaviour\n\nno receipt\n"
-        "\nCo-authored-by: Meiva #7381\n"
-    )
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 1
-    assert "diff-checks/v1 receipt is not pinned to the current head" in done.stdout
-
-
-def test_the_retired_trunk_preflight_pass_literal_is_refused(tmp_path: Path) -> None:
-    body = passing_body(
-        receipt=f"Preflight on head {HEAD}: PREFLIGHT PASS: /trunk merge is allowed"
-    )
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 1
-    assert "retired PREFLIGHT PASS is no longer accepted" in done.stdout
-
-
-@pytest.mark.parametrize(
-    ("verdict", "include_generator", "expected_fragment"),
-    [
-        ("pass", False, "missing generated=scripts/hooks/diff_checks.py"),
-        (None, True, "has no verdict="),
-        ("fail", True, "reports verdict=fail"),
-        ("incomplete", True, "reports verdict=incomplete"),
-        ("PASS", True, "reports verdict=PASS"),
-    ],
-)
-def test_only_a_generated_receipt_stating_verdict_pass_is_accepted(
-    tmp_path: Path, verdict: str | None, include_generator: bool, expected_fragment: str
-) -> None:
-    body = passing_body(
-        receipt=passing_receipt(verdict=verdict, include_generator=include_generator)
-    )
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 1
-    assert expected_fragment in done.stdout
-
-
-def test_the_gate_trusts_the_verdict_and_does_not_reread_the_fields(tmp_path: Path) -> None:
-    receipt = passing_receipt(overrides={"ruff": "failed(1)(0s)", "failed": "2tests"})
-    done = run_gate(tmp_path, world(pull=view(body=passing_body(receipt=receipt))))
-    assert done.returncode == 0, done.stdout + done.stderr
-
-
-@pytest.mark.parametrize(
-    "receipt_line",
-    [
-        f"Preflight on head {HEAD}: `{passing_receipt()}`",
-        f"- `{passing_receipt()}`",
-        passing_receipt(
-            overrides={
-                "pyright": "9err(0in-closure,9elsewhere:other.py)(1s)",
-                "err_in_this_diff": "0",
-                "tests": "skipped(--skip-tests)",
-                "passed": "n/a(no-test-ran)",
-                "failed": "n/a(no-test-ran)",
-                "errors": "n/a(no-test-ran)",
-            }
-        ),
-        passing_receipt(
-            overrides={
-                "selector": "BLIND(dyn.py)",
-                "blind": "BLIND(dyn.py)",
-                "fallback": "RAN(domain)",
-            }
-        ),
-    ],
-)
-def test_supported_passing_receipt_formats_go(tmp_path: Path, receipt_line: str) -> None:
-    body = passing_body(receipt=receipt_line)
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert f"GO: four conditions hold (head {HEAD[:12]}, main {MAIN[:12]})" in done.stdout
-
-
 def test_a_body_without_the_lane_conventions_is_refused(tmp_path: Path) -> None:
-    body = f"{passing_receipt()}\n\nCo-authored-by: Meiva #7381\n"
+    body = "Co-authored-by: Meiva #7381\n"
     done = run_gate(tmp_path, world(pull=view(body=body)))
     assert done.returncode == 1
     assert "body has no where_used" in done.stdout
@@ -344,7 +226,7 @@ def test_a_body_without_the_lane_conventions_is_refused(tmp_path: Path) -> None:
 
 def test_a_reviewer_merge_waives_the_body_conditions_but_not_the_checks(tmp_path: Path) -> None:
     runs = {"check_runs": [{"name": "backend", "status": "completed", "conclusion": "failure"}]}
-    body = "no preflight, no conventions, no trailer"
+    body = "no conventions, no trailer"
     entries = world(pull=view(body=body), runs=runs)
     done = run_gate(tmp_path, entries, env={"MEIVA_MERGE_REVIEWER": "1"})
     assert done.returncode == 1
@@ -354,14 +236,14 @@ def test_a_reviewer_merge_waives_the_body_conditions_but_not_the_checks(tmp_path
 
 
 def test_a_reviewer_merge_with_green_checks_goes(tmp_path: Path) -> None:
-    body = "no preflight, no conventions, no trailer"
+    body = "no conventions, no trailer"
     done = run_gate(tmp_path, world(pull=view(body=body)), env={"MEIVA_MERGE_REVIEWER": "1"})
     assert done.returncode == 0, done.stdout + done.stderr
     assert "GO (reviewer merge)" in done.stdout
 
 
 def test_a_merged_pull_request_passes_without_reading_the_conditions(tmp_path: Path) -> None:
-    body = "no preflight, no conventions, no trailer"
+    body = "no conventions, no trailer"
     done = run_gate(tmp_path, world(pull=view(body=body, state="closed")))
     assert done.returncode == 0, done.stdout + done.stderr
     assert "already merged as" in done.stdout

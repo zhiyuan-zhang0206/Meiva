@@ -223,7 +223,7 @@ def render(report: Report, limit: int | None) -> str:
     )
     lines.append(
         f"{hidden}Static references only: runtime-built names are not seen. "
-        "1-hop references are not the full test surface; use diff_checks / test_selector for test selection."
+        "1-hop references are not the full test surface; use scripts/hooks/affected_tests.py (or scripts/ci/test_selector.py) for test selection."
     )
     return "\n".join(lines)
 

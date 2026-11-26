@@ -1,2 +1,2 @@
 [uses]
-"test_diff_checks_scratch.py" = ["child_diff_checks_scratch.py"]
+"test_affected_tests.py" = ["child_process.py"]
