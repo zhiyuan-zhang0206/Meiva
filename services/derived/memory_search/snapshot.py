@@ -40,11 +40,23 @@ class Snapshot:
     rows: tuple[Row, ...]
     matrix: np.ndarray[tuple[int, int], np.dtype[np.float32]]
     fingerprint: str
+    norms: NDArray[np.float32]
     last_save_seconds: float | None = None
     saves: int = 0
 
-    def __post_init__(self) -> None:
-        self.matrix.flags.writeable = False
+    @classmethod
+    def build(
+        cls,
+        rows: tuple[Row, ...],
+        matrix: np.ndarray[tuple[int, int], np.dtype[np.float32]],
+        fingerprint: str,
+        *,
+        saves: int = 0,
+    ) -> Snapshot:
+        norms = np.linalg.norm(matrix, axis=1)
+        matrix.flags.writeable = False
+        norms.flags.writeable = False
+        return cls(rows, matrix, fingerprint, norms, saves=saves)
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         meta: dict[str, tuple[float, str, str]] = {}
@@ -67,8 +79,7 @@ class Snapshot:
             for index, row in enumerate(self.rows):
                 _ = first.setdefault(row.path, index)
             return [self._hit(index, 0.0) for index in list(first.values())[:k]]
-        row_norms = np.linalg.norm(self.matrix, axis=1)
-        scores = [array_number(c) for c in array_items(self.matrix @ query / (row_norms * q_norm))]
+        scores = [array_number(c) for c in array_items(self.matrix @ query / (self.norms * q_norm))]
         best: dict[str, int] = {}
         for index, row in enumerate(self.rows):
             if row.path not in best or scores[index] > scores[best[row.path]]:

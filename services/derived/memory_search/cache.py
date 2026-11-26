@@ -71,7 +71,7 @@ def _read_snapshot(data: NpzFile[np.generic], dim: int, fingerprint: str) -> Sna
         or any(space != fingerprint for space in embedders)
     ):
         raise ValueError("cache has an incompatible vector space")
-    return Snapshot(rows, matrix, fingerprint)
+    return Snapshot.build(rows, matrix, fingerprint)
 
 
 def _load_archive(data_file: Path, dim: int, fingerprint: str) -> Snapshot:
@@ -101,15 +101,10 @@ def load_snapshot(data_file: Path, dim: int, fingerprint: str) -> Snapshot | Non
         return None
 
 
-def save_snapshot(
-    data_file: Path, snapshot: Snapshot, replace_file: Callable[[Path, Path], object]
-) -> float:
-    start = time.perf_counter()
-    data_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = data_file.with_suffix(".tmp.npz")
+def write_npz(path: Path, snapshot: Snapshot) -> None:
     rows = snapshot.rows
     np.savez(
-        tmp,
+        path,
         pks=np.array([row.pk for row in rows], dtype=str),
         paths=np.array([row.path for row in rows], dtype=str),
         kinds=np.array([row.kind for row in rows], dtype=str),
@@ -119,5 +114,24 @@ def save_snapshot(
         embedders=np.array([snapshot.fingerprint] * len(rows), dtype=str),
         vectors=snapshot.matrix,
     )
-    _ = replace_file(tmp, data_file)
+
+
+def save_snapshot(
+    data_file: Path,
+    snapshot: Snapshot,
+    replace_file: Callable[[Path, Path], object],
+    write_archive: Callable[[Path, Snapshot], None],
+) -> float:
+    start = time.perf_counter()
+    data_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = data_file.with_suffix(".tmp.npz")
+    try:
+        write_archive(tmp, snapshot)
+        _ = replace_file(tmp, data_file)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            _log.warning("[memory_search] failed to clean temporary archive %s", tmp, exc_info=True)
+        raise
     return time.perf_counter() - start

@@ -406,6 +406,7 @@ def test_failed_replace_leaves_live_and_persisted_snapshot_intact(tmp_path: Path
         fail = True
         rows = [_upsert_body("/a.md", 1, mtime=2), _upsert_body("/b.md", 2)]
         assert client.post("/v1/upsert_batch", json={"rows": rows}).status_code == 500
+        assert not (tmp_path / "vectors.tmp.npz").exists()
         assert client.post("/v1/search", json=query).json() == old_hits
         assert client.get("/v1/meta").json() == old_meta
         assert client.get("/stats").json() == old_stats

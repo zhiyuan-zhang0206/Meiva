@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from services.derived.embeddinggemma.config import ServerConfig
@@ -27,7 +27,11 @@ from services.derived.embeddinggemma.engine import (
     EngineOpener,
     OpenedEngine,
 )
-from services.derived.embeddinggemma.scheduler import InferenceScheduler, SchedulerClosedError
+from services.derived.embeddinggemma.scheduler import (
+    InferenceScheduler,
+    SchedulerClosedError,
+    Vectors,
+)
 
 _log = logging.getLogger("embeddinggemma")
 
@@ -92,6 +96,28 @@ async def _serve(
         executor.shutdown(wait=False)
 
 
+async def _cancel_on_disconnect(request: Request, inference: asyncio.Task[Vectors]) -> None:
+    while (await request.receive())["type"] != "http.disconnect":
+        continue
+    _ = inference.cancel()
+
+
+async def _infer_while_connected(
+    request: Request, scheduler: InferenceScheduler, infer: Callable[[], Vectors], *, single: bool
+) -> Vectors | None:
+    try:
+        async with asyncio.TaskGroup() as group:
+            inference = group.create_task(scheduler.run(infer, single=single))
+            disconnect = group.create_task(_cancel_on_disconnect(request, inference))
+            _ = await asyncio.wait({inference})
+            _ = disconnect.cancel()
+    except ExceptionGroup as failure:
+        if len(failure.exceptions) == 1:
+            raise failure.exceptions[0] from None
+        raise
+    return None if inference.cancelled() else inference.result()
+
+
 def create_app(
     config: ServerConfig, *, open_engine: EngineOpener, api_key: str | None = None
 ) -> FastAPI:
@@ -128,7 +154,7 @@ def create_app(
         }
 
     @app.post(EMBEDDINGS_PATH, dependencies=[Depends(authorized)])
-    async def create_embeddings(req: EmbeddingRequest) -> dict[str, object]:
+    async def create_embeddings(req: EmbeddingRequest, request: Request) -> dict[str, object]:
         opened = serving.opened
         scheduler = serving.scheduler
         if opened is None or scheduler is None:
@@ -158,7 +184,9 @@ def create_app(
             dimensions=req.dimensions,
         )
         try:
-            vectors = await scheduler.run(infer, single=len(texts) == 1)
+            vectors = await _infer_while_connected(
+                request, scheduler, infer, single=len(texts) == 1
+            )
         except SchedulerClosedError as exc:
             raise HTTPException(status_code=503, detail="engine not initialized") from exc
         except EmbeddingRejectedError as exc:
@@ -167,6 +195,8 @@ def create_app(
                 status_code=400,
                 detail=f"embedding computation rejected input (overflow or invalid): {exc}",
             ) from exc
+        if vectors is None:
+            raise HTTPException(status_code=499, detail="client disconnected")
         return {
             "model": req.model,
             "data": [{"index": index, "embedding": vector} for index, vector in enumerate(vectors)],

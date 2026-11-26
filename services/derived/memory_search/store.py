@@ -12,7 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, pk_of
-from services.derived.memory_search.cache import load_snapshot, save_snapshot
+from services.derived.memory_search.cache import load_snapshot, save_snapshot, write_npz
 from services.derived.memory_search.snapshot import Row, Snapshot
 
 _log = logging.getLogger("services.derived.memory_search.store")
@@ -26,12 +26,14 @@ class MemoryStore:
         fingerprint: str,
         *,
         replace_file: Callable[[Path, Path], object] = Path.replace,
+        write_archive: Callable[[Path, Snapshot], None] = write_npz,
     ) -> None:
         self._data_file = data_file
         self._dim = dim
         self._replace_file = replace_file
+        self._write_archive = write_archive
         self._writer = Lock()
-        self._snapshot = Snapshot((), np.empty((0, dim), dtype=np.float32), fingerprint)
+        self._snapshot = Snapshot.build((), np.empty((0, dim), dtype=np.float32), fingerprint)
 
     def require_space(self, fingerprint: str | None) -> None:
         if fingerprint != self._snapshot.fingerprint:
@@ -51,8 +53,8 @@ class MemoryStore:
     def _commit(self, rows: tuple[Row, ...], matrix: NDArray[np.float32]) -> None:
         """Called with the writer lock held. Publish only after the rename succeeds."""
         current = self._snapshot
-        candidate = Snapshot(rows, matrix, current.fingerprint, saves=current.saves + 1)
-        elapsed = save_snapshot(self._data_file, candidate, self._replace_file)
+        candidate = Snapshot.build(rows, matrix, current.fingerprint, saves=current.saves + 1)
+        elapsed = save_snapshot(self._data_file, candidate, self._replace_file, self._write_archive)
         self._snapshot = replace(candidate, last_save_seconds=elapsed)
 
     def upsert(

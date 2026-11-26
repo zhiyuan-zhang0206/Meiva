@@ -135,6 +135,8 @@ def test_upsert_many_preserves_the_old_snapshot_when_overwriting(tmp_path: Path)
     old = store._snapshot
     assert old.matrix.shape == (5, _DIM)
     assert not old.matrix.flags.writeable
+    assert not old.norms.flags.writeable
+    np.testing.assert_array_equal(old.norms, np.linalg.norm(old.matrix, axis=1))
 
     store.upsert_many(update_rows)
     assert store._snapshot.matrix.shape == old.matrix.shape
@@ -399,3 +401,23 @@ def test_same_dimension_different_space_starts_empty(tmp_path: Path) -> None:
     switched.load()
     assert switched.all_meta() == {}
     assert switched.search_topk(np.ones(8, dtype=np.float32), 1) == []
+
+
+def test_failed_archive_write_removes_partial_temp_file(tmp_path: Path) -> None:
+    committed = _store(tmp_path)
+    committed.upsert("/a.md", 1.0, "before", _vec(0))
+    archive = tmp_path / "vectors.npz"
+    original = archive.read_bytes()
+
+    def write_partial(path: Path, _snapshot: object) -> None:
+        _ = path.write_bytes(b"incomplete archive")
+        raise OSError("injected archive write failure")
+
+    store = MemoryStore(archive, _DIM, _FP, write_archive=write_partial)
+    store.load()
+    with pytest.raises(OSError, match="injected archive write failure"):
+        store.upsert("/a.md", 2.0, "after", _vec(1))
+
+    assert not (tmp_path / "vectors.tmp.npz").exists()
+    assert archive.read_bytes() == original
+    assert store.all_meta() == committed.all_meta()
