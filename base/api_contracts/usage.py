@@ -64,8 +64,16 @@ class ReceiptSubmission(StrEnum):
 type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], ReceiptSubmission]
 
 
-type ScheduleUsageReceipt = Callable[[Callable[[], None]], Future[None]]
+type ScheduleUsageReceipt = Callable[
+    [UsageLedgerEntry, UsageReceiptSubmitter, Callable[[], None]], Future[None]
+]
 type ReserveUsageReceipt = Callable[[], AbstractContextManager[ScheduleUsageReceipt]]
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledUsageReceipt:
+    write: UsageReceiptSubmitter
+    schedule: ScheduleUsageReceipt
 
 
 class ReceiptStagingUnavailableError(RuntimeError):

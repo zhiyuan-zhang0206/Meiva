@@ -82,16 +82,20 @@ Loki `llm_usage` stream is the operational copy and keeps seven days.
 The gateway and indexer own a `UsageReceiptDelivery` for their explicit home and
 ledger. Each starts the consumer with the service, including when it uses a
 different embedding backend. Overlapping Gateway lifespans keep the same
-receipt workers until the last lifespan exits. Shutdown closes admission,
-gives staging and delivery one second each to finish, and reports unfinished
-work. Receipts already staged remain recoverable across forced process exit.
+receipt workers until the last lifespan exits. Gateway shutdown closes
+admission and asynchronously allows eight seconds for staging and one second
+for Postgres delivery. The staging budget covers a five-second SQLite lock
+wait with time for commit and cleanup. If staging remains unconfirmed, shutdown
+logs every affected receipt's full frozen payload before releasing the service.
+A write already in progress may commit after the diagnostic, and replay of the
+same `call_id` remains idempotent. Receipts already staged survive process exit.
 
 Gemini passes the service's `UsageReceiptSubmitter` to `log_usage_fields`.
 Before making an async provider request, Gemini reserves one of the service's
 256 outstanding staging slots. This bounds memory during sustained local I/O
 failure and rejects new work before it incurs a provider charge. Immediately
-after a successful response has been parsed, Gemini queues billing on the
-dedicated staging thread before the next cancellable await. The request's
+after a successful response has been parsed, Gemini freezes the ledger entry
+and queues it on the dedicated staging thread before the next cancellable await. The request's
 shielded wait can end when the request is cancelled. The service retains the
 accepted job and completes staging independently of the default executor.
 Indexer batch staging runs on its existing synchronous caller thread. Both
@@ -128,7 +132,9 @@ other processes even if their producers exited without signalling.
 ### Recover a receipt logged during a storage failure
 
 `submit` returns `staged` after durable admission or `fallback_logged` if a
-storage or capacity failure required the log fallback. The fallback record's
+storage or capacity failure required the log fallback. The same recovery
+record is emitted for each accepted entry whose staging remains unconfirmed
+at the end of Gateway shutdown. The fallback record's
 `receipt_json` is the complete frozen ledger payload. It excludes the Gemini
 API key, request text and returned vectors. Extract that field as raw JSON from
 the failure log. Once storage is healthy and capacity is available, run the

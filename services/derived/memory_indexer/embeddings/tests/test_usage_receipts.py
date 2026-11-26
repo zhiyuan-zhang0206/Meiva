@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -20,12 +21,14 @@ from base.api_contracts.usage import (
     UsageLedger,
     UsageLedgerEntry,
     UsageLedgerRejectedError,
+    UsageReceiptSubmitter,
 )
 from base.db import Database
 from base.db.usage_ledger import usage_writer
 from base.host.proc import run_bounded
 from base.lm.usage.receipt import (
     UsageReceiptDelivery,
+    UsageReceiptRuntime,
     UsageReceiptStaging,
     UsageReceiptStore,
     decode_receipt,
@@ -383,3 +386,55 @@ def test_staging_capacity_refuses_before_gemini_call() -> None:
     finally:
         assert staging.stop(timeout=5)
     assert transport.calls == []
+
+
+async def test_shutdown_timeout_logs_inflight_queued_and_late_receipts(tmp_path: Path) -> None:
+    store = UsageReceiptStore(tmp_path, "cluster")
+    seed = _entry("seed")
+    store.stage(seed)
+    initial = (replace(seed, call_id="inflight"), replace(seed, call_id="queued"))
+    late = replace(seed, call_id="late")
+    owner = UsageReceiptRuntime(store, _ledger(lambda _: False))
+    owner.start()
+    started = Event()
+    captured: list[str] = []
+    sink = logger.add(
+        lambda message: captured.append(str(message.record["extra"]["receipt_json"])),
+        filter=lambda record: record["extra"].get("stage") == "shutdown_drain",
+    )
+
+    def write(entry: UsageLedgerEntry) -> ReceiptSubmission:
+        started.set()
+        return owner.submit(entry)
+
+    try:
+        with closing(connect(store.path)) as writer, owner.reserve() as schedule_late:
+            _ = writer.execute("BEGIN IMMEDIATE")
+            accepted = [_accept(owner, entry, write) for entry in initial]
+            assert await asyncio.to_thread(started.wait, 2)
+            await owner.aclose(staging_timeout=0.05, delivery_timeout=0.2)
+            assert [decode_receipt(item.encode()) for item in captured] == list(initial)
+            assert not any(future.done() for future in accepted)
+            assert schedule_late(late, write, lambda: None).done()
+            assert decode_receipt(captured[-1].encode()) == late
+            writer.rollback()
+        await asyncio.wait_for(
+            asyncio.gather(*(asyncio.wrap_future(future) for future in accepted)), timeout=5
+        )
+    finally:
+        logger.remove(sink)
+
+    for payload in captured:
+        store.recover(payload.encode())
+    expected = [seed, *initial, late]
+    recovered = [decode_receipt(payload) for _, payload in store.pending(after=0, limit=8)]
+    assert sorted(recovered, key=lambda entry: entry.call_id) == sorted(
+        expected, key=lambda entry: entry.call_id
+    )
+
+
+def _accept(
+    owner: UsageReceiptRuntime, entry: UsageLedgerEntry, write: UsageReceiptSubmitter
+) -> Future[None]:
+    with owner.reserve() as schedule:
+        return schedule(entry, write, lambda: None)

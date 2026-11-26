@@ -1,5 +1,6 @@
 # meiva:link base/lm/usage/README.md
 
+import asyncio
 from collections.abc import Callable, Generator
 from concurrent.futures import Future
 from contextlib import AbstractContextManager, closing, contextmanager, suppress
@@ -22,6 +23,7 @@ from base.api_contracts.usage import (
     UsageLedgerConflictError,
     UsageLedgerEntry,
     UsageLedgerRejectedError,
+    UsageReceiptSubmitter,
 )
 from base.host.boundary.untyped import object_of
 from base.host.net.resilience import retry_sleep
@@ -191,15 +193,29 @@ class UsageReceiptDelivery:
             self._wake.set()
         return result
 
-    def stop(self, *, timeout: float) -> bool:
+    def _request_stop(self) -> None:
         with self._lifecycle_lock:
             self._stop_requested.set()
-            thread = self._thread
         self._wake.set()
+
+    def stop(self, *, timeout: float) -> bool:
+        self._request_stop()
+        thread = self._thread
         if thread is None:
             return True
         thread.join(timeout=timeout)
-        if thread.is_alive():
+        return self._finish_stop()
+
+    async def aclose(self, *, timeout: float) -> None:
+        self._request_stop()
+        thread = self._thread
+        if thread is not None:
+            await _wait_for_thread(thread, timeout=timeout)
+            _ = self._finish_stop()
+
+    def _finish_stop(self) -> bool:
+        thread = self._thread
+        if thread is not None and thread.is_alive():
             logger.warning("Usage receipt delivery stop unfinished at {}", self._store.path)
             return False
         if self._error is not None:
@@ -311,9 +327,28 @@ def _log_fallback(
     )
 
 
+async def _wait_for_thread(thread: Thread, *, timeout: float) -> None:
+    with suppress(TimeoutError):
+        async with asyncio.timeout(timeout):
+            while thread.is_alive():
+                await asyncio.sleep(0.01)
+
+
+def _log_unconfirmed(entry: UsageLedgerEntry, *, stage: str) -> None:
+    logger.error(
+        "Usage receipt {call_id} unconfirmed during {stage}; recover receipt_json={receipt_json}",
+        call_id=entry.call_id,
+        stage=stage,
+        receipt_status=ReceiptSubmission.FALLBACK_LOGGED.value,
+        receipt_json=encode_receipt(entry).decode(),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _StagingJob:
-    call: Callable[[], None]
+    entry: UsageLedgerEntry
+    write: UsageReceiptSubmitter
+    observe: Callable[[], None]
     result: Future[None]
     trace: trace_context.Context
 
@@ -323,6 +358,8 @@ class UsageReceiptStaging:
         self._max_outstanding = max_outstanding
         self._outstanding = 0
         self._jobs: SimpleQueue[_StagingJob | None] = SimpleQueue()
+        self._pending: dict[Future[None], UsageLedgerEntry] = {}
+        self._expired = False
         self._lock = Lock()
         self._stop_requested = Event()
         self._error: BaseException | None = None
@@ -339,14 +376,15 @@ class UsageReceiptStaging:
             self._outstanding += 1
         scheduled = False
 
-        def schedule(call: Callable[[], None]) -> Future[None]:
+        def schedule(
+            entry: UsageLedgerEntry, write: UsageReceiptSubmitter, observe: Callable[[], None]
+        ) -> Future[None]:
             nonlocal scheduled
             if scheduled:
                 raise RuntimeError("usage receipt slot was already scheduled")
-            job = _StagingJob(call, Future(), trace_context.get_current())
-            self._jobs.put(job)
             scheduled = True
-            return job.result
+            job = _StagingJob(entry, write, observe, Future(), trace_context.get_current())
+            return self._schedule(job)
 
         try:
             yield schedule
@@ -354,21 +392,54 @@ class UsageReceiptStaging:
             if not scheduled:
                 self._release()
 
+    def _schedule(self, job: _StagingJob) -> Future[None]:
+        with self._lock:
+            if not self._expired:
+                self._pending[job.result] = job.entry
+                self._jobs.put(job)
+                return job.result
+        try:
+            _log_unconfirmed(job.entry, stage="shutdown_drain")
+            job.result.set_result(None)
+        finally:
+            self._release()
+        return job.result
+
     def _release(self) -> None:
         with self._lock:
             self._outstanding -= 1
             if self._outstanding == 0 and self._stop_requested.is_set():
                 self._jobs.put(None)
 
-    def stop(self, *, timeout: float) -> bool:
+    def _request_stop(self) -> None:
         with self._lock:
             self._stop_requested.set()
             if self._outstanding == 0:
                 self._jobs.put(None)
+
+    def stop(self, *, timeout: float) -> bool:
+        self._request_stop()
         self._thread.join(timeout=timeout)
+        return self._finish_stop()
+
+    async def aclose(self, *, timeout: float) -> None:
+        self._request_stop()
+        try:
+            await _wait_for_thread(self._thread, timeout=timeout)
+        finally:
+            _ = self._finish_stop()
+
+    def _finish_stop(self) -> bool:
+        with self._lock:
+            self._expired = True
+            unconfirmed = tuple(self._pending.values())
+            self._pending.clear()
+        for entry in unconfirmed:
+            _log_unconfirmed(entry, stage="shutdown_drain")
         if self._thread.is_alive():
             logger.warning(
-                "Usage receipt staging stop unfinished ({} outstanding)", self._outstanding
+                "Usage receipt staging stop unfinished ({} unconfirmed receipts logged)",
+                len(unconfirmed),
             )
             return False
         if self._error is not None:
@@ -387,19 +458,39 @@ class UsageReceiptStaging:
             logger.opt(exception=exc).error("Usage receipt staging worker stopped")
 
     def _execute(self, job: _StagingJob) -> None:
+        running = job.result.set_running_or_notify_cancel()
         try:
-            if job.result.set_running_or_notify_cancel():
-                token = trace_context.attach(job.trace)
-                try:
-                    job.call()
-                finally:
-                    trace_context.detach(token)
-                job.result.set_result(None)
+            self._stage_and_observe(job)
         except Exception as exc:
-            job.result.set_exception(exc)
+            if running:
+                job.result.set_exception(exc)
             logger.opt(exception=exc).error("Accepted provider usage receipt staging failed")
+        else:
+            if running:
+                job.result.set_result(None)
         finally:
             self._release()
+
+    def _stage_and_observe(self, job: _StagingJob) -> None:
+        with self._lock:
+            if job.result not in self._pending:
+                return
+        token = trace_context.attach(job.trace)
+        try:
+            self._write_receipt(job)
+            job.observe()
+        finally:
+            trace_context.detach(token)
+
+    def _write_receipt(self, job: _StagingJob) -> None:
+        try:
+            _ = job.write(job.entry)
+        except BaseException:
+            _log_unconfirmed(job.entry, stage="staging_error")
+            raise
+        finally:
+            with self._lock:
+                _ = self._pending.pop(job.result, None)
 
 
 class UsageReceiptRuntime:
@@ -424,19 +515,23 @@ class UsageReceiptRuntime:
                 self._delivery = delivery
             self._owners += 1
 
-    def stop(self, *, timeout: float) -> None:
+    def _retire(self) -> tuple[UsageReceiptStaging | None, UsageReceiptDelivery | None]:
         with self._lock:
             self._owners -= 1
             if self._owners:
-                return
+                return None, None
             staging, delivery = self._staging, self._delivery
             self._staging = self._delivery = None
+            return staging, delivery
+
+    async def aclose(self, *, staging_timeout: float, delivery_timeout: float) -> None:
+        staging, delivery = self._retire()
         try:
             if staging is not None:
-                _ = staging.stop(timeout=timeout)
+                await staging.aclose(timeout=staging_timeout)
         finally:
             if delivery is not None:
-                _ = delivery.stop(timeout=timeout)
+                await delivery.aclose(timeout=delivery_timeout)
 
     def reserve(self) -> AbstractContextManager[ScheduleUsageReceipt]:
         with self._lock:

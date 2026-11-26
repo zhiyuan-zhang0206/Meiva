@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import Literal
 
 from langchain_core.messages import AIMessage
@@ -13,7 +14,7 @@ from loguru import logger
 
 from base.api_contracts.agent_contract import harness_billing_of_source
 from base.api_contracts.usage import (
-    ReceiptSubmission,
+    ScheduledUsageReceipt,
     UsageLedger,
     UsageLedgerConflictError,
     UsageLedgerEntry,
@@ -205,7 +206,7 @@ def log_usage_fields(
     usage_kind: str,
     catalog: ModelCatalog,
     now: datetime,
-    submit_receipt: UsageReceiptSubmitter | None = None,
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Log raw provider usage; absent cache metering stays absent, including on decisions.
@@ -315,7 +316,7 @@ def _log_usage(
     event: _UsageEvent,
     *,
     record_out: dict[str, object] | None = None,
-    submit_receipt: UsageReceiptSubmitter | None = None,
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
@@ -352,17 +353,15 @@ def _log_usage(
         "attribution": event.attribution or _attribution(event.for_agent_id),
     }
     vendor = vendor_of_model(event.model, catalog=event.catalog)
-    try:
-        emit_observation = _book_usage(event, priced, vendor, record, submit_receipt)
-    except UsageLedgerConflictError:
-        raise
-    except UsageLedgerWriteError:
-        _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
-        raise
+    observe = partial(
+        _emit_usage_observation, event, priced, vendor, record, cache_text, reason_pct
+    )
+    booking = _freeze_booking(event, priced, vendor, record)
+    emit_observation = booking is None or _dispatch_booking(booking, submit_receipt, observe)
     if record_out is not None:
         record_out.update(record)
-    if emit_observation is not False:
-        _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
+    if emit_observation:
+        observe()
     return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
 
@@ -405,19 +404,18 @@ def _unpriced_cause(event: _UsageEvent) -> tuple[str, str]:
     return "no_cache_write_rate", missing
 
 
-def _book_usage(
+def _freeze_booking(
     event: _UsageEvent,
     priced: CostQuote | None,
     vendor: str | None,
     record: dict[str, object],
-    submit_receipt: UsageReceiptSubmitter | None,
-) -> bool | ReceiptSubmission:
+) -> tuple[UsageLedger, UsageLedgerEntry] | None:
     resolve_ledger = event.catalog.usage_ledger
     ledger = resolve_ledger() if resolve_ledger is not None else None
     if ledger is None:
         if not event.complete:
             record["complete"] = False
-        return True
+        return None
     call_id = event.call_id
     if call_id is None and event.provider_request_id is not None:
         call_id = f"api:provider:{vendor or event.model}:{event.provider_request_id}"
@@ -430,10 +428,28 @@ def _book_usage(
     if priced is not None and priced.exact_usd is not None:
         record["cost_usd_exact"] = str(priced.exact_usd)
     record["complete"] = event.complete
-    entry = _ledger_entry(ledger, call_id, event, priced, vendor)
-    if submit_receipt is None:
+    return ledger, _ledger_entry(ledger, call_id, event, priced, vendor)
+
+
+def _dispatch_booking(
+    booking: tuple[UsageLedger, UsageLedgerEntry],
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None,
+    observe: Callable[[], None],
+) -> bool:
+    ledger, entry = booking
+    if isinstance(submit_receipt, ScheduledUsageReceipt):
+        _ = submit_receipt.schedule(entry, submit_receipt.write, observe)
+        return False
+    try:
+        if submit_receipt is not None:
+            _ = submit_receipt(entry)
+            return True
         return ledger.write(entry)
-    return submit_receipt(entry)
+    except UsageLedgerConflictError:
+        raise
+    except UsageLedgerWriteError:
+        observe()
+        raise
 
 
 def _emit_usage_observation(

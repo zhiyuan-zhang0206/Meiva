@@ -43,7 +43,6 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
 from contextlib import nullcontext
 from datetime import datetime
-from functools import partial
 
 import httpx
 import numpy as np
@@ -52,7 +51,9 @@ from pydantic import BaseModel, Field, ValidationError
 from base.api_contracts.usage import (
     ReceiptStagingUnavailableError,
     ReserveUsageReceipt,
+    ScheduledUsageReceipt,
     ScheduleUsageReceipt,
+    UsageLedgerEntry,
     UsageReceiptSubmitter,
 )
 from base.host.boundary.untyped import object_of
@@ -197,7 +198,7 @@ def _emit_billing(
     *,
     catalog: ModelCatalog,
     now: datetime,
-    submit_receipt: UsageReceiptSubmitter | None,
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None,
 ) -> None:
     """Stage usage for a completed request before validating its vectors."""
     from base.lm.usage import UsageFields, log_usage_fields
@@ -331,7 +332,9 @@ async def embed_async(
     as ``embed``: query embeds pass ``QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
-    if reserve_receipt is None and (submit_receipt is not None or catalog.usage_ledger is not None):
+    if (submit_receipt is not None or catalog.usage_ledger is not None) and (
+        reserve_receipt is None or submit_receipt is None
+    ):
         raise EmbeddingAPIError(
             "async Gemini accounting requires a service-owned receipt staging slot"
         )
@@ -376,18 +379,28 @@ async def _embed_async_reserved(
     payload = _payload(texts, task_type)
     staged: list[Future[None]] = []
 
+    def schedule(
+        entry: UsageLedgerEntry, write: UsageReceiptSubmitter, observe: Callable[[], None]
+    ) -> Future[None]:
+        if schedule_receipt is None:
+            raise RuntimeError("Gemini receipt staging was not reserved")
+        accepted = schedule_receipt(entry, write, observe)
+        staged.append(accepted)
+        return accepted
+
+    submission = (
+        ScheduledUsageReceipt(submit_receipt, schedule)
+        if schedule_receipt is not None and submit_receipt is not None
+        else submit_receipt
+    )
+
     def bill(body: object) -> None:
-        call = partial(
-            _emit_billing,
+        _emit_billing(
             _billing_tokens(body),
             catalog=catalog,
             now=now(),
-            submit_receipt=submit_receipt,
+            submit_receipt=submission,
         )
-        if schedule_receipt is None:
-            call()
-        else:
-            staged.append(schedule_receipt(call))
 
     try:
         client = httpx.AsyncClient(timeout=timeout_s, transport=transport)

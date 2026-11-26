@@ -250,11 +250,16 @@ def _build_request_resources(
     releases.push_async_callback(insights_client.aclose)
 
 
-def _start_usage_receipts(state: GatewayServerState, releases: AsyncExitStack) -> None:
-    if hasattr(state, "usage_receipts"):
-        receipts = state.usage_receipts
-        receipts.start()
-        _ = releases.callback(receipts.stop, timeout=1.0)
+@asynccontextmanager
+async def _usage_receipt_lifetime(state: GatewayServerState) -> AsyncGenerator[None]:
+    async with startup_releases() as releases:
+        if hasattr(state, "usage_receipts"):
+            receipts = state.usage_receipts
+            receipts.start()
+            _ = releases.push_async_callback(
+                receipts.aclose, staging_timeout=8.0, delivery_timeout=1.0
+            )
+        yield
 
 
 @asynccontextmanager
@@ -311,7 +316,6 @@ async def lifespan(
             db_pool = state.db.pool(max_size=state.gateway_config.db_pool_max_size)
             state.db_pool = db_pool
             releases.callback(db_pool.close)
-            _start_usage_receipts(state, releases)
             await asyncio.to_thread(plugins_router.initialize_plugins, db_pool, home=process.home)
             state.sessions = SessionStore(db_pool)
             state.session_keys = SessionKeys(state.gateway_config.rng)
@@ -379,11 +383,14 @@ async def lifespan(
             )
             state.upload_recovery = upload_recovery
 
-            async with _background_lifetime(
-                app,
-                upload_recovery,
-                outbox_interval_seconds=config.view.gateway.notification_outbox_interval_seconds,
-                outbox_batch=config.view.gateway.notification_outbox_batch,
+            async with (
+                _background_lifetime(
+                    app,
+                    upload_recovery,
+                    outbox_interval_seconds=config.view.gateway.notification_outbox_interval_seconds,
+                    outbox_batch=config.view.gateway.notification_outbox_batch,
+                ),
+                _usage_receipt_lifetime(state),
             ):
                 yield
 
