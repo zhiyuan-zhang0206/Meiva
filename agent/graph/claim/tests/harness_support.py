@@ -24,6 +24,7 @@ from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
+from base.agents.history.transcript_timeline.record.harness import wire_id
 from base.agents.history.transcript_timeline.record.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import Harness
@@ -47,6 +48,7 @@ from base.lm.harness import (
     ReasoningText,
     Reconciliation,
     ReconciliationUnavailableError,
+    TextBlock,
     ToolResult,
     ToolUse,
     TurnCompleted,
@@ -54,8 +56,10 @@ from base.lm.harness import (
     TurnStarted,
     Usage,
 )
+from base.lm.harness.antigravity.tests.support import sent_request
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.session.transcript.entries import InputRow
-from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -468,13 +472,14 @@ class AgyRecord:
     def confirm_input(self, key: str, text: str) -> None:
         if key not in self.confirmed:
             self.confirmed.add(key)
-            self.write("USER_INPUT", content=f"<USER_REQUEST>{text}</USER_REQUEST>")
+            self.write("USER_INPUT", content=sent_request(self.path, key, text))
 
     def observe(self, event: BridgeEvent) -> None:
         if isinstance(event, InputInContext):
             item = self.inputs.get(event.key)
             if item is not None:
-                self.confirm_input(event.key, item.text)
+                text = "".join(b.text for b in item.blocks if isinstance(b, TextBlock))
+                self.confirm_input(event.key, text)
             elif event.key in self.known_inputs:
                 self.confirm_input(event.key, self.known_inputs[event.key])
         elif isinstance(event, (ToolUse, ToolResult)):
@@ -544,12 +549,16 @@ async def read_recorded_items(
         def load(until: datetime, wanted: Mapping[str, InputRow]) -> dict[str, list[TimelineItem]]:
             return sent_inputs(
                 load_sent_rows(
-                    db, agent_id, until=until, wanted=wanted, wire_id=lambda key: key
+                    db,
+                    agent_id,
+                    until=until,
+                    wanted=wanted,
+                    wire_id=lambda key: wire_id("antigravity", key),
                 ).rows
             )
 
         return read_window(
-            RecordFile(path),
+            AntigravityRecordFile(path),
             harness="antigravity",
             limit=1000,
             before=None,

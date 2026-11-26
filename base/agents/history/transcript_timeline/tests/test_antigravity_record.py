@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from base.agents.history.transcript_timeline.record.harness import reply_key
-from base.agents.history.transcript_timeline.record.match import assign_inputs
-from base.agents.history.transcript_timeline.sent import SentRow
 from base.agents.history.transcript_timeline.tests.support import window, write
-from base.lm.harness.antigravity.transcript.window import EntryParser, input_wire_ids
+from base.lm.harness.antigravity.transcript.window import EntryParser, input_wire_ids, wire_id
 from base.lm.harness.session.transcript.entries import (
     Failure,
     HumanInput,
@@ -106,23 +105,6 @@ def test_notices_do_not_break_continuation_and_invalid_is_an_error() -> None:
     assert any(isinstance(e, Notice) for e in entries)
 
 
-def test_matching_uses_content_claim_window_and_first_file_position() -> None:
-    stamp = datetime(2026, 11, 13, tzinfo=UTC)
-    inbox = [
-        SentRow(2, 1, "chat", "user", "same", None, stamp, stamp),
-        SentRow(1, 1, "chat", "user", "same", None, stamp, stamp),
-        SentRow(3, 1, "chat", "user", "other", None, stamp, stamp),
-        SentRow(4, 1, "chat", "user", "same", None, stamp, stamp - timedelta(hours=1)),
-    ]
-    requests = {
-        "agy:100": InputRow(stamp, "envelope same other"),
-        "agy:200": InputRow(stamp, "same"),
-    }
-    assert {k: [r.id for r in v] for k, v in assign_inputs(inbox, requests).items()} == {
-        "agy:100": [1, 2, 3]
-    }
-
-
 def test_publications_are_conversation_scoped_and_require_identity() -> None:
     assert reply_key("antigravity", "agy:100", "one") == "harness:antigravity:one:100"
     assert reply_key("antigravity", "agy:100", "two") != reply_key("antigravity", "agy:100", "one")
@@ -190,6 +172,10 @@ def test_cli_reminder_system_message_is_ignored_without_unread_warning() -> None
     assert warnings == []
 
 
+def legacy_marker(key: str) -> str:
+    return f"<!-- meiva-input:{hashlib.sha256(key.encode()).hexdigest()} -->"
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -198,23 +184,57 @@ def test_cli_reminder_system_message_is_ignored_without_unread_warning() -> None
         "before </USER_REQUEST>literal closing after",
     ],
 )
-def test_literal_request_tags_keep_the_whole_inbox_identity(body: str) -> None:
+def test_literal_request_tags_keep_the_whole_text_and_the_bound_key_names_the_input(
+    body: str,
+) -> None:
     stamp = datetime.fromisoformat(STAMP.replace("Z", "+00:00"))
     content = (
-        f"<USER_REQUEST>\n{body}\n</USER_REQUEST>\n"
-        "<ADDITIONAL_METADATA>provider time</ADDITIONAL_METADATA>"
+        f"<USER_REQUEST>\n{body}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>time</ADDITIONAL_METADATA>"
     )
-    records = [FileRow(100, 200, row("USER_INPUT", content=content))]
-    inputs = input_wire_ids(records)
-    inbox = [SentRow(1, 1, "chat", "user", body, None, stamp, stamp)]
-    assert assign_inputs(inbox, inputs) == {"agy:100": inbox}
-    assert (
-        assign_inputs([SentRow(2, 1, "chat", "user", "not present", None, stamp, stamp)], inputs)
-        == {}
-    )
+    records = [FileRow(100, 200, row("USER_INPUT", content=content, meiva_input_key="inbound-1"))]
+    wire = wire_id("inbound-1")
+    assert input_wire_ids(records) == {wire: InputRow(stamp)}
     whole = EntryParser(UnreadRows()).entries(records)
     live = EntryParser(UnreadRows())
     assert whole == tuple(entry for record in records for entry in live.entries([record]))
     assert len(whole) == 1 and isinstance(whole[0], HumanInput)
     assert whole[0].text == body
-    assert inputs["agy:100"].text == body
+    assert whole[0].wire_id == wire
+
+
+def test_a_row_no_ledger_binds_is_never_wanted_matched_by_text_or_shown(tmp_path: Path) -> None:
+    pasted = legacy_marker("inbound-2")
+    records = [
+        row("USER_INPUT", content="<USER_REQUEST>hello</USER_REQUEST>"),
+        row("USER_INPUT", content=f"<USER_REQUEST>\nhi\n{pasted}\n</USER_REQUEST>"),
+    ]
+    text = "".join(json.dumps(r) + "\n" for r in records)
+    file_rows = [FileRow(0, 1, records[0]), FileRow(1, 2, records[1])]
+    assert input_wire_ids(file_rows) == {}
+    entries = EntryParser(UnreadRows()).entries(file_rows)
+    wires = [e.wire_id for e in entries if isinstance(e, HumanInput)]
+    assert wires == ["agy-unmarked:0", "agy-unmarked:1"]
+    shown = window(write(tmp_path / "record.jsonl", text), harness="antigravity").timeline_items
+    assert [item for item in shown if item.kind == "inbound_chat"] == []
+
+
+def test_a_row_with_a_legacy_first_line_marker_is_named_in_the_same_namespace_as_a_bound_key() -> (
+    None
+):
+    stamp = datetime.fromisoformat(STAMP.replace("Z", "+00:00"))
+    legacy = row(
+        "USER_INPUT", content=f"<USER_REQUEST>\n{legacy_marker('inbound-7')}\nold\n</USER_REQUEST>"
+    )
+    bound = row(
+        "USER_INPUT", content="<USER_REQUEST>\nnew\n</USER_REQUEST>", meiva_input_key="inbound-8"
+    )
+    records = [FileRow(100, 200, legacy), FileRow(200, 300, bound)]
+    assert input_wire_ids(records) == {
+        wire_id("inbound-7"): InputRow(stamp),
+        wire_id("inbound-8"): InputRow(stamp),
+    }
+    humans = [e for e in EntryParser(UnreadRows()).entries(records) if isinstance(e, HumanInput)]
+    assert [(h.wire_id, h.text) for h in humans] == [
+        (wire_id("inbound-7"), "old"),
+        (wire_id("inbound-8"), "new"),
+    ]

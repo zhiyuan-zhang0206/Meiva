@@ -124,6 +124,6 @@ with the answers is in [foreground input and cancellation](../../../../agent/gra
 |---|---|---|---|
 | Codex | `turn/steer` or `turn/start` response (strong) | `item/completed(userMessage, clientId)` | refusal and loss are events |
 | Claude Code | the write (weak) | echo of our uuid (`replay-user-messages`) | an input that misses the turn becomes a turn of its own |
-| Antigravity | ACP prompt write (weak) | user echo or transcript carrying the input marker, or the latest non-cancelled prompt result for that input | the latest request owns the foreground boundary across steers |
+| Antigravity | ACP prompt write (weak) | user echo or a transcript row bound to the input (`meiva-inputs.jsonl`), or the latest non-cancelled prompt result for that input | the latest request owns the foreground boundary across steers |
 
 `HarnessSession` has `deliver()` once all three implement it.

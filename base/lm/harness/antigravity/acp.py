@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Sequence
@@ -11,44 +10,22 @@ from base.lm.harness.delivery import InputBlock, TextBlock
 from base.lm.harness.events import HarnessCause, ToolResult, ToolUse
 
 
-def input_marker(key: str) -> str:
-    return f"<!-- meiva-input:{hashlib.sha256(key.encode()).hexdigest()} -->"
+def prompt_blocks(blocks: Sequence[InputBlock]) -> list[dict[str, str]]:
+    return [
+        {"type": "text", "text": block.text}
+        if isinstance(block, TextBlock)
+        else {"type": "image", "mimeType": block.mime_type, "data": block.data_base64}
+        for block in blocks
+    ]
 
 
-def prompt_blocks(key: str, blocks: Sequence[InputBlock]) -> list[dict[str, str]]:
-    marker = input_marker(key)
-    content: list[dict[str, str]] = []
-    for block in blocks:
-        if isinstance(block, TextBlock):
-            text = block.text if content else f"{marker}\n{block.text}"
-            content.append({"type": "text", "text": text})
-        else:
-            if not content:
-                content.append({"type": "text", "text": marker})
-            content.append(
-                {"type": "image", "mimeType": block.mime_type, "data": block.data_base64}
-            )
-    return content
+_LEGACY_MARKER = re.compile(r"<!-- meiva-input:([a-f0-9]{64}) -->")
 
 
-_INPUT_MARKER = re.compile(r"<!-- meiva-input:[a-f0-9]{64} -->")
-
-
-def without_input_marker(text: str) -> str:
+def split_legacy_marker(text: str) -> tuple[str | None, str]:
     first, _, rest = text.partition("\n")
-    return rest.strip() if _INPUT_MARKER.fullmatch(first) else text
-
-
-def received_markers(rows: Sequence[dict[str, object]]) -> set[str]:
-    markers: set[str] = set()
-    for row in rows:
-        content = row.get("content")
-        if row.get("type") != "USER_INPUT" or not isinstance(content, str):
-            continue
-        first_line = content.removeprefix("<USER_REQUEST>\n").split("\n", 1)[0]
-        if _INPUT_MARKER.fullmatch(first_line):
-            markers.add(first_line)
-    return markers
+    found = _LEGACY_MARKER.fullmatch(first)
+    return (found.group(1), rest.strip()) if found else (None, text)
 
 
 def content_text(content: object) -> str:

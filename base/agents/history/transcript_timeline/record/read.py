@@ -16,7 +16,6 @@ from base.agents.history.transcript_timeline.record.harness import (
     input_wire_ids,
     wire_id,
 )
-from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK
 from base.api_contracts.reading import ReadingSourceUnavailableError, ReadingUnavailableReason
 from base.lm.harness.session.transcript.entries import AgentText, InputRow, Reasoning
 from base.lm.harness.session.transcript.record_file import (
@@ -27,7 +26,6 @@ from base.lm.harness.session.transcript.record_file import (
     RecordFile,
     RecordReadBudgetError,
     UnreadRows,
-    stamp_of,
 )
 
 # meiva:note
@@ -122,11 +120,7 @@ def read_reading_window(
                 load_sent=load_sent,
                 unread=unread,
             )
-            if (
-                start == 0
-                or not projected.items
-                or (_whole(projected, 0) and _input_context_complete(rows, projected, 0, harness))
-            ):
+            if start == 0 or not projected.items or _whole(projected, 0):
                 return Window(
                     projected.items,
                     start > 0,
@@ -199,11 +193,7 @@ def read_window(
         if (
             start <= floor
             or spent >= MAX_LOOKBACK_BYTES
-            or (
-                full
-                and _whole(projected, cut)
-                and _input_context_complete(rows, projected, cut, harness)
-            )
+            or (full and _whole(projected, cut))
             or read >= MAX_REQUEST_BYTES
             or grown == 0
         ):
@@ -311,20 +301,6 @@ def _whole(projected: Projected, cut: int) -> bool:
     if not first.is_call and first.call_id is not None:
         return False
     return first.turn is None or first.turn in projected.opened_turns
-
-
-# meiva:note
-# Text-matched inputs need the earlier inputs in their claim window as context, so a repeated
-# message cannot move to a later input merely because a page starts there. The existing lookback
-# and request budgets still bound this context; the file start is definitive.
-def _input_context_complete(
-    rows: Sequence[FileRow], projected: Projected, cut: int, harness: str
-) -> bool:
-    wanted = input_wire_ids(harness, rows)
-    if not wanted or all(row.text is None for row in wanted.values()):
-        return True
-    stamp = stamp_of(projected.items[cut].item.created_at)
-    return stamp is not None and min(row.stamp for row in wanted.values()) <= stamp - CLAIM_SLACK
 
 
 # meiva:note

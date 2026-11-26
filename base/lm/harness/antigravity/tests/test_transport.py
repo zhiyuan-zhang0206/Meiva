@@ -138,7 +138,7 @@ async def test_close_recovers_an_unsampled_child_that_created_its_own_session(
         assert await transport.open_session(resume=None) == "conv-acp"
         transport.prompt(
             transport.next_request_id(),
-            [{"type": "text", "text": "marker\neof"}],
+            [{"type": "text", "text": "eof"}],
             before_write=lambda: None,
         )
         async with asyncio.timeout(3):

@@ -13,9 +13,8 @@ from base.lm.harness.antigravity.acp import (
     UnrecognisedError,
     classify_system_message,
     content_text,
-    input_marker,
-    received_markers,
 )
+from base.lm.harness.antigravity.transcript.input_store import bind_inputs, row_input_key
 from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
@@ -62,6 +61,7 @@ def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[d
 class TranscriptSnapshot:
     rows: list[dict[str, object]]
     offsets: tuple[int, ...]
+    fresh: tuple[Path, Mapping[int, str]] | None = None
 
     @classmethod
     def for_session(cls, session_id: str | None, *, home: Path | None) -> TranscriptSnapshot:
@@ -75,9 +75,8 @@ class TranscriptSnapshot:
             records = RecordFile(path).rows_after(0).rows
         except OSError:
             return cls([], ())
-        return cls(
-            [dict(record.row) for record in records], tuple(record.offset for record in records)
-        )
+        rows, fresh = bind_inputs(path, records)
+        return cls(rows, tuple(record.offset for record in records), fresh)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +156,6 @@ def _attribution_events(
     *,
     carry_scheduled_notices: bool,
 ) -> Iterator[PlannerRow | BackgroundNotice | None]:
-    marks = {input_marker(key): key for key in keys}
     foreground: str | None = None
     input_index = -1
     background: BackgroundNotice | None = None
@@ -168,8 +166,7 @@ def _attribution_events(
         kind = row.get("type")
         if kind == "USER_INPUT":
             input_index = index
-            marker = next(iter(received_markers((row,))), "")
-            foreground = marks.get(marker)
+            foreground = row_input_key(row, keys)
             boundary = boundaries.get(foreground or "")
             commands = set() if foreground is not None else None
             background = _carry_notice(

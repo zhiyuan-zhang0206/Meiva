@@ -1,11 +1,12 @@
-exports = ["window.py", "file.py"]
+exports = ["window.py", "file.py", "input_store.py"]
 
 [uses]
 "__init__.py" = []
-"file.py" = []
+"file.py" = ["input_store.py"]
 "text.py" = []
-"window.py" = ["text.py"]
-"tests" = ["text.py", "window.py"]
+"input_store.py" = ["text.py"]
+"window.py" = ["input_store.py", "text.py"]
+"tests" = ["file.py", "input_store.py", "text.py", "window.py"]
 
 [purity]
 "." = "strict"
@@ -15,3 +16,5 @@ exports = ["window.py", "file.py"]
 "window.py" = { mode = "off", why = "the Antigravity record boundary locates the file and reports unknown shapes; its entries follow file offsets and tool adjacency" }
 
 "file.py" = { mode = "off", why = "bounded native record rows enriched from independently validated atomic timing facts" }
+
+"input_store.py" = { mode = "off", why = "the ledger of inputs sent to the CLI, appended under a lock before each prompt is written and read back to name the row of the record each one became; what a row shows is decided in window.py" }

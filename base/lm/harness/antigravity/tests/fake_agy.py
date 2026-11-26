@@ -584,14 +584,17 @@ def regular_prompt(transcript: Path, request: int, command: str) -> None:
         plain_prompt(transcript, request, command)
 
 
+def prompt_text(data: dict[str, Any]) -> str:
+    return "".join(b["text"] for b in data["params"]["prompt"] if b["type"] == "text")
+
+
 def handle_prompt(
     transcript: Path,
     data: dict[str, Any],
     original: int | None,
 ) -> tuple[int | None, int | None]:
     request = data["id"]
-    text = data["params"]["prompt"][0]["text"]
-    marker, _, command = text.partition("\n")
+    text = command = prompt_text(data)
     record(
         transcript,
         {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
@@ -603,7 +606,7 @@ def handle_prompt(
         complete_steer(transcript, request)
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
-        update("user_message_chunk", content={"type": "text", "text": marker})
+        update("user_message_chunk", content={"type": "text", "text": text})
     if command == "steer":
         return original, None
     if command in {"hold", "reactive", "hold-no-stdin"}:

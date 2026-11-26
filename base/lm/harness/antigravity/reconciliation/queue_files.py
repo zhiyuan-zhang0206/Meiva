@@ -5,13 +5,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.jsonl import read_jsonl_rows
 from base.host.boundary.untyped import object_of
-from base.lm.harness.antigravity.acp import input_marker, received_markers
-from base.lm.harness.antigravity.mapping import transcript_path
+from base.lm.harness.antigravity.mapping import TranscriptSnapshot, transcript_path
 from base.lm.harness.antigravity.reconciliation.judge import QueuedMessage, judge
 from base.lm.harness.antigravity.reconciliation.payload import client_message_id
 from base.lm.harness.antigravity.trajectory import AgyInterfaceError
+from base.lm.harness.antigravity.transcript.input_store import received_keys
 from base.lm.harness.delivery import Reconciliation, home_in
 
 
@@ -90,8 +89,8 @@ def reconcile_acp_inputs(
     path = transcript_path(conversation_id, home=home)
     if path is None:
         return reconcile_inputs(home, conversation_id, keys)
-    marks = received_markers(read_jsonl_rows(path))
-    confirmed = {key: Reconciliation.IN_CONTEXT for key in keys if input_marker(key) in marks}
+    received = received_keys(TranscriptSnapshot.read(path).rows, keys)
+    confirmed = {key: Reconciliation.IN_CONTEXT for key in keys if key in received}
     missing = [key for key in keys if key not in confirmed]
     if not missing:
         return confirmed

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from itertools import combinations
 
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
+from base.lm.harness.antigravity.acp import ToolCall
 from base.lm.harness.antigravity.mapping import (
     OutputProjection,
     PlannerRow,
@@ -17,6 +17,7 @@ from base.lm.harness.antigravity.mapping import (
     planner_tokens,
 )
 from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
+from base.lm.harness.antigravity.transcript.input_store import received_keys
 from base.lm.harness.base_session import ActiveTurn
 from base.lm.harness.events import (
     AssistantText,
@@ -69,8 +70,7 @@ class PromptUsage:
 def planner_usage(
     rows: Sequence[dict[str, object]], keys: Sequence[str], final_text: str
 ) -> tuple[Usage, ...]:
-    marks = {input_marker(key) for key in keys}
-    if received_markers(rows) & marks != marks:
+    if received_keys(rows, keys) != set(keys):
         return ()
     planner = [
         step.row
@@ -495,7 +495,7 @@ class PromptTurn:
         )
 
     def _latest_marker_recorded(self, rows: Sequence[dict[str, object]]) -> bool:
-        return input_marker(self.keys[-1]) in received_markers(rows[self.transcript_offset :])
+        return self.keys[-1] in received_keys(rows[self.transcript_offset :], self.keys)
 
     def settle_projection(
         self,

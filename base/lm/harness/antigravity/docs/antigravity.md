@@ -11,7 +11,7 @@ here to keep a running tool and both inputs through a mid-turn prompt.
 `initialize` and either `session/new` or `session/load`. The protocol ends history playback at the load response. The adapter queues
 later frames, including while it reapplies the configured model and reasoning effort
 with the combined model ID in `session/set_model`. The first prompt after a
-load verifies output against the newly written input marker and planner rows.
+load verifies output against the newly recorded input row and planner rows.
 This keeps late historical chunks outside the new prompt and allows the verified
 planner counters to supply usage when its ACP result omits usage.
 
@@ -22,12 +22,27 @@ latest request governs the foreground turn boundary. Earlier replies contribute
 delivery and usage evidence. A reply from another process generation or a
 request outside the current turn cannot end the current turn.
 
-A write emits a weak receipt. ACP has no durable client input ID, so the
-adapter includes a leading HTML comment containing a digest of the input key
-in the text. A matching user chunk or `USER_INPUT` transcript row confirms
-delivery. The latest non-cancelled prompt result also confirms that prompt.
-The timeline removes the comment from the displayed input. Recovery reads the
-transcript with the shared JSONL reader and can still consult the private
+A write emits a weak receipt. ACP has no durable client input ID and the
+prompt carries nothing but the input's own text and images. The adapter keeps
+the binding outside the prompt, in `logs/meiva-inputs.jsonl` beside the
+transcript (guarded by `meiva-inputs.lock`). Before the prompt is written it
+appends a `sent` line with the input key, the transcript's last complete line
+boundary (`min_offset`), the SHA-256 of the prompt's text blocks joined with no
+separator and stripped, and the image count; a host that dies right after the
+write has still recorded it. The CLI writes a `USER_INPUT` row whose request
+holds the same joined text, so the earliest row at or after `min_offset` that
+no other input has taken and whose whole request text hashes to the same digest
+(an image-only input also compares its `media` count) is the row of that input.
+Equal texts sent in a row take their rows one to one in file order. The match
+is by digest of the whole text and never by a part of it. Each new match is
+appended as a `bound` line (`offset`, `key`). A reader that finds a `sent` line
+with no `bound` line (a host that died in between) resolves it the same way, so
+the result is the same whoever reads. Rows written before this ledger opened
+with an HTML comment holding a digest of the input key; they are still read for
+the key they name and are never taken by a new input. A matching user chunk or
+a `USER_INPUT` row bound to the input confirms delivery. The latest
+non-cancelled prompt result also confirms that prompt. Recovery reads the
+transcript with the shared record reader and can still consult the private
 message queue for inputs written before this migration. An input absent from
 both records has an unknown outcome if a write may have started. A failed
 dispatch that never reached the write hands its specific input keys back to the
@@ -111,7 +126,7 @@ native notice. Available planner usage stays on its own turn, and incomplete
 counts are marked uncertain. A current textless terminal row can close a
 prompt despite unmatched replay. Cancellation settles proved foreground
 evidence immediately, preserving recorded text and usage. At the attribution
-deadline, a terminal ACP response with its current input marker in the
+deadline, a terminal ACP response with its current input row in the
 transcript can settle with only attributed foreground output. The adapter logs
 `agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
 planner rows quarantined for native attribution. A pending notice from a

@@ -23,6 +23,15 @@ from base.agents.history.transcript_timeline.sent import (
     sent_inputs,
 )
 from base.db import create_agent
+from base.lm.harness.antigravity.tests.support import request_content
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
+from base.lm.harness.antigravity.transcript.input_store import (
+    inputs_path,
+    record_sent_input,
+    text_sha256,
+)
+from base.lm.harness.antigravity.transcript.window import input_wire_ids as agy_input_wire_ids
+from base.lm.harness.antigravity.transcript.window import wire_id as agy_wire_id
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.entries import InputRow
@@ -308,28 +317,6 @@ def test_a_handed_back_row_is_found_under_every_key_it_was_handed_over_under(
 
 
 # meiva:note
-# A text-bearing input (Antigravity) is settled by the inbox row its text matched, as an id is by the row that carries it:
-# the scan ends at the batch that holds it and does not run to the row cap for an input that was found.
-def test_an_input_matched_by_its_text_ends_the_scan_at_its_batch(
-    db_conn: psycopg.Connection, loguru_records: LogRecords
-) -> None:
-    agent = create_agent(db_conn)
-    _rows(db_conn, agent, 2500, "2026-11-20T00:00:00Z")
-    said = _claimed(db_conn, agent, "hello there", "k1")
-    at = datetime(2026, 11, 12, 8, 57, tzinfo=UTC)
-    found = load_sent_rows(
-        db_conn,
-        agent,
-        until=at,
-        wanted={"agy:100": InputRow(at, "<USER_REQUEST>hello there</USER_REQUEST>")},
-        wire_id=lambda key: key,
-    )
-    assert [(row.id, row.input_keys) for row in found.rows] == [(said, ("agy:100",))]
-    assert found.scanned == BATCH_ROWS
-    assert loguru_records.events("harness_timeline_inputs_unmatched") == []
-
-
-# meiva:note
 # An input older than the oldest row the scan reached is outside the range the cap allows and is not a fault; one inside
 # the range that no row names is reported.
 def test_an_input_beyond_the_scanned_range_is_not_reported_and_one_within_it_is(
@@ -343,8 +330,8 @@ def test_an_input_beyond_the_scanned_range_is_not_reported_and_one_within_it_is(
         db_conn,
         agent,
         until=newest,
-        wanted={"agy:old": InputRow(old, "<USER_REQUEST>nothing like it</USER_REQUEST>")},
-        wire_id=lambda key: key,
+        wanted={key_uuid("old"): InputRow(old)},
+        wire_id=key_uuid,
     )
     assert beyond.scanned == MAX_ROWS
     assert loguru_records.events("harness_timeline_inputs_unmatched") == []
@@ -352,50 +339,20 @@ def test_an_input_beyond_the_scanned_range_is_not_reported_and_one_within_it_is(
         db_conn,
         agent,
         until=newest,
-        wanted={"agy:new": InputRow(newest, "<USER_REQUEST>nothing like it</USER_REQUEST>")},
-        wire_id=lambda key: key,
+        wanted={key_uuid("new"): InputRow(newest)},
+        wire_id=key_uuid,
     )
     assert within.scanned == MAX_ROWS
     assert len(loguru_records.events("harness_timeline_inputs_unmatched")) == 1
 
 
-def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
-    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
-) -> None:
-    agent = create_agent(db_conn)
-    other = create_agent(db_conn)
-    first = _claimed(db_conn, agent, "hello attachments", "original-key")
-    _ = _claimed(db_conn, other, "hello attachments", "wrong-owner")
-    note = _claimed(db_conn, agent, "memory instruction", "note-key")
-    hidden = _claimed(db_conn, agent, "restart note", "hidden-key")
-    upload = {
-        "name": "paper.txt",
-        "size": 12,
-        "content_type": "text/plain",
-        "batch_id": "a" * 32,
-        "ordinal": 0,
-    }
-    db_conn.execute(
-        "UPDATE inbound_messages SET payload=%s::jsonb WHERE id=%s",
-        (
-            json.dumps(
-                {
-                    "image_uploads": [{"batch_id": "b" * 32, "ordinal": 1}],
-                    "upload_files": [upload, {"batch_id": "bad"}],
-                }
-            ),
-            first,
-        ),
-    )
-    db_conn.execute(
-        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
-        (json.dumps({"note_tag": "memory"}), note),
-    )
-    db_conn.execute(
-        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
-        (json.dumps({"note_tag": "lifecycle_restart"}), hidden),
-    )
-    db_conn.commit()
+def _agy_record(
+    tmp_path: Path,
+    agent: int,
+    rows: list[dict[str, object]],
+    *,
+    stamp: str = "2026-11-26T07:06:52Z",
+) -> Path:
     home = tmp_path / "home"
     FileSessionRegistry(harness_sessions_dir(home=home)).save(
         SessionRecord(
@@ -416,36 +373,106 @@ def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
         / ".system_generated/logs/transcript_full.jsonl"
     )
     record.parent.mkdir(parents=True)
-    rows = [
-        {
-            "type": "USER_INPUT",
-            "content": "<USER_REQUEST>hello attachments memory instruction restart note</USER_REQUEST>",
-        },
-        {"type": "PLANNER_RESPONSE", "content": "first reply"},
-        {
-            "type": "USER_INPUT",
-            "content": "<USER_REQUEST>hello attachments memory instruction restart note</USER_REQUEST>",
-        },
-        {"type": "PLANNER_RESPONSE", "content": "second reply"},
-    ]
-    record.write_text(
-        "".join(
-            json.dumps(
-                {"status": "DONE", "step_index": 1, "created_at": "2026-11-12T08:57:00Z", **row}
-            )
-            + "\n"
-            for row in rows
-        )
+    written = 0
+    with record.open("a") as handle:
+        for row in rows:
+            key, text = row.get("_sent_key"), row.get("_sent_text")
+            fields = {k: v for k, v in row.items() if not k.startswith("_sent")}
+            if isinstance(key, str) and isinstance(text, str):
+                record_sent_input(
+                    inputs_path(record),
+                    key=key,
+                    min_offset=written,
+                    text_sha256=text_sha256(text),
+                    image_count=0,
+                )
+            line = json.dumps({"status": "DONE", "step_index": 1, "created_at": stamp, **fields})
+            _ = handle.write(line + "\n")
+            handle.flush()
+            written += len(line.encode()) + 1
+    return home
+
+
+def _sent(key: str, text: str, at: str) -> dict[str, object]:
+    return {
+        "type": "USER_INPUT",
+        "created_at": at,
+        "content": request_content(text),
+        "_sent_key": key,
+        "_sent_text": text,
+    }
+
+
+def _planner(text: str, at: str) -> dict[str, object]:
+    return {"type": "PLANNER_RESPONSE", "created_at": at, "content": text}
+
+
+def _inbound(window: HarnessTimelineWindow) -> list[tuple[int | None, str]]:
+    return [(i.inbound_id, i.payload) for i in window.items if i.kind == "inbound_chat"]
+
+
+def _read_agy(
+    pool: ConnectionPool, agent: int, home: Path, tmp_path: Path, **fields: object
+) -> HarnessTimelineWindow:
+    return read_harness_timeline(
+        _request(agent, harness="antigravity", **fields),
+        pool=pool,
+        home=home,
+        unread=UnreadRows(),
+        environ={"HOME": str(tmp_path)},
     )
 
+
+def test_agy_ledger_matching_preserves_uploads_notes_and_page_identity(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    other = create_agent(db_conn)
+    first = _claimed(db_conn, agent, "hello attachments", "batch")
+    _ = _claimed(db_conn, other, "hello attachments", "batch")
+    note = _claimed(db_conn, agent, "memory instruction", "batch")
+    hidden = _claimed(db_conn, agent, "restart note", "batch")
+    upload = {
+        "name": "paper.txt",
+        "size": 12,
+        "content_type": "text/plain",
+        "batch_id": "a" * 32,
+        "ordinal": 0,
+    }
+    db_conn.execute(
+        "UPDATE inbound_messages SET payload=%s::jsonb WHERE id=%s",
+        (
+            json.dumps(
+                {
+                    "harness_input_key": "batch",
+                    "image_uploads": [{"batch_id": "b" * 32, "ordinal": 1}],
+                    "upload_files": [upload, {"batch_id": "bad"}],
+                }
+            ),
+            first,
+        ),
+    )
+    db_conn.execute(
+        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
+        (json.dumps({"harness_input_key": "batch", "note_tag": "memory"}), note),
+    )
+    db_conn.execute(
+        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
+        (json.dumps({"harness_input_key": "batch", "note_tag": "lifecycle_restart"}), hidden),
+    )
+    db_conn.commit()
+    at = "2026-11-12T08:57:00Z"
+    text = "hello attachments memory instruction restart note"
+    rows = [
+        _sent("batch", text, at),
+        _planner("first reply", at),
+        _sent("batch", text, at),
+        _planner("second reply", at),
+    ]
+    home = _agy_record(tmp_path, agent, rows, stamp=at)
+
     def read(before: int | None = None, limit: int = 50):
-        return read_harness_timeline(
-            _request(agent, harness="antigravity", before=before, limit=limit),
-            pool=pool,
-            home=home,
-            unread=UnreadRows(),
-            environ={"HOME": str(tmp_path)},
-        )
+        return _read_agy(pool, agent, home, tmp_path, before=before, limit=limit)
 
     full = read()
     inbound = [item for item in full.items if item.kind == "inbound_chat"]
@@ -458,6 +485,74 @@ def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
     notes = [item for item in full.items if item.kind == "system_marker"]
     assert [(item.source, item.payload) for item in notes] == [("memory", "memory instruction")]
     assert _paged_items(read) == full.items
+
+
+def test_a_new_agy_input_takes_its_own_row_and_never_an_earlier_one_whose_text_it_holds(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    one = _claimed(
+        db_conn, agent, "1", "k-one", "2026-11-26T07:00:16.300Z", "2026-11-26T07:00:16.365Z"
+    )
+    two = _claimed(
+        db_conn, agent, "B", "k-two", "2026-11-26T07:06:52.596Z", "2026-11-26T07:06:52.896Z"
+    )
+    rows = [
+        _sent("k-one", "1", "2026-11-26T07:00:16Z"),
+        _planner("ok", "2026-11-26T07:00:20Z"),
+        _sent("k-two", "B", "2026-11-26T07:06:52Z"),
+    ]
+    home = _agy_record(tmp_path, agent, rows)
+    assert _inbound(_read_agy(pool, agent, home, tmp_path)) == [(one, "1"), (two, "B")]
+
+    record = tmp_path / ".gemini/antigravity-cli/brain" / SESSION / ".system_generated/logs"
+    file = AntigravityRecordFile(record / "transcript_full.jsonl")
+    wanted = agy_input_wire_ids(file.rows_before(file.complete_end(), 1).rows)
+    assert len(wanted) == 1
+    found = load_sent_rows(
+        db_conn,
+        agent,
+        until=max(held.stamp for held in wanted.values()),
+        wanted=wanted,
+        wire_id=agy_wire_id,
+    )
+    assert [row.id for row in found.rows] == [two]
+
+
+def test_a_batch_of_agy_rows_sharing_one_key_is_matched_through_the_ledger(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    first = _claimed(
+        db_conn, agent, "first", "batch", "2026-11-26T07:00:00Z", "2026-11-26T07:00:05Z"
+    )
+    second = _claimed(
+        db_conn, agent, "second", "batch", "2026-11-26T07:00:01Z", "2026-11-26T07:00:05Z"
+    )
+    rows = [_sent("batch", "first\n\nsecond", "2026-11-26T07:00:06Z")]
+    home = _agy_record(tmp_path, agent, rows)
+    assert _inbound(_read_agy(pool, agent, home, tmp_path)) == [
+        (first, "first"),
+        (second, "second"),
+    ]
+
+
+def test_an_agy_row_the_ledger_does_not_name_shows_no_user_bubble(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    mine = _claimed(db_conn, agent, "B", "k-mine", "2026-11-26T07:06:52Z", "2026-11-26T07:06:53Z")
+    rows: list[dict[str, object]] = [
+        {
+            "type": "USER_INPUT",
+            "created_at": "2026-11-26T07:06:50Z",
+            "content": "<USER_REQUEST>B</USER_REQUEST>",
+        },
+        _sent("synthetic-control-key", "context reset", "2026-11-26T07:06:00Z"),
+        _sent("k-mine", "B", "2026-11-26T07:06:54Z"),
+    ]
+    home = _agy_record(tmp_path, agent, rows)
+    assert _inbound(_read_agy(pool, agent, home, tmp_path)) == [(mine, "B")]
 
 
 def _paged_items(read: Callable[[int | None, int], HarnessTimelineWindow]) -> list[TimelineItem]:
