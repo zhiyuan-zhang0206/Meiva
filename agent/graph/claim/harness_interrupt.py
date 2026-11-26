@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
-from contextlib import suppress
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
+from contextlib import asynccontextmanager, suppress
+from functools import partial
+from inspect import isawaitable
 from typing import Protocol
 
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
@@ -47,11 +49,59 @@ class HarnessTimeline(Protocol):
     ) -> None: ...
 
 
+TimelineEffect = Callable[[], Awaitable[None] | None]
+
+
+# meiva:link agent/graph/docs/harness-turn.md
+class TimelineNotifications:
+    def __init__(self, agent_id: int, sink: HarnessTimeline) -> None:
+        self.sink = sink
+        self._agent_id = agent_id
+        self._pending = asyncio.Queue[TimelineEffect | None]()
+
+    def post(self, effect: TimelineEffect) -> None:
+        self._pending.put_nowait(effect)
+
+    @asynccontextmanager
+    async def running(self) -> AsyncGenerator[None]:
+        outcome: BaseException | None = None
+        async with asyncio.TaskGroup() as tasks:
+            worker = tasks.create_task(self._consume(), name=f"harness-projection-{self._agent_id}")
+            try:
+                yield
+            except BaseException as error:
+                outcome = error
+                if isinstance(error, asyncio.CancelledError):
+                    _ = worker.cancel()
+            finally:
+                self._pending.put_nowait(None)
+        if outcome is not None:
+            raise outcome
+
+    async def _consume(self) -> None:
+        while (effect := await self._pending.get()) is not None:
+            await self._apply(effect)
+
+    async def flush_text(self) -> None:
+        await self._apply(self.sink.flush_text)
+
+    async def _apply(self, effect: TimelineEffect) -> None:
+        try:
+            if isawaitable(work := effect()):
+                await work
+        except Exception:
+            logger.opt(exception=True).warning(
+                "could not apply a harness timeline notification",
+                event="harness_live_timeline_failed",
+                agent_id=self._agent_id,
+            )
+
+
 async def await_foreground(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: HarnessTimeline,
+    projector: TimelineNotifications,
     execute: Callable[[], Awaitable[None]],
 ) -> None:
     resources = ctx.hosted_resources
@@ -67,7 +117,13 @@ async def await_foreground(
         async def request_interrupt() -> None:
             await interrupt.wait()
             if error := await interrupt_engine(agent_id, bridge):
-                await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
+                projector.post(
+                    partial(
+                        projector.sink.record_control,
+                        f"Cancellation unconfirmed: {error}",
+                        error=True,
+                    )
+                )
 
         async def go() -> None:
             await _with_interrupt(execute, request_interrupt, agent_id)
@@ -115,7 +171,7 @@ async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
     work: Awaitable[None],
-    projector: HarnessTimeline,
+    projector: TimelineNotifications,
 ) -> None:
     async def settle() -> BaseException | None:
         try:

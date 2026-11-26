@@ -152,10 +152,10 @@ class ReadTimelineSink:
         self._dirty = asyncio.Event()
         self._busy = asyncio.Lock()
         self._closed_turns = 0
-        self._history_end = self._start_offset()
-        self._seen_stat: tuple[int, ...] | None = (
-            None if self._file is None else self._file.watch_signature()
-        )
+        self._history_end: int | None = None
+        self._seen_stat: tuple[int, ...] | None = None
+        with self._log_projection_failure():
+            self._snapshot_start()
         self._floor: int | None = None
         self._input_keys: list[str] = []
         self._fork_source_loaded = False
@@ -416,10 +416,17 @@ class ReadTimelineSink:
         return self._file
 
     # meiva:note
-    # The end of the record as the sink began: what lies before it was written by an earlier process.
-    def _start_offset(self) -> int:
+    # Snapshot the old history before any input is delivered. When the record
+    # cannot be opened, its size is a conservative upper bound on the old
+    # complete rows. A failed lookup leaves the publication boundary unknown.
+    def _snapshot_start(self) -> None:
         file = self._resolve()
-        return 0 if file is None else file.complete_end()
+        if file is None:
+            self._history_end = 0
+            return
+        self._history_end = file.size()
+        self._history_end = file.complete_end()
+        self._seen_stat = file.watch_signature()
 
     def _publish(self, projected: Projected, end: int) -> None:
         shown = {item.item.item_id for item in projected.items}
@@ -492,6 +499,8 @@ class ReadTimelineSink:
 
     async def _deliver(self, items: Sequence[ProjectedItem], *, anchored: bool = False) -> None:
         floor = self._fork_floor or 0 if anchored else await self._delivery_floor()
+        if floor is None:
+            return
         replies = [
             (reply_key(self._harness, item.key, self._session_id()), item.item)
             for item in items
@@ -507,7 +516,7 @@ class ReadTimelineSink:
     # everything is offered, which the key makes a no-op for what was delivered. A Claude Code fork never falls below
     # its persisted fork floor, because its record carries the parent's pre-fork rows and key-dedup cannot filter rows
     # this child never published.
-    async def _delivery_floor(self) -> int:
+    async def _delivery_floor(self) -> int | None:
         if self._floor is None:
 
             def switched() -> bool:
@@ -517,6 +526,8 @@ class ReadTimelineSink:
                     )
 
             base = 0 if await asyncio.to_thread(switched) else self._history_end
+            if base is None:
+                return None
             self._floor = max(base, self._fork_floor or 0)
         return max(self._floor, self._fork_floor or 0)
 
@@ -580,7 +591,7 @@ class ReadTimelineSink:
             parent_end, saw_child = fork_floor.parent_fork_cut(file, parent_uuids)
             if parent_end is not None:
                 return parent_end if saw_child else None
-        if self._history_end > 0:
+        if self._history_end:
             return self._history_end
         return None
 

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
-from typing import Literal
+from functools import partial
 
 from psycopg_pool import PoolTimeout
 
@@ -40,7 +40,7 @@ from agent.graph.claim.harness_inbox import (
     reserve_head_batch,
     settle_halted_turn,
 )
-from agent.graph.claim.harness_interrupt import HarnessTimeline
+from agent.graph.claim.harness_interrupt import TimelineNotifications
 from agent.graph.claim.harness_render import (
     native_images,
     render_messages,
@@ -74,11 +74,9 @@ from base.lm.harness import (
     completed_turn,
     fault_of_event,
 )
-from base.lm.harness.engine import HarnessTurn, TurnEngine
+from base.lm.harness.engine import TurnEngine
 from base.log import logger
 from base.telemetry.tracing import link_inbox_input
-
-HarnessGoto = Literal["claim"]
 
 # meiva:note
 # Delivery is woken by the host's inbound wake, so the queue is not polled while a turn runs. The
@@ -113,7 +111,7 @@ class ForegroundRun:
         ctx: MeivaContext,
         agent_id: int,
         bridge: TurnEngine,
-        projector: HarnessTimeline,
+        projector: TimelineNotifications,
         state: _state.AgentState,
         publisher: AgentEventPublisher,
         *,
@@ -287,7 +285,9 @@ class ForegroundRun:
     def _inbound_committed(self, *, human_input: bool = False) -> None:
         if human_input:
             self.protocol.non_human_wake = False
-        self._projector.inbound_committed(human_input=human_input)
+        self._projector.post(
+            partial(self._projector.sink.inbound_committed, human_input=human_input)
+        )
 
     async def _apply(self, plan: Reconciled) -> list[int]:
         marked = await apply_reconciled(self._ctx, self._agent_id, plan, self._inbound_committed)
@@ -429,7 +429,7 @@ class ForegroundRun:
             raise fault
         settlements = self._advance_foreground(event)
         if self.protocol.observe(event):
-            await self._projector.on_event(event)
+            self._projector.post(partial(self._projector.sink.on_event, event))
         match event:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
@@ -454,8 +454,21 @@ class ForegroundRun:
                 log_turn_usage, self._ctx, self._agent_id, self._bridge.model, turn
             )
         finally:
-            await self._finish_completed_turn(turn)
-            self._committed_by_turn.pop(event.turn_id, None)
+            self._projector.post(
+                partial(
+                    self._projector.sink.finish,
+                    (turn,),
+                    interrupted=turn.interrupted,
+                    input_keys=self._turn_inputs.pop(turn.turn_id, []),
+                )
+            )
+            requires_record = not turn.interrupted and bool(self.protocol.has_activity or turn.text)
+            if (
+                requires_record
+                and (record_error := await self._check_completed_record()) is not None
+            ):
+                raise record_error
+            _ = self._committed_by_turn.pop(event.turn_id, None)
             if not turn.is_error:
                 self.protocol.has_delivered_output = False
                 self._taken_back_for_abort = ()
@@ -463,21 +476,9 @@ class ForegroundRun:
             if turn.interrupted:
                 self.interrupted = True
             else:
-                self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
+                done = LLMDone(agent_id=self._agent_id).model_dump_json()
+                self._projector.post(partial(self._publisher.emit, done))
                 await persist_last_active(self._ctx, self._agent_id, turn.text)
-
-    async def _finish_completed_turn(self, turn: HarnessTurn) -> None:
-        projection = self._projector.finish(
-            (turn,),
-            interrupted=turn.interrupted,
-            input_keys=self._turn_inputs.pop(turn.turn_id, []),
-        )
-        if turn.interrupted or not (self.protocol.has_activity or turn.text):
-            await projection
-            return
-        _, record_error = await asyncio.gather(projection, self._check_completed_record())
-        if record_error is not None:
-            raise record_error
 
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:
@@ -746,7 +747,9 @@ class ForegroundRun:
         self._begin_delivery(handed)
         if group is not None:
             await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
-        self._projector.note_input_keys([item.key for item in inputs])
+        self._projector.post(
+            partial(self._projector.sink.note_input_keys, [item.key for item in inputs])
+        )
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError as exc:

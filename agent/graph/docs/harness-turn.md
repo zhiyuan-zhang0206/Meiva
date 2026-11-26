@@ -50,10 +50,14 @@ An external agent's timeline is not written to a database table: it is read from
 - The live sink is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
   sink dirty, and after half a second it reads the bytes the CLI appended since its last read, projects them with the
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
-  carries the item published before it and every call still running). A turn's end waits, for at most two seconds, until
-  the read shows a closing row. The sink's state (offset, open turn, calls awaiting a result) is in memory only; a new
-  sink starts at the start of the record's last turn. A reply the sink could not
-  deliver is retried by the next invocation when it reads the last turn and delivers by key.
+  carries the item published before it and every call still running). A single consumer applies
+  notifications in order and waits up to two seconds for a closing row. The foreground keeps
+  settling events and steering while that consumer waits. The invocation drains the notification
+  queue after choosing its outcome. The sink's state is in memory only. A reply the sink could
+  not deliver is retried by the next invocation when it reads the last turn and delivers by key.
+  When the starting record cannot be opened, the sink uses its initial file size as an upper
+  bound on historical rows. If even the starting boundary is unknown, migration-era delivery
+  waits for a later invocation to establish it. Existing keyed publications can still deduplicate.
 - The foreground folds adapter events into `TurnProtocol` for abort handling, input handback,
   wake polarity and reply correction. It commits inbox settlements before notifying the live sink.
   A normal completion with activity or reply text must have a live-readable adapter record. The

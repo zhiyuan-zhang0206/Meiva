@@ -379,6 +379,10 @@ async def test_quota_abort_only_requeues_failed_turn_after_earlier_turn_succeede
                     TextDelta("t1", "MEIVA_DISPLAY_TO_USER\nturn one complete"),
                     completed("t1", "MEIVA_DISPLAY_TO_USER\nturn one complete"),
                 )
+                await wait_until(lambda: row_status(db_conn, row1) == "done", "first row committed")
+                row2_holder.append(
+                    insert_row(db_conn, agent_id, "chat", "user", "turn two hits quota")
+                )
             else:
                 self.emit(
                     TurnStarted("t2", TurnOrigin.INPUT, tuple(keys), 1),
@@ -388,16 +392,8 @@ async def test_quota_abort_only_requeues_failed_turn_after_earlier_turn_succeede
 
     engine = TwoTurnEngine()
     rt = harness_runtime(engine, agent_id=agent_id)
-    node_task = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
-
-    await wait_until(lambda: len(engine.delivered) == 1, "first turn delivered")
-    await wait_until(lambda: row_status(db_conn, row1) == "done", "first turn row committed")
-    row2 = insert_row(db_conn, agent_id, "chat", "user", "turn two hits quota")
-    row2_holder.append(row2)
-    engine.notify_inbound()
-
     with pytest.raises(HarnessTurnHaltedError) as failed:
-        await asyncio.wait_for(node_task, 20)
+        await asyncio.wait_for(harness_turn_node(AgentState(), rt, config(agent_id)), 20)
 
     assert failed.value.requeued_inbound_ids == (row2_holder[0],)
     assert row_status(db_conn, row1) == "done"

@@ -14,6 +14,7 @@ from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_inbox import restart_owed, settle_stale_interrupts
 from agent.graph.claim.harness_interrupt import (
     HarnessTimeline,
+    TimelineNotifications,
     announce_interrupt,
     await_foreground,
 )
@@ -198,7 +199,7 @@ async def _handle_harness_abort(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: HarnessTimeline,
+    projector: TimelineNotifications,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
 ) -> HarnessTurnHaltedError | None:
@@ -214,7 +215,7 @@ async def _finish_harness_abort(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: HarnessTimeline,
+    projector: TimelineNotifications,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
 ) -> HarnessTurnHaltedError | None:
@@ -232,7 +233,7 @@ async def _finish_harness_abort(
     produced_output = run.protocol.has_activity
     marked = await run.retire_unconfirmed()
     if produced_output:
-        await projector.finish(error=str(exc))
+        projector.post(partial(projector.sink.finish, error=str(exc)))
     elif marked:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     if halt_reason is not None:
@@ -273,7 +274,7 @@ async def _settle_exit_cut(
     agent_id: int,
     state: _state.AgentState,
     bridge: TurnEngine,
-    projector: HarnessTimeline,
+    projector: TimelineNotifications,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
     extra_updates: dict[str, object],
@@ -281,7 +282,7 @@ async def _settle_exit_cut(
     await bridge.retire(reason="session unavailable")
     produced_output = run.protocol.has_activity
     marked = await run.retire_unconfirmed()
-    await projector.finish(interrupted=True)
+    projector.post(partial(projector.sink.finish, interrupted=True))
     if marked and not produced_output:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     logger.info(
@@ -309,20 +310,19 @@ async def run_harness_turn(
 ) -> Command[HarnessGoto]:
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
-    extra_updates: dict[str, object] = {}
-
     session_id = _session_of(ctx, agent_id, ctx.harness.value)
-    projector = (
-        ReadTimelineSink(
+    sink = (
+        timeline
+        if timeline is not None
+        else ReadTimelineSink(
             ctx,
             agent_id,
             event_publisher,
             non_human_wake=state.non_human_wake,
             session_id=session_id,
         )
-        if timeline is None
-        else timeline
     )
+    projector = TimelineNotifications(agent_id, sink)
     run = ForegroundRun(
         ctx,
         agent_id,
@@ -334,12 +334,25 @@ async def run_harness_turn(
         stall_seconds=ctx.require_agent().read("agent", "harness_turn_stall_seconds"),
     )
     await settle_stale_interrupts(ctx, agent_id)
+    async with projector.running():
+        return await _run_foreground(ctx, agent_id, state, bridge, projector, run)
+
+
+async def _run_foreground(
+    ctx: MeivaContext,
+    agent_id: int,
+    state: _state.AgentState,
+    bridge: TurnEngine,
+    projector: TimelineNotifications,
+    run: ForegroundRun,
+) -> Command[HarnessGoto]:
+    extra_updates: dict[str, object] = {}
 
     try:
         await await_foreground(ctx, agent_id, bridge, projector, run.execute)
     except ModelInterruptedError as exc:
         await run.retire_unconfirmed()
-        await projector.finish(interrupted=True)
+        projector.post(partial(projector.sink.finish, interrupted=True))
         _apply_wake_polarity(state, run, extra_updates)
         return Command[HarnessGoto](
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
@@ -351,7 +364,7 @@ async def run_harness_turn(
             and not _is_quota_exhaustion(exc)
         ):
             await bridge.retire(reason="session unavailable")
-            await projector.finish()
+            projector.post(projector.sink.finish)
             logger.info(
                 "harness session closed after delivering replies while waiting on background "
                 "work; session retired and agent idles cleanly ({detail})",
@@ -398,10 +411,10 @@ async def run_harness_turn(
             )
         raise
 
-    await projector.finish(interrupted=run.interrupted)
+    projector.post(partial(projector.sink.finish, interrupted=run.interrupted))
     _apply_wake_polarity(state, run, extra_updates)
     if run.interrupted:
-        announce_interrupt(ctx, agent_id)
+        projector.post(partial(announce_interrupt, ctx, agent_id))
     return Command[HarnessGoto](
         update={
             **extra_updates,
