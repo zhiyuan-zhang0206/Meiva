@@ -16,7 +16,9 @@ daemon readiness test.
 
 The manifest generator (`manifests.py`) also derives each unit's stop window and
 `stop_tier`: a `ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM
-cleanup can outlast root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`.
+cleanup can outlast root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`. A spec with `term_leader_only` (the
+agent-host) emits that manifest field: root's graceful stop TERMs its leader pid alone, so
+the harness CLIs in its process group survive until its drain has ended their turns.
 The gateway's ceiling is uvicorn's drain budget
 (`gateway.gateway_graceful_shutdown_timeout_seconds`) plus the lifespan cleanup
 allowance, read from the same setting the launch hands uvicorn; browser-mcp's is

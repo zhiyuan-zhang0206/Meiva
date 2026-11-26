@@ -74,11 +74,12 @@ class _Legacy:
     db_access: str | None = None
     gated: bool = False
     stop_ceiling_s: float | None = None
+    term_leader_only: bool = False
 
 
 # meiva:note
 # The agent-host and ops rows also declare the stop ceiling their SIGTERM exits added after
-# the migration (the host settles running turns to their restart, ops drains the requests it
+# the migration (the host settles running turns to their restart and is TERMed alone, ops drains the requests it
 # admitted), and schedule-manager declares its move to both_services with runner DB access:
 # those deliberate changes are updated in place while every other launch fact stays locked.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
@@ -120,6 +121,7 @@ _LEGACY = (
         True,
         profile="agent",
         stop_ceiling_s=HOST_STOP_CEILING_S,
+        term_leader_only=True,
     ),
     _Legacy(
         "ops",
@@ -164,6 +166,7 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         if row.session == "memory-indexer"
         else (),
         stop_ceiling_s=row.stop_ceiling_s,
+        term_leader_only=row.term_leader_only,
     )
 
 

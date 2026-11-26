@@ -7,6 +7,23 @@ KeyboardInterrupt route of `base/daemon/shutdown.py` still applies.
 duration of `serve_until_exit`; on leaving, a SIGTERM that arrived leaves the
 signal ignored, so a retry cannot abort the exit it started.
 
+## Who is signalled
+
+Root's graceful stop sends this SIGTERM to the agent-host's **leader pid alone**
+(`term_leader_only` on the unit, declared by the roster;
+`services/supervision/meiva_root/stopping.py::signal_owned`). The host's
+external-harness children (the Claude Code CLI, the Codex app-server) share its
+process group, so a group TERM would end them within milliseconds (exit 143, app-server
+stdout closed) and the drain's interrupt, which needs a live CLI to end the
+turn at, would never run. With a leader-only TERM those turns end as a native
+turn's do: the restart is reached at a boundary, or interrupts the call after its grace,
+and the CLI is closed by the host's own cleanup. Once the host has exited, root sends
+TERM to whatever it left in the group and escalates to SIGKILL of the group past the unit's
+window, as for any unit. Force (`--mode force`, an escaped window) still signals the group.
+The setting lives in root's manifest, frozen when root starts, and the signalling code in
+the root process: a change reaches a running root only through a stop and start of root
+(`meiva restart --only agent-host` does not reload it).
+
 ## Steps
 
 1. **Close admission.** `TurnScheduler.stop_admission` refuses every later wake,
@@ -25,8 +42,9 @@ signal ignored, so a retry cannot abort the exit it started.
    from reading as planned once its budget is over. Root's
    health replacement of a host it observed down sends the same SIGTERM but writes
    no journal, and the plugin watcher's own restart writes none either, so those
-   exits are not planned. A turn that aborts during a planned exit (typically the
-   external harness's CLI killed with the host) emits `llm_turn_aborted` with
+   exits are not planned. A turn that aborts during a planned exit (an external harness's CLI
+   killed with the host, as before root signalled the leader alone or when the host is
+   signalled as a group) emits `llm_turn_aborted` with
    `cause=planned_restart`, which `meiva-ops-llm-turn-aborted` leaves out; an abort
    in any other exit, or outside one, carries no cause and alerts.
 2. **One lifecycle command per running turn (and passive notes when explained).**
@@ -64,7 +82,7 @@ signal ignored, so a retry cannot abort the exit it started.
    is idle and only reads "Restart was accepted from system:restart".
    A turn that ends before its next claim leaves the restart pending instead;
    the next host claims it. A turn that died with the process (an external
-   harness's CLI is killed with the host, so its turn fails before it reaches the
+   harness's CLI killed with the host, as by a group signal or a crash, so its turn fails before it reaches the
    restart) is stamped as a crash; the next host's claim reads that stamp on the
    host's own restart (`source='system:restart'`) and treats the turn as unfinished,
    so the apply queues the continuation note and the agent wakes. Without the stamp

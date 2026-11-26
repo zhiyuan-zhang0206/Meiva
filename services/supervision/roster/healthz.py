@@ -94,6 +94,7 @@ def healthz_daemon(
     plugin_config: tuple[str, BaseModel] | None = None,
     db_access: DbAccess | None = None,
     stop_ceiling_s: float | None = None,
+    term_leader_only: bool = False,
     bind_host: Callable[[], str] | None = None,
 ) -> ServiceSpec:
     """A roster entry for a standard ``/healthz`` daemon.
@@ -105,7 +106,7 @@ def healthz_daemon(
         capabilities: which machine capabilities run it.
         requires_db: whether it dials Postgres; no default because a database
             outage holds exactly the services that say yes.
-        gate, profile, no_profile_marker, config_inputs, plugin_config, db_access, stop_ceiling_s: the optional
+        gate, profile, no_profile_marker, config_inputs, plugin_config, db_access, stop_ceiling_s, term_leader_only: the optional
             declarations of ``ServiceSpec``, passed through unchanged.
 
     Raises:
@@ -139,4 +140,5 @@ def healthz_daemon(
         plugin_config=plugin_config,
         db_access=db_access,
         stop_ceiling_s=stop_ceiling_s,
+        term_leader_only=term_leader_only,
     )

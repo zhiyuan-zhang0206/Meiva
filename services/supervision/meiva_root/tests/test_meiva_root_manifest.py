@@ -258,6 +258,24 @@ def test_invalid_stop_tier_is_rejected(bad: object) -> None:
         UnitManifest.from_mapping(_manifest(stop_tier=bad), origin="t")
 
 
+def test_term_leader_only_is_optional_typed_and_part_of_the_generation() -> None:
+    default = UnitManifest.from_mapping(_manifest(), origin="t")
+    assert default.term_leader_only is False
+    leader_only = UnitManifest.from_mapping(_manifest(term_leader_only=True), origin="t")
+    assert leader_only.term_leader_only is True
+    assert leader_only.digest() != default.digest()
+    assert (
+        default.digest()
+        == UnitManifest.from_mapping(_manifest(term_leader_only=False), origin="t").digest()
+    )
+
+
+@pytest.mark.parametrize("bad", [1, 0, "true", [True]])
+def test_invalid_term_leader_only_is_rejected(bad: object) -> None:
+    with pytest.raises(ManifestError, match="term_leader_only"):
+        UnitManifest.from_mapping(_manifest(term_leader_only=bad), origin="t")
+
+
 def test_load_manifests_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="cannot read manifest file"):
         load_manifests(tmp_path / "absent.json")

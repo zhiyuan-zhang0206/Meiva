@@ -31,6 +31,7 @@ def root(
     *scenario: str,
     stop_timeout_s: float | None = None,
     default_window_s: float = _DEFAULT_WINDOW_S,
+    term_leader_only: bool = False,
 ) -> Supervisor:
     unit = UnitManifest(
         "worker",
@@ -38,6 +39,7 @@ def root(
         RestartPolicy.ALWAYS,
         "root",
         stop_timeout_s=stop_timeout_s,
+        term_leader_only=term_leader_only,
     )
     return Supervisor(
         UnitRegistry([unit]),
@@ -411,5 +413,72 @@ async def test_same_tier_slow_units_stop_in_parallel_preserving_result_order(
         recorded = events.read_text(encoding="utf-8").splitlines()
         assert set(recorded[:3]) == {f"term {name}" for name in names}
         assert set(recorded[3:]) == {f"exit {name}" for name in names}
+    finally:
+        await owner.shutdown()
+
+
+def _gone(pid: int) -> bool:
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
+async def _stop_leader_beside_group_child(
+    tmp_path: Path, *, term_leader_only: bool, recorder: _Recorder
+) -> tuple[str, int]:
+    ready, report, child_file = tmp_path / "ready", tmp_path / "report", tmp_path / "child.pid"
+    owner = root(
+        tmp_path,
+        "drains_beside_group_child",
+        str(child_file),
+        str(report),
+        str(ready),
+        stop_timeout_s=3.0,
+        term_leader_only=term_leader_only,
+    )
+    await owner.start()
+    await wait_file(ready)
+    try:
+        await owner.down("worker")
+        assert recorder.events("root_unit_stop_escalated") == []
+        return report.read_text(), int(child_file.read_text())
+    finally:
+        await owner.shutdown()
+
+
+async def test_a_group_term_ends_the_leaders_children_while_it_is_still_draining(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    report, child = await _stop_leader_beside_group_child(
+        tmp_path, term_leader_only=False, recorder=recorder
+    )
+    assert report == "child-ended"
+    assert _gone(child)
+
+
+async def test_a_leader_only_term_lets_the_leader_drain_before_its_children_are_reaped(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    report, child = await _stop_leader_beside_group_child(
+        tmp_path, term_leader_only=True, recorder=recorder
+    )
+    assert report == "child-running"
+    assert _gone(child), "the group the leader left was reaped within the window"
+
+
+async def test_a_leader_only_unit_that_ignores_term_still_escalates_to_a_group_kill(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    ready = tmp_path / "ready"
+    owner = root(tmp_path, "ignore_term", str(ready), stop_timeout_s=0.5, term_leader_only=True)
+    await owner.start()
+    await wait_file(ready)
+    pid = cast("list[dict[str, Any]]", (await owner.status())["units"])[0]["pid"]
+    try:
+        await owner.down("worker")
+        assert not psutil.pid_exists(pid)
+        escalated = recorder.events("root_unit_stop_escalated")
+        assert [event["reason"] for event in escalated] == ["escaped_term_window"]
     finally:
         await owner.shutdown()

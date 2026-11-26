@@ -65,6 +65,10 @@ class ServiceSpec:
             restate the number. Root's window for the unit is this plus
             ``services.supervision.meiva_root_glue.manifests.STOP_MARGIN_S``; None = the service
             finishes inside root's default window.
+        term_leader_only: root's graceful stop sends TERM to this service's leader pid alone,
+            not its process group, then reaps whatever the leader leaves in the group. A
+            service whose own shutdown closes children it must be allowed to drain (the agent
+            host's external-harness CLIs) declares it; default False = TERM to the group.
         curl_url: HTTP readiness endpoint; None for non-HTTP protocols.
         tcp_port: listener port for a non-HTTP protocol readiness probe.
         identity_probe: a protocol readiness callback returning DaemonProbe.
@@ -142,6 +146,7 @@ class ServiceSpec:
     # whose bearer is rendered into its configuration, receives none.
     api_access_from_host: bool = False
     stop_ceiling_s: float | None = None
+    term_leader_only: bool = False
     health_name: str | None = None
     home_healthz: bool = False
     plugin_config: tuple[str, BaseModel] | None = None

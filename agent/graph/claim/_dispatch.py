@@ -427,17 +427,20 @@ async def handle_restart(
 #
 #     `halted` alone cannot say so. An interrupt pauses an agent by setting it, and so does a
 #     model call or code run a restart interrupted, though that turn is unfinished:
-#     `interrupted_by_restart` marks the latter. An agent with no history is idle. A
+#     `interrupted_by_restart` marks the latter. An agent with no history is idle, unless a
+#     restart interrupted its turn: an external harness keeps its history in the CLI's record,
+#     so its checkpoint can hold no messages while a turn runs. A
 #     restart from the agent's own code (`meiva.self.restart()`) leaves its exec halted
 #     with the turn unfinished, so it never counts as idle.
 #
 #     The host's own restart (`HOST_RESTART_SOURCE`) is written for a turn that was running when the
 #     host exited. When that turn died before claiming it (an external harness's CLI is killed with
-#     the host), the next host's invocation starts with `halted` set and would read an idle agent;
+#     the host, as by a group signal or a crash), the next host's invocation starts with `halted` set and would read an idle agent;
 #     `crash_marked` is the durable record that the turn was cut short.
 def _turn_was_idle(state: _state.AgentState, item: ClaimedInbound, *, crash_marked: bool) -> bool:
     halted = state.halted and not state.interrupted_by_restart
-    return (halted or not state.messages) and item.source != "self" and not crash_marked
+    no_history = not state.messages and not state.interrupted_by_restart
+    return (halted or no_history) and item.source != "self" and not crash_marked
 
 
 async def _host_restart_found_crash(ctx: MeivaContext, item: ClaimedInbound) -> bool:

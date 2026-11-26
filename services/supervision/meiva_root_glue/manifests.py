@@ -152,6 +152,8 @@ def build_units(
         }
         if spec.stop_ceiling_s is not None:
             unit["stop_timeout_s"] = spec.stop_ceiling_s + STOP_MARGIN_S
+        if spec.term_leader_only:
+            unit["term_leader_only"] = True
         units.append(unit)
     return units
 

@@ -36,7 +36,13 @@ _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 # validators reject anything else, so field drift fails loudly instead of
 # being carried around silently.
 _REQUIRED_FIELDS = frozenset({"id", "exec", "restart"})
-_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "stop_timeout_s", "stop_tier"}
+_MANIFEST_FIELDS = _REQUIRED_FIELDS | {
+    "attach",
+    "env",
+    "stop_timeout_s",
+    "stop_tier",
+    "term_leader_only",
+}
 _FILE_FIELDS = frozenset({"units", "launch_digest"})
 
 
@@ -73,19 +79,23 @@ class UnitManifest:
     # meiva:note
     # Nonnegative stop-wave tier among siblings at the same attach level (0 stops first).
     stop_tier: int = 1
+    term_leader_only: bool = False
 
     def digest(self) -> str:
         """Bind executable and private environment without exposing credentials."""
+        fields: dict[str, object] = {
+            "id": self.id,
+            "exec": self.exec,
+            "restart": self.restart.value,
+            "attach": self.attach,
+            "env": self.env,
+            "stop_timeout_s": self.stop_timeout_s,
+            "stop_tier": self.stop_tier,
+        }
+        if self.term_leader_only:
+            fields["term_leader_only"] = True
         body = json.dumps(
-            {
-                "id": self.id,
-                "exec": self.exec,
-                "restart": self.restart.value,
-                "attach": self.attach,
-                "env": self.env,
-                "stop_timeout_s": self.stop_timeout_s,
-                "stop_tier": self.stop_tier,
-            },
+            fields,
             separators=(",", ":"),
             sort_keys=True,
         )
@@ -136,6 +146,7 @@ class UnitManifest:
             env=_parse_environment(raw.get("env", {}), origin),
             stop_timeout_s=_parse_stop_timeout(raw.get("stop_timeout_s"), origin),
             stop_tier=_parse_stop_tier(raw.get("stop_tier"), origin),
+            term_leader_only=_parse_term_leader_only(raw.get("term_leader_only"), origin),
         )
 
 
@@ -173,6 +184,14 @@ def _parse_stop_tier(raw: object, origin: str) -> int:
         return 1
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
         raise ManifestError(f"{origin}: stop_tier must be a nonnegative integer")
+    return raw
+
+
+def _parse_term_leader_only(raw: object, origin: str) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ManifestError(f"{origin}: term_leader_only must be a boolean")
     return raw
 
 

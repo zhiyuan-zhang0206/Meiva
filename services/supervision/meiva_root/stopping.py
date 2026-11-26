@@ -10,7 +10,7 @@ import asyncio
 import math
 import signal
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Never
@@ -143,11 +143,14 @@ def _foreign_birth_at_pid(identity: OwnedProcess) -> bool:
 # The group signal is the right one only for a leader that leads a group of its own: a leader
 # inside *our* group would take this process (and every sibling) down with it, so its pid is
 # signalled alone. `own_group` is that fact, handed in by whoever runs in this process.
+# `leader_only` (a unit's `term_leader_only`) signals the leader's pid alone even then: the
+# leader closes its own children, and `StoppingMixin` reaps the rest once the leader has exited.
 def signal_owned(
     identity: OwnedProcess,
     *,
     force: bool,
     own_group: int,
+    leader_only: bool = False,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
 ) -> bool:
     if not identity.live():
@@ -157,7 +160,7 @@ def signal_owned(
         group = process_control.getpgid(identity.pid)
         if not identity.live():
             return False
-        if group == identity.pid and group != own_group:
+        if group == identity.pid and group != own_group and not leader_only:
             process_control.killpg(group, signum)
         else:
             process_control.kill(identity.pid, signum)
@@ -239,11 +242,14 @@ class StoppingMixin:
         generation.closing = True
         identity = generation.identity
         pgid = self._owned_group(identity) if identity is not None else None
+        leader_only = runtime.manifest.term_leader_only
         if identity is not None:
-            self._signal_owned(identity, force=False)
+            self._signal_owned(identity, force=False, leader_only=leader_only)
         window = 0.0 if force else self._stop_window(runtime)
         deadline = began + window
         if await self._wait_exit(generation, window):
+            if leader_only and identity is not None:
+                self._term_group_survivors(pgid, identity)
             remaining = max(0.0, deadline - self._clock.monotonic())
             if await self._wait_group_empty(pgid, identity, remaining):
                 self._log_stopped(runtime, generation, began)
@@ -341,6 +347,12 @@ class StoppingMixin:
             f"unit {runtime.manifest.id} outlived its {window:g}s window and its "
             f"leader identity changed, so root did not kill it (pid {generation.proc.pid})"
         )
+
+    def _term_group_survivors(self, pgid: int | None, identity: OwnedProcess) -> None:
+        if pgid is None or not self._group_has_survivors(pgid, identity):
+            return
+        with suppress(ProcessLookupError, PermissionError):
+            self._process_control.killpg(pgid, signal.SIGTERM)
 
     def _kill_group(self, pgid: int, identity: OwnedProcess) -> bool:
         try:
@@ -444,10 +456,12 @@ class StoppingMixin:
         identity: OwnedProcess,
         *,
         force: bool,
+        leader_only: bool = False,
     ) -> bool:
         return signal_owned(
             identity,
             force=force,
+            leader_only=leader_only,
             own_group=self._own_group(),
             process_control=self._process_control,
         )

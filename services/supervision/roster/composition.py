@@ -361,6 +361,7 @@ def build_services(
             profile="agent",
             requires_db=True,
             stop_ceiling_s=HOST_STOP_CEILING_S,
+            term_leader_only=True,
         ),
         ServiceSpec(
             session="exec-host",
