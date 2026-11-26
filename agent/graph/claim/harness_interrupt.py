@@ -6,30 +6,52 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from contextlib import suppress
+from typing import Protocol
 
-from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InterruptScope
 from base.events.live.projection import Cancelled
-from base.lm.harness.engine import TurnEngine
+from base.lm.harness import BridgeEvent
+from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.log import logger
 
 # meiva:note
-# This tick keeps host custody alive while a harness owns the invocation. Provider
-# activity is recorded separately by the timeline projector.
+# This tick keeps host custody alive while a harness owns the invocation.
 # meiva:link agent/graph/docs/harness-turn.md
 PROGRESS_TICK_SECONDS = 60.0
+
+
+# meiva:link agent/graph/docs/harness-turn.md
+class HarnessTimeline(Protocol):
+    def note_input_keys(self, keys: Sequence[str]) -> None: ...
+
+    def inbound_committed(self, *, human_input: bool = False) -> None: ...
+
+    async def on_event(self, event: BridgeEvent) -> None: ...
+
+    async def flush_text(self) -> None: ...
+
+    async def record_control(self, text: str, *, error: bool = False) -> None: ...
+
+    async def finish(
+        self,
+        turns: Sequence[HarnessTurn] = (),
+        *,
+        interrupted: bool = False,
+        error: str | None = None,
+        input_keys: Sequence[str] = (),
+    ) -> None: ...
 
 
 async def await_foreground(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: ReadTimelineSink,
+    projector: HarnessTimeline,
     execute: Callable[[], Awaitable[None]],
 ) -> None:
     resources = ctx.hosted_resources
@@ -93,7 +115,7 @@ async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
     work: Awaitable[None],
-    projector: ReadTimelineSink,
+    projector: HarnessTimeline,
 ) -> None:
     async def settle() -> BaseException | None:
         try:

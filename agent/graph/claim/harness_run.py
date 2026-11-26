@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import Literal
@@ -19,6 +19,7 @@ from agent.graph.claim.harness_foreground import (
     Reconciled,
     Requeue,
     Settlement,
+    TurnProtocol,
     event_generation,
     merge_handed,
     plan_wake,
@@ -39,7 +40,7 @@ from agent.graph.claim.harness_inbox import (
     reserve_head_batch,
     settle_halted_turn,
 )
-from agent.graph.claim.harness_read_sink import ReadTimelineSink
+from agent.graph.claim.harness_interrupt import HarnessTimeline
 from agent.graph.claim.harness_render import (
     native_images,
     render_messages,
@@ -69,19 +70,11 @@ from base.lm.harness import (
     HarnessTurnStalledError,
     ImageBlock,
     InputInContext,
-    ReasoningDelta,
-    ReasoningText,
-    SubagentText,
-    TextDelta,
-    ToolResult,
-    ToolUse,
     TurnCompleted,
-    TurnOrigin,
-    TurnStarted,
     completed_turn,
     fault_of_event,
 )
-from base.lm.harness.engine import TurnEngine
+from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.log import logger
 from base.telemetry.tracing import link_inbox_input
 
@@ -120,10 +113,11 @@ class ForegroundRun:
         ctx: MeivaContext,
         agent_id: int,
         bridge: TurnEngine,
-        projector: ReadTimelineSink,
+        projector: HarnessTimeline,
         state: _state.AgentState,
         publisher: AgentEventPublisher,
         *,
+        check_completed_record: Callable[[], Awaitable[HarnessSetupError | None]],
         stall_seconds: float,
     ) -> None:
         if stall_seconds <= 0:
@@ -132,6 +126,11 @@ class ForegroundRun:
         self._agent_id = agent_id
         self._bridge = bridge
         self._projector = projector
+        self._check_completed_record = check_completed_record
+        self.protocol = TurnProtocol(
+            explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
+            non_human_wake=state.non_human_wake,
+        )
         self._publisher = publisher
         self._baseline = state.user_delivery_baseline
         self.fg = Foreground()
@@ -264,7 +263,9 @@ class ForegroundRun:
             )
             return []
         if plan is None:
-            return await mark_unconfirmed(self._ctx, self._agent_id, self._projector, unsettled)
+            return await mark_unconfirmed(
+                self._ctx, self._agent_id, unsettled, self._inbound_committed
+            )
         return await self._apply(plan)
 
     async def _reconcile_after_failure(self, unsettled: Sequence[Handed]) -> Reconciled | None:
@@ -283,8 +284,13 @@ class ForegroundRun:
             self._bridge, self._agent_id, unsettled, where="after_failure"
         )
 
+    def _inbound_committed(self, *, human_input: bool = False) -> None:
+        if human_input:
+            self.protocol.non_human_wake = False
+        self._projector.inbound_committed(human_input=human_input)
+
     async def _apply(self, plan: Reconciled) -> list[int]:
-        marked = await apply_reconciled(self._ctx, self._agent_id, self._projector, plan)
+        marked = await apply_reconciled(self._ctx, self._agent_id, plan, self._inbound_committed)
         if plan.requeue:
             self._changed.set()
         return marked
@@ -309,7 +315,7 @@ class ForegroundRun:
         handed = self._grouped(rows)
         plan = await reconcile_handed(self._bridge, self._agent_id, handed, where="session_start")
         if plan is None:
-            _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, handed)
+            _ = await mark_unconfirmed(self._ctx, self._agent_id, handed, self._inbound_committed)
             return
         deferred = {r.id for r in rows if is_deferred(r)}
         keep = tuple(h for h in plan.keep if not deferred.intersection(h.row_ids))
@@ -346,7 +352,7 @@ class ForegroundRun:
         self.fg = self.fg.withdraw(frozenset(h.key for h in kept))
         plan = await reconcile_handed(self._bridge, self._agent_id, kept, where="after_resume")
         if plan is None:
-            _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, kept)
+            _ = await mark_unconfirmed(self._ctx, self._agent_id, kept, self._inbound_committed)
             return
         _ = await self._apply(plan)
         await defer_reconciliation(self._ctx, self._agent_id, plan.keep)
@@ -422,22 +428,13 @@ class ForegroundRun:
         if (fault := fault_of_event(self._ctx.harness, event)) is not None:
             raise fault
         settlements = self._advance_foreground(event)
+        if self.protocol.observe(event):
+            await self._projector.on_event(event)
         match event:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
-                await self._projector.on_event(event)
                 if text.strip():
                     await persist_last_active(self._ctx, self._agent_id, text)
-            case (
-                ReasoningDelta()
-                | ReasoningText()
-                | TextDelta()
-                | SubagentText()
-                | ToolUse()
-                | ToolResult()
-                | TurnStarted(origin=TurnOrigin.HARNESS, record_start=int())
-            ):
-                await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):
                 self._turn_inputs.setdefault(turn_id, []).append(key)
             case TurnCompleted():
@@ -451,19 +448,16 @@ class ForegroundRun:
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
+        self.protocol.completed(turn)
         try:
             await asyncio.to_thread(
                 log_turn_usage, self._ctx, self._agent_id, self._bridge.model, turn
             )
         finally:
-            await self._projector.finish(
-                (turn,),
-                interrupted=turn.interrupted,
-                input_keys=self._turn_inputs.pop(event.turn_id, []),
-            )
+            await self._finish_completed_turn(turn)
             self._committed_by_turn.pop(event.turn_id, None)
             if not turn.is_error:
-                self._projector.reset_turn_delivery()
+                self.protocol.has_delivered_output = False
                 self._taken_back_for_abort = ()
             self._turn_ended = True
             if turn.interrupted:
@@ -472,14 +466,25 @@ class ForegroundRun:
                 self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
                 await persist_last_active(self._ctx, self._agent_id, turn.text)
 
+    async def _finish_completed_turn(self, turn: HarnessTurn) -> None:
+        projection = self._projector.finish(
+            (turn,),
+            interrupted=turn.interrupted,
+            input_keys=self._turn_inputs.pop(turn.turn_id, []),
+        )
+        if turn.interrupted or not (self.protocol.has_activity or turn.text):
+            await projection
+            return
+        _, record_error = await asyncio.gather(projection, self._check_completed_record())
+        if record_error is not None:
+            raise record_error
+
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:
             case Commit(handed=handed, turn_id=turn_id):
                 self._committed_by_turn.setdefault(turn_id, []).append(handed)
-                await self._projector.append_inbound(
-                    lambda: commit_handed(self._ctx, self._agent_id, [handed]),
-                    human_input=handed.human,
-                )
+                await commit_handed(self._ctx, self._agent_id, [handed])
+                self._inbound_committed(human_input=handed.human)
             case Requeue(handed=handed, reason=reason):
                 logger.info(
                     "harness input returned to the queue",
@@ -695,7 +700,7 @@ class ForegroundRun:
 
     def _begin_delivery(self, handed: Sequence[Handed]) -> None:
         if self._confirmed_background_wait or not self.awaiting_reply:
-            self._projector.reset_turn_delivery()
+            self.protocol.has_delivered_output = False
         self._confirmed_background_wait = False
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
@@ -732,9 +737,8 @@ class ForegroundRun:
         if not handed and not settled_now:
             return False
         if settled_now:
-            await self._projector.append_inbound(
-                lambda: commit_handed(self._ctx, self._agent_id, settled_now)
-            )
+            await commit_handed(self._ctx, self._agent_id, settled_now)
+            self._inbound_committed()
         await requeue_handed(self._ctx, self._agent_id, plan.held)
         if not handed:
             return True
@@ -775,7 +779,7 @@ class ForegroundRun:
         if not self._turn_ended or self.interrupted:
             return False
         self._turn_ended = False
-        invalid = self._projector.take_invalid_reply()
+        invalid = self.protocol.take_invalid_reply()
         correction = await harness_reply_correction(
             self._ctx,
             self._agent_id,

@@ -8,14 +8,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from functools import partial
-from typing import LiteralString
+from typing import LiteralString, Protocol
 
 from psycopg import sql
 
 from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
 from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
-from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_render import render_message
 from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.messages.reply_visibility import reply_visibility_note
@@ -384,29 +382,34 @@ async def reconcile_handed(
     return plan
 
 
+class _CommitNotification(Protocol):
+    def __call__(self, *, human_input: bool = False) -> None: ...
+
+
 # meiva:note
-# Consume the inputs whose fate cannot be established and return the inbox rows retired.
+# Notify the foreground after retiring an uncertain input so record readers can
+# see the committed settlement.
 async def mark_unconfirmed(
-    ctx: MeivaContext, agent_id: int, projector: ReadTimelineSink, handed: Sequence[Handed]
+    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed], on_commit: _CommitNotification
 ) -> list[int]:
-    return await projector.append_inbound(partial(retire_unconfirmed, ctx, agent_id, handed))
+    marked = await retire_unconfirmed(ctx, agent_id, handed)
+    on_commit()
+    return marked
 
 
 # meiva:note
-# Write what a reconciliation decided: inputs in the context settle like an acknowledgement, absent ones go
-# back to the queue (the caller wakes the delivery loop), inputs the record cannot tell about are retired.
-# Inputs the harness stored itself are left alone. Returns the rows retired.
+# Reconciled inputs enter the same settlement path as acknowledged ones. Notify
+# after each write so any earlier successful commit is visible if a later one fails.
 async def apply_reconciled(
-    ctx: MeivaContext, agent_id: int, projector: ReadTimelineSink, plan: Reconciled
+    ctx: MeivaContext, agent_id: int, plan: Reconciled, on_commit: _CommitNotification
 ) -> list[int]:
     for entry in plan.commit:
-        await projector.append_inbound(
-            partial(commit_reconciled, ctx, agent_id, [entry]), human_input=entry.human
-        )
+        await commit_reconciled(ctx, agent_id, [entry])
+        on_commit(human_input=entry.human)
     if plan.requeue:
         await requeue_handed(ctx, agent_id, plan.requeue)
     if plan.unknown:
-        return await mark_unconfirmed(ctx, agent_id, projector, plan.unknown)
+        return await mark_unconfirmed(ctx, agent_id, plan.unknown, on_commit)
     return []
 
 

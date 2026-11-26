@@ -17,7 +17,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_interrupt import announce_interrupt
-from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.harness_turn import harness_turn_node, run_harness_turn
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -33,14 +33,27 @@ from agent.graph.claim.tests.harness_support import (
 from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
-from agent.graph.llm_errors import FatalLLMStreamError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED
 from base.agents.tests.langgraph_views import command_update
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
-from base.lm.harness import HarnessInput, InputInContext, SessionFailed, TurnOrigin, TurnStarted
+from base.lm.harness import (
+    AssistantText,
+    BridgeEvent,
+    HarnessInput,
+    InputInContext,
+    ReasoningDelta,
+    SessionFailed,
+    TextDelta,
+    TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
+)
+from base.lm.harness.engine import HarnessTurn
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedTurnResources
@@ -280,3 +293,155 @@ async def test_a_session_killed_before_the_exit_wrote_its_restart_is_still_a_fat
             config(agent_id),
         )
     assert not [m for m in loguru_records.messages() if "graceful exit" in m]
+
+
+class NoTimeline:
+    def note_input_keys(self, keys: Sequence[str]) -> None:
+        pass
+
+    def inbound_committed(self, *, human_input: bool = False) -> None:
+        pass
+
+    async def on_event(self, event: BridgeEvent) -> None:
+        pass
+
+    async def flush_text(self) -> None:
+        pass
+
+    async def record_control(self, text: str, *, error: bool = False) -> None:
+        pass
+
+    async def finish(
+        self,
+        turns: Sequence[HarnessTurn] = (),
+        *,
+        interrupted: bool = False,
+        error: str | None = None,
+        input_keys: Sequence[str] = (),
+    ) -> None:
+        pass
+
+
+@pytest.mark.parametrize("streamed", [False, True])
+async def test_prefix_correction_is_sent_without_a_timeline(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture, *, streamed: bool
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        keys = [item.key for item in inputs]
+        if keys[0].endswith(":visibility-correction"):
+            return in_a_turn(keys, "MEIVA_DISPLAY_TO_USER\nDone.", turn_id="t2")
+        if streamed:
+            return in_a_turn(keys, "", activity=[AssistantText("t1", "Unmarked reply.")])
+        return in_a_turn(keys, "Unmarked reply.")
+
+    engine = FakeEngine(script=script)
+    ctx = harness_runtime(engine, agent_id=agent_id).context
+    publisher = ctx.event_publisher
+    assert publisher is not None
+    command = await run_harness_turn(
+        AgentState(non_human_wake=True),
+        ctx,
+        agent_id,
+        publisher,
+        timeline=NoTimeline(),
+    )
+    assert command_update(command)["non_human_wake"] is False
+    assert row_status(db_conn, row) == "done"
+    assert [[item.key for item in batch] for batch in engine.delivered] == [
+        [input_key(row)],
+        [f"{input_key(row)}:visibility-correction"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("host_exiting", "activity", "timeline"),
+    [
+        (False, False, NoTimeline()),
+        (False, True, NoTimeline()),
+        (True, False, NoTimeline()),
+        (True, True, NoTimeline()),
+        (True, True, None),
+    ],
+)
+async def test_session_cut_uses_stream_activity_without_a_timeline(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+    *,
+    host_exiting: bool,
+    activity: bool,
+    timeline: NoTimeline | None,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+
+    def script(_inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        failure = SessionFailed("child exited with status 143")
+        return (TextDelta("t1", "Partial output"), failure) if activity else (failure,)
+
+    class CutEngine(FakeEngine):
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
+            if host_exiting:
+                _ = insert_row(db_conn, agent_id, "restart", "system:restart", "")
+            await super().deliver(inputs, compaction_note=compaction_note)
+
+    engine = CutEngine(script=script)
+    ctx = replace(
+        harness_runtime(engine, agent_id=agent_id).context, host_exiting=lambda: host_exiting
+    )
+    engine.record = None
+    publisher = ctx.event_publisher
+    assert publisher is not None
+    if host_exiting:
+        command = await run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=timeline)
+        assert command.goto == "claim"
+        assert command_update(command)["interrupted_by_restart"] is True
+    else:
+        with pytest.raises(FatalLLMStreamError, match="child exited with status 143"):
+            _ = await run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=timeline)
+
+    assert row_status(db_conn, row) == "done"
+    assert bool(loguru_records.events("turn_fault_lost_inbound")) is not activity
+
+
+@pytest.mark.parametrize("output", [False, True])
+async def test_quota_halt_only_hands_back_inputs_before_output_without_a_timeline(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture, *, output: bool
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+    partial = TextDelta("t1", "Some output") if output else ReasoningDelta("t1", "Thinking")
+    engine = FakeEngine(script=lambda _inputs: [partial, TurnFaulted("t1", "Rate limit exceeded")])
+    ctx = harness_runtime(engine, agent_id=agent_id).context
+    publisher = ctx.event_publisher
+    assert publisher is not None
+
+    with pytest.raises(HarnessTurnHaltedError) as halted:
+        _ = await run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=NoTimeline())
+
+    assert halted.value.reason == HALT_REASON_QUOTA_EXHAUSTED
+    assert halted.value.requeued_inbound_ids == (() if output else (row,))
+    assert row_status(db_conn, row) == ("done" if output else "pending")
+
+
+async def test_a_completed_reply_without_a_record_fails_even_without_a_timeline(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "work")
+    engine = FakeEngine()
+    ctx = harness_runtime(engine, agent_id=agent_id).context
+    engine.record = None
+    publisher = ctx.event_publisher
+    assert publisher is not None
+
+    with pytest.raises(
+        FatalLLMStreamError, match=r"record of the antigravity session .* was not found"
+    ):
+        _ = await run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=NoTimeline())
+    assert row_status(db_conn, row) == "done"

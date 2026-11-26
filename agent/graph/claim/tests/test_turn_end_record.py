@@ -17,6 +17,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph.claim.harness_activity import log_turn_usage
+from agent.graph.claim.harness_foreground import TurnProtocol
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import snapshot_items
@@ -481,102 +482,62 @@ def _tool(name: str = "Read", *, parent: str | None = None) -> tuple[ToolUse, To
     return use, result
 
 
-def _sink(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness, *, non_human_wake: bool, mode: str
-) -> ReadTimelineSink:
-    ctx = MeivaContext(
-        agent=AgentSlices.resolve({"user_delivery_mode": mode}, default_reader=defaults()),
-        harness=harness,
-        meiva_home=tmp_path,
-        environ={"HOME": str(tmp_path)},
-    )
-    return ReadTimelineSink(
-        ctx, 100, live_events.publisher, non_human_wake=non_human_wake, session_id=lambda: None
-    )
-
-
-async def _verdict(sink: ReadTimelineSink, events: tuple[BridgeEvent, ...]) -> bool:
+def _verdict(protocol: TurnProtocol, events: tuple[BridgeEvent, ...]) -> bool:
     for event in events:
-        await sink.on_event(event)
-    return sink.take_invalid_reply()
+        _ = protocol.observe(event)
+    return protocol.take_invalid_reply()
 
 
-_ALL_HARNESSES = [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY]
-
-
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
 @pytest.mark.parametrize("final", [_UNMARKED, _MARKED, _DISPLAYED])
-async def test_a_reply_to_a_non_human_wake_is_never_corrected(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness, final: str
-) -> None:
-    sink = _sink(tmp_path, live_events, harness, non_human_wake=True, mode="prefix")
+def test_a_reply_to_a_non_human_wake_is_never_corrected(final: str) -> None:
+    protocol = TurnProtocol(non_human_wake=True, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(final))) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text(final))) is False
 
 
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
-async def test_unmarked_narration_before_a_tool_call_is_not_corrected_when_the_final_reply_is_marked(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness
+@pytest.mark.parametrize("final", [_MARKED, _DISPLAYED])
+def test_unmarked_narration_before_a_tool_call_is_not_corrected_when_the_final_reply_is_marked(
+    final: str,
 ) -> None:
-    for final in (_MARKED, _DISPLAYED):
-        sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
-        use, result = _tool()
-        events = (_text(_UNMARKED), use, result, _text(_UNMARKED), use, result, _text(final))
-        assert await _verdict(sink, events) is False
-
-
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
-async def test_an_unmarked_final_reply_to_a_human_is_corrected(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness
-) -> None:
-    sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_MARKED), use, result, _text("The answer."))) is True
-    assert sink.take_invalid_reply() is False
+    events = (_text(_UNMARKED), use, result, _text(_UNMARKED), use, result, _text(final))
+    assert _verdict(protocol, events) is False
 
 
-async def test_an_unmarked_block_followed_by_a_marked_one_is_not_corrected(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
-    assert await _verdict(sink, (_text(_UNMARKED), _text(_DISPLAYED))) is False
+def test_an_unmarked_final_reply_to_a_human_is_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
+    use, result = _tool()
+    assert _verdict(protocol, (_text(_MARKED), use, result, _text("The answer."))) is True
+    assert protocol.take_invalid_reply() is False
 
 
-async def test_unmarked_narration_that_ends_the_turn_on_a_tool_call_is_not_corrected(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+def test_an_unmarked_block_followed_by_a_marked_one_is_not_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
+    assert _verdict(protocol, (_text(_UNMARKED), _text(_DISPLAYED))) is False
+
+
+def test_unmarked_narration_that_ends_the_turn_on_a_tool_call_is_not_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, _ = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use)) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use)) is False
 
 
-async def test_a_tool_call_of_a_sub_agent_does_not_clear_the_unmarked_final_reply(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+def test_a_tool_call_of_a_sub_agent_does_not_clear_the_unmarked_final_reply() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, result = _tool(parent="parent-call")
-    assert await _verdict(sink, (_text(_UNMARKED), use, result)) is True
+    assert _verdict(protocol, (_text(_UNMARKED), use, result)) is True
 
 
-async def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=True, mode="prefix")
+def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable() -> None:
+    protocol = TurnProtocol(non_human_wake=True, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is False
-
-    async def commit() -> None:
-        return None
-
-    await sink.append_inbound(commit, human_input=True)
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is True
-    await sink.append_inbound(commit, human_input=True)
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(_DISPLAYED))) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text("Done."))) is False
+    protocol.non_human_wake = False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text("Done."))) is True
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text(_DISPLAYED))) is False
 
 
-@pytest.mark.parametrize("mode", ["naive", "sdk"])
-async def test_modes_without_a_visibility_prefix_never_correct(
-    tmp_path: Path, live_events: LiveEvents, mode: str
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode=mode)
-    assert await _verdict(sink, (_text("The answer."),)) is False
+def test_modes_without_a_visibility_prefix_never_correct() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=False)
+    assert _verdict(protocol, (_text("The answer."),)) is False
