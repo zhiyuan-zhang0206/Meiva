@@ -351,7 +351,7 @@ class StoppingMixin:
     def _term_group_survivors(self, pgid: int | None, identity: OwnedProcess) -> None:
         if pgid is None or not self._group_has_survivors(pgid, identity):
             return
-        with suppress(ProcessLookupError):
+        with suppress(ProcessLookupError, PermissionError):
             self._process_control.killpg(pgid, signal.SIGTERM)
 
     def _kill_group(self, pgid: int, identity: OwnedProcess) -> bool:

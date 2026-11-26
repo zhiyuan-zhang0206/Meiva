@@ -83,17 +83,19 @@ class UnitManifest:
 
     def digest(self) -> str:
         """Bind executable and private environment without exposing credentials."""
+        fields: dict[str, object] = {
+            "id": self.id,
+            "exec": self.exec,
+            "restart": self.restart.value,
+            "attach": self.attach,
+            "env": self.env,
+            "stop_timeout_s": self.stop_timeout_s,
+            "stop_tier": self.stop_tier,
+        }
+        if self.term_leader_only:
+            fields["term_leader_only"] = True
         body = json.dumps(
-            {
-                "id": self.id,
-                "exec": self.exec,
-                "restart": self.restart.value,
-                "attach": self.attach,
-                "env": self.env,
-                "stop_timeout_s": self.stop_timeout_s,
-                "stop_tier": self.stop_tier,
-                "term_leader_only": self.term_leader_only,
-            },
+            fields,
             separators=(",", ":"),
             sort_keys=True,
         )

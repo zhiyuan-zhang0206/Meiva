@@ -465,3 +465,20 @@ async def test_a_leader_only_term_lets_the_leader_drain_before_its_children_are_
     )
     assert report == "child-running"
     assert _gone(child), "the group the leader left was reaped within the window"
+
+
+async def test_a_leader_only_unit_that_ignores_term_still_escalates_to_a_group_kill(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    ready = tmp_path / "ready"
+    owner = root(tmp_path, "ignore_term", str(ready), stop_timeout_s=0.5, term_leader_only=True)
+    await owner.start()
+    await wait_file(ready)
+    pid = cast("list[dict[str, Any]]", (await owner.status())["units"])[0]["pid"]
+    try:
+        await owner.down("worker")
+        assert not psutil.pid_exists(pid)
+        escalated = recorder.events("root_unit_stop_escalated")
+        assert [event["reason"] for event in escalated] == ["escaped_term_window"]
+    finally:
+        await owner.shutdown()
