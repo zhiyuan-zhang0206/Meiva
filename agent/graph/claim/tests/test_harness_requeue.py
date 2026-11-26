@@ -197,7 +197,6 @@ async def test_timing_revision_emits_only_same_id_reasoning_updates(
         store_timings(path, native)
         await sink._refresh_timing(end)
         assert_reasoning_update(await live_events.typed(), old.item_id, 30265)
-    assert sink.has_activity is False
     await sink._refresh_timing(end)
     assert await live_events.events() == []
     timing_path(path).unlink()

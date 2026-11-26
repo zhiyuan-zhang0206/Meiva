@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from os import scandir
 from pathlib import Path
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
@@ -22,9 +24,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     record_file,
     record_location,
     reply_key,
-    reply_key_prefix,
     session_file,
-    unreadable_file,
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.read import (
@@ -40,8 +40,6 @@ from base.agents.history.transcript_timeline.sent import (
 )
 from base.agents.messages.harness_input_key import recorded_input_key
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.reply_intent import parse_reply_visibility
-from base.agents.to_user.delivery.store import has_keyed_publication
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_all
@@ -49,18 +47,13 @@ from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness import (
-    AssistantText,
     BridgeEvent,
-    HarnessSetupError,
-    SubagentText,
-    TextDelta,
-    ToolResult,
-    ToolUse,
     TurnOrigin,
     TurnStarted,
 )
 from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.entries import AgentText, HumanInput
 from base.lm.harness.session.transcript.record_file import (
     FileRow,
     RecordFile,
@@ -84,11 +77,9 @@ from base.paths import harness_sessions_dir, workspace_dir
 # What the sink delivers: the replies of the items it projects, once each. A reply's publication key is the CLI's own id
 # of the row that holds it (`harness:claude:<row uuid>`, `harness:codex:<message id>`), the same however often and from wherever it is read, so a
 # repeated read, a restart and a replay never publish it twice. A reply read from before this sink began is offered
-# again (a crash may have ended the process before it was delivered) once the agent has a publication under this
-# key scheme; the first sink of an agent that has none is at the switch from the old keys, and delivers only what the
-# record gains from its start (`_delivery_floor`). A turn's end is waited for in the record (`finish`), the turn's
-# closing row, for at most
-# `END_WAIT_SECONDS`, and a turn that did something with no record to show for it fails. A reply the sink could not
+# again (a crash may have ended the process before it was delivered) when an earlier reply in the same record
+# has an exact canonical publication key. Otherwise delivery starts at the initial record boundary. A turn's end is waited for in the record (`finish`), the turn's
+# closing row, for at most `END_WAIT_SECONDS`. A reply the sink could not
 # deliver (a database error in `_deliver`) is not retried by the sink, the read position having moved on: the next
 # invocation reads the record's last turn again and delivers it by key. A row of a kind the parser does not know is
 # said once per kind by this sink (its own `UnreadRows`), so once per turn at most.
@@ -108,6 +99,24 @@ class _InboundKeyRow:
     id: int
     kind: str
     payload: object
+
+
+@dataclass(frozen=True)
+class _PublicationKeyRow:
+    source_key: str
+
+
+def _check_rollout_directories(directory: Path, levels: int) -> None:
+    try:
+        with scandir(directory) as children:
+            if levels == 0:
+                _ = next(children, None)
+                return
+            for child in children:
+                if child.is_dir():
+                    _check_rollout_directories(Path(child.path), levels - 1)
+    except (FileNotFoundError, NotADirectoryError):
+        return
 
 
 class ReadTimelineSink:
@@ -146,7 +155,6 @@ class ReadTimelineSink:
         self._timing_revision: int | None = None
         self._timing_start: int | None = None
         self._timing_needed = False
-        self._replied = False
         self._warned = False
         self._projector = RecordProjector(
             policy=self._policy,
@@ -161,14 +169,12 @@ class ReadTimelineSink:
         self._announced: set[int] = set()
         self._dirty = asyncio.Event()
         self._busy = asyncio.Lock()
-        self._active = False
-        self._delivered_output = False
         self._closed_turns = 0
-        self._unmarked_tail = False
-        self._history_end = self._start_offset()
-        self._seen_stat: tuple[int, ...] | None = (
-            None if self._file is None else self._file.watch_signature()
-        )
+        self._history_end: int | None = None
+        self._startup_readable = False
+        self._seen_stat: tuple[int, ...] | None = None
+        with self._log_projection_failure():
+            self._snapshot_start()
         self._floor: int | None = None
         self._input_keys: list[str] = []
         self._fork_source_loaded = False
@@ -183,48 +189,15 @@ class ReadTimelineSink:
             if key and key not in self._input_keys:
                 self._input_keys.append(key)
 
-    @property
-    def has_activity(self) -> bool:
-        return self._active
-
-    @property
-    def non_human_wake(self) -> bool:
-        return self._non_human_wake
-
-    @property
-    def has_delivered_output(self) -> bool:
-        return self._delivered_output
-
-    def reset_turn_delivery(self) -> None:
-        self._delivered_output = False
-
-    def take_invalid_reply(self) -> bool:
-        unmarked, self._unmarked_tail = self._unmarked_tail, False
-        return unmarked and not self._non_human_wake
-
-    def mark_human(self) -> None:
-        self._non_human_wake = False
-
     # meiva:note
-    # The events are signals that the record grew, and the text of a finished reply is also checked here against the
-    # visibility prefix the agent was told to write: the correction does not depend on the record being found.
+    # The adapter's anchored wake also offers its prior reply for publication under
+    # the same key a later record read will use.
     async def on_event(self, event: BridgeEvent) -> None:
-        self._active = True
-        if isinstance(event, (AssistantText, TextDelta, SubagentText, ToolUse, ToolResult)):
-            self._delivered_output = True
-        if isinstance(event, AssistantText):
-            self._check_reply(event.text)
-        elif isinstance(event, ToolUse) and event.parent_tool_use_id is None:
-            self._unmarked_tail = False
-        self._overlay.on_event(event)
+        with self._log_projection_failure():
+            self._overlay.on_event(event)
         if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
             await self._read_logged(anchor=event)
         self._dirty.set()
-
-    def _check_reply(self, text: str) -> None:
-        self._replied = True
-        if self._policy.explicit_visibility and text.strip():
-            self._unmarked_tail = parse_reply_visibility(text) is None
 
     async def record_control(self, text: str, *, error: bool = False) -> None:
         logger.warning(
@@ -235,17 +208,10 @@ class ReadTimelineSink:
             error=error,
         )
 
-    async def append_inbound[T](
-        self,
-        commit: Callable[[], Awaitable[T]],
-        *,
-        human_input: bool = False,
-    ) -> T:
-        result = await commit()
+    def inbound_committed(self, *, human_input: bool = False) -> None:
         if human_input:
-            self.mark_human()
+            self._non_human_wake = False
         self._dirty.set()
-        return result
 
     # meiva:note
     # Stdout events mark `_dirty` immediately; the bounded timeout fallback checks only cheap
@@ -257,10 +223,10 @@ class ReadTimelineSink:
             try:
                 _ = await asyncio.wait_for(self._dirty.wait(), timeout=self._poll_seconds)
             except TimeoutError:
-                if not await asyncio.to_thread(self._has_disk_change):
-                    continue
-                self._dirty.clear()
-                await self._read_logged()
+                with self._log_projection_failure():
+                    if await asyncio.to_thread(self._has_disk_change):
+                        self._dirty.clear()
+                        await self._read()
                 continue
             await asyncio.sleep(self._debounce_seconds)
             self._dirty.clear()
@@ -282,11 +248,6 @@ class ReadTimelineSink:
         input_keys: Sequence[str] = (),
     ) -> None:
         self.note_input_keys(input_keys)
-        if not self._replied and not interrupted:
-            for turn in turns:
-                if turn.text:
-                    self._check_reply(turn.text)
-        self._replied = False
         clock = self._ctx.require_clock()
         before, deadline = self._closed_turns, clock.monotonic() + END_WAIT_SECONDS
         wait = bool(turns) or interrupted or error is not None
@@ -294,52 +255,29 @@ class ReadTimelineSink:
             while True:
                 await self._read_logged()
                 if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
-                    self._require_record(ended=wait, said=any(turn.text for turn in turns))
                     return
                 await clock.asleep(END_POLL_SECONDS)
         finally:
-            self._publish_retired(self._overlay.retire_all(), self._from or 0)
-
-    # meiva:note
-    # A turn that did something and ends with no record file to show for it is a failed turn, not a quiet one: nothing of
-    # it can reach the timeline or the user, so it fails the way any harness setup failure does (the page's live
-    # `Error` event, as for a built-in agent). The message names the session and where it was looked for.
-    def _require_record(self, *, ended: bool, said: bool) -> None:
-        if not (ended and (self._active or said)) or self._resolve() is not None:
-            return
-        ctx = self._ctx
-        workspace = workspace_dir(self._agent_id, home=ctx.require_meiva_home())
-        where = record_location(self._harness, ctx.require_environ(), workspace)
-        sid = self._session_id()
-        name = (
-            None
-            if sid is None
-            else unreadable_file(
-                self._harness, ctx.require_environ(), sid, packed_is_readable=False
-            )
-        )
-        if name is not None:
-            logger.warning(
-                "the record of session {session_id} is in a form the live timeline does not read: {name}",
-                event="harness_record_unreadable",
-                agent_id=self._agent_id,
-                session_id=sid,
-                name=name,
-            )
-        raise HarnessSetupError(
-            f"the record of the {ctx.harness.value} session {self._session_id() or '(not started)'} was not found "
-            f"in {where} or any other project directory; nothing of this turn can be shown or delivered"
-        )
+            with self._log_projection_failure():
+                self._publish_retired(self._overlay.retire_all(), self._from or 0)
 
     async def _read_logged(self, *, anchor: TurnStarted | None = None) -> None:
-        try:
+        with self._log_projection_failure():
             if anchor is None:
                 await self._read()
             else:
                 await self._deliver_anchored_reply(anchor)
+
+    # meiva:note
+    # The foreground owns the turn verdict. Failed projections are observed here
+    # so the event reader and host-exit handling keep their original outcome.
+    @contextmanager
+    def _log_projection_failure(self) -> Generator[None]:
+        try:
+            yield
         except Exception:
             logger.opt(exception=True).warning(
-                "could not read the harness's record for the live timeline; the next read tries again",
+                "could not update the live timeline from the harness",
                 event="harness_live_timeline_failed",
                 agent_id=self._agent_id,
             )
@@ -433,6 +371,16 @@ class ReadTimelineSink:
         self._timing_needed = needs_native_timing_refresh(self._harness, block.rows)
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
+        if self._history_end is None:
+            current = {wire_id(self._harness, key) for key in self._input_keys}
+            self._history_end = min(
+                (
+                    entry.order.seq
+                    for entry in entries
+                    if isinstance(entry, HumanInput) and entry.wire_id in current
+                ),
+                default=None,
+            )
         projected = self._projector.feed(
             entries, tail=self._parser.pending_calls, release_held=False
         )
@@ -497,10 +445,25 @@ class ReadTimelineSink:
         return self._file
 
     # meiva:note
-    # The end of the record as the sink began: what lies before it was written by an earlier process.
-    def _start_offset(self) -> int:
+    # Snapshot the old history before any input is delivered. When the record
+    # cannot be opened, its size is a conservative upper bound on the old
+    # complete rows. A failed lookup leaves the publication boundary unknown.
+    # Codex's glob skips inaccessible directories, so a miss for a known session
+    # is evidence of absence only after checking the sessions/YYYY/MM/DD search.
+    def _snapshot_start(self) -> None:
         file = self._resolve()
-        return 0 if file is None else file.complete_end()
+        if file is None and self._harness == Harness.CODEX.value and self._session_id() is not None:
+            workspace = workspace_dir(self._agent_id, home=self._ctx.require_meiva_home())
+            sessions = record_location(self._harness, self._ctx.require_environ(), workspace)
+            _check_rollout_directories(Path(sessions), levels=3)
+            file = self._resolve()
+        if file is None:
+            self._history_end = 0
+            return
+        self._history_end = file.size()
+        self._history_end = file.complete_end()
+        self._startup_readable = True
+        self._seen_stat = file.watch_signature()
 
     def _publish(self, projected: Projected, end: int) -> None:
         shown = {item.item.item_id for item in projected.items}
@@ -573,6 +536,8 @@ class ReadTimelineSink:
 
     async def _deliver(self, items: Sequence[ProjectedItem], *, anchored: bool = False) -> None:
         floor = self._fork_floor or 0 if anchored else await self._delivery_floor()
+        if floor is None:
+            return
         replies = [
             (reply_key(self._harness, item.key, self._session_id()), item.item)
             for item in items
@@ -582,24 +547,38 @@ class ReadTimelineSink:
             await capture_keyed_items(self._ctx, self._agent_id, replies, tolerate_conflicts=True)
 
     # meiva:note
-    # Where delivery starts, decided once per sink. An agent that has no publication under the new key scheme yet is at
-    # the switch from the old one: the replies before this sink's start were delivered under the old keys (or are not
-    # worth delivering now), so only what the record gains from here is. An agent that has one is past the switch, and
-    # everything is offered, which the key makes a no-op for what was delivered. A Claude Code fork never falls below
-    # its persisted fork floor, because its record carries the parent's pre-fork rows and key-dedup cannot filter rows
-    # this child never published.
-    async def _delivery_floor(self) -> int:
+    # Only an exact publication key in the initial bytes of this same record
+    # can authorize replay before a readable start. A degraded start keeps its
+    # initial size or waits for a row matching an input sent by this invocation.
+    async def _delivery_floor(self) -> int | None:
         if self._floor is None:
-
-            def switched() -> bool:
-                with self._ctx.require_db().connect() as conn:
-                    return has_keyed_publication(
-                        conn, self._agent_id, reply_key_prefix(self._harness)
-                    )
-
-            base = 0 if await asyncio.to_thread(switched) else self._history_end
-            self._floor = max(base, self._fork_floor or 0)
+            base = self._history_end
+            if base is None:
+                return None
+            if base and self._startup_readable and self._file is not None:
+                base = await asyncio.to_thread(self._published_floor, self._file, base)
+            self._floor = base
         return max(self._floor, self._fork_floor or 0)
+
+    def _published_floor(self, file: RecordFile, start: int) -> int:
+        block = file.rows_before(start)
+        parser = entry_reader(self._harness, self._unread)
+        session = self._session_id()
+        offsets = {
+            reply_key(self._harness, entry.key, session): entry.order.seq
+            for entry in parser.entries(block.rows)
+            if isinstance(entry, AgentText)
+        }
+        if not offsets:
+            return start
+        with self._ctx.require_db().connect() as conn:
+            rows = query_all(
+                conn,
+                _PublicationKeyRow,
+                "SELECT source_key FROM agent_publications WHERE agent_id=%s AND source_key=ANY(%s)",
+                (self._agent_id, list(offsets)),
+            )
+        return max((offsets[row.source_key] for row in rows), default=start)
 
     def _fork_source(self) -> int | None:
         if not self._fork_source_loaded:
@@ -661,7 +640,7 @@ class ReadTimelineSink:
             parent_end, saw_child = fork_floor.parent_fork_cut(file, parent_uuids)
             if parent_end is not None:
                 return parent_end if saw_child else None
-        if self._history_end > 0:
+        if self._history_end:
             return self._history_end
         return None
 

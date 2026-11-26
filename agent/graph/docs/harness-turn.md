@@ -50,12 +50,23 @@ An external agent's timeline is not written to a database table: it is read from
 - The live sink is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
   sink dirty, and after half a second it reads the bytes the CLI appended since its last read, projects them with the
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
-  carries the item published before it and every call still running). A turn's end waits, for at most two seconds, until
-  the read shows a closing row. The sink's state (offset, open turn, calls awaiting a result) is in memory only; a new
-  sink starts at the start of the record's last turn. A turn that did something and ends with
-  no record file to show for it fails like a harness setup failure (a live `Error` event naming the session and where it
-  was looked for); a failed turn is not shown after a refresh, as for a built-in agent. A reply the sink could not
-  deliver is not retried: the next invocation reads the last turn again and delivers it by key.
+  carries the item published before it and every call still running). A single consumer applies
+  notifications in order and waits up to two seconds for a closing row. The foreground keeps
+  settling events and steering while that consumer waits. After the outcome is chosen, the
+  entire queue has two seconds to drain. A timeout or cancellation stops the consumer and
+  logs unfinished work. Queued terminal events are sent once the consumer stops. The sink's state is in memory only.
+  A readable start can retry the last turn from the latest exact canonical publication key
+  in the record block before startup. A start with a size but no readable contents keeps that
+  initial size as a boundary. A miss for a known Codex session counts as an empty start only
+  if the dated rollout directories can be searched. When size is unknown, the first record
+  row matching an input sent by this invocation establishes the boundary after access recovers. Publications are
+  deduplicated by stable key.
+- The foreground folds adapter events into `TurnProtocol` for abort handling, input handback,
+  wake polarity and reply correction. It commits inbox settlements before notifying the live sink.
+  A normal completion with activity or reply text must have a live-readable adapter record. The
+  foreground checks for that file within the record's close window independently of projecting
+  rows. A missing or unsupported record reports a setup failure naming the session and location.
+  An interrupted or faulted turn keeps its original disposition while the sink flushes the view.
 - An input is settled by the stream's acknowledgement (`InputInContext`) or by reading the record after a failure, and
   only the inbound row is set `done` (`commit_handed`, `commit_reconciled`): no database timeline rows are written for
   delivered inputs, a stop's passive note, an unconfirmed input, a lost turn, a restart, a harness switch, a fork or
@@ -63,7 +74,7 @@ An external agent's timeline is not written to a database table: it is read from
   strip clears on the item's `inbound_id` and on the `InboundCommitted` event the sink publishes with it.
 - The reply to the user is delivered from the projected items, once each, under the harness record's stable key
   (`capture_keyed_items`). For a forked Claude Code agent whose cloned `.jsonl` carries the parent's history (with copied `user` rows stamped with the child's first `promptId`), `ReadTimelineSink` anchors and persists a per-session fork delivery floor (`<agent_id>.<harness>.floor`) at the start of the child's own rows so pre-fork parent replies stay readable on the timeline without ever publishing into `agent_publications`. The reply-visibility check of a finished reply, and with it the correction input, is made on the
-  `AssistantText` event, so it does not depend on the record being found.
+  `AssistantText` event or the terminal reply text if no reply event arrived.
 - Usage is logged from the turn's result frame (`log_turn_usage`); the sub-agents' tokens are in
   that figure only as the CLI reports them.
 - The CLI finds its login through `USER` and `LOGNAME` besides `HOME`; the session's child environment carries all three

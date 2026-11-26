@@ -17,6 +17,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.graph.claim.harness_activity import log_turn_usage
+from agent.graph.claim.harness_foreground import TurnProtocol
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.claim_support import snapshot_items
@@ -26,6 +27,7 @@ from agent.graph.claim.tests.harness_support import (
     completed,
     config,
     in_a_turn,
+    publications,
     runtime,
     silent_engine,
 )
@@ -37,8 +39,10 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.langgraph_views import command_update
+from base.agents.to_user.delivery.store import publish
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.usage import UsageLedgerWriteError
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -481,102 +485,136 @@ def _tool(name: str = "Read", *, parent: str | None = None) -> tuple[ToolUse, To
     return use, result
 
 
-def _sink(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness, *, non_human_wake: bool, mode: str
-) -> ReadTimelineSink:
-    ctx = MeivaContext(
-        agent=AgentSlices.resolve({"user_delivery_mode": mode}, default_reader=defaults()),
-        harness=harness,
-        meiva_home=tmp_path,
-        environ={"HOME": str(tmp_path)},
-    )
-    return ReadTimelineSink(
-        ctx, 100, live_events.publisher, non_human_wake=non_human_wake, session_id=lambda: None
-    )
-
-
-async def _verdict(sink: ReadTimelineSink, events: tuple[BridgeEvent, ...]) -> bool:
+def _verdict(protocol: TurnProtocol, events: tuple[BridgeEvent, ...]) -> bool:
     for event in events:
-        await sink.on_event(event)
-    return sink.take_invalid_reply()
+        _ = protocol.observe(event)
+    return protocol.take_invalid_reply()
 
 
-_ALL_HARNESSES = [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY]
-
-
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
 @pytest.mark.parametrize("final", [_UNMARKED, _MARKED, _DISPLAYED])
-async def test_a_reply_to_a_non_human_wake_is_never_corrected(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness, final: str
-) -> None:
-    sink = _sink(tmp_path, live_events, harness, non_human_wake=True, mode="prefix")
+def test_a_reply_to_a_non_human_wake_is_never_corrected(final: str) -> None:
+    protocol = TurnProtocol(non_human_wake=True, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(final))) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text(final))) is False
 
 
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
-async def test_unmarked_narration_before_a_tool_call_is_not_corrected_when_the_final_reply_is_marked(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness
+@pytest.mark.parametrize("final", [_MARKED, _DISPLAYED])
+def test_unmarked_narration_before_a_tool_call_is_not_corrected_when_the_final_reply_is_marked(
+    final: str,
 ) -> None:
-    for final in (_MARKED, _DISPLAYED):
-        sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
-        use, result = _tool()
-        events = (_text(_UNMARKED), use, result, _text(_UNMARKED), use, result, _text(final))
-        assert await _verdict(sink, events) is False
-
-
-@pytest.mark.parametrize("harness", _ALL_HARNESSES)
-async def test_an_unmarked_final_reply_to_a_human_is_corrected(
-    tmp_path: Path, live_events: LiveEvents, harness: Harness
-) -> None:
-    sink = _sink(tmp_path, live_events, harness, non_human_wake=False, mode="prefix")
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_MARKED), use, result, _text("The answer."))) is True
-    assert sink.take_invalid_reply() is False
+    events = (_text(_UNMARKED), use, result, _text(_UNMARKED), use, result, _text(final))
+    assert _verdict(protocol, events) is False
 
 
-async def test_an_unmarked_block_followed_by_a_marked_one_is_not_corrected(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
-    assert await _verdict(sink, (_text(_UNMARKED), _text(_DISPLAYED))) is False
+def test_an_unmarked_final_reply_to_a_human_is_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
+    use, result = _tool()
+    assert _verdict(protocol, (_text(_MARKED), use, result, _text("The answer."))) is True
+    assert protocol.take_invalid_reply() is False
 
 
-async def test_unmarked_narration_that_ends_the_turn_on_a_tool_call_is_not_corrected(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+def test_an_unmarked_block_followed_by_a_marked_one_is_not_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
+    assert _verdict(protocol, (_text(_UNMARKED), _text(_DISPLAYED))) is False
+
+
+def test_unmarked_narration_that_ends_the_turn_on_a_tool_call_is_not_corrected() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, _ = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use)) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use)) is False
 
 
-async def test_a_tool_call_of_a_sub_agent_does_not_clear_the_unmarked_final_reply(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode="prefix")
+def test_a_tool_call_of_a_sub_agent_does_not_clear_the_unmarked_final_reply() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=True)
     use, result = _tool(parent="parent-call")
-    assert await _verdict(sink, (_text(_UNMARKED), use, result)) is True
+    assert _verdict(protocol, (_text(_UNMARKED), use, result)) is True
 
 
-async def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable(
-    tmp_path: Path, live_events: LiveEvents
-) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=True, mode="prefix")
+def test_a_human_input_during_a_non_human_run_makes_its_final_reply_correctable() -> None:
+    protocol = TurnProtocol(non_human_wake=True, explicit_visibility=True)
     use, result = _tool()
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is False
-
-    async def commit() -> None:
-        return None
-
-    await sink.append_inbound(commit, human_input=True)
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text("Done."))) is True
-    await sink.append_inbound(commit, human_input=True)
-    assert await _verdict(sink, (_text(_UNMARKED), use, result, _text(_DISPLAYED))) is False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text("Done."))) is False
+    protocol.non_human_wake = False
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text("Done."))) is True
+    assert _verdict(protocol, (_text(_UNMARKED), use, result, _text(_DISPLAYED))) is False
 
 
-@pytest.mark.parametrize("mode", ["naive", "sdk"])
-async def test_modes_without_a_visibility_prefix_never_correct(
-    tmp_path: Path, live_events: LiveEvents, mode: str
+def test_modes_without_a_visibility_prefix_never_correct() -> None:
+    protocol = TurnProtocol(non_human_wake=False, explicit_visibility=False)
+    assert _verdict(protocol, (_text("The answer."),)) is False
+
+
+@pytest.mark.parametrize("parent_denied", [False, True])
+async def test_codex_start_distinguishes_denied_rollout_directory_from_new_rollout(
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+    harness_runtime: RuntimeFixture,
+    live_events: LiveEvents,
+    *,
+    parent_denied: bool,
 ) -> None:
-    sink = _sink(tmp_path, live_events, Harness.CLAUDE_CODE, non_human_wake=False, mode=mode)
-    assert await _verdict(sink, (_text("The answer."),)) is False
+    agent_id = agent_row(db_conn)
+    session = "known-codex-session"
+    codex_home = tmp_path / "codex"
+    day = codex_home / "sessions/2026/11/27"
+    day.mkdir(parents=True)
+    path = day / f"rollout-{session}.jsonl"
+    ctx = replace(
+        harness_runtime(FakeEngine(), agent_id=agent_id).context,
+        harness=Harness.CODEX,
+        agent=AgentSlices.resolve({"user_delivery_mode": "naive"}, default_reader=defaults()),
+        environ={"HOME": str(tmp_path), "CODEX_HOME": str(codex_home)},
+    )
+    now = ctx.require_clock().now()
+    row = {
+        "timestamp": now.isoformat(),
+        "type": "event_msg",
+        "payload": {
+            "type": "item_completed",
+            "turn_id": "turn-1",
+            "started_at_ms": int(now.timestamp() * 1000),
+            "item": {
+                "type": "AgentMessage",
+                "id": "msg_1",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": "The answer."}],
+            },
+        },
+    }
+    expected_key = "harness:codex:msg_1"
+    if parent_denied:
+        _ = path.write_text(json.dumps(row) + "\n")
+        expected_key = "harness:h5.0"
+        _ = publish(
+            db_conn,
+            agent_id,
+            expected_key,
+            PublishMessage(content="The answer.", suggestions=[]),
+            mode=UserDeliveryMode.NAIVE,
+            created_at=now,
+        )
+        db_conn.commit()
+        day.chmod(0o000)
+    try:
+        if parent_denied:
+            try:
+                _ = path.stat()
+            except PermissionError:
+                denied = True
+            else:
+                denied = False
+            if not denied:
+                pytest.skip("the test process can search a directory with mode 000")
+        sink = ReadTimelineSink(
+            ctx, agent_id, live_events.publisher, non_human_wake=False, session_id=lambda: session
+        )
+    finally:
+        day.chmod(0o700)
+    if not parent_denied:
+        _ = path.write_text(json.dumps(row) + "\n")
+
+    await sink.finish()
+
+    assert publications(db_conn, agent_id) == [(expected_key, "The answer.")]

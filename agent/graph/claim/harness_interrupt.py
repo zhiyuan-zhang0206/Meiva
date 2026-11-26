@@ -6,30 +6,152 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine
-from contextlib import suppress
+from collections import deque
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
+from contextlib import asynccontextmanager, suppress
+from functools import partial
+from inspect import isawaitable
+from typing import Protocol
 
-from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import InterruptScope
 from base.events.live.projection import Cancelled
-from base.lm.harness.engine import TurnEngine
+from base.lm.harness import BridgeEvent
+from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.log import logger
 
 # meiva:note
-# This tick keeps host custody alive while a harness owns the invocation. Provider
-# activity is recorded separately by the timeline projector.
+# This tick keeps host custody alive while a harness owns the invocation.
 # meiva:link agent/graph/docs/harness-turn.md
 PROGRESS_TICK_SECONDS = 60.0
+
+
+# meiva:link agent/graph/docs/harness-turn.md
+class HarnessTimeline(Protocol):
+    def note_input_keys(self, keys: Sequence[str]) -> None: ...
+
+    def inbound_committed(self, *, human_input: bool = False) -> None: ...
+
+    async def on_event(self, event: BridgeEvent) -> None: ...
+
+    async def flush_text(self) -> None: ...
+
+    async def record_control(self, text: str, *, error: bool = False) -> None: ...
+
+    async def finish(
+        self,
+        turns: Sequence[HarnessTurn] = (),
+        *,
+        interrupted: bool = False,
+        error: str | None = None,
+        input_keys: Sequence[str] = (),
+    ) -> None: ...
+
+
+TIMELINE_DRAIN_SECONDS = 2.0
+TimelineEffect = Callable[[], Awaitable[None] | None]
+
+
+# meiva:link agent/graph/docs/harness-turn.md
+class TimelineNotifications:
+    def __init__(self, agent_id: int, sink: HarnessTimeline) -> None:
+        self.sink = sink
+        self._agent_id = agent_id
+        self._pending = asyncio.Queue[TimelineEffect | None]()
+        self._applying = False
+        self._terminals: deque[Callable[[], None]] = deque()
+
+    def post(self, effect: TimelineEffect) -> None:
+        self._pending.put_nowait(effect)
+
+    def post_terminal(self, emit: Callable[[], None]) -> None:
+        self._terminals.append(emit)
+        self.post(self._emit_terminal)
+
+    def _emit_terminal(self) -> None:
+        emit = self._terminals.popleft()
+        emit()
+
+    @asynccontextmanager
+    async def running(self) -> AsyncGenerator[None]:
+        outcome: BaseException | None = None
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                worker = tasks.create_task(
+                    self._consume(), name=f"harness-projection-{self._agent_id}"
+                )
+                try:
+                    yield
+                except BaseException as error:
+                    outcome = error
+                if isinstance(outcome, asyncio.CancelledError):
+                    self._stop(worker, reason="cancelled", queued=self._pending.qsize())
+                else:
+                    await self._drain(worker)
+        finally:
+            while self._terminals:
+                await self._apply(self._emit_terminal)
+        if outcome is not None:
+            raise outcome
+
+    async def _drain(self, worker: asyncio.Task[None]) -> None:
+        self._pending.put_nowait(None)
+        try:
+            async with asyncio.timeout(TIMELINE_DRAIN_SECONDS):
+                await asyncio.shield(worker)
+        except TimeoutError:
+            self._stop(worker, reason="timeout", queued=max(0, self._pending.qsize() - 1))
+        except asyncio.CancelledError:
+            self._stop(worker, reason="cancelled", queued=max(0, self._pending.qsize() - 1))
+            raise
+
+    def _stop(self, worker: asyncio.Task[None], *, reason: str, queued: int) -> None:
+        if worker.done():
+            return
+        _ = worker.cancel()
+        if not queued and not self._applying:
+            return
+        logger.warning(
+            "harness timeline drain {reason}; stopping unfinished projection work",
+            event="harness_live_timeline_failed",
+            agent_id=self._agent_id,
+            reason=reason,
+            queued_notifications=queued,
+            notification_in_flight=self._applying,
+            terminal_notifications=len(self._terminals),
+            drain_budget_seconds=TIMELINE_DRAIN_SECONDS,
+        )
+
+    async def _consume(self) -> None:
+        while (effect := await self._pending.get()) is not None:
+            self._applying = True
+            try:
+                await self._apply(effect)
+            finally:
+                self._applying = False
+
+    async def flush_text(self) -> None:
+        await self._apply(self.sink.flush_text)
+
+    async def _apply(self, effect: TimelineEffect) -> None:
+        try:
+            if isawaitable(work := effect()):
+                await work
+        except Exception:
+            logger.opt(exception=True).warning(
+                "could not apply a harness timeline notification",
+                event="harness_live_timeline_failed",
+                agent_id=self._agent_id,
+            )
 
 
 async def await_foreground(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: ReadTimelineSink,
+    projector: TimelineNotifications,
     execute: Callable[[], Awaitable[None]],
 ) -> None:
     resources = ctx.hosted_resources
@@ -45,7 +167,13 @@ async def await_foreground(
         async def request_interrupt() -> None:
             await interrupt.wait()
             if error := await interrupt_engine(agent_id, bridge):
-                await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
+                projector.post(
+                    partial(
+                        projector.sink.record_control,
+                        f"Cancellation unconfirmed: {error}",
+                        error=True,
+                    )
+                )
 
         async def go() -> None:
             await _with_interrupt(execute, request_interrupt, agent_id)
@@ -93,7 +221,7 @@ async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
     work: Awaitable[None],
-    projector: ReadTimelineSink,
+    projector: TimelineNotifications,
 ) -> None:
     async def settle() -> BaseException | None:
         try:

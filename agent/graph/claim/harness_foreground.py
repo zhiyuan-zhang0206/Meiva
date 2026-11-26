@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from agent.graph.claim.harness_render import fit_input_images, skipped_images_note
+from base.agents.messages.reply_intent import parse_reply_visibility
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -27,13 +28,16 @@ from base.lm.harness import (
     ReasoningDelta,
     ReasoningText,
     Reconciliation,
+    SubagentText,
     TextBlock,
     TextDelta,
     ToolResult,
     ToolUse,
     TurnCompleted,
+    TurnOrigin,
     TurnStarted,
 )
+from base.lm.harness.engine import HarnessTurn
 
 __all__ = [
     "Commit",
@@ -42,6 +46,7 @@ __all__ = [
     "Reconciled",
     "Requeue",
     "Settlement",
+    "TurnProtocol",
     "event_generation",
     "plan_reconciliation",
 ]
@@ -392,3 +397,48 @@ def _wake_input(
     if skipped and notes_from == len(parts):
         blocks.append(TextBlock(skipped_images_note(skipped)))
     return HarnessInput(wake.key, tuple(blocks))
+
+
+# meiva:link agent/graph/docs/harness-turn.md
+class TurnProtocol:
+    def __init__(self, *, explicit_visibility: bool, non_human_wake: bool) -> None:
+        self._explicit_visibility = explicit_visibility
+        self.non_human_wake = non_human_wake
+        self.has_activity = False
+        self.has_delivered_output = False
+        self._replied = False
+        self._unmarked_tail = False
+
+    def observe(self, event: BridgeEvent) -> bool:
+        match event:
+            case AssistantText(text=text):
+                self._check_reply(text)
+                self.has_delivered_output = True
+            case ToolUse(parent_tool_use_id=parent):
+                if parent is None:
+                    self._unmarked_tail = False
+                self.has_delivered_output = True
+            case TextDelta() | SubagentText() | ToolResult():
+                self.has_delivered_output = True
+            case ReasoningDelta() | ReasoningText():
+                pass
+            case TurnStarted(origin=TurnOrigin.HARNESS, record_start=int()):
+                pass
+            case _:
+                return False
+        self.has_activity = True
+        return True
+
+    def completed(self, turn: HarnessTurn) -> None:
+        if not self._replied and not turn.interrupted and turn.text:
+            self._check_reply(turn.text)
+        self._replied = False
+
+    def _check_reply(self, text: str) -> None:
+        self._replied = True
+        if self._explicit_visibility and text.strip():
+            self._unmarked_tail = parse_reply_visibility(text) is None
+
+    def take_invalid_reply(self) -> bool:
+        unmarked, self._unmarked_tail = self._unmarked_tail, False
+        return unmarked and not self.non_human_wake
