@@ -1,4 +1,5 @@
 import psycopg
+import pytest
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentityReader
@@ -341,6 +342,71 @@ def test_quote_send_persists_snapshot_and_reconciles_after_source_changes(
         foreign = {**body, "quote": {**quote_body, "source_agent_id": tid + 1}}
         denied = client.post(f"/api/agents/{tid}/messages", json=foreign)
         assert denied.status_code == 422
+
+
+@pytest.mark.parametrize("compacted", [False, True])
+def test_quote_admission_uses_the_persisted_native_block_after_reordering(
+    db_conn: psycopg.Connection, compacted: bool, *, machine_identity: MachineIdentityReader
+) -> None:
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    from base.config import settings
+    from gateway.tests.auth.gateway_config import reconfigure
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    agent = _seed_agent(db_conn, local_machine=machine_identity)
+    foreign = _seed_agent(db_conn, local_machine=machine_identity)
+    _ = put_checkpoint(
+        settings.data_plane.db_url,
+        agent,
+        [
+            SystemMessage(content="system"),
+            AIMessage(id="new-first", content="first"),
+            AIMessage(id="selected", content="selected"),
+        ],
+        version="1",
+        boundary=compacted,
+    )
+    if compacted:
+        _ = put_checkpoint(
+            settings.data_plane.db_url,
+            agent,
+            [AIMessage(id="current", content="current")],
+            version="2",
+        )
+    _ = put_checkpoint(
+        settings.data_plane.db_url,
+        foreign,
+        [AIMessage(id="foreign", content="foreign")],
+        version="1",
+    )
+    quote: dict[str, object] = {
+        "source_agent_id": agent,
+        "source_item_id": "future-page-format:before-reordering",
+        "source_message_id": "selected",
+        "source_block_idx": 0,
+        "author": "Agent",
+        "text": "selected",
+    }
+
+    with gateway_test_client(machine=machine_identity) as client:
+        if compacted:
+            _ = reconfigure(client, timeline_compact_history=0)
+        for changes, expected in [
+            ({}, 201),
+            ({"source_message_id": "foreign"}, 422),
+            ({"source_agent_id": foreign}, 422),
+            ({"source_block_idx": 4}, 422),
+            ({"source_inbound_id": 1234}, 422),
+            ({"text": " "}, 422),
+        ]:
+            response = client.post(
+                f"/api/agents/{agent}/messages",
+                json={"content": "Explain", "source": "user", "quote": {**quote, **changes}},
+            )
+            assert response.status_code == expected, response.text
+
+    assert len(_pending_rows(db_conn, agent)) == 1
 
 
 def test_quote_accepts_exact_retained_native_segment(

@@ -128,6 +128,31 @@ class TestTimelineEpochs(CompactHistoryCases):
         )
         return agent
 
+    def test_a_canonical_quote_uses_native_epoch_membership(
+        self, db_conn: psycopg.Connection, client: GatewayTestClient
+    ) -> None:
+        agent = self._meiva_cli_meiva(db_conn)
+        earlier = _reply("old", 2).model_copy(update={"id": "earlier-reply"})
+        current = _reply("current", 6).model_copy(update={"id": "current-reply"})
+        self._put_checkpoint(agent, [earlier, current], version="2")
+        for source, status in [("earlier-reply", 422), ("current-reply", 201)]:
+            response = client.post(
+                f"/api/agents/{agent}/messages",
+                json={
+                    "content": "Explain",
+                    "source": "user",
+                    "quote": {
+                        "source_agent_id": agent,
+                        "source_item_id": "reordered",
+                        "source_message_id": source,
+                        "source_block_idx": 0,
+                        "author": "Agent",
+                        "text": "selected",
+                    },
+                },
+            )
+            assert response.status_code == status, response.text
+
     def test_the_head_is_the_current_native_epoch_and_its_switch_block(
         self, db_conn: psycopg.Connection, client: GatewayTestClient
     ) -> None:

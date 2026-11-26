@@ -12,6 +12,11 @@ from langchain_core.messages import (
     ToolCall,
 )
 
+from base.agents.history.native_source import (
+    AiSourceBlock,
+    ai_source_blocks,
+    native_message_identity,
+)
 from base.agents.history.timeline_item import ReadingWindow
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.messages.envelope import inbound_body
@@ -41,7 +46,7 @@ from base.api_contracts.reading import (
     RecordReadingLocator,
 )
 from base.host.boundary.json_values import is_object_dict
-from base.lm.content import message_addl_kwargs, message_content
+from base.lm.content import message_content
 from base.lm.system_note import unwrap_system_note
 
 __all__ = [
@@ -155,13 +160,10 @@ def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMe
     for item in items:
         msg_idx, block_idx = (int(part.removeprefix("h")) for part in item.item_id.split("."))
         message = messages[msg_idx]
-        kwargs = read_meiva_kwargs(message)
-        if message.id and not kwargs.get("meiva_ephemeral_message_id"):
-            item.source_message_id = message.id
-            item.source_block_idx = block_idx
-        embedded_id = kwargs.get("meiva_inbound_id")
-        if isinstance(embedded_id, int) and not isinstance(embedded_id, bool) and embedded_id > 0:
-            item.source_inbound_id = embedded_id
+        identity = native_message_identity(message)
+        item.source_message_id = identity.message_id
+        item.source_inbound_id = identity.inbound_id
+        if identity.message_id is not None or identity.inbound_id is not None:
             item.source_block_idx = block_idx
 
 
@@ -538,27 +540,6 @@ def _native_reading_identity_matches(item: TimelineItem, locator: NativeReadingL
     )
 
 
-def _fold_addl_reasoning_into_content(
-    content: str | list[object], additional_kwargs: dict[str, object]
-) -> str | list[object]:
-    from base.lm.reasoning import ContentBlock
-
-    addl_reasoning = additional_kwargs.get("reasoning_content")
-    if not (addl_reasoning and isinstance(addl_reasoning, str) and addl_reasoning.strip()):
-        return content
-    if isinstance(content, list):
-        if any(is_object_dict(b) and b.get("type") == "thinking" for b in content):
-            return content
-        head: ContentBlock = {"type": "thinking", "thinking": addl_reasoning, "index": 0}
-        return [head, *content]
-    if isinstance(content, str):
-        return [
-            {"type": "thinking", "thinking": addl_reasoning, "index": 0},
-            {"type": "text", "text": content, "index": 1},
-        ]
-    assert_never(content)
-
-
 def ai_message_items(
     msg: AIMessage,
     msg_idx: int,
@@ -572,15 +553,13 @@ def ai_message_items(
     delivery_mode = kwargs.get("meiva_user_delivery_mode")
     reasoning_ms_by_block = kwargs.get("meiva_reasoning_ms_by_block")
     code_ms_by_block = kwargs.get("meiva_code_ms_by_block")
-    from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
+    from base.lm.reasoning import extract_reasoning_tokens
 
     reasoning_tokens = (
         extract_reasoning_tokens(msg.usage_metadata, content=message_content(msg)) or None
     )
     reasoning_attached = False
-    content_indices: set[int] = set()
-    content = to_canonical_reasoning(message_content(msg))
-    content = _fold_addl_reasoning_into_content(content, message_addl_kwargs(msg))
+    blocks = ai_source_blocks(msg)
     block_ctx = _AiBlockContext(
         msg_idx=msg_idx,
         created_at=created_at,
@@ -590,25 +569,14 @@ def ai_message_items(
         explicit_visibility=explicit_visibility,
         delivery_mode=delivery_mode,
     )
-    if isinstance(content, str):
-        if content:
-            out.append(_chat_item(block_ctx, 0, content))
-            content_indices.add(0)
-    elif isinstance(content, list):
-        for pos, block in enumerate(content):
-            item, block_idx, reasoning_attached = _content_block_item(
-                block,
-                pos,
-                block_ctx,
-                reasoning_attached=reasoning_attached,
-            )
-            if block_idx is not None:
-                content_indices.add(block_idx)
-            if item is not None:
-                out.append(item)
-    else:
-        return out
+    for block in blocks:
+        item, reasoning_attached = _content_block_item(
+            block, block_ctx, reasoning_attached=reasoning_attached
+        )
+        if item is not None:
+            out.append(item)
 
+    content_indices = {block.index for block in blocks}
     out.extend(
         _tool_call_items(msg, msg_idx, content_indices, code_ms_by_block, created_at, sdk_by_id)
     )
@@ -646,23 +614,15 @@ def _chat_item(ctx: _AiBlockContext, block_idx: int, raw_text: str) -> TimelineI
 
 # meiva:link base/agents/history/docs/timeline/timeline.md
 def _content_block_item(
-    block: object,
-    pos: int,
+    block: AiSourceBlock,
     ctx: _AiBlockContext,
     *,
     reasoning_attached: bool,
-) -> tuple[TimelineItem | None, int | None, bool]:
-    if not is_object_dict(block):
-        return None, None, reasoning_attached
-    block_type = block.get("type")
-    if block_type not in ("text", "thinking"):
-        return None, None, reasoning_attached
-    raw_idx = block.get("index", pos)
-    block_idx = raw_idx if isinstance(raw_idx, int) else pos
-    if block_type == "thinking":
-        t = block.get("thinking")
-        if not (isinstance(t, str) and t):
-            return None, block_idx, reasoning_attached
+) -> tuple[TimelineItem | None, bool]:
+    block_idx = block.index
+    if block.text is None:
+        return None, reasoning_attached
+    if block.reasoning:
         block_reasoning_ms = (
             None
             if ctx.reasoning_ms_by_block is None
@@ -672,21 +632,14 @@ def _content_block_item(
             item_id=f"{ctx.msg_idx}.{block_idx}",
             kind="agent_reasoning",
             source=None,
-            payload=t,
+            payload=block.text,
             created_at=ctx.created_at,
             inbound_id=None,
             reasoning_ms=block_reasoning_ms,
             reasoning_tokens=None if reasoning_attached else ctx.reasoning_tokens,
         )
-        return item, block_idx, True
-    t = block.get("text")
-    if not (isinstance(t, str) and t):
-        return None, block_idx, reasoning_attached
-    return (
-        _chat_item(ctx, block_idx, t),
-        block_idx,
-        reasoning_attached,
-    )
+        return item, True
+    return _chat_item(ctx, block_idx, block.text), reasoning_attached
 
 
 def _tool_call_code_and_source(

@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.timeline import reading_target, reading_window
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
-from base.agents.history.transcript_timeline.project import ProjectedItem
+from base.agents.history.transcript_timeline.project import ProjectedItem, with_record_identity
 from base.agents.history.transcript_timeline.record.harness import (
     compressed_file,
     record_file,
@@ -19,12 +19,17 @@ from base.agents.history.transcript_timeline.record.harness import (
     unreadable_file,
     wire_id,
 )
+from base.agents.history.transcript_timeline.record.quote import RecordQuoteQuery, read_record_quote
 from base.agents.history.transcript_timeline.record.read import (
     LoadSent,
     read_reading_window,
     read_window,
 )
-from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
+from base.agents.history.transcript_timeline.sent import (
+    load_sent_rows,
+    quoted_inbound_matches,
+    sent_inputs,
+)
 from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.api_contracts.reading import (
     ReadingSourceUnavailableError,
@@ -37,10 +42,20 @@ from base.api_contracts.reading import (
 )
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.entries import InputRow
-from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows, ZstdRecordFile
+from base.lm.harness.session.transcript.record_file import (
+    RecordFile,
+    RecordReadBudgetError,
+    UnreadRows,
+    ZstdRecordFile,
+)
 from base.log import logger
 from base.paths import harness_sessions_dir
-from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow, RecordUnreadable
+from ops.rpc_schemas import (
+    HarnessTimelineReadRequest,
+    HarnessTimelineWindow,
+    RecordQuoteEvidence,
+    RecordUnreadable,
+)
 
 
 # meiva:note
@@ -87,6 +102,8 @@ def read_harness_timeline(
             )
         return sent_inputs(rows.rows)
 
+    if request.quote_identity is not None:
+        return _quote_source(request, file, record.session_id, pool, unread)
     try:
         if request.reading_locator is not None:
             return _reading_window(request, file, record.session_id, load_sent, unread)
@@ -148,6 +165,7 @@ def _empty(
         size=0,
         unreadable=unreadable,
         anchor_applied=request.anchor_item_id is not None,
+        quote_applied=request.quote_identity is not None,
         reading_applied=request.reading_locator is not None,
         reading_unavailable=ReadingUnavailableReason.SOURCE
         if request.reading_locator is not None
@@ -172,7 +190,7 @@ def _with_record_locators(
     projected: Sequence[ProjectedItem],
 ) -> list[TimelineItem]:
     source = _record_source(request, session)
-    entry_keys = {shown.item.item_id: shown.key for shown in projected}
+    sources = {shown.item.item_id: shown for shown in projected}
     bound: list[TimelineItem] = []
     for item in items:
         offset, block = item.item_id.split(".")
@@ -186,10 +204,73 @@ def _with_record_locators(
         update: dict[str, object] = {"reading_locator": encode_reading_locator(locator)}
         if item.kind == "agent_chat":
             update["publication_key"] = reply_key(
-                request.harness, entry_keys[item.item_id], session
+                request.harness, sources[item.item_id].key, session
             )
-        bound.append(item.model_copy(update=update))
+        shown = sources[item.item_id]
+        bound.append(
+            with_record_identity(
+                item.model_copy(update=update),
+                agent_id=request.agent_id,
+                harness=request.harness,
+                session=session,
+                offset=shown.offset,
+                entry_key=shown.key,
+            )
+        )
     return bound
+
+
+def _quote_source(
+    request: HarnessTimelineReadRequest,
+    file: RecordFile,
+    session: str,
+    pool: ConnectionPool,
+    unread: UnreadRows,
+) -> HarnessTimelineWindow:
+    identity = request.quote_identity
+    if identity is None:
+        raise ValueError("A quote identity is required")
+
+    def inbound_matches(inbound_id: int, wanted: frozenset[str]) -> bool:
+        with pool.connection() as conn:
+            return quoted_inbound_matches(
+                conn,
+                request.agent_id,
+                inbound_id,
+                wanted=wanted,
+                wire_id=lambda key: wire_id(request.harness, key),
+            )
+
+    try:
+        matched = read_record_quote(
+            file,
+            RecordQuoteQuery(
+                request.agent_id, request.harness, session, identity, request.quote_inbound_id
+            ),
+            inbound_matches=inbound_matches,
+            unread=unread,
+        )
+    except FileNotFoundError:
+        return _empty(request, RecordUnreadable.FILE_MISSING)
+    except (RecordReadBudgetError, zstandard.ZstdError):
+        return _empty(request, RecordUnreadable.UNDECODABLE)
+    evidence = (
+        None
+        if matched is None
+        else RecordQuoteEvidence(
+            identity=identity,
+            inbound_id=request.quote_inbound_id,
+            activity_pending=matched.activity_pending,
+            created_at=matched.created_at,
+        )
+    )
+    return HarnessTimelineWindow(
+        items=[],
+        has_more=False,
+        size=0,
+        quote_applied=True,
+        quote_evidence=evidence,
+    )
 
 
 def _reading_window(

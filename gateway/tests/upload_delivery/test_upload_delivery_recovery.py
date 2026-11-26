@@ -218,6 +218,43 @@ def request_for(pool: ConnectionPool, batch_id: str, *, local_machine: str) -> R
 # meiva:note
 # The proof a receiver on `request.target` returns: the batch's send directory inside that agent's
 # own workspace on the target machine, named by the cluster's configured directory name.
+def test_quoted_upload_uses_the_persisted_native_block(
+    uploaded_agent: tuple[GatewayTestClient, int],
+    db_url: str,
+) -> None:
+    from langchain_core.messages import AIMessage
+
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    client, agent = uploaded_agent
+    _ = put_checkpoint(
+        db_url, agent, [AIMessage(id="upload-source", content="source")], version="1"
+    )
+    staged = stage(client, agent)
+    assert staged.status_code == 201, staged.text
+    file_ids = [staged.json()["file_id"]]
+    quote: dict[str, object] = {
+        "source_agent_id": agent,
+        "source_item_id": "new-display-cursor",
+        "source_message_id": "upload-source",
+        "source_block_idx": 0,
+        "author": "Agent",
+        "text": "source",
+    }
+    for changes, expected in [
+        ({"source_agent_id": agent + 1}, 422),
+        ({"source_message_id": "missing"}, 422),
+        ({"text": ""}, 422),
+        ({}, 202),
+    ]:
+        response = client.post(
+            f"/api/keyed/v1/agents/{agent}/uploads",
+            headers=HEADERS,
+            json={"file_ids": file_ids, "text": "See attached", "quote": {**quote, **changes}},
+        )
+        assert response.status_code == expected, response.text
+
+
 def proof_for(client: GatewayTestClient, request: ReceiveRequest) -> CopyProof:
     path = delivered_upload_dir(
         request.manifest.agent_id,

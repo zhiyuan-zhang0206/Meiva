@@ -16,6 +16,7 @@ from base.agents.history.transcript_timeline.project import (
     Projected,
     ProjectedItem,
     RecordProjector,
+    with_record_identity,
 )
 from base.agents.history.transcript_timeline.record import fork_floor
 from base.agents.history.transcript_timeline.record.harness import (
@@ -487,10 +488,20 @@ class ReadTimelineSink:
 
     def _published(self, projected: ProjectedItem) -> TimelineItem:
         session = self._session_id()
-        if projected.item.kind != "agent_chat" or session is None:
+        if session is None:
             return projected.item
-        key = reply_key(self._harness, projected.key, session)
-        return projected.item.model_copy(update={"publication_key": key})
+        item = with_record_identity(
+            projected.item,
+            agent_id=self._agent_id,
+            harness=self._harness,
+            session=session,
+            offset=projected.offset,
+            entry_key=projected.key,
+        )
+        if item.kind == "agent_chat":
+            key = reply_key(self._harness, projected.key, session)
+            return item.model_copy(update={"publication_key": key})
+        return item
 
     def _publish_retired(self, retires: list[str], end: int) -> None:
         if retires:

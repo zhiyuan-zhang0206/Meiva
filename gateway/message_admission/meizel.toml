@@ -1,7 +1,8 @@
 exports = ["cursor.py", "harness.py", "quote_source.py"]
 
 [uses]
-"quote_source.py" = ["cursor.py", "harness.py"]
+"legacy_quote.py" = ["cursor.py"]
+"quote_source.py" = ["legacy_quote.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.identity import record_identity
 from base.agents.history.transcript_timeline.items import ReplyPolicy, item_of
 from base.lm.harness.session.transcript.drafts import (
     DraftKind,
@@ -193,3 +194,23 @@ def _turn_start(drafts: Sequence[TimelineDraft]) -> int | None:
         return None
     last = max(drafts, key=lambda draft: draft.order)
     return min(draft.order.seq for draft in drafts if draft.turn == last.turn)
+
+
+def with_record_identity(
+    item: TimelineItem,
+    *,
+    agent_id: int,
+    harness: str,
+    session: str,
+    offset: int,
+    entry_key: str,
+) -> TimelineItem:
+    if item.kind == "system_marker":
+        return item
+    return item.model_copy(
+        update={
+            "source_message_id": record_identity(
+                agent_id, harness, session, offset, item.inbound_id or entry_key
+            )
+        }
+    )
