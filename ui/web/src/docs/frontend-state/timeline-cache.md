@@ -110,6 +110,14 @@ it also removes an overlay whose committed row a `GET /timeline` already deliver
 An overlay id that no snapshot retires is kept like any in-flight partial, and the
 backend sends nothing for an id after retiring it.
 
+An overlay never outlives its turn even when its retirement never reached the page (a
+dropped event, an SSE reconnect, a replaced host): `settleTurn` and `cancelled` remove
+every overlay row, a `GET /timeline` merged while no turn runs does the same
+(`dropLiveOverlays`, `lib/fold/overlay-id.ts`), and `hasUnsettledClock` counts an
+overlay row so an idle page always settles. Overlay rows are client-clocked, so the
+Working/Worked segments (`computeSegment`) are bounded by the record's own rows as soon as
+the segment holds one with a timestamp; before that the overlay rows anchor the live clock.
+
 ## Earlier harness epochs
 
 An agent that switched harness keeps one timeline. The gateway reads the current

@@ -15,6 +15,7 @@ import {
   captureCompactTransition,
   type CompactTransitionBuffer,
 } from "../layout/compact-transition";
+import { dropLiveOverlays, isLiveOverlayId } from "../fold";
 import {
   clearCodeClocks,
   freezeExecClocks,
@@ -195,11 +196,12 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       applied = true;
       const snapshotIds = new Set(snapshot.map((it) => it.item_id));
       const disjointGap = !crossedCompact && hasDisjointSnapshotGap(s.items, snapshot, hasMoreOlder);
+      const held = s.turnActive || s.turnRunning ? s.items : dropLiveOverlays(s.items);
       const localBase = crossedCompact
         ? []
         : disjointGap
-          ? s.items.filter((it) => Boolean(it.partial) || it.item_id.startsWith("_marker."))
-          : s.items;
+          ? held.filter((it) => Boolean(it.partial) || it.item_id.startsWith("_marker."))
+          : held;
       const merged = mergeSnapshotWithStreaming(
         localBase,
         snapshot,
@@ -342,12 +344,13 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
           it.codeStartedAt != null ||
           (it.kind === "agent_code" && it.activity_pending === true && it.code_elapsed_ms == null) ||
           (it.execStartedAt != null && it.exec_ms == null) ||
-          (it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
+          (it.kind === "code_output" && it.payload === "" && it.exec_ms == null) ||
+          isLiveOverlayId(it.item_id),
       );
       if (!s.turnActive && !s.turnRunning && s.arrivedInboundIds.length === 0 && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock && s.liveAnchorAt === 0) {
         return {};
       }
-      const cleaned = s.items.filter(
+      const cleaned = dropLiveOverlays(s.items).filter(
         (it) => !it.llmWaiting && !(it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       );
       const items = hasLiveClock

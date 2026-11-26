@@ -10,7 +10,7 @@ exports = ["agents.ts", "owner.ts", "timeline.ts"]
 "questions.ts" = ["types.ts"]
 "owner.ts" = ["index.ts", "repair.ts"]
 "repair.test.ts" = ["repair.ts"]
-"timeline.ts" = ["item-id.ts"]
+"timeline.ts" = ["item-id.ts", "overlay-id.ts"]
 
 [purity]
 "agents.ts" = "strict"

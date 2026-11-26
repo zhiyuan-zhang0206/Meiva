@@ -109,6 +109,7 @@ class LiveOverlay:
             self._open_unkeyed[kind] = item_id
         return item_id
 
+    # meiva:link base/lm/harness/docs/streaming-reconciliation.md
     def superseded(self, committed: Sequence[ProjectedItem]) -> list[str]:
         retired: list[str] = []
         for item in committed:
@@ -120,7 +121,8 @@ class LiveOverlay:
             retired.extend(
                 block.item_id
                 for block in self._blocks.values()
-                if block.kind == kind and block.item_id not in retired and _matches(block, item)
+                if block.item_id not in retired
+                and ((block.kind == kind and _matches(block, item)) or _precedes(block, item))
             )
         return self._retire(retired)
 
@@ -180,3 +182,17 @@ def _matches(block: _Block, item: ProjectedItem) -> bool:
         return block.key == item.block
     live = block.text.strip()
     return bool(live) and item.text.strip().startswith(live)
+
+
+def _precedes(block: _Block, item: ProjectedItem) -> bool:
+    if block.key is None or item.block is None:
+        return False
+    message, _, index = block.key.rpartition(":")
+    committed_message, _, committed_index = item.block.rpartition(":")
+    return (
+        message != ""
+        and message == committed_message
+        and index.isdigit()
+        and committed_index.isdigit()
+        and int(index) < int(committed_index)
+    )

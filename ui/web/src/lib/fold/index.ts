@@ -36,7 +36,7 @@ export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } f
 export { QUESTIONS_QUERY_KEY } from "./questions";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 export { isEpochItemId, isSyntheticEpochItemId, parseEpochItemId, type EpochItemId } from "./epoch-id";
-export { isDisplayOnlyItemId, isLiveOverlayId } from "./overlay-id";
+export { dropLiveOverlays, isDisplayOnlyItemId, isLiveOverlayId } from "./overlay-id";
 export {
   isEventForThread,
   isReattachedTimelineContext,

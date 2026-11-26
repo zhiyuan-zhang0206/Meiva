@@ -1,7 +1,7 @@
 exports = ["image-dimensions-cache.ts", "reveal", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-timeline.ts"]
 
 [uses]
-"tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
+"tests" = ["timeline-plan.ts", "timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "epoch-cursor.test.ts" = ["timeline-plan.ts", "timeline-store-events.ts"]
 "record-offset-ids.test.ts" = ["timeline-store-events.ts"]
 "timeline-scenarios.test.ts" = ["timeline.ts"]

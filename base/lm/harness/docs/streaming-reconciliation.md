@@ -18,7 +18,8 @@ are one measurement each, so read them as orders of magnitude, not constants.
 | Exact key | `message_start.message.id` equals the row's `message.id`; `content_block_start.index` equals the row's `apiBlockIndex` | delta `itemId` equals `item.id` of `item/started` / `item/completed` and the rollout `response_item` id (agent message and reasoning alike) | none: chunks carry no id or index |
 | Use | block `"<message.id>:<index>"` | block `itemId` | text-prefix fallback, retire on turn end |
 
-- Claude: a message with N blocks is N rows sharing `message.id`, in block order (thinking 0, text 1, tool_use 2 observed). The loop
+- Claude: a message with N blocks is N rows sharing `message.id`, in block order (thinking 0, text 1, tool_use 2 observed). A committed row of block N
+  therefore also retires the still-live earlier blocks of its message: a thinking block whose row renders nothing has no twin of its own. The loop
   `index` in `claude/transcript/parse.py` counts blocks inside one row (always 0 for a one-block row); the API block
   index is `raw["apiBlockIndex"]`.
 - Codex reasoning: `item/reasoning/summaryPartAdded` and `summaryTextDelta` carry the reasoning item's `itemId` and a `summaryIndex`
