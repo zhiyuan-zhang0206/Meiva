@@ -64,6 +64,7 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import harness_registrations_dir, harness_sessions_dir, workspace_path
 from base.telemetry.tracing import turn_span
+from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.invocation import (
     InvocationHooks,
     PendingWorkResult,
@@ -164,7 +165,7 @@ class AgentHost:
         self._machine_identity = machine
         self._machine = machine.name()
         self._wake: Callable[[int], object] | None = None
-        self._in_planned_stop: Callable[[], bool] | None = None
+        self._stop: TurnScheduler | None = None
         self._owner = runtime_owner
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         # meiva:note
@@ -541,15 +542,13 @@ class AgentHost:
         self._wake = wake
 
     # meiva:note
-    # The scheduler's answer to "is this host in an exit an operator asked for", read when a turn's
-    # abort is settled. A host built without a scheduler (tests) has no planned stop.
-    def bind_planned_stop(self, in_planned_stop: Callable[[], bool]) -> None:
-        if self._in_planned_stop is not None:
-            raise RuntimeError("this host already has a planned-stop reader bound")
-        self._in_planned_stop = in_planned_stop
-
-    def _planned_stop(self) -> bool:
-        return self._in_planned_stop is not None and self._in_planned_stop()
+    # The scheduler's answers to "is this host in an exit an operator asked for" (read when a turn's
+    # abort is settled) and "has it begun its graceful exit at all" (every turn's `host_exiting`). A
+    # host built without a scheduler (tests) is never in an exit.
+    def bind_stop(self, scheduler: TurnScheduler) -> None:
+        if self._stop is not None:
+            raise RuntimeError("this host already has a scheduler bound for its stop")
+        self._stop = scheduler
 
     # meiva:note
     # An inbound wake for an agent whose invocation is running reaches its external harness engine, so
@@ -641,6 +640,7 @@ class AgentHost:
             extensions=self._extensions,
             commands=self._commands,
             turn_progress=self.turn_progress,
+            host_exiting=lambda: self._stop is not None and self._stop.in_stop(),
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             original_incarnation=incarnation,
             hosted_resources=resources,
@@ -710,7 +710,7 @@ class AgentHost:
                             ctx,
                             config,
                             prepared,
-                            planned_stop=self._planned_stop(),
+                            planned_stop=self._stop is not None and self._stop.in_planned_stop(),
                         )
                     outcome = await finish_completed_invocation(
                         self._control_pool,

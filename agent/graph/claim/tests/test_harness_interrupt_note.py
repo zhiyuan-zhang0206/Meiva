@@ -1,18 +1,26 @@
 # meiva:note
 # The stop button's passive note remains deliverable after confirmation. It rides in the next
 # input as text; Meiva lifecycle hints do not invent rows in the external record timeline.
+# It also holds how a harness session killed by the host's own graceful exit settles its turn,
+# which is a restart's interrupt, not a crash.
 # meiva:link agent/graph/docs/turn-interrupts.md
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from dataclasses import replace
 
 import psycopg
+import pytest
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_interrupt import announce_interrupt
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    RuntimeFixture,
     completed,
     in_a_turn,
     input_key,
@@ -22,14 +30,19 @@ from agent.graph.claim.tests.harness_support import (
     silent_engine,
     wait_until,
 )
+from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
+from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.tests.langgraph_views import command_update
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
-from base.lm.harness import InputInContext, TurnOrigin, TurnStarted
+from base.lm.harness import HarnessInput, InputInContext, SessionFailed, TurnOrigin, TurnStarted
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedTurnResources
 
 _NOTE = "Your running turn was interrupted by user."
@@ -207,3 +220,46 @@ async def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouc
     assert row_status(db_conn, note) == "pending"
     row = db_conn.execute("SELECT payload FROM inbound_messages WHERE id=%s", (note,)).fetchone()
     assert row is not None and row[0] == {"note_tag": "lifecycle_interrupt", "passive": True}
+
+
+class _CliKilledEngine(FakeEngine):
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
+        self.emit(SessionFailed("Command failed with exit code 143"))
+
+
+async def test_a_session_killed_during_the_hosts_graceful_exit_is_handed_to_the_restart(
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = _CliKilledEngine()
+    rt = harness_runtime(engine, agent_id=agent_id)
+    exiting = Runtime(context=replace(rt.context, host_exiting=lambda: True))
+
+    command = await harness_turn_node(
+        AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}]),
+        exiting,
+        config(agent_id),
+    )
+
+    assert command.goto == "claim"
+    update = command_update(command)
+    assert update["halted"] is True
+    assert update["interrupted_by_restart"] is True
+    assert update["harness_inputs"] == []
+    assert "session unavailable" in engine.retired, "the dead session is retired, not reused"
+    cut = loguru_records.events("harness_turn_cut_by_host_exit")
+    assert len(cut) == 1 and "exit code 143" in cut[0]["extra"]["detail"]
+
+
+async def test_a_session_killed_outside_a_graceful_exit_is_still_a_fatal_stream_abort(
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+
+    with pytest.raises(FatalLLMStreamError, match="exit code 143"):
+        await harness_turn_node(
+            AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}]),
+            harness_runtime(_CliKilledEngine(), agent_id=agent_id),
+            config(agent_id),
+        )
+    assert loguru_records.events("harness_turn_cut_by_host_exit") == []

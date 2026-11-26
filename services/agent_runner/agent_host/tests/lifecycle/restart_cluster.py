@@ -223,7 +223,7 @@ class Cluster:
         scheduler = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
         if wakes:
             host.bind_wake(scheduler.wake)
-        host.bind_planned_stop(scheduler.in_planned_stop)
+        host.bind_stop(scheduler)
         graceful = GracefulExit(
             turns=scheduler,
             progress=host.turn_progress,

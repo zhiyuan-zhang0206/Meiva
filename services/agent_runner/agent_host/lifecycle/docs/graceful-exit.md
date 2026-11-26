@@ -103,6 +103,20 @@ also discovers Meiva takeover rows with unapplied handoffs or plugin deltas,
 including sessions retired by an upgrade without a pending inbound. Nothing
 new is written at boot.
 
+## A harness session that dies during the exit
+
+Root's leader-only TERM is not the only way an exit can reach a harness child: if the
+host's cgroup scope is torn down (systemd stops a scope after an OOM kill unless it
+carries `OOMPolicy=continue`) or something signals the group, the CLI dies (exit 143)
+while the host is draining. The scheduler's `in_stop` is true from the moment admission
+closes, and each turn's `MeivaContext.host_exiting` reads it. A turn whose session died
+in that window (`HarnessClosedError`, a failed setup, or a fault naming no completed
+turn; quota exhaustion and stalls keep their halts) is handed to the restart the exit
+writes: it ends halted and marked `interrupted_by_restart`, like a turn a restart
+interrupted, so the claim that takes the restart queues the continuation note on the next
+host. It raises no `FatalLLMStreamError`, renders no error and stamps no corpse. A turn
+that finished in error, or a session that dies with no exit in progress, is still a crash.
+
 ## Bounds
 
 A turn still running at the deadline is logged as `host_exit_drain_timeout`

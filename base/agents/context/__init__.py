@@ -452,6 +452,8 @@ class MeivaContext:
     """The turn-progress clock: graph nodes and the LLM stream mark activity on it, the host's
     stall guard, dispatcher and heartbeat read it."""
 
+    host_exiting: Callable[[], bool] = lambda: False
+
     def require_db(self) -> Database:
         """The cluster database handle; a context built without one fails here."""
         if self.db is None:
