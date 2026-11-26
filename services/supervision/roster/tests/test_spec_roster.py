@@ -42,6 +42,7 @@ _GATEWAY_SESSIONS = {
     "pty-sessions",
     "pg-backup",
     "redis-bridge",
+    "embeddinggemma",
     "ttl-reaper",
     "schedule-manager",
     "insights",
@@ -63,6 +64,7 @@ _AGENT_RUNNER_SESSIONS = {
     "otel-collector",
     "pty-sessions",
     "schedule-manager",
+    "embeddinggemma",
     "cloudflared",
     "tailscale",
 }

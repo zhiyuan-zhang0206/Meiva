@@ -1029,6 +1029,9 @@ root = "services/backup/scheduler/tests"
 root = "services/backup/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/derived/embeddinggemma/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/derived/insights/run_timeline/tests"
 
 [[tool.pyright.executionEnvironments]]

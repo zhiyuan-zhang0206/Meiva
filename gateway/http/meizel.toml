@@ -6,7 +6,7 @@ exports = ["auth", "config.py", "disconnect.py", "error_handlers.py", "ingress.p
 "error_handlers.py" = ["config.py", "middleware"]
 "ingress.py" = []
 "model_catalog.py" = ["config.py"]
-"tests" = ["error_handlers.py", "ingress.py", "middleware"]
+"tests" = ["config.py", "error_handlers.py", "ingress.py", "middleware"]
 
 [purity]
 "__init__.py" = "strict"

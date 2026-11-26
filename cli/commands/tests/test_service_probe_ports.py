@@ -29,6 +29,7 @@ _EXPECTED_SESSIONS = {
     "events-maintenance",
     "memory-search",
     "memory-indexer",
+    "embeddinggemma",
     "frontend",
     "ops",
     "browser",

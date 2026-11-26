@@ -25,6 +25,8 @@ from datetime import datetime
 import httpx
 
 from base.lm.catalog import ModelCatalog
+from services.derived.embeddinggemma.contract import DEFAULT_PORT
+from services.derived.embeddinggemma.placement import client_target
 from services.derived.memory_indexer.embeddings import embeddinggemma, gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
@@ -139,14 +141,27 @@ def embeddinggemma_config(
     model: str | None,
     revision: str | None,
     api_key: str | None,
+    placement_host: str = "",
+    placement_port: int = DEFAULT_PORT,
+    self_host: str = "",
 ) -> embeddinggemma.EmbeddingGemmaConfig | None:
     # meiva:note
-    # Validate the selected backend's raw configuration without touching the network.
+    # Validate the selected backend's raw configuration without touching the network. A managed
+    # placement (`MEIVA_EMBEDDINGGEMMA_HOST`) supplies the endpoint and the model locator the
+    # operator left unset; an explicit value always wins, so an external server keeps working.
     if name != embeddinggemma.NAME:
         return None
+    endpoint, model = client_target(
+        endpoint=endpoint,
+        model=model,
+        host=placement_host,
+        port=placement_port,
+        self_host=self_host,
+    )
     if endpoint is None or model is None or revision is None:
         raise ValueError(
-            "embeddinggemma requires MEIVA_EMBEDDINGGEMMA_ENDPOINT, "
-            "MEIVA_EMBEDDINGGEMMA_MODEL and MEIVA_EMBEDDINGGEMMA_REVISION"
+            "embeddinggemma requires MEIVA_EMBEDDINGGEMMA_REVISION and either "
+            "MEIVA_EMBEDDINGGEMMA_HOST (managed service) or both "
+            "MEIVA_EMBEDDINGGEMMA_ENDPOINT and MEIVA_EMBEDDINGGEMMA_MODEL"
         )
     return embeddinggemma.EmbeddingGemmaConfig(endpoint, model, revision, api_key)

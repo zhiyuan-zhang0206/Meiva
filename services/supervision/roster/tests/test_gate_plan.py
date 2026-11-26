@@ -7,6 +7,7 @@ from services.supervision.roster.gate_plan import (
     BrowserFact,
     CollectorFact,
     ComputerFact,
+    EmbeddingGemmaFact,
     FlagFact,
     GateFact,
     GateKind,
@@ -29,6 +30,7 @@ from services.supervision.roster.gate_plan import (
         ("grafana", "station"),
         ("otel-collector", "collector"),
         ("redis-bridge", "bridge"),
+        ("embeddinggemma", "embeddinggemma"),
         ("gateway", "none"),
         ("ops", "none"),
     ],
@@ -124,3 +126,29 @@ def test_the_relay_is_gated_by_its_declaration_and_its_endpoint(
     fact: GateFact, expected: str | None
 ) -> None:
     assert gate_reason("redis-bridge", fact) == expected
+
+
+_SHA = "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c"
+
+
+def test_embeddinggemma_runs_only_on_the_machine_whose_address_is_the_placement_host() -> None:
+    here = EmbeddingGemmaFact(host="10.64.0.7", self_host="10.64.0.7", revision=_SHA)
+    elsewhere = EmbeddingGemmaFact(host="10.64.0.9", self_host="10.64.0.7", revision=_SHA)
+    unmanaged = EmbeddingGemmaFact(host="", self_host="10.64.0.7", revision=_SHA)
+    assert gate_reason("embeddinggemma", here) is None
+    assert gate_reason("embeddinggemma", elsewhere) == (
+        "EmbeddingGemma is hosted on 10.64.0.9, not on this machine"
+    )
+    assert gate_reason("embeddinggemma", unmanaged) == (
+        "no managed EmbeddingGemma service (MEIVA_EMBEDDINGGEMMA_HOST is empty)"
+    )
+
+
+def test_a_placement_naming_this_machine_needs_a_revision_the_model_can_be_verified_against() -> (
+    None
+):
+    for revision in (None, "", "f9972ac22e696a105c482202646979e33e4b5a1e"):
+        fact = EmbeddingGemmaFact(host="h", self_host="h", revision=revision)
+        reason = gate_reason("embeddinggemma", fact)
+        assert reason is not None
+        assert "64-hex SHA256" in reason

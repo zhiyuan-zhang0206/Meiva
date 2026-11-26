@@ -27,6 +27,10 @@ from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import otel_collector_active_config, otel_collector_binary, run_dir
 from services.supervision.roster import plugin_services
+from services.supervision.roster.embeddinggemma_unit import (
+    EmbeddingGemmaSettings,
+    embeddinggemma_service,
+)
 from services.supervision.roster.field_values import optional_text, real, text, texts, whole
 from services.supervision.roster.gate_plan import GateSettings
 from services.supervision.roster.healthz import healthz_daemon
@@ -142,6 +146,7 @@ def build_services(
 
     from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
+    from services.derived.embeddinggemma.probe import probe_embeddinggemma
     from services.desktop.browser import shutdown_budget as browser_mcp_budget
     from services.desktop.browser.profile import profile_dir
     from services.entrypoints.gate.daemon import app_port, entry_port
@@ -493,6 +498,11 @@ def build_services(
             ),
             identity_probe=partial(probe_collector_at, telemetry_otlp_port),
             healthcheck_module="services.supervision.healthchecks.otel_collector",
+        ),
+        embeddinggemma_service(
+            EmbeddingGemmaSettings.from_fields(get_field),
+            self_host=machine_host(),
+            probe=probe_embeddinggemma,
         ),
     )
 

@@ -1,0 +1,7 @@
+[uses]
+"serve_child.py" = ["fakes.py"]
+"test_app.py" = ["fakes.py"]
+"test_contract_and_config.py" = ["fakes.py"]
+"test_daemon.py" = ["fakes.py", "serve_child.py"]
+"test_engine.py" = ["fakes.py"]
+"test_probe.py" = ["fakes.py"]

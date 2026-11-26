@@ -1,0 +1,21 @@
+exports = ["config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py"]
+
+[uses]
+"app.py" = ["config.py", "contract.py", "engine.py"]
+"config.py" = ["contract.py"]
+"daemon.py" = ["app.py", "config.py", "engine.py"]
+"engine.py" = ["config.py", "contract.py"]
+"placement.py" = ["contract.py"]
+"tests" = ["app.py", "config.py", "contract.py", "daemon.py", "engine.py", "placement.py", "probe.py"]
+
+[external]
+"engine.py" = "imports the LiteRT-LM runtime (`litert_lm`) by name at startup: it is installed outside the repository environment, in the interpreter or directory the host configures"
+
+[purity]
+"__init__.py" = "strict"
+"config.py" = "strict"
+"contract.py" = "strict"
+"placement.py" = "strict"
+
+[roots]
+"daemon.py" = { kinds = ["argv", "environ"], why = "process entry point of the managed EmbeddingGemma server: reads its command line once and the API key from its own process environment, then hands both to the app as values" }
