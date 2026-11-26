@@ -584,18 +584,26 @@ def regular_prompt(transcript: Path, request: int, command: str) -> None:
         plain_prompt(transcript, request, command)
 
 
+def prompt_text(data: dict[str, Any]) -> str:
+    return "".join(b["text"] for b in data["params"]["prompt"] if b["type"] == "text")
+
+
+def record_user_input(transcript: Path, text: str, *, written: bool) -> None:
+    if written:
+        record(
+            transcript,
+            {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
+        )
+
+
 def handle_prompt(
     transcript: Path,
     data: dict[str, Any],
     original: int | None,
 ) -> tuple[int | None, int | None]:
     request = data["id"]
-    text = data["params"]["prompt"][0]["text"]
-    marker, _, command = text.partition("\n")
-    record(
-        transcript,
-        {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
-    )
+    text = command = prompt_text(data)
+    record_user_input(transcript, text, written=command != "unwritten")
     if command == "steer":
         assert original is not None
         result(original)
@@ -603,7 +611,7 @@ def handle_prompt(
         complete_steer(transcript, request)
     # agy may omit live user_message_chunk. Emit an echo on selected paths to exercise both.
     if command in {"hold", "reactive", "background", "permission", "overlap-first"}:
-        update("user_message_chunk", content={"type": "text", "text": marker})
+        update("user_message_chunk", content={"type": "text", "text": text})
     if command == "steer":
         return original, None
     if command in {"hold", "reactive", "hold-no-stdin"}:
@@ -638,7 +646,7 @@ def handle_prompt(
         record(transcript, planner_row("incomplete foreground", tokens=1))
         message("OK")
         result(request)
-    elif command == "broken":
+    elif command in {"broken", "unwritten"}:
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
         regular_prompt(transcript, request, command)

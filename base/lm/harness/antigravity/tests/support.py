@@ -12,13 +12,38 @@ from uuid import uuid4
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
+from base.lm.harness.antigravity.transcript.input_store import (
+    inputs_path,
+    record_sent_input,
+    text_sha256,
+)
 from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.events import BridgeEvent, ToolResult, UnsolicitedSink
 from base.lm.harness.registry import SessionRegistry
 from base.lm.harness.session import SessionClock
+from base.lm.harness.session.transcript.record_file import RecordFile
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
+
+
+def request_content(text: str) -> str:
+    return f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"
+
+
+def input_row(key: str) -> dict[str, object]:
+    return {"type": "USER_INPUT", "meiva_input_key": key}
+
+
+def sent_request(record: Path, key: str, text: str) -> str:
+    record_sent_input(
+        inputs_path(record),
+        key=key,
+        min_offset=RecordFile(record).complete_end() if record.exists() else 0,
+        text_sha256=text_sha256(text.strip()),
+        image_count=0,
+    )
+    return request_content(text)
 
 
 class Harness:

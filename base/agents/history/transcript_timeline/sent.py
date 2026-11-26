@@ -2,18 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from psycopg import Connection
 
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.history.transcript_timeline.record.match import (
-    CLAIM_EARLY,
-    CLAIM_SLACK,
-    assign_inputs,
-)
 from base.agents.messages.harness_input_key import (
-    INPUT_KEY_FIELD,
     handed_input_keys,
 )
 from base.agents.messages.image_dimensions import ImageDimensions
@@ -38,6 +32,8 @@ from base.log import logger
 # happened. How the rows are found is `load_sent_rows`.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
+CLAIM_EARLY = timedelta(seconds=5)
+CLAIM_SLACK = timedelta(minutes=10)
 BATCH_ROWS = 200
 MAX_ROWS = 1000
 DELIVERABLE_KINDS = (
@@ -95,10 +91,6 @@ class Found:
     scanned: int
 
 
-# meiva:note
-# Antigravity supplies text-bearing InputRows instead of injected wire ids. The same bounded inbox scan
-# supplies candidates; assign_inputs applies content, claim time and file order, preserving the original payload, and
-# settles in `_settle` the inputs it matched, as a wire id settles the ones of the other CLIs.
 def load_sent_rows(
     conn: Connection,
     agent_id: int,
@@ -114,7 +106,7 @@ def load_sent_rows(
         batch = _batch(conn, agent_id, until + CLAIM_SLACK, scanned)
         scanned += len(batch)
         found.extend(row for row, _claimed in batch)
-        _settle(pending, batch, wanted, wire_id)
+        _settle(pending, batch, wire_id)
         if len(batch) < BATCH_ROWS:
             break
     if scanned >= MAX_ROWS:
@@ -138,28 +130,18 @@ def load_sent_rows(
 def _matched_rows(
     found: Sequence[SentRow], wanted: Mapping[str, InputRow], wire_id: Callable[[str], str]
 ) -> list[SentRow]:
-    if any(held.text is not None for held in wanted.values()):
-        assigned = assign_inputs(found, wanted)
-        return [
-            replace(row, payload={**(row.payload or {}), INPUT_KEY_FIELD: key})
-            for key, rows in assigned.items()
-            for row in rows
-        ]
     return [row for row in found if any(wire_id(key) in wanted for key in row.input_keys)]
 
 
 # meiva:note
 # What one batch settles of the ids still wanted: the ones its rows carry are matched, and the ones whose rows were written
-# long after the oldest claim in the batch are given up on (see `load_sent_rows`). Text-bearing inputs are matched by
-# `assign_inputs` against all of `wanted`, not only the ones pending: a row belongs to the earliest input in file order
-# that holds it, and an input settled by an earlier batch must keep the rows it takes.
+# long after the oldest claim in the batch are given up on (see `load_sent_rows`).
 def _settle(
     pending: dict[str, InputRow],
     batch: Sequence[tuple[SentRow, datetime | None]],
-    wanted: Mapping[str, InputRow],
     wire_id: Callable[[str], str],
 ) -> None:
-    for key in _matched_keys([row for row, _claimed in batch], wanted, wire_id) & pending.keys():
+    for key in _matched_keys([row for row, _claimed in batch], wire_id) & pending.keys():
         del pending[key]
     oldest_claim = min((c for _row, c in batch if c is not None), default=None)
     if oldest_claim is None:
@@ -169,11 +151,7 @@ def _settle(
             del pending[wire]
 
 
-def _matched_keys(
-    rows: Sequence[SentRow], wanted: Mapping[str, InputRow], wire_id: Callable[[str], str]
-) -> set[str]:
-    if any(held.text is not None for held in wanted.values()):
-        return set(assign_inputs(rows, wanted))
+def _matched_keys(rows: Sequence[SentRow], wire_id: Callable[[str], str]) -> set[str]:
     return {wire_id(key) for row in rows for key in row.input_keys}
 
 

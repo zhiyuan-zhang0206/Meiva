@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness.antigravity.acp import input_marker
 from base.lm.harness.antigravity.foreground import (
     PromptTurn,
     PromptUsage,
@@ -18,7 +17,7 @@ from base.lm.harness.antigravity.foreground import (
 from base.lm.harness.antigravity.mapping import OutputProjection, TranscriptSnapshot
 from base.lm.harness.antigravity.session import ActiveTurn
 from base.lm.harness.antigravity.subagent_files import SubagentReader
-from base.lm.harness.antigravity.tests.support import release_timer, start
+from base.lm.harness.antigravity.tests.support import input_row, release_timer, start
 from base.lm.harness.antigravity.timing_store import timing_path
 from base.lm.harness.delivery import HarnessInput, ImageBlock, Reconciliation, TextBlock
 from base.lm.harness.events import (
@@ -52,7 +51,7 @@ async def test_one_prompt_preserves_ordered_text_and_images_and_recovers_its_rec
         done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
         [prompt] = harness.prompts()
         assert prompt["params"]["prompt"] == [
-            {"type": "text", "text": f"{input_marker('one')}\nlook"},
+            {"type": "text", "text": "look"},
             {"type": "image", "mimeType": "image/png", "data": "YQ=="},
             {"type": "text", "text": "tail"},
         ]
@@ -463,7 +462,7 @@ def test_usage_handles_cumulative_steer_and_missing_cancel_usage() -> None:
 
 def test_planner_span_requires_own_inputs_and_final_row_without_background() -> None:
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker("one")},
+        input_row("one"),
         {
             "type": "PLANNER_RESPONSE",
             "status": "DONE",
@@ -471,7 +470,7 @@ def test_planner_span_requires_own_inputs_and_final_row_without_background() -> 
             "output_tokens": 3,
             "content": "FIRST",
         },
-        {"type": "USER_INPUT", "content": input_marker("two")},
+        input_row("two"),
         {
             "type": "PLANNER_RESPONSE",
             "status": "DONE",
@@ -507,14 +506,14 @@ def test_disjoint_steer_usage_survives_background_overlap_and_requires_first_pla
 
     first, final = planner(reports[0], "FIRST"), planner(reports[1], "FINAL")
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker("one")},
+        input_row("one"),
         first,
         {
             "type": "SYSTEM_MESSAGE",
             "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-12 priority=MESSAGE_PRIORITY_HIGH content=timer",
         },
         {**final, "content": "TIMER", "input_tokens": 20_000},
-        {"type": "USER_INPUT", "content": input_marker("two")},
+        input_row("two"),
         final,
     ]
     steps = planner_usage(rows, ("one", "two"), "FINAL")
@@ -537,7 +536,7 @@ def test_turn_keeps_candidates_buffered_without_unique_ownership(answers: tuple[
     turn.reports[1] = PromptUsage(10, 3, 0, 0, 0)
     projection = OutputProjection(0, keys=[key])
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker(key)},
+        input_row(key),
         {
             "type": "SYSTEM_MESSAGE",
             "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
@@ -587,7 +586,7 @@ def test_foreground_total_must_cover_text_on_both_sides_of_the_hub_notice() -> N
     turn.reports[1] = PromptUsage(30, 6, 0, 0, 0)
     projection = OutputProjection(0, keys=[key])
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker(key)},
+        input_row(key),
         _planner("FIRST", 10),
         {
             "type": "SYSTEM_MESSAGE",
@@ -630,7 +629,7 @@ def test_partial_native_echo_survives_foreground_settlement(tmp_path: Path, pref
     turn.register_request(1, key)
     turn.stop_reason = "end_turn"
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker(key)},
+        input_row(key),
         _planner("Middle", 10),
         _native_notice(1),
         _planner("native reply", 20),
@@ -676,7 +675,7 @@ def test_idle_native_echo_matches_identical_replies_once_each(tmp_path: Path) ->
 def test_repeated_text_consumes_earliest_row_for_the_same_owner() -> None:
     projection = OutputProjection(0, keys=["one"])
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker("one")},
+        input_row("one"),
         _planner("SAME", 10),
         _planner("SAME", 20),
     ]
@@ -716,9 +715,9 @@ def test_terminal_cumulative_steer_usage_without_early_receipt(
         "output_tokens": 168,
     }
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker("one")},
+        input_row("one"),
         *([first] if first_planner_visible else []),
-        {"type": "USER_INPUT", "content": input_marker("two")},
+        input_row("two"),
         {
             "type": "SYSTEM_MESSAGE",
             "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
@@ -754,7 +753,7 @@ def test_cancel_boundary_keeps_an_existing_planner_out_of_the_timer_reply() -> N
     projection = OutputProjection(0, keys=["one"])
     interrupted = _planner("LATE FOREGROUND", 10)
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker("one")},
+        input_row("one"),
         {
             "type": "SYSTEM_MESSAGE",
             "content": "[Message] timestamp=2026-11-22T19:38:44Z sender=conv/task-1 priority=MESSAGE_PRIORITY_HIGH content=timer",
@@ -774,7 +773,7 @@ def test_command_completion_after_foreground_closes_keeps_native_ownership() -> 
     key = "one"
     projection = OutputProjection(0, keys=[key])
     rows: list[dict[str, object]] = [
-        {"type": "USER_INPUT", "content": input_marker(key)},
+        input_row(key),
         {
             "step_index": 12,
             "source": "MODEL",

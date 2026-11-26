@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -7,8 +8,14 @@ from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.antigravity.acp import UnrecognisedError, classify_system_message
-from base.lm.harness.antigravity.reconciliation.queue_files import agy_home
-from base.lm.harness.antigravity.transcript.text import background_notice, user_text, without_stamps
+from base.lm.harness.antigravity.transcript.input_store import ROW_KEY
+from base.lm.harness.antigravity.transcript.text import (
+    background_notice,
+    legacy_marker_digest,
+    user_text,
+    without_stamps,
+)
+from base.lm.harness.delivery import home_in
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     Anomaly,
@@ -34,12 +41,15 @@ _PLANNER_NON_DONE_STATUSES = frozenset(
 )
 
 
+_INPUT_WIRE = "agy-input:"
+
+
 def wire_id(key: str) -> str:
-    return key
+    return f"{_INPUT_WIRE}{hashlib.sha256(key.encode()).hexdigest()}"
 
 
 def record_location(environ: Mapping[str, str]) -> str:
-    return str(agy_home(None, environ) / ".gemini/antigravity-cli/brain")
+    return str(Path(home_in(environ)) / ".gemini/antigravity-cli/brain")
 
 
 def session_file(environ: Mapping[str, str], conversation_id: str) -> Path | None:
@@ -105,7 +115,8 @@ class EntryParser:
         kind = row.get("type")
         key, order = f"agy:{file.offset}", Order(file.offset)
         if kind == "USER_INPUT":
-            return [HumanInput(key=key, order=order, at=at, wire_id=key, text=user_text(text))]
+            wire = _input_wire(row) or f"agy-unmarked:{file.offset}"
+            return [HumanInput(key=key, order=order, at=at, wire_id=wire, text=user_text(text))]
         if kind == "PLANNER_RESPONSE":
             return self._planner(file.offset, row, stamp, at)
         if kind == "SYSTEM_MESSAGE":
@@ -214,12 +225,20 @@ def _unknown(key: str, order: Order, detail: str) -> Anomaly:
     )
 
 
+def _input_wire(row: Mapping[str, object]) -> str | None:
+    key, content = row.get(ROW_KEY), row.get("content")
+    if isinstance(key, str):
+        return wire_id(key)
+    digest = legacy_marker_digest(content) if isinstance(content, str) else None
+    return None if digest is None else f"{_INPUT_WIRE}{digest}"
+
+
 def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, InputRow]:
     return {
-        f"agy:{r.offset}": InputRow(stamp, user_text(content))
+        wire: InputRow(stamp)
         for r in rows
         if r.row.get("type") == "USER_INPUT"
-        and isinstance((content := r.row.get("content")), str)
+        and (wire := _input_wire(r.row)) is not None
         and (stamp := stamp_of(r.row.get("created_at"))) is not None
     }
 

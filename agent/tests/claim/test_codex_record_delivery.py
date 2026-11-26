@@ -46,6 +46,7 @@ from base.host.boundary.fields import str_field
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import BridgeEvent, HarnessInput
+from base.lm.harness.antigravity.tests.support import sent_request
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -290,10 +291,10 @@ class RecordingAntigravity:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def write(self) -> None:
+    def write(self, key: str) -> None:
         stamp = datetime.now(UTC).isoformat()
         rows: list[dict[str, object]] = [
-            {"type": "USER_INPUT", "content": "<USER_REQUEST>hello</USER_REQUEST>"},
+            {"type": "USER_INPUT", "content": sent_request(self.path, key, "hello")},
             {"type": "PLANNER_RESPONSE", "content": REPLY, "tool_calls": []},
         ]
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,7 +306,7 @@ class RecordingAntigravity:
                 )
 
 
-async def test_antigravity_content_matching_and_conversation_publications_are_idempotent(
+async def test_antigravity_input_matching_and_conversation_publications_are_idempotent(
     tmp_path: Path,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -326,7 +327,7 @@ async def test_antigravity_content_matching_and_conversation_publications_are_id
     cli = RecordingAntigravity(path)
 
     def record(inputs: Sequence[HarnessInput]):
-        cli.write()
+        cli.write(inputs[0].key)
         return in_a_turn([item.key for item in inputs], REPLY)
 
     def rt(engine: FakeEngine) -> Runtime[MeivaContext]:
@@ -364,9 +365,7 @@ async def test_finish_waits_for_a_record_written_after_the_cli_completed_signal(
             / ".system_generated/logs/transcript_full.jsonl"
         )
 
-        def write(key: str) -> None:
-            del key
-            cli.write()
+        write = cli.write
     else:
         codex = RecordingCodex(tmp_path / "codex" / DAY / ROLLOUT)
         write = codex.write

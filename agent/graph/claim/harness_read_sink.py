@@ -27,7 +27,6 @@ from base.agents.history.transcript_timeline.record.harness import (
     unreadable_file,
     wire_id,
 )
-from base.agents.history.transcript_timeline.record.match import CLAIM_EARLY, CLAIM_SLACK
 from base.agents.history.transcript_timeline.record.read import (
     needs_native_timing_refresh,
     read_anchored_reply,
@@ -62,7 +61,6 @@ from base.lm.harness import (
 )
 from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
-from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import (
     FileRow,
     RecordFile,
@@ -161,7 +159,6 @@ class ReadTimelineSink:
         self._parser = entry_reader(self._harness, self._unread)
         self._last: ProjectedItem | None = None
         self._announced: set[int] = set()
-        self._input_context: dict[str, InputRow] = {}
         self._dirty = asyncio.Event()
         self._busy = asyncio.Lock()
         self._active = False
@@ -462,14 +459,6 @@ class ReadTimelineSink:
         wanted = input_wire_ids(self._harness, rows)
         if not wanted:
             return
-        if any(row.text is not None for row in wanted.values()):
-            self._input_context.update(wanted)
-            floor = max(row.stamp for row in wanted.values()) - (CLAIM_SLACK + CLAIM_EARLY)
-            self._input_context = {
-                key: row for key, row in self._input_context.items() if row.stamp >= floor
-            }
-            self._input_context = dict(list(self._input_context.items())[-1000:])
-            wanted = self._input_context
         with self._ctx.require_db().connect() as conn:
             found = sent_inputs(
                 load_sent_rows(

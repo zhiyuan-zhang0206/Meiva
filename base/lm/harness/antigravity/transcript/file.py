@@ -1,17 +1,35 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from base.lm.harness.antigravity.timing import timing_key
 from base.lm.harness.antigravity.timing_store import TimingRecord, load_timings, timing_path
+from base.lm.harness.antigravity.transcript.input_store import (
+    MAX_SCAN_BYTES,
+    ROW_KEY,
+    Ledger,
+    SentInput,
+    answers,
+    inputs_path,
+    load_ledger,
+    resolve_unbound,
+    unbound_inputs,
+)
 from base.lm.harness.session.transcript.record_file import BLOCK_BYTES, Block, FileRow, RecordFile
 
 
 class AntigravityRecordFile(RecordFile):
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, scan_bytes: int = MAX_SCAN_BYTES) -> None:
         super().__init__(path)
+        self._scan_bytes = scan_bytes
         self._record = path
         self._timings = timing_path(path)
+        self._inputs = inputs_path(path)
+        self._ledger_data: Ledger | None = None
+        self._ledger_signature: tuple[int, ...] | None = None
+        self._scan: Mapping[int, str] = {}
+        self._scan_signature: tuple[int, ...] | None = None
         self._loaded = False
         self._signature: tuple[int, ...] | None = None
         self._data: TimingRecord | None = None
@@ -30,8 +48,47 @@ class AntigravityRecordFile(RecordFile):
         try:
             timing = self._timings.stat()
         except OSError:
-            return (*base, 0, 0, 0)
-        return (*base, timing.st_ino, timing.st_size, timing.st_mtime_ns)
+            timing_part = (0, 0, 0)
+        else:
+            timing_part = (timing.st_ino, timing.st_size, timing.st_mtime_ns)
+        return (*base, *timing_part, *self._inputs_signature())
+
+    def _inputs_signature(self) -> tuple[int, ...]:
+        try:
+            stat = self._inputs.stat()
+        except OSError:
+            return (0, 0, 0)
+        return (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+    def _ledger(self) -> Ledger:
+        signature = self._inputs_signature()
+        if signature != self._ledger_signature or self._ledger_data is None:
+            self._ledger_data, self._ledger_signature = load_ledger(self._inputs), signature
+        return self._ledger_data
+
+    def _bindings(self, block: Block) -> Mapping[int, str]:
+        ledger = self._ledger()
+        unbound = unbound_inputs(ledger)
+        takes = (
+            file.offset not in ledger.bound
+            and any(file.offset >= sent.min_offset and answers(file.row, sent) for sent in unbound)
+            for file in block.rows
+        )
+        return self._scanned(ledger, unbound) if any(takes) else ledger.bound
+
+    def _scanned(self, ledger: Ledger, unbound: Sequence[SentInput]) -> Mapping[int, str]:
+        signature = self.watch_signature()
+        if signature is None or signature != self._scan_signature:
+            floor = self.size() - self._scan_bytes
+            near = [sent for sent in unbound if sent.min_offset >= floor]
+            rows = (
+                RecordFile(self._record).rows_after(min(s.min_offset for s in near)).rows
+                if near
+                else ()
+            )
+            found = [(row.offset, row.row) for row in rows]
+            self._scan, self._scan_signature = resolve_unbound(found, ledger.bound, near), signature
+        return self._scan
 
     def _load(self) -> TimingRecord | None:
         try:
@@ -67,6 +124,7 @@ class AntigravityRecordFile(RecordFile):
 
     def _enrich(self, block: Block) -> Block:
         data = self._load()
+        bound = self._bindings(block)
         rows: list[FileRow] = []
         for file in block.rows:
             row = file.row
@@ -77,5 +135,11 @@ class AntigravityRecordFile(RecordFile):
                 else data.entries.get(str(file.offset))
             )
             ms = value.ms if value is not None and value.fingerprint == key else None
-            rows.append(FileRow(file.offset, file.end, {**row, "meiva_reasoning_ms": ms}))
+            key = bound.get(file.offset)
+            enriched = {**row, "meiva_reasoning_ms": ms}
+            rows.append(
+                FileRow(
+                    file.offset, file.end, enriched if key is None else {**enriched, ROW_KEY: key}
+                )
+            )
         return Block(block.start, block.end, tuple(rows))

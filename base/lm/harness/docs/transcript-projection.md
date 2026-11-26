@@ -37,7 +37,7 @@ input (their key gives the row's `uuid`) and what each of them shows; `read.py` 
 the end of the file or before an item, with a bounded look-back for the call of a result and for the start of a turn. An explicit inclusive anchor first reads the complete row at its byte offset, then applies that same window projection and look-back. A coordinate inside a line, an incomplete line or a row beyond the existing byte budget yields no anchor. Compressed records still make one archive decompression pass with bounded held memory. An anchored window is at the active tail when its row ends at `RecordFile.complete_record_end()`, the full record's last newline-terminated row boundary. Partial bytes after that boundary do not settle pending calls. A compressed reader tracks this full-stream boundary independently of `complete_end()`, which describes its retained window, so an older anchor remains historical even after its buffer stops growing.
 The same `RecordProjector` over only the bytes appended since the last read is the live view
 ([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-external-harnesses)); the two give the same items.
-Antigravity reads the main full transcript in file order, with the same bounded reader. Its input attribution uses the user-selected content-and-order rule rather than adding an identifier to the model-visible prompt. Repeated step indices never establish identity. Background handoffs and missing results leave closed call displays.
+Antigravity reads the main full transcript in file order, with the same bounded reader. Its input attribution is by the id the adapter's input ledger binds to the row (`meiva-inputs.jsonl`, [adapter contract](../antigravity/docs/antigravity.md)), like the other two CLIs; a row no ledger line names is not ours and shows as unmatched. Repeated step indices never establish identity. Background handoffs and missing results leave closed call displays.
 
 ## The two pieces
 
@@ -76,7 +76,7 @@ surrogates) before it is parsed. Nothing is stored: the position of a read lives
 
 | Entry | Claude Code transcript | Codex history items (rollout for the rest) | Antigravity `transcript_full.jsonl` |
 |---|---|---|---|
-| `HumanInput` | `user` row whose `uuid` is ours; `attachment/queued_command.source_uuid` for an absorbed one | `userMessage.clientId`; a second user input of the same turn is a steer | `USER_INPUT` (text inside `<USER_REQUEST>`); no id unless the trajectory's `clientMessageId` is supplied |
+| `HumanInput` | `user` row whose `uuid` is ours; `attachment/queued_command.source_uuid` for an absorbed one | `userMessage.clientId`; a second user input of the same turn is a steer | `USER_INPUT` (text inside `<USER_REQUEST>`); the id is the input key the ledger binds to the row (`meiva_input_key`); a row of the earlier first-line `<!-- meiva-input:... -->` comment names its key by that digest |
 | `AgentText` | `assistant` text block (one block per row, blocks share `message.id`); `isAbortedMidStream` is incomplete | `agentMessage` (whole, at completion) | `PLANNER_RESPONSE.content` |
 | `Reasoning` | `thinking` block, `thinkingDurationMs` | `reasoning` item, text empty (encrypted) | `PLANNER_RESPONSE.thinking`, high-thinking tier only |
 | `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other items, completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; identity is the row offset and call position) |
@@ -96,8 +96,10 @@ surrogates) before it is parsed. Nothing is stored: the position of a read lives
   an `Interrupt` entry carrying an order at the last position it read.
 - **Turn end for Antigravity**, and the exact end of a Claude turn (no end row; the result frame can arrive
   before the last row). Owned by the stream plus the record's closing entry, when the CLI writes one.
-- **Which inbound message an Antigravity ordinary turn answers.** The record has text only; the projection's
-  text fallback covers the common case and reports an input it cannot place as unmatched.
+- **Which inbound message an Antigravity ordinary turn answers.** The adapter's input ledger binds each input
+  key to the row it became (by the digest of the request's whole text, from the last row boundary before the input was
+  sent), and the wire id is `sha256` of that key, matched like the ids of the other CLIs. A row the ledger does not name
+  (not ours) is never matched by its text and is shown as unmatched.
 - **Errors that kill the process.** No record shows them.
 - **Image bytes**, which the record keeps inline (Claude, Codex) or as a path (Antigravity); the projection
   takes images from the table of what we sent.
