@@ -1996,6 +1996,13 @@ jobs:
       - name: Install the data plane (Postgres 17, Redis, PgBouncer, pgvector)
         run: bash scripts/provision/database.sh
 
+      # The Postgres a test cluster runs is production's vendored tree (zonky 17 plus the pinned
+      # pgvector files), exactly as on the Linux lanes — not the brew keg: Homebrew's `pgvector`
+      # formula builds for `postgresql@18`/`@19` only, so a brew `postgresql@17` has no
+      # `vector.control` and every pgvector test fails with 'extension "vector" is not available'.
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Create an isolated Meiva home
         run: |
           mkdir -p "$RUNNER_TEMP/meiva-home"
