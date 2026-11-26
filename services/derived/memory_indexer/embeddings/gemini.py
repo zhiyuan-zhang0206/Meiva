@@ -37,17 +37,17 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import json
 import random
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from functools import partial
 
 import httpx
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError
 
-from base.api_contracts.usage import UsageLedgerEntry
+from base.api_contracts.usage import UsageReceiptSubmitter
 from base.host.boundary.untyped import object_of
 from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
@@ -60,7 +60,6 @@ from base.host.net.resilience import (
     retry_sleep,
 )
 from base.lm.catalog import ModelCatalog
-from base.paths import meiva_home
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, row_vectors
 from services.derived.memory_indexer.embeddings.sync_call import run_sync
 
@@ -178,30 +177,12 @@ def _vectors_from_body(body: object, texts: list[str]) -> np.ndarray:
     return vectors
 
 
-type _ReceiptSubmitter = Callable[[UsageLedgerEntry], None]
-
-
-def _receipt_submitter(catalog: ModelCatalog) -> _ReceiptSubmitter | None:
-    resolve_ledger = catalog.usage_ledger
-    if resolve_ledger is None:
-        return None
-    ledger = resolve_ledger()
-    if ledger is None:
-        return None
-    from base.lm.usage.receipt import UsageReceiptDelivery, UsageReceiptStore
-
-    store = UsageReceiptStore(meiva_home() / "usage-receipts")
-    delivery = UsageReceiptDelivery(store, ledger)
-    _ = atexit.register(delivery.stop, timeout=1.0)
-    return delivery.submit
-
-
 def _emit_billing(
     body: object,
     *,
     catalog: ModelCatalog,
-    now: datetime,
-    submit_receipt: _ReceiptSubmitter | None,
+    now: Callable[[], datetime],
+    submit_receipt: UsageReceiptSubmitter | None,
 ) -> None:
     """Stage usage for a completed request before validating its vectors."""
     from base.lm.usage import UsageFields, log_usage_fields
@@ -216,7 +197,7 @@ def _emit_billing(
         fields=UsageFields(tok_in=tok_in, tok_out=0),
         usage_kind="embedding",
         catalog=catalog,
-        now=now,
+        now=now(),
         submit_receipt=submit_receipt,
     )
 
@@ -227,8 +208,10 @@ async def post_attempt_once(
     timeout_s: float,
     headers: dict[str, str],
     payload: dict[str, object],
+    on_success: Callable[[object], None],
 ) -> object:
     """Run one HTTP attempt under the shared cancellation deadline."""
+    received = False
     try:
         async with asyncio.timeout(timeout_s):
             async with client.stream("POST", endpoint, json=payload, headers=headers) as response:
@@ -240,8 +223,17 @@ async def post_attempt_once(
                         request=response.request,
                         response=response,
                     )
-                return object_of(json.loads, await response.aread())
-    except TimeoutError as exc:
+                body = object_of(json.loads, await response.aread())
+                received = True
+                on_success(body)
+                return body
+    except (TimeoutError, httpx.HTTPError) as exc:
+        if received:
+            raise EmbeddingAPIError(
+                "Gemini response received before local completion failed"
+            ) from exc
+        if isinstance(exc, httpx.HTTPError):
+            raise
         # The HTTP classifier retries transport errors, not builtin TimeoutError.
         raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
 
@@ -251,7 +243,7 @@ def embed(
     task_type: str,
     *,
     catalog: ModelCatalog,
-    submit_receipt: _ReceiptSubmitter | None = None,
+    submit_receipt: UsageReceiptSubmitter | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -282,10 +274,11 @@ def embed(
         return np.empty((0, DIM), dtype=np.float32)
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
+    bill = partial(_emit_billing, catalog=catalog, now=now, submit_receipt=submit_receipt)
 
     async def _attempt() -> object:
         async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
-            return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
+            return await post_attempt_once(client, endpoint, timeout_s, headers, payload, bill)
 
     def _call() -> object:
         return run_sync(_attempt)
@@ -296,7 +289,6 @@ def embed(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog, now=now(), submit_receipt=submit_receipt)
     return _vectors_from_body(body, texts)
 
 
@@ -305,7 +297,7 @@ async def embed_async(
     task_type: str,
     *,
     catalog: ModelCatalog,
-    submit_receipt: _ReceiptSubmitter | None = None,
+    submit_receipt: UsageReceiptSubmitter | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -326,6 +318,7 @@ async def embed_async(
         return np.empty((0, DIM), dtype=np.float32)
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
+    bill = partial(_emit_billing, catalog=catalog, now=now, submit_receipt=submit_receipt)
     try:
         client = httpx.AsyncClient(timeout=timeout_s, transport=transport)
     except httpx.HTTPError as exc:
@@ -336,7 +329,7 @@ async def embed_async(
         async with client:
 
             async def _call() -> object:
-                return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
+                return await post_attempt_once(client, endpoint, timeout_s, headers, payload, bill)
 
             body = await aretry_jittered(policy, rng=rng, asleep=asleep)(_call)
     except EmbeddingAPIError:
@@ -345,9 +338,6 @@ async def embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    await asyncio.to_thread(
-        _emit_billing, body, catalog=catalog, now=now(), submit_receipt=submit_receipt
-    )
     return _vectors_from_body(body, texts)
 
 
@@ -372,7 +362,7 @@ class GeminiEmbeddingProvider:
         self,
         catalog: ModelCatalog,
         *,
-        submit_receipt: _ReceiptSubmitter | None = None,
+        submit_receipt: UsageReceiptSubmitter | None = None,
         timeout_s: float,
         api_key: str | None,
         endpoint: str = ENDPOINT,
@@ -383,7 +373,7 @@ class GeminiEmbeddingProvider:
         rng: random.Random,
     ) -> None:
         self._catalog = catalog
-        self._submit_receipt = submit_receipt or _receipt_submitter(catalog)
+        self._submit_receipt = submit_receipt
         self._timeout_s = timeout_s
         self._api_key = api_key
         self._endpoint = endpoint

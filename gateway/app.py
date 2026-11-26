@@ -34,6 +34,7 @@ from base.host.system.cron.health_job import register_os_cron
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.lm.catalog import ModelCatalog
+from base.lm.usage.receipt import UsageReceiptDelivery, UsageReceiptStore
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
 from base.paths.scratch import SYSTEM_SCRATCH
@@ -249,6 +250,11 @@ def _build_request_resources(
     releases.push_async_callback(insights_client.aclose)
 
 
+def _start_usage_receipts(receipts: UsageReceiptDelivery, releases: AsyncExitStack) -> None:
+    receipts.start()
+    _ = releases.callback(receipts.stop, timeout=1.0)
+
+
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
@@ -256,6 +262,7 @@ async def lifespan(
     process: GatewayProcess,
     process_ownership: Literal["borrowed", "owned"],
     runtime_process: psutil.Process,
+    usage_receipts: UsageReceiptDelivery,
 ) -> AsyncGenerator[None]:
     state = app_state_as(app, GatewayServerState)
 
@@ -303,6 +310,7 @@ async def lifespan(
             db_pool = state.db.pool(max_size=state.gateway_config.db_pool_max_size)
             state.db_pool = db_pool
             releases.callback(db_pool.close)
+            _start_usage_receipts(usage_receipts, releases)
             await asyncio.to_thread(plugins_router.initialize_plugins, db_pool, home=process.home)
             state.sessions = SessionStore(db_pool)
             state.session_keys = SessionKeys(state.gateway_config.rng)
@@ -455,6 +463,8 @@ def create_app(
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
+    ledger = bind_usage_ledger(process.database, process.machine.name, process.home)
+    usage_receipts = UsageReceiptDelivery(UsageReceiptStore(process.home, ledger.cluster), ledger)
     application = TraceIngressApp if process.tracer_provider is not None else FastAPI
     app = application(
         title="Meiva",
@@ -466,6 +476,7 @@ def create_app(
             # The process the runtime monitor samples is this gateway's own; the root builds it here
             # so no async body reaches for psutil.
             runtime_process=psutil.Process(),
+            usage_receipts=usage_receipts,
         ),
         docs_url=None,
         redoc_url=None,
@@ -486,12 +497,14 @@ def create_app(
     if isinstance(catalog, ModelCatalog):
         catalog = replace(
             catalog,
-            usage_ledger=partial(
-                bind_usage_ledger, process.database, process.machine.name, process.home
-            ),
+            usage_ledger=lambda: ledger,
         )
         state.memory_embedder = memory_router.build_embedder(
-            config.memory_search, catalog, now=state.clock.now, rng=config.rng
+            config.memory_search,
+            catalog,
+            now=state.clock.now,
+            rng=config.rng,
+            submit_receipt=usage_receipts.submit,
         )
     state.catalog = catalog
     state.command_catalog = CommandCatalog.system(

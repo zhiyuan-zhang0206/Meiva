@@ -8,6 +8,3 @@ exports = ["base.py", "embeddinggemma.py", "factory.py", "gemini.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
-
-[roots]
-"gemini.py" = { kinds = ["home"], why = "composes the host-local usage receipt delivery for a Gemini provider when its catalog supplies a ledger; the receipt worker takes that directory explicitly" }

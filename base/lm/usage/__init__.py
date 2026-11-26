@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
@@ -13,10 +13,12 @@ from loguru import logger
 
 from base.api_contracts.agent_contract import harness_billing_of_source
 from base.api_contracts.usage import (
+    ReceiptSubmission,
     UsageLedger,
     UsageLedgerConflictError,
     UsageLedgerEntry,
     UsageLedgerWriteError,
+    UsageReceiptSubmitter,
 )
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
@@ -85,8 +87,6 @@ class UsageOptions:
 
 
 _DEFAULT_USAGE_OPTIONS = UsageOptions()
-
-type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,7 +361,7 @@ def _log_usage(
         raise
     if record_out is not None:
         record_out.update(record)
-    if emit_observation:
+    if emit_observation is not False:
         _emit_usage_observation(event, priced, vendor, record, cache_text, reason_pct)
     return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
@@ -411,7 +411,7 @@ def _book_usage(
     vendor: str | None,
     record: dict[str, object],
     submit_receipt: UsageReceiptSubmitter | None,
-) -> bool:
+) -> bool | ReceiptSubmission:
     resolve_ledger = event.catalog.usage_ledger
     ledger = resolve_ledger() if resolve_ledger is not None else None
     if ledger is None:
@@ -433,8 +433,7 @@ def _book_usage(
     entry = _ledger_entry(ledger, call_id, event, priced, vendor)
     if submit_receipt is None:
         return ledger.write(entry)
-    submit_receipt(entry)
-    return True
+    return submit_receipt(entry)
 
 
 def _emit_usage_observation(

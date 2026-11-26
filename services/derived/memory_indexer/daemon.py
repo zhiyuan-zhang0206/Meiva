@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import assert_never
 
@@ -32,6 +31,7 @@ from base.db.config import db_config_from_boot
 from base.db.usage_ledger import bind_usage_ledger
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
+from base.lm.usage.receipt import UsageReceiptDelivery, UsageReceiptStore
 from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -526,18 +526,16 @@ async def run(
     # Fail fast before deriving liveness or binding healthz: an unknown
     # MEIVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
-        catalog = replace(
-            build_model_catalog(home=home),
-            usage_ledger=partial(
-                bind_usage_ledger, database, ConfiguredMachineIdentity(config).name, home
-            ),
-        )
+        ledger = bind_usage_ledger(database, ConfiguredMachineIdentity(config).name, home)
+        receipts = UsageReceiptDelivery(UsageReceiptStore(home, ledger.cluster), ledger)
+        catalog = replace(build_model_catalog(home=home), usage_ledger=lambda: ledger)
         provider = get_provider(
             inputs.embedding_name,
             catalog=catalog,
             timeout_s=inputs.embed_timeout_s,
             api_key=inputs.api_key,
             embeddinggemma_config=inputs.embeddinggemma_config,
+            submit_receipt=receipts.submit,
             now=now,
             rng=rng,
         )
@@ -598,6 +596,7 @@ async def run(
     _log.info("[indexer] connected to %s backend", backend.name)
 
     try:
+        receipts.start()
         await patrol_loop(
             backend,
             provider,
@@ -608,10 +607,13 @@ async def run(
             root=root,
         )
     finally:
-        _close_backend(backend)
-        await stop_health_server(health)
-        _remove_pidfile(config, runtime=runtime)
-        _log.info("[indexer] daemon stopped")
+        try:
+            _ = receipts.stop(timeout=1.0)
+        finally:
+            _close_backend(backend)
+            await stop_health_server(health)
+            _remove_pidfile(config, runtime=runtime)
+            _log.info("[indexer] daemon stopped")
 
 
 def main() -> None:

@@ -79,42 +79,64 @@ Loki `llm_usage` stream is the operational copy and keeps seven days.
 
 ## Replayable usage receipts
 
-Gemini document and query embeddings pass `UsageReceiptDelivery.submit` to
-`log_usage_fields(..., submit_receipt=...)`. Both submission paths share the
-same call ID allocator and ledger-entry builder. The receipt freezes the original
-time, attribution, machine, token counts, exact decimal cost and price snapshot
-before returning control for vector validation. The caller emits the existing
-`llm_usage` event and billing span for the provider response. Ledger delivery
-runs independently and replay emits no second observation.
+The gateway and indexer own a `UsageReceiptDelivery` for their explicit home and
+ledger. Each starts the consumer with the service, including when it uses a
+different embedding backend. Shutdown signals the consumer and waits up to one
+second for the current operation. Receipts already staged remain recoverable
+across forced process exit.
 
-A versioned, checksummed receipt is atomically written and synced in
-`$MEIVA_HOME/usage-receipts` on the calling host. A process-owned consumer scans at Gemini provider startup, then wakes on new
-submissions. Shutdown signals the worker and bounds the join, leaving any
-unfinished delivery on disk.
-The handoff waits for local storage. It can return while a ledger write is
-blocked, including on the gateway's async query path.
+Gemini passes the service's `UsageReceiptSubmitter` to `log_usage_fields`.
+As soon as a successful response has been parsed, the adapter runs the short
+local staging operation synchronously before the next cancellable await. The
+service acknowledges staging even if the request has just been cancelled and
+the default executor is saturated. SQLite's lock wait is limited to 50 ms per
+operation. Staging uses local durable storage and involves filesystem sync.
+The caller emits the existing usage event and billing span. Ledger delivery
+runs independently, using the original occurrence, attribution, machine,
+token counts, exact decimal cost, price snapshot and `call_id`. Delivery
+emits no second usage observation.
 
-- `*.v1.json` is pending. On a delivery failure the consumer retains the file
-  and retries after 30 seconds to limit reconnections during an outage. Use
-  `llm_usage_ledger_write_failed` to count failed database writes in Loki. The
-  `Usage receipt pending` warning includes the call ID and the local path.
-- A successful insert or matching replay acknowledges the receipt and removes
-  it. If a process stops between commit and removal, the ledger's existing
-  `call_id` check acknowledges the same row on restart.
-- `*.v1.conflict` preserves a rejected or unreadable receipt for investigation.
-  The `Usage receipt conflict retained` error records its path and reason.
-  Other valid receipts continue through the consumer.
+The SQLite spool lives at `$MEIVA_HOME/usage-receipts.v1.sqlite3` under the
+same service home used to bind the ledger. The producer limits admission to
+4,096 rows of up to 8 KiB, including quarantined rows, and limits the database
+to 32,768 pages. These defaults bound the footprint of a prolonged outage
+while reserving space for a substantial local backlog. Concurrent writers
+share admission through a SQLite write transaction. Each consumer processes
+at most 16 rows per batch. Submissions wake the local consumer immediately.
+It rescans at least every 30 seconds when idle, which finds receipts from
+other processes even if their producers exited without signalling.
 
-With the same cluster's configured ledger, the hosting process can also run
-`UsageReceiptStore(directory).replay(ledger)` to attempt pending files
-directly. Replay uses the archived entry without querying the provider or
-repricing it. Files remain on the host where they were staged.
+- A successful insert or matching replay acknowledges the staged row. If a
+  producer or consumer stops after Postgres commits, the next consumer gets
+  the same acknowledgement by `call_id`.
+- A conflicting or invalid row remains quarantined for inspection. Other rows
+  proceed. A transient or unknown failure keeps the row pending and advances
+  the scan cursor so later rows receive an attempt. The consumer backs off
+  for 30 seconds per failed batch to limit database reconnections.
+- `llm_usage_ledger_write_failed` counts failures in Loki. Spool errors state
+  the safe error type or errno. Backlog warnings show pending rows, oldest
+  occurrence time and available slots. A receipt from a different cluster
+  remains pending for its ledger owner.
 
-If local storage fails, the producer reports a `Usage receipt storage failed`
-error and still emits the existing usage event with its call ID and exact
-cost for reconciliation. A host failure before receipt staging or loss of the
-receipt volume still requires reconciliation against the available usage events
-and provider bill.
+### Recover a receipt logged during a storage failure
+
+`submit` returns `staged` after durable admission or `fallback_logged` if a
+storage or capacity failure required the log fallback. The fallback record's
+`receipt_json` is the complete frozen ledger payload. It excludes the Gemini
+API key, request text and returned vectors. Extract that field as raw JSON from
+the failure log. Once storage is healthy and capacity is available, run the
+following from the deployed checkout with its Python environment, supplying the
+actual service home and ledger cluster as arguments:
+
+```bash
+python -c 'import sys; from pathlib import Path; from base.lm.usage.receipt import UsageReceiptStore; UsageReceiptStore(Path(sys.argv[1]), sys.argv[2]).recover(sys.stdin.buffer.read())'   "$MEIVA_HOME" "<ledger-cluster>" < receipt.json
+```
+
+The gateway or indexer delivers the recovered row on its next scan. The normal
+ledger replay check handles repeats safely. The local fallback log has the
+existing log retention window. If the host fails before staging or both local
+storage and diagnostic logging are unavailable, reconcile against the provider
+bill and the usage events that survived.
 
 ## Unpriced calls
 

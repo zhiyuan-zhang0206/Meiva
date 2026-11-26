@@ -3,6 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,9 +42,21 @@ class UsageLedgerConflictError(UsageLedgerWriteError):
     pass
 
 
+class UsageLedgerRejectedError(UsageLedgerWriteError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class UsageLedger:
     write: Callable[[UsageLedgerEntry], bool]
     machine: Callable[[], str]
     cluster: str
     new_call_id: Callable[[], str]
+
+
+class ReceiptSubmission(StrEnum):
+    STAGED = "staged"
+    FALLBACK_LOGGED = "fallback_logged"
+
+
+type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], ReceiptSubmission]
