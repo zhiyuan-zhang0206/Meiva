@@ -60,8 +60,17 @@ its full suite publishes nothing.
 ## Provisioning
 
 `bash scripts/provision/database.sh` — the macOS branch of the one provisioning
-script, so the versions this job tests (`postgresql@17`, `redis@8.2`, `pgbouncer`,
-`pgvector` from brew) are the ones a developer's Mac and a Mac host carry, not a
-second list kept in YAML. The script proves each binary afterwards.
+script, so the Redis and PgBouncer versions this job tests (`redis@8.2`, `pgbouncer`)
+are the ones a developer's Mac and a Mac host carry, not a second list kept in YAML.
+The script proves each binary afterwards.
+
+The Postgres the test clusters run is not the brew keg's. The job then runs the
+`vendor-pg-runtime` action (as the Linux lanes do), which puts production's vendored
+tree — zonky Postgres 17 plus the sha256-pinned pgvector files from
+`base/cluster/dataplane/runtime_binaries.py` — in place and exports
+`CI_VENDORED_RUNTIME_ROOT`; `tests/fixtures/env_bootstrap.py` links it into every
+pytest session. Brew's `pgvector` formula builds for `postgresql@18`/`@19` only (it
+dropped 17), so a brew `postgresql@17` has no `vector.control`: the two pgvector
+bring-up tests failed on it on 2026-11-26 (#9292).
 
 Parent: [CI](ci.md).
