@@ -397,7 +397,7 @@ def read_config_snapshot(
     path = snapshot_path(home)
     try:
         mode = path.lstat().st_mode
-        if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != 0o600:
+        if not stat.S_ISREG(mode):
             return None
         raw = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -530,7 +530,11 @@ def _offline_resolution(
             )
         return _mirror_resolution(mirror)
     if legacy is not None:
-        logger.warning("[bootstrap] gateway unreachable; using the legacy bootstrap snapshot")
+        logger.warning(
+            "[bootstrap] gateway unreachable; continuing on the last-known cluster config "
+            "snapshot (legacy fallback, age {age:.0f}s)",
+            age=legacy[1],
+        )
         return BootstrapResolution(legacy[0], "legacy_fallback")
     raise BootstrapFetchError(
         f"could not fetch cluster config from {base_url}; this runner has no snapshot "

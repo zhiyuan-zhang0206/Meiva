@@ -27,9 +27,9 @@ fresh, valid signed response. HTTP refusals and invalid responses fail the
 refresh. Local publication failure leaves the prior file in place and logs the
 write failure while the current boot uses the verified live response.
 
-During a mixed-version rollout the recognized owner-only v4
-`bootstrap-snapshot.json` is read under the previous freshness and outage rules
-when the mirror is absent. The formats coexist in separate files for older
+During a mixed-version rollout the recognized v4 `bootstrap-snapshot.json`
+is read under the previous freshness and outage rules when the mirror is absent.
+The legacy writer also publishes with mode `0600`. The formats coexist in separate files for older
 processes. Once a mirror file exists, an expired or invalid mirror cannot
 select the legacy snapshot, and live recovery requires a signed response.
 The boot result exposes `live_bootstrap`, `authorized_mirror`, or
