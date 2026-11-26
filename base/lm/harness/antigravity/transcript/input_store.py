@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,11 +13,13 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
 from base.lm.harness.antigravity.transcript.text import legacy_marker_digest, request_body
+from base.lm.harness.events import InputLost, InputRejected
 from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
 
 ROW_KEY = "meiva_input_key"
 LEDGER_NAME = "meiva-inputs.jsonl"
 RECORD_NAMES = ("transcript_full.jsonl", "transcript.jsonl")
+MAX_SCAN_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,7 @@ class SentInput:
 class Ledger:
     sent: tuple[SentInput, ...] = ()
     bound: Mapping[int, str] = field(default_factory=dict[int, str])
+    dropped: tuple[str, ...] = ()
 
 
 def inputs_path(record: Path) -> Path:
@@ -74,6 +77,7 @@ def load_ledger(path: Path) -> Ledger:
     unterminated = len(lines) if text and not text.endswith("\n") else None
     sent: list[SentInput] = []
     bound: dict[int, str] = {}
+    dropped: list[str] = []
     for number, line in enumerate(lines, start=1):
         if not line.strip():
             continue
@@ -83,12 +87,17 @@ def load_ledger(path: Path) -> Ledger:
             if number == unterminated:
                 continue
             raise
-        _read_line(path, number, row, sent, bound)
-    return Ledger(tuple(sent), bound)
+        _read_line(path, number, row, sent, bound, dropped)
+    return Ledger(tuple(sent), bound, tuple(dropped))
 
 
 def _read_line(
-    path: Path, number: int, row: object, sent: list[SentInput], bound: dict[int, str]
+    path: Path,
+    number: int,
+    row: object,
+    sent: list[SentInput],
+    bound: dict[int, str],
+    dropped: list[str],
 ) -> None:
     if is_object_dict(row):
         kind, key = row.get("kind"), row.get("key")
@@ -108,6 +117,9 @@ def _read_line(
         if kind == "bound" and isinstance(key, str) and offset is not None:
             bound[offset] = key
             return
+        if kind == "dropped" and isinstance(key, str):
+            dropped.append(key)
+            return
     raise ValueError(f"{path}:{number}: an input ledger line of an unexpected shape")
 
 
@@ -115,12 +127,13 @@ def _count(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
-def _append(path: Path, lines: Sequence[Mapping[str, object]]) -> None:
-    if not lines:
-        return
+def _append(path: Path, build: Callable[[Ledger], Sequence[Mapping[str, object]]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        lines = build(load_ledger(path))
+        if not lines:
+            return
         data = "".join(json.dumps(line, separators=(",", ":")) + "\n" for line in lines)
         with path.open("ab") as handle:
             handle.write(data.encode())
@@ -131,30 +144,42 @@ def _append(path: Path, lines: Sequence[Mapping[str, object]]) -> None:
 def record_sent_input(
     path: Path, *, key: str, min_offset: int, text_sha256: str, image_count: int
 ) -> None:
+    line = {
+        "kind": "sent",
+        "key": key,
+        "min_offset": min_offset,
+        "text_sha256": text_sha256,
+        "image_count": image_count,
+    }
+    _append(path, lambda _ledger: [line])
+
+
+def record_bound_inputs(path: Path, bindings: Mapping[int, str]) -> None:
     _append(
         path,
-        [
-            {
-                "kind": "sent",
-                "key": key,
-                "min_offset": min_offset,
-                "text_sha256": text_sha256,
-                "image_count": image_count,
-            }
+        lambda ledger: [
+            {"kind": "bound", "offset": offset, "key": key}
+            for offset, key in bindings.items()
+            if ledger.bound.get(offset) != key
         ],
     )
 
 
-def record_bound_inputs(path: Path, bindings: Mapping[int, str]) -> None:
-    known = load_ledger(path).bound
-    fresh = {offset: key for offset, key in bindings.items() if known.get(offset) != key}
+def drop_input(home: Path | None, conversation_id: str | None, event: object) -> None:
+    if conversation_id is None or not isinstance(event, (InputLost, InputRejected)):
+        return
     _append(
-        path, [{"kind": "bound", "offset": offset, "key": key} for offset, key in fresh.items()]
+        inputs_path_for(home, conversation_id),
+        lambda ledger: (
+            [{"kind": "dropped", "key": event.key}]
+            if any(sent.key == event.key for sent in unbound_inputs(ledger))
+            else []
+        ),
     )
 
 
 def unbound_inputs(ledger: Ledger) -> list[SentInput]:
-    unconsumed = Counter(ledger.bound.values())
+    unconsumed = Counter(ledger.bound.values()) + Counter(ledger.dropped)
     unbound: list[SentInput] = []
     for sent in ledger.sent:
         if unconsumed[sent.key] > 0:
@@ -165,27 +190,37 @@ def unbound_inputs(ledger: Ledger) -> list[SentInput]:
 
 
 def resolve_inputs(
-    rows: Iterable[tuple[int, Mapping[str, object]]], ledger: Ledger
+    rows: Iterable[tuple[int, Mapping[str, object]]],
+    ledger: Ledger,
+    scan_bytes: int = MAX_SCAN_BYTES,
 ) -> dict[int, str]:
     found = list(rows)
-    resolved = dict(ledger.bound)
-    used = set(resolved)
-    for sent in unbound_inputs(ledger):
+    floor = max((offset for offset, _row in found), default=0) - scan_bytes
+    unbound = [sent for sent in unbound_inputs(ledger) if sent.min_offset >= floor]
+    return resolve_unbound(found, ledger.bound, unbound)
+
+
+def resolve_unbound(
+    rows: Sequence[tuple[int, Mapping[str, object]]],
+    bound: Mapping[int, str],
+    unbound: Sequence[SentInput],
+) -> dict[int, str]:
+    resolved = dict(bound)
+    for sent in unbound:
         offset = next(
             (
                 offset
-                for offset, row in found
-                if offset >= sent.min_offset and offset not in used and _answers(row, sent)
+                for offset, row in rows
+                if offset >= sent.min_offset and offset not in resolved and answers(row, sent)
             ),
             None,
         )
         if offset is not None:
             resolved[offset] = sent.key
-            used.add(offset)
     return resolved
 
 
-def _answers(row: Mapping[str, object], sent: SentInput) -> bool:
+def answers(row: Mapping[str, object], sent: SentInput) -> bool:
     content = row.get("content")
     if row.get("type") != "USER_INPUT" or not isinstance(content, str):
         return False
@@ -238,7 +273,7 @@ def settle_inputs(
     return received_keys(rows, keys)
 
 
-def record_prompt(
+def log_prompt(
     home: Path | None, conversation_id: str | None, key: str, blocks: Sequence[Mapping[str, str]]
 ) -> None:
     if conversation_id is None:

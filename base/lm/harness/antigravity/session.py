@@ -19,7 +19,7 @@ from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, rec
 from base.lm.harness.antigravity.schedules import Schedules
 from base.lm.harness.antigravity.subagent_files import SubagentReader
 from base.lm.harness.antigravity.timing_refresh import TimingRefresh
-from base.lm.harness.antigravity.transcript.input_store import record_prompt, settle_inputs
+from base.lm.harness.antigravity.transcript.input_store import drop_input, log_prompt, settle_inputs
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
@@ -39,6 +39,7 @@ from base.lm.harness.delivery import (
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
+    BridgeEvent,
     InterruptConfirmed,
     SessionFailed,
     SessionStarted,
@@ -119,6 +120,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self, session_id: str, keys: Sequence[str]
     ) -> dict[str, Reconciliation] | None:
         return reconcile_acp_inputs(agy_home(self._home, self._environ), session_id, keys)
+
+    def _emit(self, event: BridgeEvent) -> None:
+        super()._emit(event)
+        drop_input(self._home, self._session_id, event)
 
     def adopt(self, keys: Sequence[str]) -> None:
         super().adopt(keys)
@@ -337,7 +342,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         blocks = prompt_blocks(entry.blocks)
 
         def writing() -> None:
-            record_prompt(self._home, self._session_id, entry.key, blocks)
+            log_prompt(self._home, self._session_id, entry.key, blocks)
             self._ledger = self._ledger.scoped(entry.key, turn.ticket.turn_id)
 
         transport.prompt(request, blocks, before_write=writing)
@@ -746,10 +751,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     def _lose_schedules(self) -> None:
         lost = self._schedules.pending_at(self._clock.now().timestamp())
-        self._schedules = Schedules(
-            max_timer_seconds=self.config.max_schedule_timer_seconds,
-            reply_wait_seconds=self.config.background_reply_seconds,
-        )
+        self._schedules = self._schedules.cleared()
         self._lose_background(lost)
 
     def background_work(self) -> BackgroundWork:

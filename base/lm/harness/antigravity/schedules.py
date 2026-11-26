@@ -61,6 +61,11 @@ class Schedules:
     max_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
     expired_replies: tuple[tuple[str, str | None], ...] = ()
 
+    def cleared(self) -> Schedules:
+        return Schedules(
+            max_timer_seconds=self.max_timer_seconds, reply_wait_seconds=self.reply_wait_seconds
+        )
+
     def observe_tool(self, event: ToolUse | ToolResult, *, now: float, mono: float) -> Schedules:
         if isinstance(event, ToolUse):
             return self.tool_used(

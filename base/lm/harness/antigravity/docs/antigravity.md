@@ -35,7 +35,7 @@ no other input has taken and whose whole request text hashes to the same digest
 (an image-only input also compares its `media` count) is the row of that input.
 Equal texts sent in a row take their rows one to one in file order. The match
 is by digest of the whole text and never by a part of it. Each new match is
-appended as a `bound` line (`offset`, `key`). A reader that finds a `sent` line
+appended as a `bound` line (`offset`, `key`). An input the session rejects or loses without a row to show for it is retired by a `dropped` line (written only while it is still unbound), so it never keeps its place ahead of a later input of the same text. Only inputs sent within the last 4 MiB of the transcript are matched, and a reader looks at the record for a binding only when a `USER_INPUT` row in the block it is reading could be the row of an unbound input. A reader that finds a `sent` line
 with no `bound` line (a host that died in between) resolves it the same way, so
 the result is the same whoever reads. Rows written before this ledger opened
 with an HTML comment holding a digest of the input key; they are still read for

@@ -588,6 +588,14 @@ def prompt_text(data: dict[str, Any]) -> str:
     return "".join(b["text"] for b in data["params"]["prompt"] if b["type"] == "text")
 
 
+def record_user_input(transcript: Path, text: str, *, written: bool) -> None:
+    if written:
+        record(
+            transcript,
+            {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
+        )
+
+
 def handle_prompt(
     transcript: Path,
     data: dict[str, Any],
@@ -595,10 +603,7 @@ def handle_prompt(
 ) -> tuple[int | None, int | None]:
     request = data["id"]
     text = command = prompt_text(data)
-    record(
-        transcript,
-        {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n{text}\n</USER_REQUEST>"},
-    )
+    record_user_input(transcript, text, written=command != "unwritten")
     if command == "steer":
         assert original is not None
         result(original)
@@ -641,7 +646,7 @@ def handle_prompt(
         record(transcript, planner_row("incomplete foreground", tokens=1))
         message("OK")
         result(request)
-    elif command == "broken":
+    elif command in {"broken", "unwritten"}:
         frame({"id": request, "error": {"code": -32603, "message": "provider error"}})
     else:
         regular_prompt(transcript, request, command)

@@ -70,7 +70,7 @@ class HumanOrigin:
 # meiva:note
 # A message a person (or the host on a person's behalf) put into the conversation, or a row the record files like one.
 # `wire_id` is the id the CLI kept for it when we gave it one (Claude's row uuid, Codex's client id, Antigravity's
-# marker digest), or None when the record cannot say; the projection then falls back to the text.
+# input key, bound to the row by its input ledger or named by the digest of an earlier comment on its first line), or None when the record cannot say; the projection then falls back to the text.
 # `joined_running_turn` is True when the message was taken into a turn that was already running (a
 # steer) and False when it opened a turn of its own. `origin` is what the row says about its source when that is
 # not a person (`HumanOrigin`): the projection settles an input of ours by `wire_id` whatever the origin says, treats a

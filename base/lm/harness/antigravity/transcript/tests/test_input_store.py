@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,9 @@ from base.lm.harness.antigravity.transcript.input_store import (
     Ledger,
     SentInput,
     bind_inputs,
+    drop_input,
     inputs_path,
+    inputs_path_for,
     load_ledger,
     prompt_image_count,
     prompt_text_sha256,
@@ -22,8 +25,11 @@ from base.lm.harness.antigravity.transcript.input_store import (
     resolve_inputs,
     row_input_key,
     text_sha256,
+    unbound_inputs,
 )
 from base.lm.harness.delivery import ImageBlock, TextBlock
+from base.lm.harness.events import InputLost, InputRejected
+from base.lm.harness.session.transcript.record_file import RecordFile
 
 
 def request(text: str, footer: str = "") -> dict[str, object]:
@@ -148,3 +154,82 @@ def test_rows_carry_their_key_and_the_record_file_resolves_a_sent_input_that_was
     after = file.rows_after(0).rows
     assert [row.row.get(ROW_KEY) for row in after] == [None, "k"]
     assert [row.get(ROW_KEY) for row in bind_inputs(record, after)[0]] == [None, "k"]
+
+
+def test_a_dropped_input_gives_up_its_place_so_a_later_equal_input_takes_the_row() -> None:
+    rows = [request("again")]
+    ledger = Ledger((sent("old", "again"), sent("new", "again")), {}, ("old",))
+    assert resolve_inputs(enumerate(rows), ledger) == {0: "new"}
+    images = Ledger((sent("old", "", images=1), sent("new", "", images=1)), {}, ("old",))
+    row: dict[str, object] = {**request(""), "media": [{}]}
+    assert resolve_inputs([(5, row)], images) == {5: "new"}
+
+
+def test_dropping_is_recorded_once_and_only_for_an_input_still_unbound(tmp_path: Path) -> None:
+    path = inputs_path_for(tmp_path, "conv")
+    record_sent_input(path, key="a", min_offset=0, text_sha256=text_sha256("x"), image_count=0)
+    record_sent_input(path, key="b", min_offset=0, text_sha256=text_sha256("y"), image_count=0)
+    record_bound_inputs(path, {4: "b"})
+    for event in (InputRejected("a", "why", 1), InputLost("a", 1), InputLost("b", 1)):
+        drop_input(tmp_path, "conv", event)
+    drop_input(tmp_path, "conv", InputLost("never-sent", 1))
+    drop_input(tmp_path, None, InputLost("a", 1))
+    drop_input(tmp_path, "conv", object())
+    assert load_ledger(path).dropped == ("a",)
+    assert unbound_inputs(load_ledger(path)) == []
+
+
+def test_concurrent_writers_record_one_binding(tmp_path: Path) -> None:
+    path = tmp_path / "meiva-inputs.jsonl"
+    record_sent_input(path, key="a", min_offset=0, text_sha256=text_sha256("x"), image_count=0)
+    with ThreadPoolExecutor(8) as pool:
+        for future in [pool.submit(record_bound_inputs, path, {3: "a"}) for _ in range(16)]:
+            future.result()
+    assert path.read_text().count('"kind":"bound"') == 1
+
+
+def ledgered_record(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
+    record = tmp_path / "transcript_full.jsonl"
+    lines = [json.dumps({"status": "DONE", "step_index": 1, "created_at": "t", **r}) for r in rows]
+    record.write_text("".join(line + "\n" for line in lines))
+    return record
+
+
+def test_an_orphaned_input_costs_a_read_only_when_a_row_could_be_its_own(tmp_path: Path) -> None:
+    rows: list[dict[str, object]] = [
+        {"type": "PLANNER_RESPONSE", "content": "plan"},
+        request("other"),
+        {"type": "GENERIC", "content": "tool"},
+        {**request("mine"), ROW_KEY: "bound-key"},
+    ]
+    record = ledgered_record(tmp_path, rows)
+    ledger = inputs_path(record)
+    record_sent_input(
+        ledger, key="orphan", min_offset=0, text_sha256=text_sha256("zzz"), image_count=0
+    )
+    file, plain = AntigravityRecordFile(record), RecordFile(record)
+    end = plain.complete_end()
+    file.prepare_reading(end)
+    block = file.rows_before(end)
+    assert len(block.rows) == len(plain.rows_before(end).rows) == len(rows)
+    assert file.bytes_read == end == record.stat().st_size
+    assert all(ROW_KEY not in r.row for r in block.rows[:3])
+
+
+def test_an_orphan_far_behind_never_takes_a_later_row_and_is_not_scanned(tmp_path: Path) -> None:
+    record = ledgered_record(tmp_path, [request("pad " * 40)] * 6 + [request("again")])
+    ledger = inputs_path(record)
+    gone = text_sha256("again")
+    record_sent_input(ledger, key="orphan", min_offset=0, text_sha256=gone, image_count=0)
+    tail = RecordFile(record).rows_before(RecordFile(record).complete_end(), 1).start
+    record_sent_input(ledger, key="new", min_offset=tail, text_sha256=gone, image_count=0)
+    assert AntigravityRecordFile(record).rows_after(tail).rows[0].row[ROW_KEY] == "orphan"
+    scanned = AntigravityRecordFile(record, scan_bytes=300)
+    scanned.prepare_reading(tail)
+    assert scanned.rows_after(tail).rows[0].row[ROW_KEY] == "new"
+    twin = RecordFile(record)
+    twin.prepare_reading(tail)
+    _ = twin.rows_after(tail)
+    assert scanned.bytes_read == twin.bytes_read
+    snapshot = [(r.offset, r.row) for r in RecordFile(record).rows_after(0).rows]
+    assert resolve_inputs(snapshot, load_ledger(ledger), scan_bytes=300)[tail] == "new"
