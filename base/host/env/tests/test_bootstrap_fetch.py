@@ -57,6 +57,7 @@ def _write_snapshot(
         ),
         encoding="utf-8",
     )
+    snap.chmod(0o600)
     return snap
 
 
@@ -411,7 +412,8 @@ def test_inject_falls_back_to_stale_snapshot_on_transport_failure(home: Path) ->
         home, base_url=url, age_s=10_000.0, values={"MEIVA_DB_URL": "postgresql://last-known/x"}
     )
     env = {"MEIVA_GATEWAY_URL": url}
-    _inject(env, home)  # must not raise
+    result = _inject(env, home)  # must not raise
+    assert result.bootstrap_source == "legacy_fallback"
     assert env["MEIVA_DB_URL"] == "postgresql://last-known/x"
 
 

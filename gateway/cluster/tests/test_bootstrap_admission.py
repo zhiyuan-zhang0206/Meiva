@@ -14,7 +14,8 @@ from pydantic import TypeAdapter
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from base import config
-from base.config import Settings
+from base.clock.tests.fakes import system_clock
+from base.config import ConfigBoot, Settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
@@ -95,6 +96,7 @@ def gateway_client(
     app.state = CatalogAppState(
         {
             "machine_token_acceptance": machine_token_acceptance,
+            "clock": system_clock(),
             "config_authority": served_authority,
             "catalog": model_catalog,
             "gateway_process": SimpleNamespace(home=gateway_home),
@@ -210,3 +212,54 @@ def test_runner_refreshes_an_outdated_admission_snapshot(
         assert env[_TURN_LIMIT] == "0"
         written = bootstrap.read_config_snapshot(url, home=tmp_path, now=now)
     assert written is not None and written[0][_TURN_LIMIT] == "0"
+
+
+def test_scoped_runner_boot_persists_a_mirror_and_cold_boots_offline(
+    gateway_snapshot: _UnitEnv,
+    gateway_client: TestClient,
+    tmp_path: Path,
+    runner_token: str,
+) -> None:
+    gateway_snapshot["MEIVA_TIMEZONE"] = "UTC"
+    now = time.time()
+    tuning = BootstrapFetch(attempts=1)
+    with serve_asgi(gateway_client.app) as url:
+        enrollment = {
+            "MEIVA_GATEWAY_URL": url,
+            "MEIVA_MACHINE_HOST": "192.0.2.20",
+            "MEIVA_API_TOKEN": runner_token,
+        }
+        online_env = dict(enrollment)
+        online = bootstrap.inject_config_from_gateway(
+            online_env, home=tmp_path, now=now, tuning=tuning
+        )
+        assert online.bootstrap_source == "live_bootstrap"
+        mirror = tmp_path / "run" / "bootstrap-mirror.json"
+        assert mirror.stat().st_mode & 0o777 == 0o600
+        assert runner_token not in mirror.read_text()
+
+    offline = bootstrap.inject_config_from_gateway(
+        enrollment, home=tmp_path, now=now + 600, tuning=tuning
+    )
+    assert offline.bootstrap_source == "authorized_mirror"
+    assert offline.bootstrap_generation == online.bootstrap_generation
+    assert offline.bootstrap_generation
+    assert enrollment[_TURN_LIMIT] == online_env[_TURN_LIMIT] == "0"
+
+    _ = (tmp_path / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=false\n"
+        "MEIVA_MACHINE_NAME=offline-runner\n"
+        f"MEIVA_MACHINE_HOST={enrollment['MEIVA_MACHINE_HOST']}\n",
+        encoding="utf-8",
+    )
+    cold_boot = ConfigBoot(
+        environment={
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_GATEWAY_URL": url,
+            "MEIVA_API_TOKEN": runner_token,
+        }
+    )
+    cold_boot.prepare()
+    assert cold_boot.view.env_boot.bootstrap_source == "authorized_mirror"
+    assert cold_boot.view.env_boot.bootstrap_generation == online.bootstrap_generation
