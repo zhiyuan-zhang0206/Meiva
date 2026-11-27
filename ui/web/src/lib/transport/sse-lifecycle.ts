@@ -1,27 +1,6 @@
 import { probeVerdict, readyStateKind, reconnectDelay } from "./stream/sse-plan";
 import type { EventSourceHandle, SessionPort } from "./transport";
 
-export type SseAuthStatus = "loading" | "authenticated" | "unauthenticated";
-
-export interface SseStoreSlice {
-  reconnectNonce: number;
-  bumpReconnect: () => void;
-  activeId: number | null;
-}
-
-export interface SseRuntimeHooks {
-  useAuthStatus: () => SseAuthStatus;
-  useStore: <T>(selector: (state: SseStoreSlice) => T) => T;
-  useMergedChannels: () => readonly ("system" | "systemAll")[];
-  useDocumentVisible: () => boolean;
-}
-
-const DEFAULT_MERGED_CHANNELS: readonly ("system" | "systemAll")[] = [];
-const DEFAULT_STORE_SLICE: SseStoreSlice = {
-  reconnectNonce: 0,
-  bumpReconnect: () => undefined,
-  activeId: null,
-};
 const sessionInvalidSink: { handler: (() => void) | null } = { handler: null };
 
 export function setSessionInvalidHandler(handler: (() => void) | null): void {
@@ -30,17 +9,6 @@ export function setSessionInvalidHandler(handler: (() => void) | null): void {
 
 export function notifySessionInvalid(): void {
   sessionInvalidSink.handler?.();
-}
-
-export const sseRuntime: SseRuntimeHooks = {
-  useAuthStatus: () => "authenticated",
-  useStore: (selector) => selector(DEFAULT_STORE_SLICE),
-  useMergedChannels: () => DEFAULT_MERGED_CHANNELS,
-  useDocumentVisible: () => true,
-};
-
-export function registerSseRuntime(hooks: Partial<SseRuntimeHooks>): void {
-  Object.assign(sseRuntime, hooks);
 }
 
 export interface SseTimerPolicy {

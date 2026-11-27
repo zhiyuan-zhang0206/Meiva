@@ -1,8 +1,9 @@
 # Provider composition
 
-`<html lang="en">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `EventStreamProvider` → [fold owner] → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
+`<html lang="en">` (`app/layout.tsx`) → `Providers` (`components/shell/providers.tsx`: `QueryClientProvider` → `AuthProvider` → `RootEventStreams` → `EventStreamProvider` → [fold owner] → `ThemeProvider` → `AppConnectionBanner` + `ToastHost`) → `AuthGuard` → page.
 
 - **QueryClient**: `staleTime` default 5min, `gcTime` 30min, `refetchOnWindowFocus` off (SSE-driven queries set `staleTime: Infinity`; bounded snapshots opt into polling explicitly). Sidebar stats consumers share one QueryClient-level 30s poll coordinator, so responsive/header/footer observers cannot mint independent intervals. A 401 is never retried and globally invalidates the session so `AuthGuard` redirects to `/login` and unmounts polling observers (Task #1326).
+- **RootEventStreams** reads authentication, document visibility, the selected agent, and reconnect state with a fixed set of hooks. It supplies their values and the separate-channel configuration through `SseRuntimeContext` to both SSE providers.
 - **EventStreamProvider** sits above the route tree: global `/api/system` broadcast persists across page navigation (one EventSource shared across routes; closed while the tab is hidden, reopened on return).
 - **Fold owner** (`useFoldOwner`, inside `EventStreamProvider`): one subscriber turns global-broadcast events into coalesced Query invalidations (`["agents", "live"]`, agent directory/detail, questions, fleet graph) and runs the central reconnect reconcile. Events refetch existing list queries and trail a GET in flight; absent keys are never seeded. Hooks only read their keys.
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).

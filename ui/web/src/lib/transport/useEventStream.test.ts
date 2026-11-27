@@ -1,7 +1,7 @@
 // meiva:note
 // @vitest-environment happy-dom
 
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, createElement, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -13,10 +13,7 @@ import { AGENTS_QUERY_KEY, RECONNECT_QUERY_KEYS } from "../fold";
 import { useFoldOwner } from "../fold/owner";
 import {
   notifySessionInvalid,
-  registerSseRuntime,
   setSessionInvalidHandler,
-  type SseAuthStatus,
-  type SseStoreSlice,
 } from "./sse-lifecycle";
 import { StreamHubProvider } from "./transport-context";
 import { StreamHub } from "./stream/stream-hub";
@@ -29,10 +26,15 @@ import type { ConnectionEvent } from "./useEventStream";
 import {
   AgentEventStreamProvider,
   EventStreamProvider,
+  SseRuntimeContext,
+  type SseRuntime,
   useEventStream,
 } from "./useEventStream";
 
 const noMergedChannels = [] as const;
+
+type SseAuthStatus = SseRuntime["authStatus"];
+type SseStoreSlice = Pick<SseRuntime, "reconnectNonce" | "bumpReconnect" | "activeId">;
 
 const useStore = create<SseStoreSlice>()((set) => ({
   reconnectNonce: 0,
@@ -111,12 +113,6 @@ beforeEach(() => {
     value: "visible",
   });
   useStore.setState({ reconnectNonce: 0, activeId: null });
-  registerSseRuntime({
-    useAuthStatus: () => useAuth().status,
-    useStore,
-    useDocumentVisible,
-    useMergedChannels: () => noMergedChannels,
-  });
 });
 
 afterEach(() => {
@@ -133,8 +129,20 @@ async function waitForInstance(): Promise<void> {
   await waitFor(() => expect(lastInstance()).not.toBeNull());
 }
 
+function TestRuntime({ children, mergedChannels }: {
+  children: ReactNode;
+  mergedChannels: SseRuntime["mergedChannels"];
+}) {
+  const { status: authStatus } = useAuth();
+  const isVisible = useDocumentVisible();
+  const slice = useStore();
+  return createElement(SseRuntimeContext.Provider, {
+    value: { ...slice, authStatus, isVisible, mergedChannels },
+  }, children);
+}
+
 // Helps renderHook wrap a hook into the Provider. agentId is passed via the wrapper factory.
-function withProvider() {
+function withProvider(mergedChannels: SseRuntime["mergedChannels"] = noMergedChannels) {
   // The R4 fold owner inside EventStreamProvider reads the query cache, so
   // the Provider must sit under a QueryClientProvider (mirrors providers.tsx).
   const qc = new QueryClient({
@@ -149,7 +157,10 @@ function withProvider() {
         createElement(
           QueryClientProvider,
           { client: qc },
-          createElement(EventStreamProvider, { children }),
+          createElement(TestRuntime, {
+            mergedChannels,
+            children: createElement(EventStreamProvider, { children }),
+          }),
         ),
       ),
     });
@@ -173,7 +184,10 @@ function withProviderAndClient() {
         createElement(
           QueryClientProvider,
           { client: qc },
-          createElement(EventStreamProvider, { children }),
+          createElement(TestRuntime, {
+            mergedChannels: noMergedChannels,
+            children: createElement(EventStreamProvider, { children }),
+          }),
         ),
       ),
     });
@@ -190,14 +204,51 @@ describe("server rendering", () => {
       get page(): never { throw new Error("browser resource acquired during SSR"); },
     };
     hub = new StreamHub(transport, { checkAuth: auth.checkAuth, sessionInvalid: notifySessionInvalid }, "");
-    registerSseRuntime({ useMergedChannels: () => ["system", "systemAll"] });
-    const Wrapper = withProvider();
+    const Wrapper = withProvider(["system", "systemAll"]);
     expect(() => renderToString(createElement(Wrapper, null, "server shell"))).not.toThrow();
     expect(tab.sources).toHaveLength(0);
   });
 });
 
 describe("EventStreamProvider connection lifecycle", () => {
+  it("updates visibility within one runtime without changing a sibling provider", () => {
+    const client = new QueryClient();
+    const bumpReconnect = () => undefined;
+    const stream = (isVisible: boolean, key: string) =>
+      createElement(SseRuntimeContext.Provider, {
+        key,
+        value: {
+          authStatus: "authenticated",
+          isVisible,
+          activeId: null,
+          reconnectNonce: 0,
+          bumpReconnect,
+          mergedChannels: noMergedChannels,
+        },
+      }, createElement(EventStreamProvider, { children: null }));
+
+    const tree = (firstVisible: boolean, secondVisible: boolean) =>
+      createElement(StreamHubProvider, {
+        hub,
+        children: createElement(QueryClientProvider, { client },
+          stream(firstVisible, "first"), stream(secondVisible, "second")),
+      });
+
+    const { rerender } = render(tree(true, false));
+    expect(tab.sources).toHaveLength(1);
+    const first = expectInstance();
+
+    rerender(tree(true, true));
+    expect(tab.sources).toHaveLength(2);
+    const second = expectInstance();
+    expect(first.readyState).not.toBe(READY.CLOSED);
+
+    rerender(tree(false, true));
+    expect(first.readyState).toBe(READY.CLOSED);
+    expect(second.readyState).not.toBe(READY.CLOSED);
+    expect(tab.sources).toHaveLength(2);
+  });
+
   it("without profile APIs, separate pages keep their own EventSources", async () => {
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
     renderHook(() => useEventStream(vi.fn(), vi.fn()), { wrapper: withProvider() });
@@ -468,7 +519,10 @@ function withAgentProvider() {
         createElement(
           QueryClientProvider,
           { client: qc },
-          createElement(AgentEventStreamProvider, { children }),
+          createElement(TestRuntime, {
+            mergedChannels: noMergedChannels,
+            children: createElement(AgentEventStreamProvider, { children }),
+          }),
         ),
       ),
     });

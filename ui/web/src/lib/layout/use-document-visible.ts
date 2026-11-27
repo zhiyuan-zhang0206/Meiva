@@ -5,8 +5,6 @@
 
 import { useEffect, useState } from "react";
 
-import { registerSseRuntime } from "../transport/sse-lifecycle";
-
 export function useDocumentVisible(): boolean {
   const [isVisible, setIsVisible] = useState(
     () => typeof document === "undefined" || document.visibilityState === "visible",
@@ -19,5 +17,3 @@ export function useDocumentVisible(): boolean {
   }, []);
   return isVisible;
 }
-
-registerSseRuntime({ useDocumentVisible });

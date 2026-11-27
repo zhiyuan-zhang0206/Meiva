@@ -30,7 +30,6 @@ import {
   type QuestionDraft,
   type QuestionDrafts,
 } from "./question-drafts-plan";
-import { registerSseRuntime } from "../transport/sse-lifecycle";
 
 // Single dismiss timer for the toast slot (see showToast).
 const toastState: { timer: ReturnType<typeof setTimeout> | null } = { timer: null };
@@ -187,5 +186,3 @@ export const useStore = create<Store>()((set) => ({
   connState: "open",
   setConnState: (s) => set({ connState: s }),
 }));
-
-registerSseRuntime({ useStore });
