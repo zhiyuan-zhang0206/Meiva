@@ -1,25 +1,30 @@
 # meiva:link base/agents/history/docs/range-read-contracts.md
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 import psycopg
 from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import CheckpointTuple
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
 from base.agents.history.checkpoint import CheckpointReadError, FullHistory, single_segment_history
-from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver
+from base.agents.history.checkpoint_postgres_walks import (
+    CheckpointQuoteBudget,
+    CheckpointQuoteBudgetError,
+    HistoryPostgresSaver,
+)
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.history.closing_request import METADATA_KEY, ClosingRequest
 from base.agents.history.delta_read_compat import as_messages, reconstruct_delta_messages
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.db import Database
-from base.db.rows import query_all
+from base.db.rows import query_all, query_one
 from base.host.boundary.untyped import object_mapping
 
 SEGMENT_SHAPE_METADATA_KEY = "compact_segment_shape"
@@ -332,3 +337,125 @@ def read_checkpoint_segment(db: Database, agent_id: int, checkpoint_id: str) -> 
     ]
     history = single_segment_history(messages)
     return history._replace(segment_closings=(segment.closing,))
+
+
+# meiva:link base/agents/history/docs/checkpoint-replay.md
+_QUOTE_SEGMENTS = 8
+_QUOTE_BYTES = 16 * 1024 * 1024
+_QUOTE_REPLAY_ROWS = 4096
+_QUOTE_TRANSACTION_TIMEOUT = "5s"
+
+_QUOTE_CHECKPOINT_COST_SQL = """
+WITH target AS (
+    SELECT * FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = '' AND checkpoint_id = %s
+), payloads AS (
+    SELECT octet_length(checkpoint::text) + octet_length(metadata::text) AS size FROM target
+    UNION ALL
+    SELECT octet_length(b.blob)
+    FROM target c CROSS JOIN LATERAL jsonb_each_text(c.checkpoint -> 'channel_versions') AS ver
+    JOIN checkpoint_blobs b ON b.thread_id = c.thread_id AND b.checkpoint_ns = ''
+        AND b.channel = ver.key AND b.version = ver.value
+    UNION ALL
+    SELECT octet_length(w.blob) FROM target c JOIN checkpoint_writes w ON w.thread_id = c.thread_id
+    WHERE (w.checkpoint_ns = '' AND w.checkpoint_id = c.checkpoint_id) OR
+        ((c.checkpoint->>'v')::int < 4 AND w.checkpoint_id = c.parent_checkpoint_id
+            AND w.channel = '__pregel_tasks')
+)
+SELECT coalesce(sum(size), 0) AS size, count(*) AS rows FROM payloads
+"""
+
+
+@dataclass(frozen=True)
+class _QuoteCheckpointId:
+    checkpoint_id: str
+
+
+@dataclass(frozen=True)
+class _QuoteCheckpointCost:
+    size: int
+    rows: int
+
+
+def checkpoint_quote_exists(
+    db: Database, agent_id: int, match: Callable[[list[BaseMessage]], bool]
+) -> bool:
+    pool = db.pool(autocommit=True, row_factory=dict_row)
+    try:
+        with pool.connection() as conn, conn.transaction():
+            _ = conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            _ = conn.execute(
+                "SELECT set_config('transaction_timeout', %s, true)", (_QUOTE_TRANSACTION_TIMEOUT,)
+            )
+            budget = CheckpointQuoteBudget(_QUOTE_BYTES, _QUOTE_REPLAY_ROWS)
+            saver = HistoryPostgresSaver(
+                conn,
+                serde=CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
+                quote_budget=budget,
+            )
+            return _search_quote_checkpoints(
+                conn,
+                agent_id,
+                lambda checkpoint_id: _read_quote_checkpoint(
+                    conn, saver, agent_id, checkpoint_id, budget
+                ),
+                match,
+            )
+    except Exception as exc:
+        raise CheckpointReadError(f"checkpoint quote read failed for agent {agent_id}") from exc
+    finally:
+        pool.close()
+
+
+def _search_quote_checkpoints(
+    conn: psycopg.Connection[DictRow],
+    agent_id: int,
+    read: Callable[[str], list[BaseMessage]],
+    match: Callable[[list[BaseMessage]], bool],
+) -> bool:
+    latest = query_one(
+        conn,
+        _QuoteCheckpointId,
+        "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_ns='' ORDER BY checkpoint_id DESC LIMIT 1",
+        (str(agent_id),),
+    )
+    if latest is None or match(read(latest.checkpoint_id)):
+        return latest is not None
+    boundaries = query_all(
+        conn,
+        _QuoteCheckpointId,
+        "SELECT checkpoint_id FROM checkpoints WHERE thread_id=%s AND checkpoint_ns='' "
+        "AND checkpoint_id < %s AND metadata->>'compact_boundary'='true' "
+        "ORDER BY checkpoint_id DESC LIMIT %s",
+        (str(agent_id), latest.checkpoint_id, _QUOTE_SEGMENTS + 1),
+    )
+    for boundary in boundaries[:_QUOTE_SEGMENTS]:
+        messages = read(boundary.checkpoint_id)
+        if messages and isinstance(messages[0], SystemMessage) and match(messages[1:]):
+            return True
+    if len(boundaries) > _QUOTE_SEGMENTS:
+        raise CheckpointQuoteBudgetError("The checkpoint quote exceeds its retained segment budget")
+    return False
+
+
+def _read_quote_checkpoint(
+    conn: psycopg.Connection[DictRow],
+    saver: HistoryPostgresSaver,
+    agent_id: int,
+    checkpoint_id: str,
+    budget: CheckpointQuoteBudget,
+) -> list[BaseMessage]:
+    cost = query_one(
+        conn, _QuoteCheckpointCost, _QUOTE_CHECKPOINT_COST_SQL, (str(agent_id), checkpoint_id)
+    )
+    if cost is None:
+        raise CheckpointReadError("The checkpoint read cost was not returned")
+    budget.take_rows(cost.rows)
+    budget.take_bytes(cost.size)
+    config: RunnableConfig = {
+        "configurable": {"thread_id": str(agent_id), "checkpoint_id": checkpoint_id}
+    }
+    value = saver.get_tuple(config)
+    if value is None:
+        return []
+    _ = reconstruct_delta_messages(saver, value)
+    return as_messages(object_mapping(value.checkpoint["channel_values"]).get("messages", []))

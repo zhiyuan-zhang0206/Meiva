@@ -2,7 +2,7 @@ exports = ["window.py", "file.py", "input_store.py"]
 
 [uses]
 "__init__.py" = []
-"file.py" = ["input_store.py"]
+"file.py" = ["input_store.py", "text.py"]
 "text.py" = []
 "input_store.py" = ["text.py"]
 "window.py" = ["input_store.py", "text.py"]

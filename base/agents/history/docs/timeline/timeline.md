@@ -93,9 +93,10 @@ unavailability if an intermediate segment cannot provide a stable edge.
 
 Record readers bind the agent's current registry, harness, session, committed row
 and block. They share the existing parser, projector, complete-row anchor and
-call context with ordinary and Quote reads. The gateway awaits the record RPC,
-then calls the single `settle_record_activity` owner; an inactive process settles
-activity without completing partial source text.
+call context with ordinary timeline windows and legacy quotes. The gateway
+awaits the record RPC, then calls the `settle_record_activity` owner. Canonical
+quotes use [stored source identity](../../../../../gateway/message_admission/README.md)
+on their own selector.
 
 Malformed selectors return 422. A verified unavailable identity, source domain
 or read budget returns 410 with code `reading_source_unavailable` and a

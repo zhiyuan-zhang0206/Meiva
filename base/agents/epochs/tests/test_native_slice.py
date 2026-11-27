@@ -63,10 +63,10 @@ def test_an_item_without_a_time_follows_the_item_before_it() -> None:
     assert _ids(2, items) == ["2.0", "3.0"]
 
 
-def test_a_leading_run_without_a_time_follows_the_first_item_with_one() -> None:
-    compacted = [_item("0.0", None), _item("1.0", None), _item("2.0", 2)]
-    assert _ids(0, compacted) == []
-    assert _ids(2, compacted) == ["0.0", "1.0", "2.0"]
+def test_a_leading_run_without_a_time_does_not_move_into_a_later_epoch() -> None:
+    items = [_item("0.0", None), _item("1.0", None), _item("2.0", 2)]
+    assert _ids(0, items) == ["0.0", "1.0"]
+    assert _ids(2, items) == ["2.0"]
 
 
 def test_a_segment_without_any_time_belongs_to_the_first_native_stretch() -> None:

@@ -128,6 +128,46 @@ class TestTimelineEpochs(CompactHistoryCases):
         )
         return agent
 
+    @pytest.mark.parametrize("prior_stamp", [True, False], ids=["prior-anchor", "unstamped-prefix"])
+    def test_a_canonical_quote_uses_native_epoch_membership(
+        self, db_conn: psycopg.Connection, client: GatewayTestClient, prior_stamp: bool
+    ) -> None:
+        agent = self._meiva_cli_meiva(db_conn)
+        earlier = _reply("old", 2).model_copy(update={"id": "earlier-reply"})
+        current = _reply("current", 6).model_copy(update={"id": "current-reply"})
+        old_untimed = AIMessage(id="earlier-untimed", content="old untimed")
+        new_untimed = AIMessage(id="current-untimed", content="current untimed")
+        prefix = [earlier, old_untimed] if prior_stamp else [old_untimed]
+        self._put_checkpoint(agent, [*prefix, current, new_untimed], version="2")
+        timeline = client.get(f"/api/agents/{agent}/timeline").json()
+        [shown] = [
+            item for item in timeline["items"] if item["source_message_id"] == "current-untimed"
+        ]
+        for source, status in [
+            ("earlier-reply", 422),
+            ("earlier-untimed", 422),
+            ("current-reply", 201),
+            ("current-untimed", 201),
+        ]:
+            response = client.post(
+                f"/api/agents/{agent}/messages",
+                json={
+                    "content": "Explain",
+                    "source": "user",
+                    "quote": {
+                        "source_agent_id": agent,
+                        "source_item_id": shown["item_id"]
+                        if source == "current-untimed"
+                        else "reordered",
+                        "source_message_id": source,
+                        "source_block_idx": 0,
+                        "author": "Agent",
+                        "text": "selected",
+                    },
+                },
+            )
+            assert response.status_code == status, response.text
+
     def test_the_head_is_the_current_native_epoch_and_its_switch_block(
         self, db_conn: psycopg.Connection, client: GatewayTestClient
     ) -> None:

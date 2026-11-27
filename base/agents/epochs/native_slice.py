@@ -43,23 +43,16 @@ def apply_native_slice(
 ) -> list[TimelineItem]:
     if epoch_slice is None:
         return list(items)
-    stamps = _item_stamps(items)
+    stamps = effective_native_stamps([item.created_at for item in items])
     return [item for item, stamp in zip(items, stamps, strict=True) if epoch_slice.holds(stamp)]
 
 
-def _item_stamps(items: Sequence[TimelineItem]) -> list[datetime | None]:
-    own = [moment_of(item.created_at) for item in items]
+def effective_native_stamps(values: Sequence[str | None]) -> list[datetime | None]:
     stamps: list[datetime | None] = []
     previous: datetime | None = None
-    for stamp in own:
-        previous = stamp or previous
+    for value in values:
+        previous = moment_of(value) or previous
         stamps.append(previous)
-    following: datetime | None = None
-    for index in range(len(stamps) - 1, -1, -1):
-        if own[index] is not None:
-            following = own[index]
-        elif stamps[index] is None:
-            stamps[index] = following
     return stamps
 
 

@@ -1,16 +1,17 @@
 exports = ["items.py", "project.py", "record", "sent.py"]
 
 [uses]
-"__init__.py" = []
+"__init__.py" = ["identity.py"]
 "items.py" = []
-"project.py" = ["items.py"]
-"record" = ["items.py", "project.py"]
+"project.py" = ["identity.py", "items.py"]
+"record" = ["identity.py", "items.py", "project.py"]
 "sent.py" = []
 "tests" = ["items.py", "project.py", "record", "sent.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
+"identity.py" = "strict"
 "items.py" = "strict"
 "project.py" = "strict"
 "sent.py" = { mode = "off", why = "the one inbox query that names the inputs a record's rows were sent as; what a row shows is decided by the pure functions beside it" }

@@ -92,3 +92,24 @@ def test_compressed_middle_window_uses_one_stream_and_keeps_both_sides(tmp_path:
     assert isinstance(file, ZstdRecordFile) and file.held_bytes <= MAX_BLOCK_BYTES
     assert file.stream_passes == 1
     assert file.compressed_bytes_read == (tmp_path / "record.jsonl.zst").stat().st_size
+
+
+def test_quote_of_first_compressed_row_stops_before_replaying_archive(tmp_path: Path) -> None:
+    first = row("selected")
+    raw = first + row("x" * 1024) * (MAX_BLOCK_BYTES // 512)
+    file = record(tmp_path, raw, True)
+    with file.quote_row(0, inbound=False) as found:
+        assert found is not None and found.row.row["value"] == "selected"
+        assert not found.is_tail()
+    assert file.bytes_read <= 64 * 1024
+    assert isinstance(file, ZstdRecordFile) and file.held_bytes == 0
+    assert file.stream_passes == 1
+
+
+def test_compressed_quote_refuses_a_row_beyond_the_stream_budget(tmp_path: Path) -> None:
+    line = row("x" * 1024)
+    raw = line * (MAX_BLOCK_BYTES // len(line) + 1)
+    file = record(tmp_path, raw, True)
+    with pytest.raises(RecordReadBudgetError), file.quote_row(len(raw) - len(line), inbound=False):
+        pytest.fail("the bounded quote read cannot reach the complete row")
+    assert file.bytes_read <= MAX_BLOCK_BYTES

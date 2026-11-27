@@ -127,6 +127,22 @@ def load_sent_rows(
     return Found(ordered, scanned)
 
 
+def quoted_inbound_matches(
+    conn: Connection,
+    agent_id: int,
+    inbound_id: int,
+    *,
+    wanted: frozenset[str],
+    wire_id: Callable[[str], str],
+) -> bool:
+    row = conn.execute(
+        "SELECT id, agent_id, kind, source, content, payload, created_at FROM inbound_messages "
+        "WHERE agent_id=%s AND id=%s AND kind=%s AND claimed_at IS NOT NULL",
+        (agent_id, inbound_id, InboundKind.CHAT.value),
+    ).fetchone()
+    return row is not None and any(wire_id(key) in wanted for key in _row(row).input_keys)
+
+
 def _matched_rows(
     found: Sequence[SentRow], wanted: Mapping[str, InputRow], wire_id: Callable[[str], str]
 ) -> list[SentRow]:

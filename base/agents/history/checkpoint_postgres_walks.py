@@ -46,7 +46,7 @@ _ANCESTOR_COLUMNS = """
               AND b.type <> 'empty') AS hb_0,
     c.checkpoint -> 'channel_values' -> 'messages' AS inline_0
 """
-_ANCESTORS_SQL = f"""
+_ANCESTORS_CTE = f"""
 WITH RECURSIVE ancestors AS (
     SELECT {_ANCESTOR_COLUMNS}, 0 AS depth
     FROM checkpoints c
@@ -56,15 +56,27 @@ WITH RECURSIVE ancestors AS (
     FROM ancestors a JOIN checkpoints c ON c.checkpoint_id = a.parent_checkpoint_id
     WHERE c.thread_id = %s AND c.checkpoint_ns = %s
       AND (a.depth = 0 OR NOT (a.hb_0 OR a.inline_0 IS NOT NULL))
+      AND a.depth < COALESCE(%s::int, 2147483647)
 )
-SELECT * FROM ancestors ORDER BY depth
 """  # noqa: S608 — only a static column list is interpolated
+_ANCESTORS_SQL = _ANCESTORS_CTE + "SELECT * FROM ancestors ORDER BY depth"  # noqa: S608
+_QUOTE_ANCESTORS_SQL = (
+    _ANCESTORS_CTE  # noqa: S608 — static CTE and projection
+    + """
+SELECT checkpoint_id, parent_checkpoint_id, ver_0, hb_0, depth,
+       CASE WHEN sum(inline_size) OVER (ORDER BY depth) <= %s THEN inline_0 END AS inline_0,
+       inline_size
+FROM (SELECT *, coalesce(octet_length(inline_0::text), 0) AS inline_size FROM ancestors) sized
+ORDER BY depth
+"""
+)
 _WRITE_KEYS_SQL = """
 SELECT chain.depth, w.checkpoint_id, w.task_id, w.task_path, w.idx,
        octet_length(w.blob) AS size
 FROM unnest(%s::text[]) WITH ORDINALITY AS chain(checkpoint_id, depth)
 JOIN checkpoint_writes w USING (checkpoint_id)
 WHERE w.thread_id = %s AND w.checkpoint_ns = %s AND w.channel = 'messages'
+LIMIT %s
 """
 _WRITE_BODIES_SQL = """
 SELECT 'w'::text AS _kind, w.checkpoint_id, w.channel, w.type, w.blob,
@@ -81,6 +93,32 @@ SELECT 'b'::text AS _kind, NULL::text AS checkpoint_id, channel, type, blob,
 FROM checkpoint_blobs
 WHERE thread_id = %s AND checkpoint_ns = %s AND channel = 'messages' AND version = %s
 """
+
+_SEED_SIZE_SQL = """
+SELECT octet_length(blob) AS size FROM checkpoint_blobs
+WHERE thread_id = %s AND checkpoint_ns = %s AND channel = 'messages' AND version = %s
+"""
+
+
+class CheckpointQuoteBudgetError(ValueError):
+    pass
+
+
+@dataclass(slots=True)
+class CheckpointQuoteBudget:
+    bytes_left: int
+    rows_left: int
+
+    def take_bytes(self, size: int) -> None:
+        if size > self.bytes_left:
+            raise CheckpointQuoteBudgetError("The checkpoint quote exceeds its byte budget")
+        self.bytes_left -= size
+
+    def take_rows(self, count: int) -> None:
+        if count > self.rows_left:
+            raise CheckpointQuoteBudgetError("The checkpoint quote exceeds its replay row budget")
+        self.rows_left -= count
+
 
 _Query = tuple[LiteralString, Sequence[object]]
 _Rows = list[DictRow]
@@ -277,14 +315,28 @@ def _resets_messages(value: object) -> bool:
     return any(isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES for m in messages)
 
 
+def _budgeted_batches(
+    keys: Sequence[WriteKey], budget: CheckpointQuoteBudget | None
+) -> Generator[list[WriteKey]]:
+    for batch in body_key_batches(keys):
+        if budget is not None:
+            budget.take_bytes(sum(key.size for key in batch))
+        yield batch
+
+
 def _fetch_suffix(
-    saver: BasePostgresSaver, keys: Sequence[WriteKey], thread: str, namespace: str, target: str
+    saver: BasePostgresSaver,
+    keys: Sequence[WriteKey],
+    thread: str,
+    namespace: str,
+    target: str,
+    budget: CheckpointQuoteBudget | None,
 ) -> Generator[_Query, _Rows, tuple[list[_DeltaStage2Row], bool]]:
     rows: list[_DeltaStage2Row] = []
     body_bytes = body_rows = body_batches = 0
     reset = False
     decode = saver.serde.loads_typed
-    for batch in body_key_batches(keys):
+    for batch in _budgeted_batches(keys, budget):
         fetched = _STAGE2_ROWS.validate_python(
             (
                 yield (
@@ -341,7 +393,7 @@ def _identity_text(identity: Mapping[str, object], key: str, default: str | None
 
 
 def _history_queries(
-    saver: BasePostgresSaver, config: RunnableConfig
+    saver: BasePostgresSaver, config: RunnableConfig, budget: CheckpointQuoteBudget | None = None
 ) -> Generator[_Query, _Rows, dict[str, DeltaChannelHistory]]:
     """Share exact query, ordering and reset semantics across both saver APIs."""
     configurable = config.get("configurable")
@@ -351,7 +403,13 @@ def _history_queries(
     thread = _identity_text(identity, "thread_id")
     namespace = _identity_text(identity, "checkpoint_ns", "")
     target = _identity_text(identity, "checkpoint_id")
-    ancestors = yield _ANCESTORS_SQL, (thread, namespace, target, thread, namespace)
+    params = (thread, namespace, target, thread, namespace)
+    if budget is None:
+        ancestors = yield _ANCESTORS_SQL, (*params, None)
+    else:
+        ancestors = yield _QUOTE_ANCESTORS_SQL, (*params, budget.rows_left, budget.bytes_left)
+        budget.take_rows(len(ancestors))
+        budget.take_bytes(sum(_db_count(row, "inline_size") for row in ancestors))
     parents: dict[str, str | None] = {}
     versions: list[dict[str, str | None]] = [{}]
     blobs: list[dict[str, bool]] = [{}]
@@ -373,11 +431,8 @@ def _history_queries(
         {},
         set(),
     )
-    chain = chains["messages"]
-    keys = _replay_order(
-        _WRITE_KEYS.validate_python((yield _WRITE_KEYS_SQL, (chain, thread, namespace)))
-    )
-    rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target)
+    keys = yield from _fetch_keys(chains["messages"], thread, namespace, budget)
+    rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target, budget)
     # A root can legitimately start without a seed. A missing ancestor cannot:
     # its omitted writes could change every value. A real reset cuts that prefix.
     parent = object_mapping(ancestors[-1])["parent_checkpoint_id"] if ancestors else None
@@ -393,8 +448,7 @@ def _history_queries(
         seeds["messages"] = None
         seed_inline.clear()
     if seeds["messages"] is not None and "messages" not in seed_inline:
-        seed_rows = yield _SEED_SQL, (thread, namespace, seeds["messages"])
-        rows.extend(_STAGE2_ROWS.validate_python(seed_rows))
+        rows.extend((yield from _fetch_seed(thread, namespace, seeds["messages"], budget)))
     return saver._build_delta_channels_writes_history(
         channels=["messages"],
         chain_by_ch=chains,
@@ -402,6 +456,46 @@ def _history_queries(
         seed_inline_by_ch=seed_inline,
         stage2_rows=rows,
     )
+
+
+def _fetch_keys(
+    chain: Sequence[str], thread: str, namespace: str, budget: CheckpointQuoteBudget | None
+) -> Generator[_Query, _Rows, list[WriteKey]]:
+    keys = _replay_order(
+        _WRITE_KEYS.validate_python(
+            (
+                yield (
+                    _WRITE_KEYS_SQL,
+                    (
+                        chain,
+                        thread,
+                        namespace,
+                        budget.rows_left + 1 if budget is not None else None,
+                    ),
+                )
+            )
+        )
+    )
+    if budget is not None:
+        budget.take_rows(len(keys))
+    return keys
+
+
+def _fetch_seed(
+    thread: str, namespace: str, seed: str | None, budget: CheckpointQuoteBudget | None
+) -> Generator[_Query, _Rows, list[_DeltaStage2Row]]:
+    params = (thread, namespace, seed)
+    if budget is not None:
+        sizes = yield _SEED_SIZE_SQL, params
+        budget.take_bytes(sum(_db_count(row, "size") for row in sizes))
+    return _STAGE2_ROWS.validate_python((yield _SEED_SQL, params))
+
+
+def _db_count(row: DictRow, column: str) -> int:
+    value = object_mapping(row).get(column)
+    if type(value) is not int:
+        raise ValueError(f"Expected an integer checkpoint size in {column}")
+    return value
 
 
 class HistoryPostgresSaver(PostgresSaver):
@@ -415,16 +509,18 @@ class HistoryPostgresSaver(PostgresSaver):
         serde: SerializerProtocol | None = None,
         *,
         surface: PrivateSurface | None = None,
+        quote_budget: CheckpointQuoteBudget | None = None,
     ) -> None:
         verify_private_surface(installed_private_surface() if surface is None else surface)
         super().__init__(conn, pipe, serde)
+        self._quote_budget = quote_budget
 
     def get_delta_channel_history(
         self, *, config: RunnableConfig, channels: Sequence[str]
     ) -> Mapping[str, DeltaChannelHistory]:
         if list(channels) != ["messages"] or not get_checkpoint_id(config):
             return super().get_delta_channel_history(config=config, channels=channels)
-        queries = _history_queries(self, config)
+        queries = _history_queries(self, config, self._quote_budget)
         rows: _Rows = []
         started = False
         with self._cursor() as cursor:

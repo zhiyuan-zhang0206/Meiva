@@ -2166,7 +2166,6 @@
   "gateway/mcp_server/endpoint.py": 1,
   "gateway/message_admission/cursor.py": 4,
   "gateway/message_admission/harness.py": 2,
-  "gateway/message_admission/quote_source.py": 3,
   "gateway/record_activity.py": 1,
   "gateway/routers/commands.py": 6,
   "gateway/routers/configuration/runtime.py": 2,

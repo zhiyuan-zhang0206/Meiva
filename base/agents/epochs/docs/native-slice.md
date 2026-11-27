@@ -2,7 +2,10 @@
 
 The built-in harness keeps one conversation per agent in its checkpoint, whatever harness ran in between. An agent that ran as `meiva`, then on a CLI, then as `meiva` again has two native stretches that share one checkpoint, so a reader cannot tell them apart by position: `state.messages` resets at a compact, and nothing in it names the stretch. The slice tells them apart by time.
 
-A stretch is the half-open interval `[started_at, ended_at)` of its epoch row. A rendered item belongs to the stretch that holds its `created_at`. An item without one (the system prompt and the standing head notes carry none) takes the time of the item before it, or of the next one when none comes before; a segment with no time at all belongs to the first native stretch. The first native stretch has no lower bound.
+A stretch is the half-open interval `[started_at, ended_at)` of its epoch row. A rendered item belongs to the stretch that holds its `created_at`. An item without one (the system prompt and the standing head notes carry none)
+takes the closest preceding timestamp in the segment. An unstamped prefix
+belongs to the first native stretch, which has no lower bound. A later
+timestamp cannot show whether the prefix predates a harness switch.
 
 An agent with one native stretch has nothing to tell apart, so it gets no slice and its reads are unchanged.
 

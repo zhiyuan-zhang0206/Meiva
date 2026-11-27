@@ -1,92 +1,115 @@
-# meiva:note
-# Quote admission checks an exact readable source, without matching rendered text to Markdown.
+# meiva:link gateway/message_admission/README.md
 
 import asyncio
+from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel
+from langchain_core.messages import BaseMessage
+from pydantic import BaseModel, ValidationError
 
-from base.agents.history.checkpoint import (
-    CheckpointReadError,
-    list_compact_boundary_checkpoint_ids,
-    load_checkpoint_messages,
-    load_checkpoint_messages_segment,
+from base.agents.epochs.chain import usable_epochs
+from base.agents.epochs.model import HarnessEpoch
+from base.agents.epochs.native_slice import (
+    NativeEpochSlice,
+    effective_native_stamps,
+    moment_of,
+    native_slice_of,
 )
-from base.agents.history.timeline import build_timeline_items
-from base.agents.history.timeline_item import TimelineItem
+from base.agents.epochs.read import read_epochs
+from base.agents.history.checkpoint import CheckpointReadError
+from base.agents.history.checkpoint_segment import checkpoint_quote_exists
+from base.agents.history.native_source import (
+    has_native_quote_block,
+    native_message_identity,
+    native_source_times,
+)
+from base.agents.history.transcript_timeline import record_quote_coordinates
 from base.agents.messages.quote import Quote
-from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.agents.to_user.delivery.store import delivery_mode
-from base.api_contracts.user_delivery import UserDeliveryMode
+from base.api_contracts.agent_contract import AgentStatus
 from base.db.rows import query_one
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
-from gateway.message_admission.cursor import TimelineCursor, parse_cursor
-from gateway.message_admission.harness import agent_harness
-from gateway.record_activity import settle_record_activity
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.message_admission.legacy_quote import validate_legacy_quote
+from ops.agents import get_agent_status
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
+from ops.rpc_schemas import (
+    HarnessTimelineReadRequest,
+    HarnessTimelineWindow,
+    RecordQuoteEvidence,
+    RecordUnreadable,
+)
 
 
 class _Placement(BaseModel):
     machine: str
+    harness: str | None
 
 
-def _admission_context(request: Request, agent_id: int) -> tuple[str, str, UserDeliveryMode]:
+@dataclass(frozen=True, slots=True)
+class _AdmissionContext:
+    machine: str
+    harness: str
+    epochs: list[HarnessEpoch]
+
+
+def _admission_context(request: Request, agent_id: int) -> _AdmissionContext:
     with gateway_state(request).db_pool.connection() as conn:
-        harness = agent_harness(conn, agent_id)
         placement = query_one(
-            conn, _Placement, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+            conn, _Placement, "SELECT machine, harness FROM agents_meta WHERE id = %s", (agent_id,)
         )
-        mode = delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
-    if placement is None:
-        raise HTTPException(404, "Agent not found")
-    return harness, placement.machine, mode
+        if placement is None:
+            raise HTTPException(404, "Agent not found")
+        harness = placement.harness or "meiva"
+        epochs = usable_epochs(read_epochs(conn, agent_id), harness)
+    return _AdmissionContext(placement.machine, harness, epochs)
 
 
-def _native_items(request: Request, agent_id: int, cursor: TimelineCursor) -> list[TimelineItem]:
-    state, config = gateway_state(request), gateway_config(request)
-    prefix = ""
-    if cursor.checkpoint_id is None:
-        messages = load_checkpoint_messages(state.db, agent_id)
-    else:
-        depth = config.timeline_compact_history
-        if depth == 0:
-            raise HTTPException(422, "Retained quote history is disabled")
-        boundaries = list_compact_boundary_checkpoint_ids(
-            state.db, agent_id, limit=depth if depth > 0 else None
+def _contains_native_source(
+    messages: list[BaseMessage], quote: Quote, epoch: NativeEpochSlice | None
+) -> bool:
+    block = quote.source_block_idx
+    if block is None:
+        return False
+    times = native_source_times(messages) if epoch is not None else {}
+    stamps = dict(zip(times, effective_native_stamps(list(times.values())), strict=True))
+    for index, message in enumerate(messages):
+        identity = native_message_identity(message)
+        if quote.source_message_id is not None and identity.message_id != quote.source_message_id:
+            continue
+        if quote.source_inbound_id is not None and identity.inbound_id != quote.source_inbound_id:
+            continue
+        if epoch is not None and not epoch.holds(stamps.get(index)):
+            continue
+        if has_native_quote_block(message, block):
+            return True
+    return False
+
+
+def _native_source_exists(
+    request: Request, agent_id: int, quote: Quote, context: _AdmissionContext
+) -> bool:
+    epoch = native_slice_of(context.epochs, context.epochs[-1].seq) if context.epochs else None
+    return checkpoint_quote_exists(
+        gateway_state(request).db,
+        agent_id,
+        lambda messages: _contains_native_source(messages, quote, epoch),
+    )
+
+
+def _record_epoch_scope(context: _AdmissionContext) -> tuple[int | None, datetime | None]:
+    current = context.epochs[-1] if context.epochs else None
+    earlier = [epoch for epoch in context.epochs[:-1] if epoch.harness == context.harness]
+    floor = current.source_start if current is not None else None
+    if floor is None:
+        floor = max(
+            (epoch.source_end for epoch in earlier if epoch.source_end is not None), default=None
         )
-        if cursor.checkpoint_id not in boundaries:
-            raise HTTPException(422, "Retained quote source is no longer available")
-        messages = load_checkpoint_messages_segment(state.db, agent_id, cursor.checkpoint_id)
-        # meiva:note
-        # Rank is presentation only. Retain the selected cursor's prefix while checking its exact checkpoint.
-        rank = boundaries.index(cursor.checkpoint_id) + 1
-        prefix = f"s{rank}.{cursor.checkpoint_id}"
-    items, _ = build_timeline_items(
-        messages,
-        inputs=TimestampPolicy.from_clock(
-            gateway_clock(request), timestamps_enabled=config.message_timestamps
-        ),
-        segment_prefix=prefix,
-    )
-    return items
+    return floor, current.started_at if current and earlier and floor is None else None
 
 
-async def _record_items(
-    request: Request,
-    agent_id: int,
-    cursor: TimelineCursor,
-    context: tuple[str, str, UserDeliveryMode],
-) -> list[TimelineItem]:
-    harness, machine, mode = context
-    read = HarnessTimelineReadRequest(
-        agent_id=agent_id,
-        harness=harness,
-        limit=2,
-        anchor_item_id=cursor.item_id(),
-        explicit_visibility=mode == UserDeliveryMode.PREFIX,
-        delivery_mode=mode.value,
-    )
+async def _record_evidence(
+    request: Request, machine: str, read: HarnessTimelineReadRequest
+) -> RecordQuoteEvidence:
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
             gateway_state(request).db,
@@ -99,71 +122,63 @@ async def _record_items(
     except ClusterOpUnreachable as exc:
         raise HTTPException(503, "Quote source machine is unavailable") from exc
     except ClusterOpFailed as exc:
-        raise HTTPException(502, "Quote source timeline could not be read") from exc
-    window = HarnessTimelineWindow.model_validate(result)
-    if not window.anchor_applied:
-        raise HTTPException(503, "Quote source reader cannot confirm an inclusive lookup")
-    if window.anchor_item_id != cursor.item_id():
-        raise HTTPException(
-            422, "Quote source is unavailable; select readable, completed text again"
-        )
-    return (await settle_record_activity(request, agent_id, window)).items
-
-
-def _check_identity(quote: Quote, source: TimelineItem) -> None:
-    if source.kind == "system_marker" and not (
-        source.source_message_id or source.source_inbound_id
+        raise HTTPException(503, "Quote source identity reader is unavailable") from exc
+    try:
+        window = HarnessTimelineWindow.model_validate(result)
+    except ValidationError as exc:
+        raise HTTPException(502, "Invalid quote source evidence") from exc
+    if not window.quote_applied or window.unreadable in (
+        RecordUnreadable.FILE_MISSING,
+        RecordUnreadable.UNDECODABLE,
     ):
-        raise HTTPException(
-            422, "Quote source has no stable message identity; select another source"
-        )
-    expected = (quote.source_message_id, quote.source_inbound_id, quote.source_block_idx)
-    actual = (
-        source.source_message_id,
-        source.source_inbound_id or source.inbound_id,
-        source.source_block_idx,
-    )
-    if any(
-        value is not None and value != stored
-        for value, stored in zip(expected, actual, strict=True)
+        raise HTTPException(503, "Quote source identity reader is unavailable")
+    source = window.quote_evidence
+    if source is None or (source.identity, source.inbound_id) != (
+        read.quote_identity,
+        read.quote_inbound_id,
     ):
-        raise HTTPException(422, "Quote source identity changed; select it again")
-
-
-def _source_item(quote: Quote, items: list[TimelineItem], cursor: TimelineCursor) -> TimelineItem:
-    # meiva:note
-    # A retained cursor's display rank may change after another compaction; its checkpoint stays authoritative.
-    suffix = (
-        f".{cursor.checkpoint_id}.{cursor.msg_idx}.{cursor.block_idx}"
-        if cursor.checkpoint_id
-        else None
-    )
-    source = next(
-        (
-            item
-            for item in items
-            if item.item_id == quote.source_item_id
-            or (suffix is not None and item.item_id.endswith(suffix))
-        ),
-        None,
-    )
-    if (
-        source is None
-        or source.activity_pending
-        or source.kind
-        not in {
-            "inbound_chat",
-            "agent_chat",
-            "agent_code",
-            "agent_reasoning",
-            "code_output",
-            "system_marker",
-        }
-    ):
-        raise HTTPException(
-            422, "Quote source is unavailable; select readable, completed text again"
-        )
+        raise HTTPException(422, "Quote source does not exist in this conversation")
     return source
+
+
+async def _validate_record_identity(
+    request: Request,
+    agent_id: int,
+    quote: Quote,
+    identity: str,
+    context: _AdmissionContext,
+) -> None:
+    coordinates = record_quote_coordinates(identity)
+    if (
+        coordinates is None
+        or quote.source_block_idx is not None
+        or (quote.source_inbound_id is not None and quote.source_inbound_id >= 2**63)
+    ):
+        raise HTTPException(422, "Invalid quote source identity")
+    floor, since = _record_epoch_scope(context)
+    if floor is not None and coordinates.offset < floor:
+        raise HTTPException(422, "Quotes from an earlier harness session are not supported")
+    read = HarnessTimelineReadRequest(
+        agent_id=agent_id,
+        harness=context.harness,
+        limit=1,
+        explicit_visibility=False,
+        delivery_mode=None,
+        session_id=coordinates.session,
+        quote_identity=identity,
+        quote_inbound_id=quote.source_inbound_id,
+    )
+    source = await _record_evidence(request, context.machine, read)
+    if since is not None:
+        stamp = moment_of(source.created_at)
+        if stamp is None or stamp < since:
+            raise HTTPException(422, "Quotes from an earlier harness session are not supported")
+    if (
+        source.activity_pending
+        and await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
+        is AgentStatus.RUNNING
+    ):
+        raise HTTPException(422, "Quote source is still running")
 
 
 async def validate_quote_source(request: Request, agent_id: int, quote: Quote | None) -> None:
@@ -171,19 +186,28 @@ async def validate_quote_source(request: Request, agent_id: int, quote: Quote | 
         return
     if quote.source_agent_id != agent_id:
         raise HTTPException(422, "Quotes must come from the current conversation")
-    cursor = parse_cursor(quote.source_item_id)
-    if cursor is None:
-        raise HTTPException(422, "This quote source is no longer locatable; select it again")
-    if cursor.epoch is not None:
-        raise HTTPException(422, "Quotes from an earlier harness session are not supported")
     context = await asyncio.to_thread(_admission_context, request, agent_id)
-    if (context[0] != "meiva") != cursor.is_harness:
-        raise HTTPException(422, "Quote source does not belong to this timeline")
-    if cursor.is_harness:
-        items = await _record_items(request, agent_id, cursor, context)
-    else:
+    if (
+        context.harness == "meiva"
+        and quote.source_block_idx is not None
+        and (quote.source_message_id is not None or quote.source_inbound_id is not None)
+    ):
         try:
-            items = await asyncio.to_thread(_native_items, request, agent_id, cursor)
+            exists = await asyncio.to_thread(
+                _native_source_exists, request, agent_id, quote, context
+            )
         except CheckpointReadError as exc:
             raise HTTPException(503, "Quote source history is unavailable") from exc
-    _check_identity(quote, _source_item(quote, items, cursor))
+        if not exists:
+            raise HTTPException(422, "Quote source does not exist in this conversation")
+        return
+    if (
+        context.harness != "meiva"
+        and (identity := quote.source_message_id)
+        and identity.startswith("record:v1:")
+    ):
+        await _validate_record_identity(request, agent_id, quote, identity, context)
+        return
+    await validate_legacy_quote(
+        request, agent_id, quote, harness=context.harness, machine=context.machine
+    )

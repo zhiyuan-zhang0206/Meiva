@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+from collections.abc import Buffer, Callable, Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
+from io import BufferedReader, RawIOBase
 from pathlib import Path
+from typing import override
 
 import zstandard
 
@@ -44,6 +48,12 @@ class Block:
     rows: tuple[FileRow, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class QuoteRow:
+    row: FileRow
+    is_tail: Callable[[], bool]
+
+
 class RecordReadBudgetError(ValueError):
     pass
 
@@ -58,6 +68,13 @@ class RecordFile:
     def prepare_reading(self, offset: int) -> None:
         self._read_budget = self.bytes_read + MAX_BLOCK_BYTES
         self.prepare_anchor(offset)
+
+    @contextmanager
+    def quote_row(self, offset: int, *, inbound: bool) -> Generator[QuoteRow | None]:
+        del inbound
+        self.prepare_reading(offset)
+        row = self.row_at(offset)
+        yield QuoteRow(row, lambda: row.end == self.complete_record_end()) if row else None
 
     # meiva:note
     # Gets the file ready for a window that ends before the row at `before` (None: at the end). A plain file needs nothing.
@@ -281,6 +298,24 @@ class ZstdRecordFile(RecordFile):
             self.compressed_bytes_read += handle.tell()
         self._install_tail(retained.data, retained.start + len(retained.data), position, complete)
 
+    @contextmanager
+    def quote_row(self, offset: int, *, inbound: bool) -> Generator[QuoteRow | None]:
+        del inbound
+        if offset >= MAX_BLOCK_BYTES:
+            raise RecordReadBudgetError("The quote offset exceeds the archive read budget")
+        with self._path.open("rb") as handle:
+            compressed = _QuoteStream(handle.read)
+            with zstandard.ZstdDecompressor().stream_reader(
+                BufferedReader(compressed), read_across_frames=True
+            ) as reader:
+                decoded = _QuoteStream(reader.read)
+                self.stream_passes += 1
+                try:
+                    yield _quote_from_stream(decoded.read, offset)
+                finally:
+                    self.bytes_read += decoded.bytes_read
+                    self.compressed_bytes_read += compressed.bytes_read
+
     def _prepare(self, before: int | None, *, inclusive: bool) -> None:
         ring = bytearray()
         position, kept_end = 0, None
@@ -337,6 +372,71 @@ class ZstdRecordFile(RecordFile):
 
     def rows_after(self, start: int) -> Block:
         raise NotImplementedError("a compressed record is read as a window, never followed")
+
+
+# meiva:link base/lm/harness/docs/transcript-projection.md
+class _QuoteStream(RawIOBase):
+    def __init__(self, read: Callable[[int], bytes]) -> None:
+        super().__init__()
+        self._read = read
+        self.bytes_read = 0
+
+    @override
+    def readable(self) -> bool:
+        return True
+
+    @override
+    def readinto(self, buffer: Buffer, /) -> int:
+        view = memoryview(buffer).cast("B")
+        data = self.read(len(view))
+        view[: len(data)] = data
+        return len(data)
+
+    @override
+    def read(self, size: int = -1, /) -> bytes:
+        remaining = MAX_BLOCK_BYTES - self.bytes_read
+        if remaining <= 0:
+            raise RecordReadBudgetError("The archive quote exceeds its byte budget")
+        requested = size if size >= 0 else _CHUNK_BYTES
+        data = self._read(min(remaining, requested, _CHUNK_BYTES))
+        self.bytes_read += len(data)
+        return data
+
+
+def _quote_from_stream(read: Callable[[int], bytes], offset: int) -> QuoteRow | None:
+    if offset < 0:
+        return None
+    remaining, previous = offset, b""
+    while remaining:
+        chunk = read(remaining)
+        if not chunk:
+            return None
+        previous = chunk[-1:]
+        remaining -= len(chunk)
+    if offset and previous != b"\n":
+        return None
+    line = bytearray()
+    while data := read(_CHUNK_BYTES):
+        newline = data.find(b"\n")
+        if newline >= 0:
+            line.extend(data[: newline + 1])
+            rows = _file_rows(offset, bytes(line))
+            return (
+                QuoteRow(rows[0], partial(_quote_is_tail, read, data[newline + 1 :]))
+                if rows
+                else None
+            )
+        line.extend(data)
+    return None
+
+
+def _quote_is_tail(read: Callable[[int], bytes], data: bytes) -> bool:
+    if b"\n" in data:
+        return False
+    while chunk := read(_CHUNK_BYTES):
+        if b"\n" in chunk:
+            return False
+    return True
 
 
 def _retain_anchor_chunk(

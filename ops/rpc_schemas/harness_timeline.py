@@ -42,6 +42,8 @@ class HarnessTimelineReadRequest(BaseModel):
     limit: int = Field(ge=1, le=1000)
     before: int | None = Field(default=None, ge=0)
     anchor_item_id: str | None = Field(default=None, pattern=r"^h[0-9]{1,20}\.[0-9]{1,20}$")
+    quote_identity: str | None = Field(default=None, max_length=512)
+    quote_inbound_id: int | None = Field(default=None, gt=0, lt=2**63)
     reading_locator: str | None = Field(default=None, max_length=MAX_READING_LOCATOR_LENGTH)
     reading_direction: ReadingDirection | None = None
     explicit_visibility: bool
@@ -58,10 +60,18 @@ class HarnessTimelineReadRequest(BaseModel):
         if self.floor is not None and self.before is not None and self.before < self.floor:
             raise ValueError("A record window cannot end before its floor")
         selectors = sum(
-            value is not None for value in (self.before, self.anchor_item_id, self.reading_locator)
+            value is not None
+            for value in (
+                self.before,
+                self.anchor_item_id,
+                self.reading_locator,
+                self.quote_identity,
+            )
         )
         if selectors > 1:
             raise ValueError("A record window requires one exclusive or inclusive selector")
+        if self.quote_inbound_id is not None and self.quote_identity is None:
+            raise ValueError("A quote inbound id requires a quote identity")
         if (self.reading_locator is None) != (self.reading_direction is None):
             raise ValueError("A reading locator and direction are required together")
         if self.reading_locator is not None:
@@ -71,6 +81,8 @@ class HarnessTimelineReadRequest(BaseModel):
     def wire_payload(self) -> dict[str, object]:
         selectors = {
             "anchor_item_id": self.anchor_item_id,
+            "quote_identity": self.quote_identity,
+            "quote_inbound_id": self.quote_inbound_id,
             "reading_locator": self.reading_locator,
             "reading_direction": self.reading_direction,
             "floor": self.floor,
@@ -78,6 +90,15 @@ class HarnessTimelineReadRequest(BaseModel):
         }
         omitted = {name for name, value in selectors.items() if value is None}
         return self.model_dump(mode="json", exclude=omitted)
+
+
+class RecordQuoteEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    identity: str
+    inbound_id: int | None
+    activity_pending: bool
+    created_at: str | None
 
 
 # meiva:note
@@ -91,6 +112,10 @@ class HarnessTimelineWindow(BaseModel):
     size: int = Field(ge=0)
     anchor_item_id: str | None = None
     anchor_applied: bool = False
+    quote_applied: bool = Field(default=False, exclude_if=_missing_reading_metadata)
+    quote_evidence: RecordQuoteEvidence | None = Field(
+        default=None, exclude_if=_missing_reading_metadata
+    )
     reading_source: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
     reading_applied: bool = Field(default=False, exclude_if=_missing_reading_metadata)
     reading_unavailable: ReadingUnavailableReason | None = Field(
