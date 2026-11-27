@@ -1,7 +1,6 @@
 // meiva:note
-// The sidebar alerts bell: the firing count from the ["alerts", "firing"] cache, a new-tab link
-// to Grafana's firing list, a grey "?" when Grafana cannot be reached, and nothing at all when
-// nothing fires or no Grafana is configured.
+// The sidebar bell reads the firing cache, links to Grafana's active critical and error
+// instances, and shows a grey "?" when Grafana cannot be reached.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -33,14 +32,22 @@ function wrap(ui: React.ReactElement, seed: FiringAlerts) {
 }
 
 describe("AlertsBadge", () => {
-  it("shows the firing count and opens Grafana's firing list in a new tab", () => {
-    wrap(<AlertsBadge />, firing(5));
+  it("shows the critical and error count and links to those instances in a new tab", () => {
+    wrap(<AlertsBadge />, { state: "ok", firing: 8, critical: 1, error: 2, warning: 5 });
     const badge = screen.getByTestId("alerts-badge");
-    expect(badge.getAttribute("href")).toBe("http://localhost:8000/grafana/alerting/list?search=state:firing");
+    expect(badge.getAttribute("href")).toBe("http://localhost:8000/grafana/alerting/groups?alertState=active&queryString=severity%3D~%22critical%7Cerror%22&groupBy=alertname%2Cmachine");
     expect(badge.getAttribute("target")).toBe("_blank");
     expect(badge.getAttribute("rel")).toContain("noopener");
-    expect(badge.getAttribute("aria-label")).toBe("5 firing alerts");
-    expect(screen.getByTestId("alerts-badge-count").textContent).toBe("5");
+    expect(badge.getAttribute("aria-label")).toBe("3 active critical or error alerts");
+    expect(badge.getAttribute("title")).toBe("3 active critical or error alerts");
+    const pill = screen.getByTestId("alerts-badge-count");
+    expect(pill.textContent).toBe("3");
+    expect(pill.className).toContain("bg-destructive");
+  });
+
+  it("renders no badge when only warnings fire", () => {
+    wrap(<AlertsBadge />, { state: "ok", firing: 3, critical: 0, error: 0, warning: 3 });
+    expect(screen.queryByTestId("alerts-badge")).toBeNull();
   });
 
   it("renders nothing when nothing fires", () => {

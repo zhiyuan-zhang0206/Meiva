@@ -476,9 +476,11 @@ which stores nothing — it only counts the watchdog heartbeat (its route repeat
 direct Telegram contact point is retired. The host sentinel retains a separate observation loop and
 agent-queue submission, but no external Bot API delivery path remains.
 
-The gateway keeps no copy of alert state. The Web UI's alert badge and `meiva stats` read Grafana's
-active alerts live (`GET /api/alerts/firing`; silenced and inhibited instances do not count, and a
-Grafana that cannot be reached shows as unavailable, never as zero). History is Grafana's: the
+The gateway keeps no copy of alert state. `GET /api/alerts/firing` counts active, unsilenced,
+uninhibited instances, excluding the synthetic watchdog heartbeat. The Web UI badge sums
+`critical` and `error` and opens Grafana's Active notifications page filtered to those active
+severities and grouped by alert name and machine. `meiva stats` uses the full severity
+breakdown. An unreachable Grafana reports unavailable. History is available in Grafana's
 alerting history page, `GET /api/annotations?type=alert` and `GET /api/v1/rules/history`.
 The retired IM channel's `notify_im` labels are inert.
 

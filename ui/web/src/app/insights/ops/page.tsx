@@ -1,7 +1,7 @@
 "use client";
 
-// /insights#ops — links to the merged Meiva Ops dashboard and to Grafana's firing-alert list,
-// both through the gateway's /grafana proxy. Meiva keeps no alert view of its own.
+// /insights#ops links to the Meiva Ops dashboard and active critical and error alert
+// instances through the gateway's /grafana proxy.
 
 import { useTranslations } from "next-intl";
 

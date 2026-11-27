@@ -6,8 +6,8 @@
 // badge in the header took a permanent slot from the conversation (user 2026-10-21). With
 // the sidebar collapsed the row is gone, so the same signal rides the restore button at the
 // bar's left edge and stays visible without opening the rail (user 2026-10-21).
-// The count is what Grafana reports firing now (`useFiringAlerts`); clicking opens Grafana's
-// firing-alert list in a new tab, since Meiva keeps no alert view of its own (user 2026-11-24).
+// The bell counts active critical and error instances and opens the matching Grafana
+// Active notifications view in a new tab.
 // Nothing renders at zero — a zero badge is noise — but a Grafana that cannot be reached
 // renders a grey "?" in place of the count: that state is unknown, not zero.
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.md

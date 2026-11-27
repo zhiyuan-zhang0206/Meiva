@@ -10,7 +10,7 @@
     "metrics": "Metrics (Grafana)",
     "openDashboard": "Open the Meiva ops dashboard",
     "alerts": "Alerts (Grafana)",
-    "openAlerts": "Open Grafana alerts"
+    "openAlerts": "Open active critical and error alerts in Grafana"
   },
   "status": {
     "couldNotReach": "Couldn't reach the gateway — retrying…",
