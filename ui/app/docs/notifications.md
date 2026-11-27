@@ -89,8 +89,9 @@ bindings, and `notify::decide_mac` (pure, unit tested) decides the operation.
   identifier present, no exception) and reports authorization `notDetermined` until the user
   answers the system prompt; nothing is delivered before that. Banner, silent replace and
   retract are therefore confirmed by the manual steps below, not by CI.
-- **Signing.** A release build is Developer ID signed and notarized (`release-app.yml`); a build
-  without the certificate is ad-hoc signed. Both are bundles with an identifier, so the centre
+- **Signing.** An `app-v*` tag push requires Developer ID signing and notarization
+  (`release-app.yml`). Reusable and manual runs can produce ad-hoc signed builds without Apple
+  credentials. Both signing modes produce bundles with an identifier, so the centre
   works for both; the identity only matters to Gatekeeper on first open. Moving an app between
   signing identities can make macOS treat it as a different app for the permission.
 

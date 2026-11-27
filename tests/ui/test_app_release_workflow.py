@@ -1,6 +1,10 @@
 import plistlib
+import subprocess
 from pathlib import Path
 from typing import cast
+
+import pytest
+import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-app.yml"
@@ -31,11 +35,71 @@ def test_tauri_cli_is_exactly_pinned() -> None:
     assert "TAURI_CLI_VERSION: '^" not in text
 
 
-def test_tag_releases_fail_closed_without_every_platform_signature() -> None:
-    text = _workflow()
-    assert 'if [ "$PUBLISH_RELEASE" = true ]; then' in text
-    assert "Release tags require updater signing" in text
-    assert "Release tags require Apple signing and notarization" in text
+_APPLE_SIGNING = {
+    "APPLE_CERTIFICATE": "certificate",
+    "APPLE_CERTIFICATE_PASSWORD": "certificate-password",
+    "APPLE_SIGNING_IDENTITY": "identity",
+}
+_APPLE_NOTARIZATION = {
+    "APPLE_ID": "id",
+    "APPLE_PASSWORD": "password",
+    "APPLE_TEAM_ID": "team",
+}
+_UPDATER_SIGNING = {"TAURI_SIGNING_PRIVATE_KEY": "key"}
+_APPLE_SECRETS = _APPLE_SIGNING | _APPLE_NOTARIZATION
+
+
+@pytest.mark.parametrize(
+    ("event", "publish", "secrets", "error"),
+    [
+        ("workflow_call", "true", _UPDATER_SIGNING, ""),
+        ("workflow_dispatch", "true", _UPDATER_SIGNING, ""),
+        ("workflow_dispatch", "false", {}, ""),
+        ("workflow_call", "true", {}, "Published macOS releases require updater signing"),
+        ("workflow_dispatch", "true", {}, "Published macOS releases require updater signing"),
+        ("push", "true", _APPLE_SECRETS, "Published macOS releases require updater signing"),
+        ("push", "true", _UPDATER_SIGNING, "Release tags require Apple signing and notarization"),
+        (
+            "push",
+            "true",
+            _UPDATER_SIGNING | _APPLE_SIGNING,
+            "Release tags require Apple signing and notarization",
+        ),
+        ("push", "true", _UPDATER_SIGNING | _APPLE_SECRETS, ""),
+        ("workflow_call", "true", _UPDATER_SIGNING | _APPLE_SECRETS, ""),
+        (
+            "workflow_call",
+            "true",
+            _UPDATER_SIGNING | {"APPLE_CERTIFICATE": "certificate"},
+            "Apple code-signing secrets are only partially configured",
+        ),
+        (
+            "workflow_dispatch",
+            "true",
+            _UPDATER_SIGNING | {"APPLE_ID": "id"},
+            "Apple notarization secrets are only partially configured",
+        ),
+    ],
+)
+def test_macos_release_signing_policy(
+    event: str, publish: str, secrets: dict[str, str], error: str
+) -> None:
+    desktop = yaml.safe_load(_workflow())["jobs"]["desktop"]
+    assert desktop["env"]["EVENT_NAME"] == "${{ github.event_name }}"
+    assert desktop["env"]["PUBLISH_RELEASE"] == "${{ needs.prepare.outputs.publish }}"
+    [validate] = [
+        step
+        for step in desktop["steps"]
+        if step.get("name") == "Validate optional signing secret groups"
+    ]
+    result = subprocess.run(  # noqa: S603 -- execute the checked-in signing validation step
+        ["bash", "-eo", "pipefail", "-c", validate["run"]],
+        env={"EVENT_NAME": event, "PUBLISH_RELEASE": publish} | secrets,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode, result.stderr.strip()) == (int(bool(error)), error)
 
 
 def test_android_release_workflow_is_separate_and_fails_closed() -> None:
