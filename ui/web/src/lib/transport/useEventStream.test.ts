@@ -211,6 +211,26 @@ describe("server rendering", () => {
 });
 
 describe("EventStreamProvider connection lifecycle", () => {
+  it("keeps its connection when the visibility module loads after mount", async () => {
+    const { qc, wrapper: Wrapper } = withProviderAndClient();
+    const { rerender, unmount } = render(createElement(Wrapper, { children: null }));
+    try {
+      await waitForInstance();
+      expect(tab.sources).toHaveLength(1);
+      const source = expectInstance();
+      act(() => source.open());
+
+      await import("../layout/use-document-visible");
+      expect(() => rerender(createElement(Wrapper, { children: null }))).not.toThrow();
+
+      expect(tab.sources).toEqual([source]);
+      expect(source.readyState).toBe(READY.OPEN);
+    } finally {
+      unmount();
+      qc.clear();
+    }
+  });
+
   it("updates visibility within one runtime without changing a sibling provider", () => {
     const client = new QueryClient();
     const bumpReconnect = () => undefined;

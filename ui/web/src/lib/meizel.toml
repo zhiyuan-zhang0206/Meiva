@@ -18,3 +18,4 @@ exports = ["agents", "auth", "browser", "composer", "context", "contracts", "fle
 "telemetry" = ["browser", "transport"]
 "timeline" = ["agents", "contracts", "fold", "format", "layout", "transport"]
 "transport" = ["browser", "contracts", "fold"]
+"transport/useEventStream.test.ts" = ["layout/use-document-visible.ts"]
