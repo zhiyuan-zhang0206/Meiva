@@ -31,6 +31,7 @@ import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -191,3 +192,49 @@ def test_a_refusal_the_gateway_chose_is_terminal_at_once() -> None:
 # indistinguishable from the host having stopped making progress.
 def test_the_budget_sits_far_under_the_no_progress_bound() -> None:
     assert GATEWAY_PREFLIGHT_BUDGET_S < NO_PROGRESS_TIMEOUT_S / 10
+
+
+@pytest.mark.parametrize("source", ["url", "header", "header-unreachable", "response"])
+def test_preflight_reports_safe_categories_without_request_secrets(
+    capsys: pytest.CaptureFixture[str], source: str
+) -> None:
+    from base.host.net.tests.local_http import closed_port_url
+
+    marker = "synthetic-sensitive-marker"
+    timers = ManualTimers()
+    with serve({PROBE_PATH: Reply(status=403, body=marker.encode())}) as gateway:
+        url = (
+            closed_port_url().replace("://", f"://fixture:{marker}@")
+            if source == "url"
+            else gateway.url
+        )
+        if source == "header-unreachable":
+            url = closed_port_url()
+        access = access_to(url)
+        if source.startswith("header"):
+            access = replace(access, cluster_secret=f"{marker}\ninvalid")
+        rc = _repo.probe_gateway_or_die(url, access=access, timers=timers, budget_s=BUDGET_S)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert marker not in captured.out + captured.err
+    assert {
+        "url": "gateway unreachable",
+        "header": "invalid gateway probe request",
+        "header-unreachable": "invalid gateway probe request",
+        "response": "unexpected status 403",
+    }[source] in captured.err
+
+    assert timers.sleeps == ([BUDGET_S] if source == "url" else [])
+
+
+@pytest.mark.parametrize("url", ["gateway.example", "https://[malformed", "http://127.0.0.1:65536"])
+def test_invalid_gateway_urls_fail_without_spending_the_retry_budget(url: str) -> None:
+    timers = ManualTimers()
+    assert (
+        _repo.probe_gateway_or_die(
+            url, access=access_to(url), timers=timers, allow_unavailable=True
+        )
+        == 1
+    )
+    assert timers.sleeps == []

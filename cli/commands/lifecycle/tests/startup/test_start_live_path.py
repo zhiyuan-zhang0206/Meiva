@@ -113,16 +113,19 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert "probe gateway" in out
 
 
-def test_cold_start_can_serve_with_an_authorized_mirror_and_gateway_down(
+@pytest.mark.parametrize(("scheme", "expected_rc"), [("http", 0), ("ftp", 1)])
+def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
     start_run: StartRun,
     db_url: str,
     redis_url: str,
     capsys: pytest.CaptureFixture[str],
+    scheme: str,
+    expected_rc: int,
 ) -> None:
     home = start_run.home
     host = "192.0.2.20"
     bearer = "offline-start-fixture"
-    gateway_url = closed_port_url()
+    gateway_url = closed_port_url().replace("http://", f"{scheme}://")
     _ = (home / ".env").write_text(
         "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "MEIVA_MACHINE_NAME=offline-start\n"
@@ -172,12 +175,18 @@ def test_cold_start_can_serve_with_an_authorized_mirror_and_gateway_down(
                 command=run.command,
                 converge_steps=(ConvergeStep("test root socket", start_root_socket),),
             )
-            == 0
+            == expected_rc
         )
 
-    assert row.state == "running"
-    assert run.serving_published
-    assert "continuing with the authorized configuration mirror" in capsys.readouterr().err
+    assert row.state == ("running" if expected_rc == 0 else "stopped")
+    assert run.serving_published is (expected_rc == 0)
+    message = capsys.readouterr().err
+    diagnostic = (
+        "continuing with the authorized configuration mirror"
+        if expected_rc == 0
+        else "invalid gateway probe request"
+    )
+    assert diagnostic in message
 
 
 def _single_slot_record(home: Path, agent_id: int) -> Path:
