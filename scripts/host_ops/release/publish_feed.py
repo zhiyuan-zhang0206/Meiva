@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -10,8 +11,13 @@ from tempfile import TemporaryDirectory
 from time import sleep
 
 from scripts.codegen.build_android_release import assert_version_code_advances
-from scripts.codegen.build_app_update_manifest import assert_version_advances
+from scripts.codegen.build_app_update_manifest import assert_version_advances, semver_tuple
 from scripts.host_ops.release.github_releases import read_release_field, run_gh
+
+_ASSET_VERSIONS = {
+    "app-latest": re.compile(r"Meiva_(\d+\.\d+\.\d+)(?:_universal\.dmg|\.app\.tar\.gz)"),
+    "android-latest": re.compile(r"meiva-app-(\d+\.\d+\.\d+)\.apk"),
+}
 
 
 class _Arguments(argparse.Namespace):
@@ -19,7 +25,7 @@ class _Arguments(argparse.Namespace):
     target: str
     title: str
     notes: str
-    version: str | None
+    version: str
     version_code: int | None
     manifest_attempts: int
     files: list[Path]
@@ -39,6 +45,17 @@ def _uploaded_assets(gh: Callable[..., str], release_id: str) -> dict[str, str]:
         '.[] | [.name, (if .state == "uploaded" then .digest else "" end)] | @tsv',
     )
     return dict(line.split("\t", maxsplit=1) for line in rows.splitlines())
+
+
+def _check_asset_versions(tag: str, version: str, assets: dict[str, str]) -> None:
+    pattern = _ASSET_VERSIONS[tag]
+    highest = max(
+        (semver_tuple(match[1]) for name in assets if (match := pattern.fullmatch(name))),
+        default=None,
+    )
+    if highest is not None and semver_tuple(version) < highest:
+        existing = ".".join(map(str, highest))
+        raise ValueError(f"refusing version {version}: {tag} already has assets for {existing}")
 
 
 def _check_current_manifest(
@@ -97,6 +114,7 @@ def publish_feed(
     gh: Callable[..., str],
     *,
     tag: str,
+    version: str,
     files: Sequence[Path],
     title: str,
     notes: str,
@@ -135,6 +153,7 @@ def publish_feed(
     manifest_changed = current_digest != expected[manifest.name]
     if current_digest is not None and manifest_changed:
         _check_current_manifest(gh, tag, manifest.name, current_digest, assert_advances)
+    _check_asset_versions(tag, version, uploaded)
     binaries = files[:-1]
     _upload_binaries(gh, tag, binaries, uploaded, expected)
     if manifest_changed:
@@ -163,21 +182,19 @@ def main(argv: Sequence[str]) -> int:
     _ = parser.add_argument("--title", required=True)
     _ = parser.add_argument("--notes", required=True)
     _ = parser.add_argument("--manifest-attempts", required=True, type=int)
-    version = parser.add_mutually_exclusive_group(required=True)
-    _ = version.add_argument("--version")
-    _ = version.add_argument("--version-code", type=int)
+    _ = parser.add_argument("--version", required=True)
+    _ = parser.add_argument("--version-code", type=int)
     _ = parser.add_argument(
         "files", type=Path, nargs="+", help="binary assets followed by the manifest"
     )
     args = parser.parse_args(argv, namespace=_Arguments())
 
     if args.tag == "app-latest":
-        candidate = args.version
-        if candidate is None:
-            parser.error("app-latest requires --version")
+        if args.version_code is not None:
+            parser.error("app-latest does not accept --version-code")
 
         def assert_advances(previous: Path) -> None:
-            assert_version_advances(current=previous, version=candidate)
+            assert_version_advances(current=previous, version=args.version)
 
     else:
         candidate_code = args.version_code
@@ -190,6 +207,7 @@ def main(argv: Sequence[str]) -> int:
     publish_feed(
         run_gh,
         tag=args.tag,
+        version=args.version,
         files=args.files,
         title=args.title,
         notes=args.notes,

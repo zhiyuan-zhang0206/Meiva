@@ -111,6 +111,7 @@ def test_feed_keeps_previous_binaries_until_remote_manifest_is_verified(
         publish_feed(
             release.gh,
             tag=tag,
+            version="1.0.2",
             files=files,
             title="Version 1.0.2",
             notes="Build metadata",
@@ -152,6 +153,7 @@ def test_stale_app_version_fails_before_any_write(tmp_path: Path) -> None:
         publish_feed(
             release.gh,
             tag="app-latest",
+            version="1.0.2",
             files=(old_archive, manifest),
             title="Old tag",
             notes="",
@@ -167,3 +169,76 @@ def test_stale_app_version_fails_before_any_write(tmp_path: Path) -> None:
         ("api", "--paginate"),
         ("release", "download"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("tag", "asset_pattern"),
+    [
+        ("app-latest", "Meiva_{}_universal.dmg"),
+        ("app-latest", "Meiva_{}.app.tar.gz"),
+        ("android-latest", "meiva-app-{}.apk"),
+    ],
+)
+@pytest.mark.parametrize("recovery_patch", [162, 163])
+def test_feed_recovers_after_manifest_replacement_exhausts_retries(
+    tmp_path: Path, tag: str, asset_pattern: str, recovery_patch: int
+) -> None:
+    manifest_name = "latest.json" if tag == "app-latest" else "android-latest.json"
+
+    def manifest_bytes(patch: int) -> bytes:
+        return (
+            f'{{"version":"1.0.{patch}"}}'
+            if tag == "app-latest"
+            else f'{{"versionName":"1.0.{patch}","versionCode":{1000000 + patch}}}'
+        ).encode()
+
+    previous_name = asset_pattern.format("1.0.161")
+    staged_name = asset_pattern.format("1.0.162")
+    release = _Release(
+        assets={previous_name: b"previous binary", manifest_name: manifest_bytes(161)},
+        manifest_failures=3,
+    )
+
+    def publish(patch: int) -> None:
+        version = f"1.0.{patch}"
+        binary = tmp_path / asset_pattern.format(version)
+        manifest = tmp_path / manifest_name
+        _ = binary.write_bytes(version.encode())
+        _ = manifest.write_bytes(manifest_bytes(patch))
+
+        def assert_advances(previous: Path) -> None:
+            if tag == "app-latest":
+                assert_version_advances(current=previous, version=version)
+            else:
+                assert_version_code_advances(current=previous, version_code=1000000 + patch)
+
+        publish_feed(
+            release.gh,
+            tag=tag,
+            version=version,
+            files=(binary, manifest),
+            title=version,
+            notes="",
+            target="a" * 40,
+            manifest_attempts=3,
+            wait=lambda _: None,
+            assert_advances=assert_advances,
+        )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        publish(162)
+    staged = {previous_name: b"previous binary", staged_name: b"1.0.162"}
+    assert release.assets == staged
+
+    release.calls.clear()
+    with pytest.raises(ValueError, match=r"1\.0\.162"):
+        publish(2)
+    assert release.assets == staged
+    assert all(call[0] == "api" for call in release.calls)
+
+    publish(recovery_patch)
+    version = f"1.0.{recovery_patch}"
+    assert release.assets == {
+        asset_pattern.format(version): version.encode(),
+        manifest_name: manifest_bytes(recovery_patch),
+    }

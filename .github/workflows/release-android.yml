@@ -357,7 +357,7 @@ jobs:
             notes="$(printf 'Version: %s\n\nVersion code: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' \
               "$APP_VERSION" "$BUILD_NUMBER" "$TARGET_SHA" "$BUILT_AT")"
             python3 -m scripts.host_ops.release.publish_feed --tag android-latest \
-              --version-code "$BUILD_NUMBER" --target "$TARGET_SHA" \
+              --version "$APP_VERSION" --version-code "$BUILD_NUMBER" --target "$TARGET_SHA" \
               --manifest-attempts "$MANIFEST_UPLOAD_ATTEMPTS" \
               --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes" \
               "$apk" release-assets/android-latest.json

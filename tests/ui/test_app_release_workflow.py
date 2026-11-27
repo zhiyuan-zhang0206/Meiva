@@ -60,7 +60,7 @@ def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
 def test_android_publish_refuses_to_roll_the_channel_back() -> None:
     text = _android_workflow()
     assert "publish_feed --tag android-latest" in text
-    assert '--version-code "$BUILD_NUMBER" --target "$TARGET_SHA"' in text
+    assert '--version "$APP_VERSION" --version-code "$BUILD_NUMBER" --target "$TARGET_SHA"' in text
 
 
 def test_manual_dispatch_keeps_the_explicit_unsigned_build_path() -> None:
