@@ -74,6 +74,9 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("false");
     expect(toggle.className).not.toContain("sticky");
+    expect(toggle.classList).toContain("py-0.5");
+    expect(toggle.classList).toContain("rounded-md");
+    expect(toggle.firstElementChild?.classList).toContain("gap-0.5");
     expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
     expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
@@ -99,6 +102,9 @@ describe("TurnBlock component", () => {
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.classList).toContain("sticky");
     expect(toggle.classList).toContain("top-11");
+    expect(toggle.classList).toContain("py-2.5");
+    expect(toggle.classList).toContain("rounded-none");
+    expect(toggle.firstElementChild?.classList).toContain("gap-1");
     expect(toggle.classList).toContain("bg-background");
     expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
 
@@ -109,6 +115,7 @@ describe("TurnBlock component", () => {
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
     const rail = screen.getByTestId("detail-content").parentElement;
+    expect(rail?.classList).toContain("mt-1");
     expect(rail?.className).toContain("ml-1.5");
     expect(rail?.className).toContain("pl-2");
     expect(rail?.className).not.toContain("pl-3");

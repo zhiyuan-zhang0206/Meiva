@@ -175,16 +175,16 @@ export const TurnBlock = memo(function TurnBlock({
         type="button"
         onClick={(event) => onToggle(toggleKey ?? id, expanded, event.currentTarget)}
         className={cn(
-          "group/disclosure w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 rounded-md bg-background text-left text-muted-foreground select-none",
+          "group/disclosure w-[calc(100%+0.5rem)] -ml-2 px-2 items-start gap-1.5 bg-background text-left text-muted-foreground select-none",
           FLEX,
-          expanded && cn("sticky z-20", BAR_STICKY_TOP_CLASS),
+          expanded ? cn("sticky z-20 py-2.5 rounded-none", BAR_STICKY_TOP_CLASS) : "py-0.5 rounded-md",
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
         data-turn-header
         data-expanded={expanded}
       >
-        <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
+        <span className={cn(expanded ? "gap-1" : "gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
             <span
@@ -213,7 +213,7 @@ export const TurnBlock = memo(function TurnBlock({
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
           {expanded ? (
-            <div className="mt-1.5 ml-1.5 pl-2 pr-2 space-y-1">
+            <div className="mt-1 ml-1.5 pl-2 pr-2 space-y-1">
               {children}
             </div>
           ) : null}
