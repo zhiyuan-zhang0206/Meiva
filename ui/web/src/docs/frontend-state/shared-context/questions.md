@@ -5,7 +5,9 @@ including legacy unstructured questions. When questions are waiting, the queue
 opens expanded on the first visit and shows one question at a time, ordered by
 question id. The frontend remembers each agent's expanded or collapsed state
 for the lifetime of the tab's application. Previous, next, the page count, and
-Submit share one bottom row.
+Submit share one bottom row. The disclosure and Submit buttons sit 6px in
+from their respective inner corners. The card clips scrolled content to its
+rounded outline and sits 8px above the composer.
 The question grows upward to its natural height, capped at 45% of the visible
 viewport. The panel reserves one row above the composer so changes in question
 height leave the controls, timeline viewport, and composer in place. The footer
