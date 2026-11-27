@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from base.agents.epochs.model import HarnessEpoch
-from base.agents.history.native_source import effective_native_stamps
-from base.agents.history.native_source import moment_of as moment_of
 from base.agents.history.timeline_item import TimelineItem
 
 NATIVE_HARNESS = "meiva"
@@ -47,3 +45,29 @@ def apply_native_slice(
         return list(items)
     stamps = effective_native_stamps([item.created_at for item in items])
     return [item for item, stamp in zip(items, stamps, strict=True) if epoch_slice.holds(stamp)]
+
+
+def effective_native_stamps(values: Sequence[str | None]) -> list[datetime | None]:
+    own = [moment_of(value) for value in values]
+    stamps: list[datetime | None] = []
+    previous: datetime | None = None
+    for stamp in own:
+        previous = stamp or previous
+        stamps.append(previous)
+    following: datetime | None = None
+    for index in range(len(stamps) - 1, -1, -1):
+        if own[index] is not None:
+            following = own[index]
+        elif stamps[index] is None:
+            stamps[index] = following
+    return stamps
+
+
+def moment_of(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

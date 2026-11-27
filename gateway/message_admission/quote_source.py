@@ -10,14 +10,19 @@ from pydantic import BaseModel, ValidationError
 
 from base.agents.epochs.chain import usable_epochs
 from base.agents.epochs.model import HarnessEpoch
-from base.agents.epochs.native_slice import NativeEpochSlice, moment_of, native_slice_of
+from base.agents.epochs.native_slice import (
+    NativeEpochSlice,
+    effective_native_stamps,
+    moment_of,
+    native_slice_of,
+)
 from base.agents.epochs.read import read_epochs
 from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.history.checkpoint_segment import checkpoint_quote_exists
 from base.agents.history.native_source import (
     has_native_quote_block,
     native_message_identity,
-    native_source_stamps,
+    native_source_times,
 )
 from base.agents.history.transcript_timeline import record_quote_coordinates
 from base.agents.messages.quote import Quote
@@ -65,7 +70,8 @@ def _contains_native_source(
     block = quote.source_block_idx
     if block is None:
         return False
-    stamps = native_source_stamps(messages) if epoch is not None else {}
+    times = native_source_times(messages) if epoch is not None else {}
+    stamps = dict(zip(times, effective_native_stamps(list(times.values())), strict=True))
     for index, message in enumerate(messages):
         identity = native_message_identity(message)
         if quote.source_message_id is not None and identity.message_id != quote.source_message_id:

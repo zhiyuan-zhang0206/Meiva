@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import assert_never
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -65,15 +64,12 @@ _SINGLE_NONQUOTE_BLOCK = frozenset(
 )
 
 
-def native_source_stamps(messages: Sequence[BaseMessage]) -> dict[int, datetime | None]:
-    sources = [(i, message) for i, message in enumerate(messages) if _has_source(message)]
-    stamps = effective_native_stamps(
-        [
-            None if isinstance(message, SystemMessage) else message_read_time(message)
-            for _, message in sources
-        ]
-    )
-    return {i: stamp for (i, _), stamp in zip(sources, stamps, strict=True)}
+def native_source_times(messages: Sequence[BaseMessage]) -> dict[int, str | None]:
+    return {
+        index: None if isinstance(message, SystemMessage) else message_read_time(message)
+        for index, message in enumerate(messages)
+        if _has_source(message)
+    }
 
 
 def _has_source(message: BaseMessage) -> bool:
@@ -86,32 +82,6 @@ def _has_source(message: BaseMessage) -> bool:
         bool(message.tool_calls)
         or any(block.text is not None for block in ai_source_blocks(message))
     )
-
-
-def effective_native_stamps(values: Sequence[str | None]) -> list[datetime | None]:
-    own = [moment_of(value) for value in values]
-    stamps: list[datetime | None] = []
-    previous: datetime | None = None
-    for stamp in own:
-        previous = stamp or previous
-        stamps.append(previous)
-    following: datetime | None = None
-    for index in range(len(stamps) - 1, -1, -1):
-        if own[index] is not None:
-            following = own[index]
-        elif stamps[index] is None:
-            stamps[index] = following
-    return stamps
-
-
-def moment_of(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def has_native_quote_block(message: BaseMessage, block: int) -> bool:
