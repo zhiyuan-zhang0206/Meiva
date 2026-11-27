@@ -134,7 +134,8 @@ other processes even if their producers exited without signalling.
 `submit` returns `staged` after durable admission or `fallback_logged` if a
 storage or capacity failure required the log fallback. The same recovery
 record is emitted for each accepted entry whose staging remains unconfirmed
-at the end of Gateway shutdown. The fallback record's
+at the end of Gateway shutdown. A staging job shares one fallback record across
+shutdown and write failures. The fallback record's
 `receipt_json` is the complete frozen ledger payload. It excludes the Gemini
 API key, request text and returned vectors. Extract that field as raw JSON from
 the failure log. Once storage is healthy and capacity is available, run the

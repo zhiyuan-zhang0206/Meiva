@@ -4,7 +4,8 @@ import asyncio
 from collections.abc import Callable, Generator
 from concurrent.futures import Future
 from contextlib import AbstractContextManager, closing, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from queue import SimpleQueue
 from sqlite3 import SQLITE_BUSY, SQLITE_LOCKED, Connection, OperationalError, connect
@@ -16,6 +17,7 @@ from opentelemetry import context as trace_context
 from pydantic import TypeAdapter
 
 from base.api_contracts.usage import (
+    ReceiptFallbackReporter,
     ReceiptStagingUnavailableError,
     ReceiptSubmission,
     ScheduleUsageReceipt,
@@ -187,8 +189,10 @@ class UsageReceiptDelivery:
             self._thread = Thread(target=self._run, name="usage-receipts", daemon=True)
         self._thread.start()
 
-    def submit(self, entry: UsageLedgerEntry) -> ReceiptSubmission:
-        result = _submit(self._store, entry)
+    def submit(
+        self, entry: UsageLedgerEntry, *, report_fallback: ReceiptFallbackReporter | None = None
+    ) -> ReceiptSubmission:
+        result = _submit(self._store, entry, report_fallback=report_fallback)
         if result is ReceiptSubmission.STAGED:
             self._wake.set()
         return result
@@ -297,34 +301,50 @@ class UsageReceiptDelivery:
         logger.error("Usage receipt {} quarantined at {} ({})", seq, self._store.path, reason)
 
 
-def _submit(store: UsageReceiptStore, entry: UsageLedgerEntry) -> ReceiptSubmission:
+def _submit(
+    store: UsageReceiptStore,
+    entry: UsageLedgerEntry,
+    *,
+    report_fallback: ReceiptFallbackReporter | None,
+) -> ReceiptSubmission:
     try:
         store.stage(entry)
     except (OSError, SQLiteError) as exc:
-        _log_fallback(store, entry, exc)
+        _log_fallback(store, entry, exc, report_fallback=report_fallback)
         return ReceiptSubmission.FALLBACK_LOGGED
     return ReceiptSubmission.STAGED
 
 
 def _log_fallback(
-    store: UsageReceiptStore, entry: UsageLedgerEntry, exc: OSError | SQLiteError
+    store: UsageReceiptStore,
+    entry: UsageLedgerEntry,
+    exc: OSError | SQLiteError,
+    *,
+    report_fallback: ReceiptFallbackReporter | None,
 ) -> None:
     backlog: ReceiptBacklog | None = None
     with suppress(OSError, SQLiteError):
         backlog = store.backlog()
-    logger.error(
-        "Usage receipt staging failed for {call_id} at {spool} ({error_type}); recover receipt_json",
-        call_id=entry.call_id,
-        spool=str(store.path),
-        stage="local_spool",
-        receipt_status=ReceiptSubmission.FALLBACK_LOGGED.value,
-        error_type=type(exc).__name__,
-        errno=exc.errno if isinstance(exc, OSError) else getattr(exc, "sqlite_errorcode", None),
-        pending=backlog.pending if backlog is not None else None,
-        oldest=backlog.oldest_pending if backlog is not None else None,
-        available=backlog.available if backlog is not None else None,
-        receipt_json=encode_receipt(entry).decode(),
-    )
+
+    def emit() -> None:
+        logger.error(
+            "Usage receipt staging failed for {call_id} at {spool} ({error_type}); recover receipt_json",
+            call_id=entry.call_id,
+            spool=str(store.path),
+            stage="local_spool",
+            receipt_status=ReceiptSubmission.FALLBACK_LOGGED.value,
+            error_type=type(exc).__name__,
+            errno=exc.errno if isinstance(exc, OSError) else getattr(exc, "sqlite_errorcode", None),
+            pending=backlog.pending if backlog is not None else None,
+            oldest=backlog.oldest_pending if backlog is not None else None,
+            available=backlog.available if backlog is not None else None,
+            receipt_json=encode_receipt(entry).decode(),
+        )
+
+    if report_fallback is None:
+        emit()
+    else:
+        _ = report_fallback(emit)
 
 
 async def _wait_for_thread(thread: Thread, *, timeout: float) -> None:
@@ -344,6 +364,20 @@ def _log_unconfirmed(entry: UsageLedgerEntry, *, stage: str) -> None:
     )
 
 
+class _FallbackOnce:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._emitted = False
+
+    def emit(self, log: Callable[[], None]) -> bool:
+        with self._lock:
+            if self._emitted:
+                return False
+            log()
+            self._emitted = True
+            return True
+
+
 @dataclass(frozen=True, slots=True)
 class _StagingJob:
     entry: UsageLedgerEntry
@@ -351,6 +385,10 @@ class _StagingJob:
     observe: Callable[[], None]
     result: Future[None]
     trace: trace_context.Context
+    fallback: _FallbackOnce = field(default_factory=_FallbackOnce)
+
+    def log_unconfirmed(self, *, stage: str) -> bool:
+        return self.fallback.emit(partial(_log_unconfirmed, self.entry, stage=stage))
 
 
 class UsageReceiptStaging:
@@ -358,7 +396,7 @@ class UsageReceiptStaging:
         self._max_outstanding = max_outstanding
         self._outstanding = 0
         self._jobs: SimpleQueue[_StagingJob | None] = SimpleQueue()
-        self._pending: dict[Future[None], UsageLedgerEntry] = {}
+        self._pending: dict[Future[None], _StagingJob] = {}
         self._expired = False
         self._lock = Lock()
         self._stop_requested = Event()
@@ -395,11 +433,11 @@ class UsageReceiptStaging:
     def _schedule(self, job: _StagingJob) -> Future[None]:
         with self._lock:
             if not self._expired:
-                self._pending[job.result] = job.entry
+                self._pending[job.result] = job
                 self._jobs.put(job)
                 return job.result
         try:
-            _log_unconfirmed(job.entry, stage="shutdown_drain")
+            _ = job.log_unconfirmed(stage="shutdown_drain")
             job.result.set_result(None)
         finally:
             self._release()
@@ -434,12 +472,11 @@ class UsageReceiptStaging:
             self._expired = True
             unconfirmed = tuple(self._pending.values())
             self._pending.clear()
-        for entry in unconfirmed:
-            _log_unconfirmed(entry, stage="shutdown_drain")
+        logged = sum(job.log_unconfirmed(stage="shutdown_drain") for job in unconfirmed)
         if self._thread.is_alive():
             logger.warning(
                 "Usage receipt staging stop unfinished ({} unconfirmed receipts logged)",
-                len(unconfirmed),
+                logged,
             )
             return False
         if self._error is not None:
@@ -484,9 +521,9 @@ class UsageReceiptStaging:
 
     def _write_receipt(self, job: _StagingJob) -> None:
         try:
-            _ = job.write(job.entry)
+            _ = job.write(job.entry, report_fallback=job.fallback.emit)
         except BaseException:
-            _log_unconfirmed(job.entry, stage="staging_error")
+            _ = job.log_unconfirmed(stage="staging_error")
             raise
         finally:
             with self._lock:
@@ -541,9 +578,11 @@ class UsageReceiptRuntime:
                 )
             return self._staging.reserve()
 
-    def submit(self, entry: UsageLedgerEntry) -> ReceiptSubmission:
+    def submit(
+        self, entry: UsageLedgerEntry, *, report_fallback: ReceiptFallbackReporter | None = None
+    ) -> ReceiptSubmission:
         with self._lock:
             delivery = self._delivery
         if delivery is None:
-            return _submit(self._store, entry)
-        return delivery.submit(entry)
+            return _submit(self._store, entry, report_fallback=report_fallback)
+        return delivery.submit(entry, report_fallback=report_fallback)

@@ -17,6 +17,7 @@ import pytest
 from loguru import logger
 
 from base.api_contracts.usage import (
+    ReceiptFallbackReporter,
     ReceiptSubmission,
     UsageLedger,
     UsageLedgerEntry,
@@ -192,9 +193,11 @@ def test_cancel_after_response_with_sqlite_lock_and_saturated_executor(
     transport = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     entered = Event()
 
-    def submit(entry: UsageLedgerEntry) -> ReceiptSubmission:
+    def submit(
+        entry: UsageLedgerEntry, *, report_fallback: ReceiptFallbackReporter | None = None
+    ) -> ReceiptSubmission:
         entered.set()
-        return delivery.submit(entry)
+        return delivery.submit(entry, report_fallback=report_fallback)
 
     def cancel_after_parse() -> datetime:
         task = asyncio.current_task()
@@ -405,9 +408,11 @@ async def test_shutdown_timeout_logs_inflight_queued_and_late_receipts(tmp_path:
         filter=lambda record: record["extra"].get("stage") == "shutdown_drain",
     )
 
-    def write(entry: UsageLedgerEntry) -> ReceiptSubmission:
+    def write(
+        entry: UsageLedgerEntry, *, report_fallback: ReceiptFallbackReporter | None = None
+    ) -> ReceiptSubmission:
         started.set()
-        return owner.submit(entry)
+        return owner.submit(entry, report_fallback=report_fallback)
 
     try:
         with closing(connect(store.path)) as writer, owner.reserve() as schedule_late:
@@ -440,3 +445,52 @@ def _accept(
 ) -> Future[None]:
     with owner.reserve() as schedule:
         return schedule(entry, write, lambda: None)
+
+
+@pytest.mark.parametrize("first_stage", ["shutdown_drain", "local_spool"])
+async def test_shutdown_and_full_spool_log_one_fallback(tmp_path: Path, first_stage: str) -> None:
+    store = UsageReceiptStore(tmp_path, "cluster", max_receipts=1)
+    store.stage(_entry("seed"))
+    [(seed, _)] = store.pending(after=0, limit=1)
+    store.reject(seed)
+    entry = _entry("one-fallback")
+    owner = UsageReceiptRuntime(store, _ledger(lambda _: False))
+    started, resume = Event(), Event()
+    captured: list[tuple[str, str]] = []
+
+    def wait_for_shutdown() -> None:
+        started.set()
+        assert resume.wait(5)
+
+    def write(
+        frozen: UsageLedgerEntry, *, report_fallback: ReceiptFallbackReporter | None = None
+    ) -> ReceiptSubmission:
+        if first_stage == "shutdown_drain":
+            wait_for_shutdown()
+        outcome = owner.submit(frozen, report_fallback=report_fallback)
+        assert outcome is ReceiptSubmission.FALLBACK_LOGGED
+        if first_stage == "local_spool":
+            wait_for_shutdown()
+        return outcome
+
+    sink = logger.add(
+        lambda message: captured.append(
+            (str(message.record["extra"]["stage"]), str(message.record["extra"]["receipt_json"]))
+        ),
+        filter=lambda record: (
+            record["extra"].get("call_id") == entry.call_id
+            and record["extra"].get("receipt_status") == ReceiptSubmission.FALLBACK_LOGGED.value
+        ),
+    )
+    owner.start()
+    try:
+        accepted = _accept(owner, entry, write)
+        assert await asyncio.to_thread(started.wait, 2)
+        await owner.aclose(staging_timeout=0.05, delivery_timeout=0.2)
+        assert captured == [(first_stage, encode_receipt(entry).decode())]
+        resume.set()
+        await asyncio.wait_for(asyncio.wrap_future(accepted), timeout=5)
+        assert captured == [(first_stage, encode_receipt(entry).decode())]
+    finally:
+        resume.set()
+        logger.remove(sink)

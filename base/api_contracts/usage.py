@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +62,17 @@ class ReceiptSubmission(StrEnum):
     FALLBACK_LOGGED = "fallback_logged"
 
 
-type UsageReceiptSubmitter = Callable[[UsageLedgerEntry], ReceiptSubmission]
+type ReceiptFallbackReporter = Callable[[Callable[[], None]], bool]
+
+
+class UsageReceiptSubmitter(Protocol):
+    def __call__(
+        self,
+        entry: UsageLedgerEntry,
+        /,
+        *,
+        report_fallback: ReceiptFallbackReporter | None = None,
+    ) -> ReceiptSubmission: ...
 
 
 type ScheduleUsageReceipt = Callable[
