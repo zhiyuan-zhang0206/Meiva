@@ -20,13 +20,15 @@ atomically as a regular `0600` file at `$MEIVA_HOME/run/bootstrap-mirror.json`.
 
 A fresh mirror supplies configuration without a bootstrap request. At the configured
 `BootstrapFetch.snapshot_fresh_s` threshold, startup attempts to refresh it
-online. A transport failure or HTTP 5xx permits use of a still-authorized
-mirror. A pure runner using that mirror can proceed through start after data
-plane admission and registration if its one gateway probe reports an outage.
-Credentials rejected by the gateway fail the refresh or preflight. The
-authorization lasts 24 hours to cover a day of maintenance, and the issue clock
-allows up to 30 seconds of forward skew. Expired or invalid mirrors need a
-fresh, valid signed response. An invalid response fails the refresh. Local
+online. Renewal checks the response status before reading and decoding a
+successful body. An HTTP 5xx, network failure, remote protocol error, or body
+decoding error permits use of a still-authorized mirror. A pure runner using
+that mirror can proceed through start after data plane admission and
+registration if its one gateway probe reports an outage. Credentials rejected
+by the gateway fail the refresh or preflight. The authorization lasts 24 hours
+to cover a day of maintenance, and the issue clock allows up to 30 seconds of
+forward skew. Expired or invalid mirrors need a fresh, valid signed response.
+A decoded payload with an invalid projection fails the refresh. Local
 publication failure keeps the prior mirror and reports the write failure while
 this boot uses the verified live response.
 

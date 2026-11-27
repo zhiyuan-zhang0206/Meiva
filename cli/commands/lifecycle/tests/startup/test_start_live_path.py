@@ -28,7 +28,7 @@ from base.config import ConfigBoot
 from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_serving
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.host.env.boot_policy import issue_config_mirror
+from base.host.env.boot_policy import BootstrapFetch, issue_config_mirror
 from base.host.env.bootstrap import stage_config_mirror
 from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
@@ -116,52 +116,78 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
 
 
 @pytest.fixture
-def cold_start_gateway_url(gateway_response: str) -> Iterator[str]:
+def cold_start_gateway(
+    gateway_response: str, bootstrap_status: int | None
+) -> Iterator[tuple[str, list[str]]]:
     """Provide a real loopback response or an endpoint that cannot answer."""
+    requested_paths: list[str] = []
     if gateway_response == "corrupt-gzip":
 
-        async def respond(_scope: Scope, _receive: Receive, send: Send) -> None:
+        async def respond(scope: Scope, _receive: Receive, send: Send) -> None:
+            if scope["type"] != "http":
+                return
+            path = scope["path"]
+            requested_paths.append(path)
+            status = bootstrap_status if path == "/api/bootstrap" else 503
+            assert status is not None
             await send(
                 {
                     "type": "http.response.start",
-                    "status": 503,
+                    "status": status,
                     "headers": [(b"content-encoding", b"gzip")],
                 }
             )
             await send({"type": "http.response.body", "body": b"not a gzip stream"})
 
         with serve_asgi(respond) as url:
-            yield url
+            yield url, requested_paths
         return
     scheme = "ftp" if gateway_response == "invalid-scheme" else "http"
-    yield closed_port_url().replace("http://", f"{scheme}://")
+    yield closed_port_url().replace("http://", f"{scheme}://"), requested_paths
 
 
 @pytest.mark.parametrize(
-    ("gateway_response", "expected_rc", "diagnostic"),
+    ("gateway_response", "bootstrap_status", "expected_rc", "diagnostic"),
     [
         (
             "closed-port",
+            None,
             0,
             "gateway unreachable; continuing with the authorized configuration mirror",
         ),
-        ("invalid-scheme", 1, "invalid gateway probe request"),
+        ("invalid-scheme", None, 1, "invalid gateway probe request"),
         (
             "corrupt-gzip",
+            None,
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+        (
+            "corrupt-gzip",
+            503,
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+        (
+            "corrupt-gzip",
+            200,
             0,
             "gateway returned HTTP 503; continuing with the authorized configuration mirror",
         ),
     ],
+    ids=["closed-port", "invalid-scheme", "corrupt-preflight", "stale-503", "stale-200"],
 )
 def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
     start_run: StartRun,
     db_url: str,
     redis_url: str,
     capsys: pytest.CaptureFixture[str],
-    cold_start_gateway_url: str,
+    cold_start_gateway: tuple[str, list[str]],
+    bootstrap_status: int | None,
     expected_rc: int,
     diagnostic: str,
 ) -> None:
+    gateway_url, requested_paths = cold_start_gateway
     home = start_run.home
     host = "192.0.2.20"
     bearer = "offline-start-fixture"
@@ -169,7 +195,7 @@ def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
         "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "MEIVA_MACHINE_NAME=offline-start\n"
         f"MEIVA_MACHINE_HOST={host}\n"
-        f"MEIVA_GATEWAY_URL={cold_start_gateway_url}\n"
+        f"MEIVA_GATEWAY_URL={gateway_url}\n"
     )
     now = time.time()
     projection = {
@@ -185,11 +211,16 @@ def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
             }
         ),
     }
-    signed = issue_config_mirror(projection, bearer=bearer, machine_host=host, now=now)
+    age = BootstrapFetch().snapshot_fresh_s + 1 if bootstrap_status is not None else 0
+    signed = issue_config_mirror(projection, bearer=bearer, machine_host=host, now=now - age)
     _ = stage_config_mirror(signed, home=home, bearer=bearer, machine_host=host, now=now)
+    mirror_path = home / "run" / "bootstrap-mirror.json"
+    installed = mirror_path.read_bytes()
     boot = ConfigBoot(environment={"MEIVA_HOME": str(home), "MEIVA_API_TOKEN": bearer})
     boot.prepare()
     assert boot.view.env_boot.bootstrap_source == "authorized_mirror"
+    assert requested_paths == (["/api/bootstrap"] if bootstrap_status is not None else [])
+    assert mirror_path.read_bytes() == installed
 
     command = replace(start_run.command, config=boot, machine=ConfiguredMachineIdentity(boot))
     run = replace(start_run, command=command)
@@ -219,7 +250,10 @@ def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
 
     assert row.state == ("running" if expected_rc == 0 else "stopped")
     assert run.serving_published is (expected_rc == 0)
-    assert diagnostic in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert diagnostic in output.err
+    if "/api/cluster/status" in requested_paths:
+        assert "gateway unreachable: HTTP 503" in output.out
 
 
 def _single_slot_record(home: Path, agent_id: int) -> Path:

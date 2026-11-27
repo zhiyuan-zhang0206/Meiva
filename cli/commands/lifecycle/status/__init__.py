@@ -268,6 +268,10 @@ def _read_host_resources(*, now: float, platform: str) -> HostReading | HostRead
 def read_gateway_outcome(config: ConfigBoot) -> GatewayOutcome:
     try:
         body = fetch_gateway_cluster_status(gateway_access_from_boot(config))
+    except httpx.HTTPStatusError as exc:
+        return GatewayUnreachable(f"HTTP {exc.response.status_code}")
+    except (httpx.DecodingError, httpx.RemoteProtocolError) as exc:
+        return GatewayUnreachable(type(exc).__name__)
     except httpx.HTTPError as exc:
         return GatewayUnreachable(str(exc))
     except json.JSONDecodeError as exc:

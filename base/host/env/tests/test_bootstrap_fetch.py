@@ -12,10 +12,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+from starlette.types import Receive, Scope, Send
 
 from base.host.env import bootstrap
 from base.host.env.boot_policy import BootstrapFetch, fetch_backoff, serve_flag
-from base.host.net.tests.local_http import closed_port_url, serve_json
+from base.host.net.tests.local_http import closed_port_url, serve_asgi, serve_json
 
 _NOW = 1_000_000.0
 # meiva:note
@@ -546,3 +547,23 @@ def test_service_plugin_config_packet_is_the_launchers_env_value() -> None:
 
     assert bootstrap.service_plugin_config_packet({SERVICE_PLUGIN_CONFIG_ENV: "{}"}) == "{}"
     assert bootstrap.service_plugin_config_packet({}) is None
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_bootstrap_refusal_does_not_read_a_corrupt_gzip_body(status: int) -> None:
+    async def respond(_scope: Scope, _receive: Receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-encoding", b"gzip")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"not a gzip stream"})
+
+    with serve_asgi(respond) as url, pytest.raises(httpx.HTTPStatusError) as rejected:
+        _ = bootstrap.fetch_bootstrap_config(url, bearer=None, tuning=_QUICK)
+
+    assert rejected.value.response.status_code == status
+    assert rejected.value.response.is_closed
+    assert not rejected.value.response.is_stream_consumed

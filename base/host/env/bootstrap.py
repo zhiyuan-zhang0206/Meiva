@@ -204,14 +204,19 @@ _SNAPSHOT_NAME = "bootstrap-snapshot.json"
 SNAPSHOT_VERSION = 4
 
 
-# Network failures can use a local snapshot. An HTTP 5xx can use an authorized
-# mirror. Authentication failures and malformed responses refuse startup.
+# Network, remote-protocol and content-decoding failures can use a local
+# snapshot. An HTTP 5xx can use an authorized mirror. Credential refusals and
+# invalid projections refuse startup.
 def _transport_failures() -> tuple[type[BaseException], ...]:
-    """Transport-level httpx failure classes (lazy import: httpx stays off the
-    settings-import path until an actual fetch is attempted)."""
+    """Failures reading the gateway response, imported lazily before the first fetch."""
     import httpx
 
-    return (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)
+    return (
+        httpx.NetworkError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError,
+        httpx.DecodingError,
+    )
 
 
 # The maintenance-verb opt-out (settings-lite). `meiva stop` / `meiva status` / the
@@ -298,7 +303,7 @@ def _fetch_bootstrap_payload(
     import httpx
 
     from base.host.net.auth import bearer_header
-    from base.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import stream_get
     from base.host.net.resilience import Policy, retry
     from base.log import guard_default_logging
 
@@ -322,9 +327,10 @@ def _fetch_bootstrap_payload(
     params = {MIRROR_HOST_PARAM: machine_host} if machine_host else None
 
     def _fetch_once() -> object:
-        resp = dial_get(url, timeout=tuning.timeout_s, headers=headers, params=params)
-        _ = resp.raise_for_status()
-        return object_of(resp.json)
+        with stream_get(url, timeout=tuning.timeout_s, headers=headers, params=params) as resp:
+            _ = resp.raise_for_status()
+            _ = resp.read()
+            return object_of(resp.json)
 
     return retry(policy)(_fetch_once)
 

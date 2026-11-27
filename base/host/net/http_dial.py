@@ -37,7 +37,8 @@ from __future__ import annotations
 import socket
 import ssl
 import typing
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
 from urllib.parse import urlsplit
 
 import httpcore
@@ -204,12 +205,24 @@ Timeout = float | httpx.Timeout | None
 
 
 # meiva:note
-# `httpx.get` for a cluster-internal dial: pins an IPv4-literal `url` host, otherwise identical, literally
-# `httpx.get` for a hostname target. The keywords are the ones this repo's call sites use (`params`,
-# `headers`, `timeout`, and `json` for a body); a caller needing another (`cookies`, `auth`,
-# `follow_redirects`, `extensions`) adds it here, or builds its own
-# `httpx.Client(transport=transport_for_url(url), ...)`, which is also the way to a
-# Client-construction-level setting (`verify` / `proxy` / `trust_env`).
+# Stream a cluster GET with the same IPv4 pinning as the buffered verbs.
+# The caller can inspect headers and status inside the context before choosing
+# whether to read and decode the body.
+@contextmanager
+def stream_get(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+) -> Generator[httpx.Response]:
+    with (
+        httpx.Client(transport=transport_for_url(url)) as client,
+        client.stream("GET", url, params=params, headers=headers, timeout=timeout) as response,
+    ):
+        yield response
+
+
 def get(
     url: str,
     *,

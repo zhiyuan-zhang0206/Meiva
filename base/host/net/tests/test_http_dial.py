@@ -20,7 +20,7 @@ import pytest
 from base.host.net.http_dial import get as dial_get
 from base.host.net.http_dial import post as dial_post
 from base.host.net.http_dial import put as dial_put
-from base.host.net.http_dial import transport_for_url
+from base.host.net.http_dial import stream_get, transport_for_url
 
 
 class _EchoHandler(http.server.BaseHTTPRequestHandler):
@@ -84,6 +84,16 @@ class TestPinnedDialNeverResolves:
         assert resp.status_code == 200
         assert resp.content == b"ok"
         assert type(resp.extensions["network_stream"]).__name__ == "_PinnedStream"
+
+    def test_stream_get_closes_the_pinned_response_without_reading_it(
+        self, echo_server: str
+    ) -> None:
+        with stream_get(f"{echo_server}/", timeout=3) as response:
+            assert response.status_code == 200
+            assert type(response.extensions["network_stream"]).__name__ == "_PinnedStream"
+            assert not response.is_stream_consumed
+        assert response.is_closed
+        assert not response.is_stream_consumed
 
     def test_post(self, echo_server: str) -> None:
         resp = dial_post(f"{echo_server}/", json={"a": 1}, timeout=3)

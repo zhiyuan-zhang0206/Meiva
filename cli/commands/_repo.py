@@ -288,7 +288,7 @@ def _probe_gateway_once(gateway_url: str, *, access: GatewayAccess) -> _GatewayP
     import httpx
 
     from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
-    from base.host.net.http_dial import transport_for_url
+    from base.host.net.http_dial import stream_get
 
     try:
         url = httpx.URL(gateway_url)
@@ -302,10 +302,7 @@ def _probe_gateway_once(gateway_url: str, *, access: GatewayAccess) -> _GatewayP
         if not bearer.isascii() or not bearer.isprintable() or bearer != bearer.strip():
             return "invalid_request"
         endpoint = f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}"
-        with (
-            httpx.Client(transport=transport_for_url(endpoint)) as client,
-            client.stream("GET", endpoint, timeout=10.0, headers=headers) as response,
-        ):
+        with stream_get(endpoint, timeout=10.0, headers=headers) as response:
             return response.status_code
     except (
         httpx.NetworkError,
