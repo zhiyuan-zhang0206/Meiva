@@ -117,7 +117,7 @@ describe("HeaderBar", () => {
       <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alerts={{ kind: "count", count: 4 }} />,
     );
     expect(screen.getByTestId("sidebar-toggle-alert-count").textContent).toBe("4");
-    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("4 firing alerts");
+    expect(screen.getByTestId("sidebar-toggle").getAttribute("aria-label")).toContain("4 active critical or error alerts");
   });
 
   it("collapsed sidebar toggle stays quiet with no firing alerts", () => {
@@ -133,7 +133,7 @@ describe("HeaderBar", () => {
     // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alerts={{ kind: "count", count: 2 }} />);
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
-    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 firing alerts");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 active critical or error alerts");
   });
 
   it("an unreachable Grafana shows a grey ? on the restore button and the menu button, never a count", () => {
@@ -192,7 +192,7 @@ describe("mobile sidebar attention", () => {
     rerender(<HeaderBar {...props} mobileAttentionCount={3} alerts={{ kind: "count", count: 2 }} />);
     expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
-    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 firing alerts");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 active critical or error alerts");
   });
   it.each(["loading", "error"] as const)("names %s without pretending the total is zero", (state) => {
     render(<HeaderBar {...props} mobileAttentionCount={null} mobileAttentionState={state} />);

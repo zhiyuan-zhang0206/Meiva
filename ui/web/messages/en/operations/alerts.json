@@ -1,4 +1,4 @@
 {
-  "firingAlerts": "{count} firing alerts",
+  "firingAlerts": "{count, plural, one {# active critical or error alert} other {# active critical or error alerts}}",
   "unreachable": "Grafana unreachable, alert status unknown"
 }

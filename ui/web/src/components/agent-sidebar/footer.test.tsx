@@ -38,7 +38,7 @@ const navigation = fakeNavigation();
 function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
-  qc.setQueryData(FIRING_ALERTS_QUERY_KEY, { state: "ok", firing: 3, critical: 1, error: 1, warning: 1 });
+  qc.setQueryData(FIRING_ALERTS_QUERY_KEY, { state: "ok", firing: 8, critical: 1, error: 2, warning: 5 });
   return rtlRender(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
@@ -100,7 +100,7 @@ describe("SidebarFooter icon row", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const row = screen.getByTestId("alerts-badge").parentElement!;
     const labels = [...row.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label"));
-    expect(labels.slice(0, 4)).toEqual(["3 firing alerts", "Fleet", "Insights", "Control"]);
+    expect(labels.slice(0, 4)).toEqual(["3 active critical or error alerts", "Fleet", "Insights", "Control"]);
     expect(screen.getByRole("link", { name: "Control" }).getAttribute("href")).toBe("/control");
   });
 });

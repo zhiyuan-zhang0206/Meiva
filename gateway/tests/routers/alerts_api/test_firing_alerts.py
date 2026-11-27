@@ -143,11 +143,11 @@ def _closed_port() -> int:
 
 
 def test_the_route_counts_what_grafana_reports_firing(grafana: Grafana) -> None:
-    grafana.answer([_instance("critical"), _instance("warning"), WATCHDOG])
+    grafana.answer([_instance("critical"), _instance("error"), _instance("warning"), WATCHDOG])
     with gateway_test_client(fields=_fields(grafana.port)) as client:
         body = client.get("/api/alerts/firing").json()
 
-    assert body == {"state": "ok", "firing": 2, "critical": 1, "error": 0, "warning": 1}
+    assert body == {"state": "ok", "firing": 3, "critical": 1, "error": 1, "warning": 1}
     assert grafana.asked == [
         (ACTIVE_ALERTS_PATH, {"active": ["true"], "silenced": ["false"], "inhibited": ["false"]})
     ]

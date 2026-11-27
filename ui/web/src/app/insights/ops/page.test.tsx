@@ -16,12 +16,12 @@ describe("Ops tab (Grafana link)", () => {
     expect(screen.getByRole("heading", { name: "Metrics (Grafana)" })).toBeTruthy();
   });
 
-  it("renders the Alerts sub-anchor with a link to Grafana's firing list", () => {
+  it("renders the Alerts sub-anchor with a link to Grafana's active critical and error instances", () => {
     wrap(<OpsPage />);
     expect(document.getElementById("ops-alerts")).toBeTruthy();
-    const link = screen.getByRole("link", { name: "Open Grafana alerts" });
+    const link = screen.getByRole("link", { name: "Open active critical and error alerts in Grafana" });
     expect(link.getAttribute("href")).toBe(
-      "http://localhost:8000/grafana/alerting/list?search=state:firing",
+      "http://localhost:8000/grafana/alerting/groups?alertState=active&queryString=severity%3D~%22critical%7Cerror%22&groupBy=alertname%2Cmachine",
     );
     expect(link.getAttribute("target")).toBe("_blank");
   });

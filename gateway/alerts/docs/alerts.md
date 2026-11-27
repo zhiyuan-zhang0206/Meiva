@@ -7,7 +7,7 @@ plus a Grafana rule
 ([decision](../../../docs/decisions/observability/alerts/2026-11-24-alerts-have-one-owner-grafana.md)).
 The gateway has three alert surfaces:
 
-- `GET /api/alerts/firing` — what Grafana reports firing right now, for the top-bar badge.
+- `GET /api/alerts/firing` — live counts by severity for the Web UI badge and diagnostics.
 - `POST /api/alerts` — the receiver of the alert pipeline's dead-man switch (the built-in Grafana
   contact point). It stores and delivers nothing.
 - `POST /api/alerts/agents/{agent_id}` — an optional Alertmanager contact point that queues one
@@ -15,8 +15,8 @@ The gateway has three alert surfaces:
 
 History is Grafana's: the alerting history page (`/grafana/alerting/history`),
 `GET /api/annotations?type=alert` and `GET /api/v1/rules/history?ruleUID=...` (one call returns at
-most 100 rows; page with `to`). The Web UI has no alert list: its badge links to Grafana's alert
-list in a new tab.
+most 100 rows; page with `to`). The Web UI badge sums `critical` and `error` and links to
+those active instances in Grafana in a new tab.
 
 ## Contract
 

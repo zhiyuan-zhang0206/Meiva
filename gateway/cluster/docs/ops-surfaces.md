@@ -54,7 +54,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | Card data | Source |
 |---|---|
 | `live_count` | Postgres `agents_meta` (not windowed) |
-| `alerts` (`state`, `firing`, `critical`, `error`, `warning`) | Grafana's embedded Alertmanager, read live per request (`gateway/alerts/firing.py`; active, unsilenced, uninhibited instances, excluding the synthetic `alert_pipeline_watchdog`) — NOT windowed; the same answer as `GET /api/alerts/firing` and the header badge. A Grafana that does not answer yields `state: "unavailable"` with null counts (never zero); a cluster without a Grafana upstream yields `not_configured`. The gateway keeps no copy of alert state |
+| `alerts` (`state`, `firing`, `critical`, `error`, `warning`) | Grafana's embedded Alertmanager, read live per request (`gateway/alerts/firing.py`; active, unsilenced, uninhibited instances, excluding the synthetic `alert_pipeline_watchdog`) — NOT windowed; the same answer as `GET /api/alerts/firing`. The Web UI badge sums `critical` and `error`. A Grafana that does not answer yields `state: "unavailable"` with null counts (never zero); a cluster without a Grafana upstream yields `not_configured`. The gateway keeps no copy of alert state |
 | windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, `google_cost_usd` | `llm_usage_ledger` (Postgres) |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), only rows of cards an enabled plugin declares in `contributions.ui.stats` / `statsFace` (an orphan row is not served; the console still joins the rest by `(plugin, id)`); NOT windowed — a plugin value is a point in time |
 
