@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +134,50 @@ def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
     assert "--android-manifest" in mint["run"]
     assert "refs/tags/channel/latest" in publish["run"]
     assert "gh pr create" not in _RELEASE_GATE.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("tag_action", "advance_latest", "refs"),
+    [
+        (
+            "create",
+            "true",
+            ["refs/tags/v2026.11.27.181410", "+refs/tags/channel/latest:refs/tags/channel/latest"],
+        ),
+        ("create", "false", ["refs/tags/v2026.11.27.181410"]),
+        ("skip", "true", ["+refs/tags/channel/latest:refs/tags/channel/latest"]),
+        ("skip", "false", []),
+    ],
+)
+def test_release_tag_and_latest_share_one_push(
+    tmp_path: Path, tag_action: str, advance_latest: str, refs: list[str]
+) -> None:
+    certify = _yaml(_RELEASE_GATE)["jobs"]["certify"]
+    publish = _step(certify["steps"], "Publish release tag and channel/latest")
+    result = subprocess.run(  # noqa: S603 -- exercise the checked-in script with a stand-in git
+        [
+            "bash",
+            "-eo",
+            "pipefail",
+            "-c",
+            """git() { [ "$1" = -c ] && [ "$3" = push ] || return 1; shift 3; echo "$*"; }\n"""
+            + publish["run"],
+        ],
+        env={
+            "VERSION": "v2026.11.27.181410",
+            "SHA": "a" * 40,
+            "TAG_ACTION": tag_action,
+            "ADVANCE_LATEST": advance_latest,
+            "PUSH_TOKEN": "test-token",
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = [" ".join(["origin", *refs])] if refs else []
+    assert result.stdout.splitlines() == expected
 
 
 def test_certify_triggers_client_packaging_when_ui_app_needs_release() -> None:

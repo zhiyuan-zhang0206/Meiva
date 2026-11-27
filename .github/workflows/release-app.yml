@@ -4,10 +4,10 @@
 # App versions move independently of the cluster, so the app has its own tag
 # namespace and its own release.
 #
-# A manual dispatch may omit signing secrets and produces unsigned validation
-# artifacts. Publication fails closed unless updater signing and Apple
-# signing and notarization credentials are all present: unsigned binaries must
-# never become public release assets.
+# Every publication requires a Tauri updater signature. An app-v* tag push
+# also requires Apple Developer ID signing and notarization. Reusable calls and
+# manual dispatches can publish ad-hoc signed macOS builds when Apple secrets
+# are absent. A validation-only dispatch may omit all signing secrets.
 #
 # The gating secrets are lifted into job-level `env` because a step's `if` is
 # evaluated against the job's environment, not the step's own.
@@ -162,6 +162,7 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      EVENT_NAME: ${{ github.event_name }}
       PUBLISH_RELEASE: ${{ needs.prepare.outputs.publish }}
       APP_VERSION: ${{ needs.prepare.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -208,11 +209,11 @@ jobs:
             echo "Updater signing password is configured without a private key" >&2
             exit 1
           fi
-          if [ "$PUBLISH_RELEASE" = true ]; then
-            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-              echo "Release tags require updater signing" >&2
-              exit 1
-            fi
+          if [ "$PUBLISH_RELEASE" = true ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "Published macOS releases require updater signing" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "push" ]; then
             if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || \
                [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_ID" ] || \
                [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then

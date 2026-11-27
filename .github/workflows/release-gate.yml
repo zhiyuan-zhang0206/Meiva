@@ -711,11 +711,15 @@ jobs:
         run: |
           auth="$(printf x-access-token:%s "$PUSH_TOKEN" | base64 -w0)"
           push() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$@"; }
+          refs=()
           if [ "$TAG_ACTION" = "create" ]; then
-            push origin "refs/tags/$VERSION"
+            refs+=("refs/tags/$VERSION")
           fi
           if [ "$ADVANCE_LATEST" = "true" ]; then
-            push --force origin refs/tags/channel/latest:refs/tags/channel/latest
+            refs+=(+refs/tags/channel/latest:refs/tags/channel/latest)
+          fi
+          if [ "${#refs[@]}" -gt 0 ]; then
+            push origin "${refs[@]}"
           fi
           echo "Certified commit \`$SHA\` as \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
 
