@@ -42,6 +42,33 @@ individual skills — this is the minimum bar, not the whole bar.
 4. **Demand that the AI state its assumptions in code/AGENTS.md** — implicit context is where AI-generated code goes wrong — `ai-era/context-explicitness`
 5. **Assume the code is wrong until a machine-checkable check says otherwise** (tests, type checks, lint, load tests) — `ai-era/verification-discipline`
 
+## Axiomatic Design in Design and PR Review
+
+**When to audit.** Briefly map functional requirements (FRs) to design parameters
+(DPs) when changing cross-layer state ownership, adding a projection, cache, or
+background writer, or diagnosing recurring cascading failures. Skip FR–DP
+matrices for small bug fixes and routine changes.
+
+**Axiom 1 — Lower-triangular self-check (Independence).** Order FRs and DPs so
+each changed DP can affect its own FR and later FRs only. Keep runtime
+dependencies in a one-way DAG. Trace four coupling paths that import checks miss:
+
+1. Read projections or UI views feeding back into execution decisions.
+2. Synchronous billing, telemetry, or observability writes blocking or failing the user or turn hot path.
+3. Startup or control-plane configuration depending on the process it manages.
+4. Heavy background writes sharing locks or single-slot queues with latency-sensitive online reads.
+
+**Single-writer ownership.** Name one writer for each piece of critical shared
+external state (row settlement state, billing ledger, local config mirror, or
+vector index generation). Downstream consumers only read. The owner makes
+upstream decisions. When removing a runtime coupling edge, add a concrete
+boundary or ownership guard in `meizel` to prevent regression. Keep FR–DP
+scoring out of the checker.
+
+**Axiom 2 — Minimum information content (Information).** Among lower-triangular
+designs, choose the one with the fewest hidden preconditions and the highest
+chance of satisfying its FRs without tribal knowledge.
+
 ## The Three Layers
 
 | Layer | What it is | Stability |
@@ -120,6 +147,7 @@ not the map itself.
 
 ## Sources
 
+- MIT, [Introduction to Axiomatic Design](https://web.mit.edu/2.882/www/chapter1/chapter1.htm) — the Independence and Information axioms
 - `references/01-philosophy-of-software-design.md` — Ousterhout, *A Philosophy of Software Design*
 - `references/02-design-of-design.md` — Brooks, *The Design of Design*
 - `references/03-pragmatic-programmer.md` — Thomas & Hunt, *The Pragmatic Programmer*
