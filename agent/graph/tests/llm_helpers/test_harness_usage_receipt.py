@@ -111,7 +111,7 @@ async def test_completed_harness_turn_replays_frozen_receipts_after_postgres_tim
     engine = FakeEngine(script=turn)
     ctx = harness_runtime(engine, agent_id=agent_id, publisher=live_events.publisher).context
     healthy = bind_usage_ledger(lambda: database, lambda: "test", tmp_path)
-    ledger = replace(healthy, write=usage_writer(connect))
+    ledger = replace(healthy, write_usage_row=usage_writer(connect))
     store = UsageReceiptStore(tmp_path, ledger.cluster)
     owner = UsageReceiptRuntime(store, ledger)
     accepted: list[str] = []
@@ -262,11 +262,11 @@ async def test_terminal_usage_survives_cancellation_in_the_reader_iteration(
     committed = asyncio.Event()
 
     def write(entry: UsageLedgerEntry) -> bool:
-        result = ledger.write(entry)
+        result = ledger.write_usage_row(entry)
         _ = loop.call_soon_threadsafe(committed.set)
         return result
 
-    owner = UsageReceiptRuntime(store, replace(ledger, write=write))
+    owner = UsageReceiptRuntime(store, replace(ledger, write_usage_row=write))
     accepted: list[str] = []
 
     ctx = replace(

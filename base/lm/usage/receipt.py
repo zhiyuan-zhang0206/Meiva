@@ -5,6 +5,7 @@ from collections.abc import Callable, Generator
 from concurrent.futures import Future
 from contextlib import AbstractContextManager, closing, contextmanager, suppress
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from queue import SimpleQueue
@@ -20,6 +21,7 @@ from base.api_contracts.usage import (
     ReceiptFallbackReporter,
     ReceiptStagingUnavailableError,
     ReceiptSubmission,
+    ScheduledUsageReceipt,
     ScheduleUsageReceipt,
     UsageLedger,
     UsageLedgerConflictError,
@@ -29,6 +31,8 @@ from base.api_contracts.usage import (
 )
 from base.host.boundary.untyped import object_of
 from base.host.net.resilience import retry_sleep
+from base.lm.catalog import ModelCatalog
+from base.lm.usage import UsageFields, log_usage_fields
 
 _ENTRY = TypeAdapter(UsageLedgerEntry)
 _COUNT = TypeAdapter(tuple[int])
@@ -280,7 +284,7 @@ class UsageReceiptDelivery:
             logger.error("Usage receipt {} at {} belongs to another cluster", seq, self._store.path)
             return False
         try:
-            _ = self._ledger.write(entry)
+            _ = self._ledger.write_usage_row(entry)
         except (UsageLedgerConflictError, UsageLedgerRejectedError) as exc:
             self._reject(seq, reason=type(exc).__name__)
         except Exception as exc:
@@ -299,6 +303,39 @@ class UsageReceiptDelivery:
     def _reject(self, seq: int, *, reason: str) -> None:
         self._store.reject(seq)
         logger.error("Usage receipt {} quarantined at {} ({})", seq, self._store.path, reason)
+
+
+def _report_unstaged_receipt(
+    entry: UsageLedgerEntry,
+    /,
+    *,
+    report_fallback: ReceiptFallbackReporter | None = None,
+) -> ReceiptSubmission:
+    emit = partial(_log_unconfirmed, entry, stage="staging_admission")
+    if report_fallback is None:
+        emit()
+    else:
+        _ = report_fallback(emit)
+    return ReceiptSubmission.FALLBACK_LOGGED
+
+
+def log_receipted_usage_fields(
+    model: str,
+    fields: UsageFields,
+    *,
+    usage_kind: str,
+    catalog: ModelCatalog,
+    now: datetime,
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None,
+) -> tuple[int, float]:
+    return log_usage_fields(
+        model,
+        fields,
+        usage_kind=usage_kind,
+        catalog=catalog,
+        now=now,
+        submit_receipt=submit_receipt if submit_receipt is not None else _report_unstaged_receipt,
+    )
 
 
 def _submit(

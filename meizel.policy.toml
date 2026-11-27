@@ -35,6 +35,10 @@ skills-scope = "names"
 [sections.single-owner]
 "*" = "reasons"
 postgres-dial-owners = "names"
+usage-ledger-insert-owners = "names"
+usage-ledger-reprice-owners = "names"
+usage-ledger-writer-owners = "names"
+bootstrap-mirror-owners = "names"
 
 [sections.turn-scoped-config]
 scan-dirs = "names"
@@ -407,6 +411,11 @@ family-modules = [
 postgres-dial-owners = [
     "base/db/connections.py",
 ]
+
+usage-ledger-insert-owners = ["base/db/usage_ledger.py"]
+usage-ledger-reprice-owners = ["services/upkeep/events_maintenance/ledger_repricing.py"]
+usage-ledger-writer-owners = ["base/lm/usage/__init__.py", "base/lm/usage/receipt.py"]
+bootstrap-mirror-owners = ["base/host/env/bootstrap.py"]
 
 [single-owner.postgres-dial]
 "base/cluster/dataplane/pg_admin.py" = "the OS-user administrator's peer-socket authority (roles, grants, schema DDL, owner sessions) behind its own postmaster custody check; the FC-10 cutover scripts dial through it, so its transport stays as rehearsed until the cutover lands"

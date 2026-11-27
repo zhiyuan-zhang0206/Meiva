@@ -2,8 +2,9 @@ exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_j
 
 [uses]
 "clock_lattice_cli.py" = ["clock_lattice.py"]
+"decisions.py" = ["runtime_boundaries.py"]
 "timing_judgement_cli.py" = ["timing_judgement.py"]
-"tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_judgement.py", "timing_judgement_cli.py"]
+"tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "runtime_boundaries.py", "timing_judgement.py", "timing_judgement_cli.py"]
 
 [roots]
 "clock_lattice_cli.py" = { kinds = ["argv", "cwd"], why = "the __main__ guard reads argv[1:] and the working directory, the checkout it judges, once and hands both to main" }

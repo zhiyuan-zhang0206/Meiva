@@ -104,6 +104,12 @@ Postgres delivery uses the original occurrence, attribution, machine, tokens,
 exact decimal cost, price snapshot and `call_id` and emits no second usage
 observation.
 
+Postgres appends go through `base/db/usage_ledger.py`, which owns replay and
+conflict handling. The delivery worker and the native usage emitter hold the
+row-write capability. Native agent turns, native provider calls such as reply
+suggestion, and standalone synchronous embedding callers still use the
+native emitter. Historical repricing owns in-place price updates.
+
 The agent host stages external harness usage from each terminal provider
 report, including faulted and interrupted turns that carry usage. It freezes
 and queues every step or turn total before awaiting staging. The host owns
@@ -112,7 +118,9 @@ staging or a recoverable fallback record. The event reader hands off usage
 from a faulted terminal report before raising the provider fault. Postgres
 delivery runs independently. If all staging slots are occupied when an
 external harness has already reported usage, the runtime records
-`fallback_logged` with stage `staging_admission`.
+`fallback_logged` with stage `staging_admission`. If a partial or standalone
+context binds a ledger without a receipt runtime, the receipt-only entry
+point emits the same recoverable record for every frozen entry.
 
 The SQLite spool lives at `$MEIVA_HOME/usage-receipts.v1.sqlite3` under the
 same service home used to bind the ledger. The producer limits admission to
