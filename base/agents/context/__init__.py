@@ -56,6 +56,7 @@ from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.operation_ids import OperationIds
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import Harness
+from base.api_contracts.usage import ScheduledUsageReceipt
 from base.clock import Clock, Timers
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
@@ -172,6 +173,8 @@ class MeivaContext:
 
     catalog: ModelCatalog | None = None
     """Provider facts built and retained by this run's process composition root."""
+
+    usage_receipts: ScheduledUsageReceipt | None = None
 
     # meiva:note
     # The provider API keys this run's process composition root holds, for the decision calls

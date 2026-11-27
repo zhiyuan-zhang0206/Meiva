@@ -1,9 +1,6 @@
 # meiva:note
-# Run local agents through a shared graph and explicit per-turn context.
-#
-# The dispatcher owns single-flight; turns borrow the daemon's pools, checkpointer
-# and machine. Cold admission consumes interrupted inputs without replaying work.
-# A restart or terminate executes at the turn boundary in one transaction; unknown failures propagate.
+# Local agents share the graph, pools and checkpointer through an explicit turn context.
+# Cold admission consumes interrupted inputs; restart and terminate settle transactionally at the turn boundary.
 
 from __future__ import annotations
 
@@ -44,6 +41,7 @@ from base.agents.history.delta_read_compat import (
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
+from base.api_contracts.usage import ScheduledUsageReceipt
 from base.cluster.machine import MachineIdentityReader
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
@@ -138,6 +136,7 @@ class AgentHost:
         policy: HostPolicy,
         handoff_stamping: TimestampSource,
         clients: ClientSet | None = None,
+        usage_receipts: ScheduledUsageReceipt | None = None,
         extensions: ExtensionRegistry = EMPTY,
         commands: CommandCatalog | None = None,
         plugin_configs: Mapping[str, BaseModel] | None = None,
@@ -148,6 +147,7 @@ class AgentHost:
         self._bus = bus
         self._db = db
         self._catalog = catalog
+        self._usage_receipts = usage_receipts
         self._policy = policy
         self._handoff_stamping = handoff_stamping
         # Shared clients are passed through each turn's explicit `MeivaContext`.
@@ -623,6 +623,7 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             catalog=self._catalog,
+            usage_receipts=self._usage_receipts,
             provider_keys=self._policy.provider_keys,
             event_publisher=event_publisher,
             db=self._db,

@@ -90,8 +90,11 @@ the root process: a change reaches a running root only through a stop and start 
    would terminate the agent after `CORPSE_REAP_GRACE_S`.
    `host_exit_drained` means every waited-for turn has ended, by either path.
 4. **Shutdown.** `run` then performs its ordinary cleanup: the scheduler cancels
-   whatever is left, `close_host_resources` joins resources, pools close, and
-   the process exits 0.
+   whatever is left and `close_host_resources` joins remaining turn resources
+   within the scheduler's existing unwind allowance. The agent host then drains
+   [usage receipt staging](../../../../../base/lm/usage/README.md#replayable-usage-receipts)
+   before closing its pools and removing its pidfile. Cleanup attempts every
+   step and keeps any original boot or turn drain failure as the primary error.
 
 A host that is not exiting wakes the resumed agent itself as soon as the apply
 commits, through its scheduler. An exiting host has closed admission and refuses

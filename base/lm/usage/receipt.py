@@ -570,6 +570,19 @@ class UsageReceiptRuntime:
             if delivery is not None:
                 await delivery.aclose(timeout=delivery_timeout)
 
+    def schedule_completed(
+        self, entry: UsageLedgerEntry, write: UsageReceiptSubmitter, observe: Callable[[], None]
+    ) -> Future[None]:
+        try:
+            with self.reserve() as schedule:
+                return schedule(entry, write, observe)
+        except ReceiptStagingUnavailableError:
+            _log_unconfirmed(entry, stage="staging_admission")
+            observe()
+            result: Future[None] = Future()
+            result.set_result(None)
+            return result
+
     def reserve(self) -> AbstractContextManager[ScheduleUsageReceipt]:
         with self._lock:
             if self._staging is None:

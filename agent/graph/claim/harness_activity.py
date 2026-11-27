@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
+from concurrent.futures import Future
+
 from base.agents.context import MeivaContext
 from base.agents.model.harness_models import resolve_harness_catalog_model
-from base.api_contracts.usage import UsageLedgerWriteError
+from base.api_contracts.usage import (
+    ScheduledUsageReceipt,
+    UsageLedgerEntry,
+    UsageLedgerWriteError,
+    UsageReceiptSubmitter,
+)
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import Usage
+from base.lm.harness import HarnessTurnFaultedError, Usage
 from base.lm.harness.engine import HarnessTurn
 from base.lm.pricing.cache_writes import cache_write_tokens, default_write_ttl
 from base.lm.usage import UsageFields, log_usage_fields
@@ -21,7 +30,61 @@ def resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
     return resolve_harness_catalog_model(raw_model, catalog.prices)
 
 
-def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
+async def stage_turn_usage(
+    ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn
+) -> None:
+    receipts = ctx.usage_receipts
+    if receipts is None:
+        await asyncio.to_thread(log_turn_usage, ctx, agent_id, model, turn)
+        return
+
+    staged: list[Future[None]] = []
+
+    def schedule(
+        entry: UsageLedgerEntry, write: UsageReceiptSubmitter, observe: Callable[[], None]
+    ) -> Future[None]:
+        accepted = receipts.schedule(entry, write, observe)
+        staged.append(accepted)
+        return accepted
+
+    # meiva:link base/lm/usage/README.md
+    log_turn_usage(
+        ctx, agent_id, model, turn, receipts=ScheduledUsageReceipt(receipts.write, schedule)
+    )
+    if staged:
+        _ = await asyncio.shield(
+            asyncio.gather(*(asyncio.wrap_future(job) for job in staged), return_exceptions=True)
+        )
+
+
+async def stage_fault_usage(
+    ctx: MeivaContext, agent_id: int, model: str | None, fault: Exception
+) -> None:
+    if not isinstance(fault, HarnessTurnFaultedError) or fault.outcome is None:
+        return
+    try:
+        if ctx.usage_receipts is None:
+            await stage_turn_usage(ctx, agent_id, model, fault.outcome)
+        else:
+            log_turn_usage(ctx, agent_id, model, fault.outcome, receipts=ctx.usage_receipts)
+    except Exception as error:
+        logger.warning(
+            "Failed to record faulted harness usage ({error_type})",
+            event="harness_usage_log_failed",
+            error_type=type(error).__name__,
+            agent_id=agent_id,
+            turn_id=fault.outcome.turn_id,
+        )
+
+
+def log_turn_usage(
+    ctx: MeivaContext,
+    agent_id: int,
+    model: str | None,
+    turn: HarnessTurn,
+    *,
+    receipts: ScheduledUsageReceipt | None = None,
+) -> None:
     entries = _reported_units(turn)
     if not entries:
         return
@@ -56,12 +119,13 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
                 call_id=f"{identity}:{index}",
                 unpriced_already_reported=index > 0,
             )
-            log_usage_fields(
+            _ = log_usage_fields(
                 pricing_model,
                 fields,
                 usage_kind="agent",
                 catalog=catalog,
                 now=now,
+                submit_receipt=receipts,
             )
         except UsageLedgerWriteError as error:
             if write_error is None:

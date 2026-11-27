@@ -10,7 +10,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_inbox import restart_owed, settle_stale_interrupts
 from agent.graph.claim.harness_interrupt import (
     HarnessTimeline,
@@ -195,22 +194,6 @@ async def _settle_halted_turn(
     return _build_halted_error(ctx, agent_id, bridge, exc, reason, requeued=requeued)
 
 
-async def _handle_harness_abort(
-    ctx: MeivaContext,
-    agent_id: int,
-    bridge: TurnEngine,
-    projector: TimelineNotifications,
-    run: ForegroundRun,
-    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-) -> HarnessTurnHaltedError | None:
-    try:
-        if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
-            await asyncio.to_thread(log_turn_usage, ctx, agent_id, bridge.model, exc.outcome)
-    finally:
-        halted = await _finish_harness_abort(ctx, agent_id, bridge, projector, run, exc)
-    return halted
-
-
 async def _finish_harness_abort(
     ctx: MeivaContext,
     agent_id: int,
@@ -386,7 +369,7 @@ async def _run_foreground(
             return await _settle_exit_cut(
                 ctx, agent_id, state, bridge, projector, run, exc, extra_updates
             )
-        halted = await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+        halted = await _finish_harness_abort(ctx, agent_id, bridge, projector, run, exc)
         if halted is not None:
             raise halted from exc
         detail = (

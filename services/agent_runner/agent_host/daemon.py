@@ -28,7 +28,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import random
@@ -66,6 +65,7 @@ from agent.graph.exec.process import ParentFacts
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
+from base.api_contracts.usage import ScheduledUsageReceipt
 from base.clock import Clock
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
@@ -90,9 +90,10 @@ from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.host.runtime_interpreter import external_plugin_read_root
+from base.lm.catalog import ModelCatalog
 from base.lm.harness.registration import SecureRandom
+from base.lm.usage.receipt import UsageReceiptRuntime, UsageReceiptStore
 from base.native_process.code_version import CodeVersion
-from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.paths import logs_dir, run_dir
 from base.paths.home import resolve_meiva_home
@@ -105,12 +106,12 @@ from services.agent_runner.understanding.chunk_consumer import (
     understanding_loop_forever,
 )
 
-from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
+from ...pidfile import acquire_pidfile, pidfile_holds_daemon
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
 from .exec_memory_guard import run_memory_guard_forever
 from .health_routes import cancel_turn_route, prepare_harness_switch_route, stats_route
 from .host import AgentHost
-from .host_beat import close_ownership_beat, ownership_beat_completion
+from .host_beat import ownership_beat_completion
 from .lifecycle.configuration import (
     boot_process,
     handoff_source,
@@ -126,10 +127,13 @@ from .lifecycle.graceful_exit import (
     write_exit_idle_notes,
     write_exit_restart,
 )
-from .lifecycle.instance import release_instance_lock, take_instance_lock
+from .lifecycle.instance import take_instance_lock
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as close_host_pools
+from .process_shutdown import close_host_runtime
+from .process_shutdown import close_joined_host_pools as close_joined_host_pools
+from .process_shutdown import close_process_owners as close_process_owners
 from .stdout_log import rotate_stdout_log_forever, stdout_log_path
 
 host_log = logging.getLogger("services.agent_runner.agent_host.daemon")
@@ -218,25 +222,6 @@ async def watch_plugins_for_restart(
             write_host_exit_message(home, PLUGINS_RESTART_MESSAGE)
         signal.raise_signal(signal.SIGTERM)
         return
-
-
-async def _close_host_runtime(
-    host: AgentHost,
-    scheduler: TurnScheduler,
-    beat: asyncio.Task[Exception | None] | None,
-    beat_tasks: asyncio.TaskGroup,
-) -> None:
-    """Drain turns and release settled ownership after background loops join.
-    Reverse callbacks attempt every cleanup before failure propagates; pools
-    must outlive active turns.
-    """
-    # Share the existing unwind allowance; late resource join must not add a
-    # second five-second window after the scheduler has spent its own budget.
-    resource_deadline = asyncio.get_running_loop().time() + CANCEL_UNWIND_TIMEOUT_S
-    async with contextlib.AsyncExitStack() as cleanup:
-        cleanup.push_async_callback(host.aclose, resource_deadline=resource_deadline)
-        cleanup.push_async_callback(close_ownership_beat, beat, beat_tasks)
-        cleanup.push_async_callback(scheduler.aclose)
 
 
 def background_loops(
@@ -331,51 +316,6 @@ async def open_host_pools(
     await control_pool.open()
 
 
-async def close_joined_host_pools(
-    host: AgentHost | None,
-    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-) -> None:
-    if host is None or host.resources_joined:
-        await close_host_pools(workload_pool, control_pool)
-    else:
-        host_log.error("[agent-host] resource join unfinished; keeping pools open until hard exit")
-
-
-async def close_process_owners(
-    host: AgentHost | None,
-    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    installation: Installation | None,
-    health: asyncio.Server | None,
-    beat: asyncio.Task[Exception | None] | None,
-    beat_tasks: asyncio.TaskGroup | None,
-    *,
-    clients: ClientSet | None = None,
-    instance_lock: int | None = None,
-    pidfile: Path,
-    primary: BaseException | None = None,
-) -> None:
-    """Collect process owners without replacing a failure from boot or turn drain."""
-    try:
-        async with contextlib.AsyncExitStack() as cleanup:
-            if instance_lock is not None:
-                cleanup.callback(release_instance_lock, instance_lock)
-            cleanup.callback(remove_pidfile, pidfile)
-            cleanup.push_async_callback(close_joined_host_pools, host, workload_pool, control_pool)
-            if host is None and clients is not None:
-                cleanup.callback(clients.close)
-            if installation is not None:
-                cleanup.callback(installation.sampling.close)
-            if health is not None:
-                cleanup.push_async_callback(stop_health_server, health)
-            cleanup.push_async_callback(close_ownership_beat, beat, beat_tasks)
-    except BaseException as secondary:
-        if primary is None:
-            raise
-        primary.add_note(f"Host process cleanup also failed: {secondary!r}")
-
-
 # meiva:note
 # Whether a host is already running; a live pid whose argv does not name this module is recycled.
 def is_running(endpoint: ServiceEndpoint) -> bool:
@@ -447,6 +387,7 @@ async def serve_host_lifecycle(
     read_planned: Callable[[], bool],
     write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
     clients: ClientSet | None = None,
+    usage_receipts: UsageReceiptRuntime | None = None,
     instance_lock: int | None = None,
     pidfile: Path,
 ) -> None:
@@ -473,7 +414,7 @@ async def serve_host_lifecycle(
             )
         finally:
             try:
-                await _close_host_runtime(host, scheduler, beat, beat_tasks)
+                await close_host_runtime(host, scheduler, beat, beat_tasks)
             finally:
                 beat = beat_tasks = None
     finally:
@@ -488,6 +429,7 @@ async def serve_host_lifecycle(
             beat,
             beat_tasks,
             clients=clients,
+            usage_receipts=usage_receipts,
             instance_lock=instance_lock,
             pidfile=pidfile,
             primary=sys.exception(),
@@ -515,6 +457,15 @@ def read_parent_facts() -> ParentFacts:
         source_root=editable_install.current_interpreter_source_root(sys.executable),
         editable_roots=(Path.home() / "Meiva",),
     )
+
+
+def _start_usage_receipts(home: Path, catalog: ModelCatalog) -> UsageReceiptRuntime | None:
+    ledger = catalog.usage_ledger() if catalog.usage_ledger is not None else None
+    if ledger is None:
+        return None
+    receipts = UsageReceiptRuntime(UsageReceiptStore(home, ledger.cluster), ledger)
+    receipts.start()
+    return receipts
 
 
 async def run(
@@ -561,6 +512,7 @@ async def run(
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None
     host: AgentHost | None = None
+    usage_receipts: UsageReceiptRuntime | None = None
     handed_off = False
     try:
         if on_clients_owned is not None:
@@ -603,6 +555,7 @@ async def run(
             user_home=user_home,
             python=Path(sys.executable),
         )
+        usage_receipts = _start_usage_receipts(home, installation.require_catalog())
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
@@ -617,6 +570,11 @@ async def run(
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
+            usage_receipts=(
+                ScheduledUsageReceipt(usage_receipts.submit, usage_receipts.schedule_completed)
+                if usage_receipts is not None
+                else None
+            ),
             policy=replace(policy, browser_authority=browser_authority),
             handoff_stamping=stamping,
             clients=clients,
@@ -695,6 +653,7 @@ async def run(
             read_planned=lambda: operator_stop_in_progress(home, now=stamping.clock.monotonic()),
             write_idle_notes=partial(write_exit_idle_notes, db, local_machine),
             clients=clients,
+            usage_receipts=usage_receipts,
             instance_lock=instance_lock,
             pidfile=endpoint.pidfile,
         )
@@ -711,6 +670,7 @@ async def run(
                 None,
                 None,
                 clients=clients,
+                usage_receipts=usage_receipts,
                 instance_lock=instance_lock,
                 pidfile=endpoint.pidfile,
                 primary=sys.exception(),

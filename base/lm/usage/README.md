@@ -52,10 +52,10 @@ advances when the same session resumes in a new process.
 
 The writer retries a transient database failure once with the same frozen
 report. On the direct path, an exhausted commit still emits `llm_usage` with the same ID, original
-occurrence time, and exact quoted cost for historical recovery. The error
-propagates after a completed harness turn finishes projecting its output. A
-process killed after the provider bills and before Postgres commits can leave a
-missing report. Use the provider bill to reconcile that window.
+occurrence time, and exact quoted cost for historical recovery. The direct
+writer returns the error to its caller. A process killed after the provider
+bills and before Postgres commits can leave a missing report. Use the provider
+bill to reconcile that window.
 
 `calls` counts the calls described by a report. A harness can report one step
 or a turn total. `complete` records whether the provider covered the usage.
@@ -79,12 +79,12 @@ Loki `llm_usage` stream is the operational copy and keeps seven days.
 
 ## Replayable usage receipts
 
-The gateway and indexer own a `UsageReceiptDelivery` for their explicit home and
-ledger. Each starts the consumer with the service, including when it uses a
-different embedding backend. Overlapping Gateway lifespans keep the same
-receipt workers until the last lifespan exits. Gateway shutdown closes
-admission and asynchronously allows eight seconds for staging and one second
-for Postgres delivery. The staging budget covers a five-second SQLite lock
+The Gateway, indexer and agent host start receipt consumers with their own
+explicit home and ledger. The Gateway and indexer start consumers even with
+another embedding backend. Overlapping Gateway lifespans keep the same
+receipt workers until the last lifespan exits. Gateway and agent-host shutdown
+close work admission, then asynchronously allow eight seconds for staging and
+one second for Postgres delivery. The staging budget covers a five-second SQLite lock
 wait with time for commit and cleanup. If staging remains unconfirmed, shutdown
 logs every affected receipt's full frozen payload before releasing the service.
 A write already in progress may commit after the diagnostic, and replay of the
@@ -103,6 +103,16 @@ paths emit the usual usage event and billing span for the provider response.
 Postgres delivery uses the original occurrence, attribution, machine, tokens,
 exact decimal cost, price snapshot and `call_id` and emits no second usage
 observation.
+
+The agent host stages external harness usage from each terminal provider
+report, including faulted and interrupted turns that carry usage. It freezes
+and queues every step or turn total before awaiting staging. The host owns
+that work through turn cancellation. Successful turn settlement awaits local
+staging or a recoverable fallback record. The event reader hands off usage
+from a faulted terminal report before raising the provider fault. Postgres
+delivery runs independently. If all staging slots are occupied when an
+external harness has already reported usage, the runtime records
+`fallback_logged` with stage `staging_admission`.
 
 The SQLite spool lives at `$MEIVA_HOME/usage-receipts.v1.sqlite3` under the
 same service home used to bind the ledger. The producer limits admission to
@@ -134,11 +144,10 @@ other processes even if their producers exited without signalling.
 `submit` returns `staged` after durable admission or `fallback_logged` if a
 storage or capacity failure required the log fallback. The same recovery
 record is emitted for each accepted entry whose staging remains unconfirmed
-at the end of Gateway shutdown. A staging job shares one fallback record across
-shutdown and write failures. The fallback record's
-`receipt_json` is the complete frozen ledger payload. It excludes the Gemini
-API key, request text and returned vectors. Extract that field as raw JSON from
-the failure log. Once storage is healthy and capacity is available, run the
+at the end of the shutdown staging budget. A staging job shares one fallback
+record across shutdown and write failures. The fallback record's `receipt_json`
+is the complete frozen ledger payload. It excludes API keys, prompts, replies
+and returned vectors. Extract that field as raw JSON from the failure log. Once storage is healthy and capacity is available, run the
 following from the deployed checkout with its Python environment, supplying the
 actual service home and ledger cluster as arguments. Manual recovery can
 admit a receipt larger than the automatic 8 KiB limit. The spool's row count,
@@ -148,11 +157,12 @@ ownership and SQLite page limits still apply.
 python -c 'import sys; from pathlib import Path; from base.lm.usage.receipt import UsageReceiptStore; UsageReceiptStore(Path(sys.argv[1]), sys.argv[2]).recover(sys.stdin.buffer.read())'   "$MEIVA_HOME" "<ledger-cluster>" < receipt.json
 ```
 
-The gateway or indexer delivers the recovered row on its next scan. The normal
+A running receipt consumer delivers the recovered row on its next scan. The normal
 ledger replay check handles repeats safely. The local fallback log has the
-existing log retention window. If the host fails before staging or both local
-storage and diagnostic logging are unavailable, reconcile against the provider
-bill and the usage events that survived.
+existing log retention window. For the agent host, read `record.extra.receipt_json`
+in `$MEIVA_HOME/logs/agent_host.log` or its rotated JSONL files. If the host fails
+before staging or both local storage and diagnostic logging are unavailable,
+reconcile against the provider bill and the usage events that survived.
 
 ## Unpriced calls
 
