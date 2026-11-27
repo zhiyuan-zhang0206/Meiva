@@ -69,13 +69,19 @@ exactly — the release workflows fail on mismatch — so a release starts by
 bumping `pyproject.toml` and its `Cargo.toml` mirror.
 `.github/workflows/ci-app.yml` path-filters Rust format/clippy, Android-target
 checking, and overlay/manifest tests.
-`release-app.yml` builds the universal macOS DMG; `release-android.yml` builds the Android APK (`android-v*` tags)
-artifacts for `app-v*` tags. The client updates from the `android-latest.json`
-manifest published beside the rolling `android-latest` APK, not from tags. Apple signing and updater signing activate only for
-complete secret groups; tag releases fail closed when any required signing
-group is absent, while manual dispatch may still produce unsigned evidence.
-`scripts/codegen/build_app_update_manifest.py` emits signed updater entries only, and
-the mutable `app-latest` release carries the stable `latest.json` endpoint.
+`release-app.yml` builds the universal macOS DMG. `release-android.yml` builds the Android APK.
+Publishing requires platform signing credentials. A build-only manual dispatch can still
+produce unsigned validation artifacts.
+
+The desktop updater reads `latest.json` from `app-latest`. The Android updater reads
+`android-latest.json` from `android-latest`. The manifests point to versioned binaries.
+Rolling publications check the advertised version, upload and verify the new binaries,
+then replace the manifest at its stable URL with bounded retries. Old assets are removed
+after GitHub reports the expected digests for both the binaries and the new manifest.
+A train that packages either client publishes both current installers as the immutable
+`client-v<version>` GitHub Latest release. Publication refuses to overwrite an existing
+client release or replace a newer client Latest. If one platform was skipped, the release carries the installer from
+that platform's current updater feed and names its actual version in the release notes.
 
 `release-android.yml` injects `versionCode = 1_000_000 + github.run_number`
 through a Tauri `--config` overlay, reads it back from the APK with `aapt2`, and

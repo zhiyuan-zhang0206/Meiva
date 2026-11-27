@@ -129,9 +129,8 @@ cd ../../..
 
 Tags matching `app-v<major>.<minor>.<patch>` drive
 `.github/workflows/release-app.yml`. The macOS updater asset is listed
-in `latest.json` only when its Tauri signature exists. Tag builds fail unless
-updater and Apple signing credentials are present; manual dispatch keeps
-the explicit unsigned validation path without publishing a GitHub Release.
+in `latest.json` only when its Tauri signature exists. Publishing requires
+updater and Apple signing credentials. Manual dispatch defaults to build-only validation.
 
 Android builds from `.github/workflows/release-android.yml` inject
 `versionCode = 1_000_000 + run_number` (rule and manifest:
@@ -140,3 +139,7 @@ publish `android-latest.json` beside the APK in the mutable `android-latest`
 prerelease. `workflow_dispatch` defaults to `dry_run=true` (build only); set it
 to false to replace the channel, and a publish fails unless its versionCode
 exceeds the one the channel already advertises.
+
+The release train publishes a unified `client-v<version>` GitHub Latest release
+with the current macOS DMG and Android APK after it packages either client.
+See [the release flow](docs/app.md#build-and-release).

@@ -33,10 +33,10 @@ precisely because dated cluster releases made `/releases/latest` unusable as an 
 ## Decision
 
 A certified cluster release publishes Git only: the annotated `vYYYY.MM.DD.HHMMSS[-hfN]` tag, the
-`channel/latest` pointer, and on promotion the `channel/stable` pointer. `release-gate.yml` and
-`promote-release.yml` create, edit and mark no GitHub Release. The Releases page belongs to artifact
-deliverables — `android-v*`, `app-v*` and their `*-latest` feeds — and its single `Latest` badge
-stays with them.
+`channel/latest` pointer, and on promotion the `channel/stable` pointer. The certify and promote
+jobs publish those Git refs. The downstream client packaging jobs update their updater feeds.
+When the train packages a client, it publishes the `client-v<version>` release with the current
+installers and marks it GitHub Latest.
 
 ## Alternatives rejected
 
@@ -58,6 +58,7 @@ stays with them.
 - No automation removes old shells, because nothing creates them any more. The operator deleted the
   accumulated ones once on 2026-11-07 (27 releases -> 3: the two `android-v*` artifacts and the
   `android-latest` feed), deleting Release objects only and keeping every git tag, so certificate
-  verification and `cli.fleet_update` were unaffected; `android-v1.0.1` holds `Latest` again.
+  verification and `cli.fleet_update` were unaffected. The cleanup restored the `Latest` badge
+  to `android-v1.0.1` at the time.
 - `tests/ui/test_release_gate_workflow.py::test_cluster_release_workflows_publish_no_github_release`
-  fails if either workflow reintroduces `gh release`.
+  fails if the certify or promote job reintroduces `gh release`.

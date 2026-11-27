@@ -47,9 +47,9 @@ it". The two never mix, and neither replaces the other; see the
   the target tag's `meiva-release/v1` certificate before advancing `channel/stable`.
 - **No GitHub Release per cluster version.** A certified release is the annotated tag and the
   channel pointers, both of which travel by `git fetch --tags`; nothing in this repository reads a
-  `v*` Release object. The GitHub Releases page carries artifact deliverables only (`android-*`,
-  `app-*`, `android-latest`, `app-latest`), because a repository has one `Latest` badge and it
-  belongs to the artifact release its users download. See the
+  `v*` Release object. When the train packages a client, the unified `client-v<version>`
+  installer release takes GitHub's `Latest` badge. The client auto-updaters read the dedicated
+  `app-latest` and `android-latest` feeds. See the
   [decision](../../decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
 - **Release verification.** Dispatch `release-gate.yml` on `main` with `verify_only=true` to run
   the full release suite early with read-only permissions. The release gate can reuse a successful first

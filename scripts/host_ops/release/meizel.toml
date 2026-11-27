@@ -1,13 +1,15 @@
-exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+exports = ["base.py", "bisect_train.py", "certify.py", "check_client_release.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "publish_feed.py", "tag.py"]
 
 [uses]
+"check_client_release.py" = ["github_releases.py"]
+"publish_feed.py" = ["github_releases.py"]
 "base.py" = ["git_tags.py"]
 "bisect_train.py" = ["git_tags.py"]
 "certify.py" = ["git_tags.py", "tag.py"]
 "evidence.py" = ["git_tags.py"]
 "promote.py" = ["git_tags.py"]
 "tag.py" = ["git_tags.py"]
-"tests" = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+"tests" = ["base.py", "bisect_train.py", "certify.py", "check_client_release.py", "evidence.py", "git_tags.py", "github_releases.py", "nightly.py", "promote.py", "publish_feed.py", "tag.py"]
 
 [roots]
 "base.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
@@ -17,3 +19,5 @@ exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.
 "nightly.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "promote.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "tag.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"check_client_release.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"publish_feed.py" = { kinds = ["argv", "environ", "random"], why = "the CLI takes argv and checks the previous manifest in a temporary directory with an OS-generated name" }
