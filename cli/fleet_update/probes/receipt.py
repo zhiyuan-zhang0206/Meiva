@@ -10,7 +10,7 @@ from typing import Literal, TypeGuard
 from ..untyped import object_of
 
 _PREFIX = "FLEET_DOMAIN="
-_VERSION = 1
+_VERSION = 2
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
@@ -43,7 +43,7 @@ def _hex_field(value: dict[str, object], key: str, pattern: re.Pattern[str]) -> 
 
 
 def _component_checks(components: object) -> dict[str, str]:
-    if not _mapping(components) or not {"config", "schema"} <= components.keys():
+    if not _mapping(components) or not {"config", "schema", "checkpoint"} <= components.keys():
         raise ValueError("receipt omitted component checks")
     checks: dict[str, str] = {}
     for component, state in components.items():

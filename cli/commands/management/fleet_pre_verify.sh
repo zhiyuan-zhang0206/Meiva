@@ -2,7 +2,7 @@
 W="$H/pre-update-verify"; R="$W.rows"; T=""
 trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"; [ -z "$T" ] || rm -rf "$T"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
-git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
+git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host"; exit 0; }}
 RCPT="$H/updates/schedules-verified"
 (umask 077; MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c {read_rows} "$R") \
   || {{

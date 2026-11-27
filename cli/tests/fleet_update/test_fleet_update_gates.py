@@ -147,14 +147,14 @@ def test_a_verdict_reused_from_the_earlier_pass_is_said_and_the_down_goes_on(
     assert "stop" in {kind for kind, _ in cluster.effects}
 
 
-def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
+def test_the_dry_run_reports_that_it_skipped_schedule_verification(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
     cluster.stored_schedules = (1, [_RED_ROW])
     assert run("down", "--dry-run") == 0
-    assert _RED_ROW in capsys.readouterr().out
-    assert [k for k, _ in cluster.effects if k != "root-check"] == ["pre-verify"]
+    assert "stored-schedule verify: skipped" in capsys.readouterr().out
+    assert cluster.effects == []
 
 
 def test_packages_refresh_reports_and_never_forces(
@@ -200,7 +200,7 @@ def test_preflight_refuses(
 
 
 @pytest.mark.parametrize(("key", "value"), _UNSAFE)
-def test_an_unsafe_runner_is_deferred_not_a_refusal(
+def test_an_unsafe_runner_refuses_before_the_stop_wave(
     env: tuple[Cluster, Callable[..., int]],
     capsys: pytest.CaptureFixture[str],
     key: str,
@@ -208,15 +208,10 @@ def test_an_unsafe_runner_is_deferred_not_a_refusal(
 ) -> None:
     cluster, run = env
     cluster.hosts["lin"][key] = value
-    cluster.outside.add("lin")
-    assert run("down") == PARTIAL_FAILURE_EXIT
-    assert [alias for _, alias in cluster.effects if alias == "lin"] == []
-    assert {alias for kind, alias in cluster.effects if kind == "switch"} == {"gw", "mac"}
-    out = capsys.readouterr().out
-    assert "DEFERRED: lin left out at 'preflight'" in out
-    assert (
-        cluster.hosts["lin"]["head"] == cluster.old and cluster.hosts["mac"]["head"] == cluster.new
-    )
+    assert run("down") == 2
+    assert cluster.effects == []
+    assert "refused: lin:" in capsys.readouterr().out
+    assert all(host["up"] and host["head"] == cluster.old for host in cluster.hosts.values())
 
 
 @pytest.mark.parametrize("command", ["run", "down", "up"])

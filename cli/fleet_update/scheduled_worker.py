@@ -103,7 +103,7 @@ def execute(path: Path) -> int:
                     f"Scheduled cluster update {record.operation_id}: exit {rc}; record {path}; state {record.state}.",
                 )
             finally:
-                s.log.close()
+                s.close()
         return rc
 
 

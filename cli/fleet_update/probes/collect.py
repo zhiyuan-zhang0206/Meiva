@@ -52,7 +52,9 @@ def _issues(receipt: DomainReceipt, *, prepare: bool) -> list[str]:
         if state == "ready" or (state == "not-installed" and component.startswith("harness/")):
             return True
         if prepare:
-            return state == "selected" or (component == "schema" and state == "migration-pending")
+            return state == "selected" or (
+                component in ("schema", "checkpoint") and state == "migration-pending"
+            )
         return component == "preflight" and state == "legacy-unbound"
 
     context = (
@@ -96,7 +98,7 @@ def prepare_receipts(
                 receipts,
                 gateway=gateway,
                 gateway_alias=args.gateway,
-                full_wave=not (s.deferred or keep_services),
+                full_wave=not keep_services,
             )
         )
     if problems:

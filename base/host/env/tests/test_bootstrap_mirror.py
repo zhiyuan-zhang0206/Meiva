@@ -125,6 +125,19 @@ def test_flat_gateway_response_cannot_replace_an_existing_mirror(tmp_path: Path)
     assert read_config_mirror(home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=now) == payload
 
 
+def test_first_mirror_publish_failure_leaves_the_host_unenrolled(tmp_path: Path) -> None:
+    payload = issue_config_mirror(_values(), bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+    destination = tmp_path / "run" / "bootstrap-mirror.json"
+    destination.mkdir(parents=True)
+    with pytest.raises(IsADirectoryError):
+        _ = stage_config_mirror(payload, home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW)
+
+    destination.rmdir()
+    assert not (tmp_path / "bootstrap-mirror-enrolled").exists()
+    assert read_config_mirror(home=tmp_path, bearer=_TOKEN, machine_host=_HOST, now=_NOW) is None
+    assert not list(destination.parent.iterdir())
+
+
 def test_pre_stage_failed_rename_keeps_the_previous_mirror(tmp_path: Path) -> None:
     def refuse_replace(_source: Path, _target: Path) -> None:
         raise OSError("replace failed")

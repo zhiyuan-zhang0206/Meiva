@@ -234,6 +234,8 @@ class Sim:
         if "converge-incomplete.json" in command:
             return self._incomplete(alias, emit)
         if "pre-update-root-check" in command:
+            if rc := self._failure("root-check", alias):
+                return rc
             return self._root_check(alias, command, emit)
         return self._verify_or_effect(alias, host, command, emit)
 
@@ -260,13 +262,13 @@ class Sim:
                 "FLEET_DOMAIN="
                 + json.dumps(
                     {
-                        "version": 1,
+                        "version": 2,
                         "target": target,
                         "scope": "local" if alias == "gw" else "runner",
                         "config": "c" * 64,
                         "schema": "e" * 64,
                         "applied": "e" * 64,
-                        "components": {"config": "ready", "schema": "ready"},
+                        "components": {"config": "ready", "schema": "ready", "checkpoint": "ready"},
                     }
                 )
             )

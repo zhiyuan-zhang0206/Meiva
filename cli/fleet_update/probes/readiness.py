@@ -11,7 +11,7 @@ from base.host.env.harness_binaries import locate_harness_binary, with_harness_p
 from services.supervision.roster.service_spec import ServiceSpec
 
 
-def service_readiness(roster: tuple[ServiceSpec, ...]) -> dict[str, str]:
+def service_readiness(roster: tuple[ServiceSpec, ...], *, target: str) -> dict[str, str]:
     checks: dict[str, str] = {}
     for spec in roster:
         if spec.identity_probe is None:
@@ -21,7 +21,13 @@ def service_readiness(roster: tuple[ServiceSpec, ...]) -> dict[str, str]:
         except Exception as exc:
             checks[spec.session] = f"probe failed ({type(exc).__name__})"
         else:
-            checks[spec.session] = "ready" if result.alive else result.verdict.value
+            if not result.alive:
+                checks[spec.session] = result.verdict.value
+            elif spec.health_name is not None and result.source_sha != target:
+                actual = result.source_sha or "unavailable"
+                checks[spec.session] = f"running SHA {actual} differs from target {target}"
+            else:
+                checks[spec.session] = "ready"
     return checks
 
 

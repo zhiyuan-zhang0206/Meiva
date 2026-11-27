@@ -7,11 +7,11 @@ and the one-shot job names are stamped with, the pacing of its waits, and the cl
 are spent on. The synchronous window receives those facts as inputs. The separate scheduled worker is an OS-owned process entry and captures its own environment and clock.
 
 - `session.py` owns the connection to the hosts: the operator's own `ssh`, found on the `PATH` the
-  process was started with, and the one redacted log. `FailedError` is a step that cannot
+  process was started with, and the executed window's redacted log. `FailedError` is a step that cannot
   complete; `RefusedError` is a window that refused before touching anything (exit 2). It also
   declares the `Timers` port and carries the clock the window's waits are spent on, and the
-  `deferred` ledger of runners left out of the window (`defer`, `live`, `gather_hosts`): only the
-  gateway's failure ends a wave, a runner's is recorded there.
+  `deferred` ledger of runners left out after the stop wave starts. A standalone recovery
+  `up` may also defer unreachable runners. The down-half preparation requires every selected host.
 - `timers.py` is the process clock behind that port: the entry point builds one and hands it to
   the session, so the roster wait reads `Session.timers` and no module here reads `time` for
   itself.
@@ -49,7 +49,11 @@ the authorization covers the stop and start budgets, then publishes through the
 bootstrap mirror writer. Only receipt metadata travels back over SSH. The gateway
 uses its authoritative local startup configuration. The probe validates the target
 settings and selected service roster, checks the installed harness CLIs, and reads
-the applied database migration set through the host's normal credentials.
+the applied database migration set through the host's normal credentials. It
+uses startup's checkpoint dependency and exact version-set validators. During
+preparation, a missing checkpoint version is allowed only if its registered
+Meiva migration is pending for the same target. Readiness requires the complete
+applied set.
 
 A domain receipt has a wire version, full target SHA, configuration generation
 (the runner mirror generation or the local startup configuration digest), required
@@ -68,7 +72,8 @@ authenticated status and checks requested unit process state and launch generati
 The roster still checks live source SHA, pinned to the requested target for
 `update run`. The domain probe compares the installed and serving runner config
 projections, verifies the applied schema matches the target, and reads component
-protocol readiness and harness CLI versions. The probe loads host-local settings
+protocol readiness and harness CLI versions. Standard `/healthz` daemons must
+report the full target SHA in the response that passed their identity check. The probe loads host-local settings
 before applying the verified runner projection so roster composition sees the same
 settings as target boot. It compares its observations with the
 staged expectations. Harnesses absent at preflight remain optional. Process-only
@@ -81,4 +86,6 @@ A retained root with an unavailable compatibility verdict refuses the window.
 Full stops replace the root. Targets without the receipt program and gateways
 without signed runner mirrors refuse before stop. A standalone recovery `up` can
 still start a legacy checkout and reports the unavailable proofs explicitly. A dry
-run reports that it skipped the publishing compatibility probe.
+run prints the plan to the console and reports which checks it skipped. It
+leaves the update log, Git targets and worktrees, schedule verdict, and other
+durable update state untouched.

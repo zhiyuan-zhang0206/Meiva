@@ -184,7 +184,8 @@ def test_run_dry_run_plans_both_halves_without_mutation(
 ) -> None:
     cluster, run = env
     assert run("run", "--dry-run") == 0
-    assert [e for e in cluster.effects if e[0] != "root-check"] == [("pre-verify", "gw")]
+    assert cluster.effects == []
+    assert not (cluster.workdir.parent / "logs").exists()
     assert all(h["up"] and h["head"] == cluster.old for h in cluster.hosts.values())
     output = capsys.readouterr().out
     assert "phase: down" in output and "phase: up" in output
@@ -237,9 +238,10 @@ def test_a_path_with_no_ssh_fails_the_window_in_one_line_before_any_host(
 ) -> None:
     cluster, run = env
     cluster.environ["PATH"] = "/nonexistent-bin"
-    assert run("run") == 1
+    assert run("run") == 2
     out = capsys.readouterr().out
-    assert "FAILED: gw: cannot run ssh:" in out and "Failed phase: down" in out
+    assert "refused before stop: preflight: gw: cannot run ssh:" in out
+    assert "Failed phase: down" in out
     assert "Traceback" not in out
     assert cluster.commands == []
 
@@ -271,7 +273,7 @@ def test_dry_run_changes_nothing(env: tuple[Cluster, Callable[..., int]]) -> Non
     cluster, run = env
     assert run("down", "--dry-run") == 0
     assert run("up", "--dry-run") == 0
-    assert [k for k, _ in cluster.effects if k != "root-check"] == ["pre-verify"]
+    assert cluster.effects == []
 
 
 def test_the_log_carries_no_secret(

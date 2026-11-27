@@ -392,9 +392,11 @@ def stage_config_mirror(
     path = _mirror_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     writer = AtomicWriter(SYSTEM_FS) if writer is None else writer
+    writer.write_bytes(
+        path, json.dumps(envelope, sort_keys=True).encode(), mode=0o600, sync_parent=True
+    )
     if not _mirror_enrollment_recorded(home):
         writer.write_bytes(_mirror_enrollment_path(home), b"1\n", mode=0o600, sync_parent=True)
-    writer.write_bytes(path, json.dumps(envelope, sort_keys=True).encode(), mode=0o600)
     return envelope
 
 

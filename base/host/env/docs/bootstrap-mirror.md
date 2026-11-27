@@ -35,8 +35,9 @@ this boot uses the verified live response.
 During a mixed-version rollout the recognized v4 `bootstrap-snapshot.json`
 is read under the previous freshness and outage rules when the mirror is absent.
 The legacy writer publishes with mode `0600`. Both formats coexist in separate
-files for older processes. Before publishing the first mirror, the writer persists an owner-only
-`$MEIVA_HOME/bootstrap-mirror-enrolled` marker outside the run directory.
+files for older processes. The writer records the owner-only
+`$MEIVA_HOME/bootstrap-mirror-enrolled` marker after the first mirror has
+been atomically published and its directory synced.
 A missing, expired or invalid mirror after enrollment requires a new signed
 response.
 The boot result exposes `live_bootstrap`, `authorized_mirror`, or

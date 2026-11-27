@@ -62,16 +62,16 @@ def test_every_host_is_asked_and_every_refusal_is_listed(
     assert _kinds(cluster).count("root-check") == 3
 
 
-def test_the_dry_run_reports_the_same_refusal(
+def test_the_dry_run_reports_that_it_skipped_the_kept_root_check(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
     cluster.root_checks["gw"] = (0, _CHANGED)
 
-    assert run("down", "--dry-run") == 2
+    assert run("down", "--dry-run") == 0
 
-    assert "refused: gw: the meiva-root this window keeps" in capsys.readouterr().out
-    assert set(_kinds(cluster)) == {"root-check"}
+    assert "kept-root check: skipped" in capsys.readouterr().out
+    assert not _kinds(cluster)
 
 
 def test_a_root_new_can_reuse_lets_the_window_go_on(

@@ -75,30 +75,25 @@ def test_every_runner_failing_its_switch_still_brings_the_gateway_up(
     }
 
 
-@pytest.mark.parametrize("step", ["prestage", "stop", "fetch"])
-def test_a_runner_that_goes_dark_at_any_effect_step_is_left_out_of_the_rest(
+@pytest.mark.parametrize("step", ["preflight", "fetch", "root-check", "prestage"])
+def test_a_required_host_failure_refuses_the_whole_window_before_stop(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], step: str
 ) -> None:
     cluster, run = env
-    cluster.die_at["lin"] = step
-    cluster.outside.add("lin")
-    assert run("run") == PARTIAL_FAILURE_EXIT
-    _assert_healthy_hosts_serve_new(cluster, "gw", "mac")
-    assert _hosts_of(_result(capsys.readouterr().out)["deferred"]) == {"lin": step}
-    after = [kind for kind, alias in cluster.effects if alias == "lin"]
-    assert after[-1] == step, "nothing was sent to lin after it went dark"
+    if step == "preflight":
+        cluster.dead = ["lin"]
+    else:
+        cluster.fail[(step, "lin")] = 255 if step == "root-check" else 1
 
+    assert run("run") == 2
 
-def test_a_runner_unreachable_from_the_first_command_is_deferred_before_anything_stops(
-    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
-) -> None:
-    cluster, run = env
-    cluster.dead = ["lin"]
-    cluster.outside.add("lin")
-    assert run("run") == PARTIAL_FAILURE_EXIT
-    _assert_healthy_hosts_serve_new(cluster, "gw", "mac")
-    assert _hosts_of(_result(capsys.readouterr().out)["deferred"]) == {"lin": "preflight"}
-    assert [kind for kind, alias in cluster.effects if alias == "lin"] == []
+    output = capsys.readouterr().out
+    assert "lin: exit" in output and "refused before stop" in output
+    assert all(host["up"] and host["head"] == cluster.old for host in cluster.hosts.values())
+    assert not cluster.silence_open
+    assert not {"silence-open", "stop", "switch", "start", "oneshot"} & {
+        kind for kind, _ in cluster.effects
+    }
 
 
 def test_a_runner_whose_stop_fails_is_deferred_and_the_others_update(

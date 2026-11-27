@@ -16,18 +16,18 @@ which once mangled a record carrying a quoted `$HOME`.
 
 ## The failed stop
 
-Only after the gateway's stop or switch fails — which hosts the window took down and must bring
-back ([The failed-stop recovery](failed-stop-recovery.md)). A runner's failed command at any step
-defers that runner instead.
+A gateway stop or switch failure triggers recovery for the hosts the window already took down
+([The failed-stop recovery](failed-stop-recovery.md)). A failed runner stop in a
+schema-changing window aborts before the gateway stops and recovers the runners already stopped.
 
 ## Deferred runners
 
-A runner whose own state refuses it in the probe (uncommitted changes, a post-checkout hook, an
-unfinished release operation) or whose command fails or times out at any step is deferred, not a
-refusal and not an abort: `down` and `up` go on with the gateway and the other runners and the
-window exits 3 naming it ([One runner never strands the cluster](../fleet-update.md#one-runner-never-strands-the-cluster)).
-Malformed probe evidence and the cluster-wide gates (head disagreement, `.python-version`, the
-helper gate, the kept-root gate, the stored schedules) still refuse the whole window.
+Before the stop wave, an unreachable host, a refused host probe, a failed fetch,
+an unreadable kept-root check, a failed dependency pre-stage, or an incompatible target
+receipt aborts the entire window. Every selected host must be accounted for. After the
+stop wave begins, a failed runner command can defer that runner while the healthy hosts
+finish. The window exits 3 and names the runners it deferred
+([One runner never strands the cluster](../fleet-update.md#one-runner-never-strands-the-cluster)).
 
 ## The kept-root gate
 
@@ -43,8 +43,8 @@ a start of NEW would request with the operator's service selection, so the verdi
 that would refuse, not a guess from the diff. A host whose root NEW cannot reuse refuses the
 window (exit 2, nothing touched) and the message names the choice to make instead:
 `--close-shell-sessions` with `--keep-no-services`, which restarts the root on the new code. The
-fleet never changes the operator's choice for them. A host with no root passes; a check that
-could not run warns and the window goes on (the start would say the same thing for real).
+fleet keeps the operator's explicit choices. A confirmed absent root passes. A check that
+fails or cannot produce a compatible verdict refuses before the first stop.
 The target reader uses the host's future source checkout for its runtime environment,
 including that checkout's `.venv` in PATH and VIRTUAL_ENV. The disposable reader's
 import location supplies the target implementation, not the environment a future
@@ -52,9 +52,8 @@ start will launch. Those paths remain launch inputs: changing the actual runtime
 or the declared service PATH still refuses reuse, as do configuration or delivered
 write-generation changes.
 
-The gate also runs under `--dry-run`, where it fetches NEW's objects on each host (nothing else:
-no ref, no checkout) because its answer is NEW's. A window that stops everything has no root to
-check and skips it.
+A full stop replaces the root and skips the check. A dry run reports the check
+as skipped and leaves the target objects and worktree untouched.
 
 ## The stored-schedule gate
 
@@ -64,7 +63,8 @@ the gateway's own `meiva schedules verify` only exists after that start. So
 `down` checks first, the only code that may read the table being the home's
 own OLD checkout, and the check being NEW's, offline, under a throwaway home;
 both steps are real files whose text ships to the host, so their imports stay
-visible.
+visible. A dry run reports that it skipped this check and leaves the gateway
+receipt and worktree untouched.
 
 A pass leaves a receipt on the gateway (`updates/schedules-verified`, naming NEW).
 A `down` rerun after a failed stop finds the gateway's database already stopped,
@@ -95,18 +95,26 @@ credential still holds the sentinel.
 
 Every printed or logged line passes the secret redaction patterns first
 (bearer tokens, secret-named assignments, URL passwords), and the log is
-created 0600. The macOS one-shot writes its plist under a fresh 0700
+created 0600 for an executed window. A dry run uses console output only. The macOS one-shot writes its plist under a fresh 0700
 directory in the remote `/tmp` and is left loaded past the start deadline,
 reporting its label and log path; its label is its own
 (`com.meiva.fleet-update.*`), never a registrar's job.
 
 ## Contracts
 
-down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell, among them whether the host is already stopped: its last lifecycle operation (`run/lifecycle-op.json`) is a completed stop with rc 0 and no meiva-root is running. A stop counts only when `meiva stop` exits 0 and that journal then records it complete with rc 0; a start counts when `meiva start` exits 0, which it does only after readiness.
+`down` requires a passing preflight from every selected host and all required
+pre-stop checks before opening the silence. The stop journal records a complete
+operation with rc 0. A start counts when `meiva start` exits 0 after readiness.
 
-Before anything stops — under --dry-run too — down asks every host whether the root a kept-root choice leaves running can serve NEW ([The kept-root gate](#the-kept-root-gate)); a root of another generation refuses with exit 2. Then down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table warns with the rows listed, continuing; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
+An executed window checks the kept root when applicable and runs the stored-schedule
+check with its advisory policy. The target compatibility gate validates the configuration
+and both the Meiva and checkpoint migration sets. It permits pending Meiva migrations
+under the full-wave policy. The readiness receipts require the applied schema and
+the running SHA from standard service health endpoints to match the target.
 
-After a failed gateway stop or switch, down recovers the hosts that were taken down: [The failed-stop recovery](failed-stop-recovery.md). A runner failing at any step is deferred and never keeps the gateway or another healthy host stopped; a gateway start failure is the one failure that keeps the cluster stopped (the new start may have migrated the database).
+The stop and switch waves handle failures according to
+[The failed-stop recovery](failed-stop-recovery.md). A gateway start failure leaves
+the cluster stopped, since the new start may have migrated the database.
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up shortens it to a 10-minute post-up settle grace after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 

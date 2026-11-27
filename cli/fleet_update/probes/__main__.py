@@ -22,7 +22,7 @@ from services.supervision.roster.service_spec import ServiceSpec
 from .config import config_generation
 from .readiness import harness_readiness, service_readiness
 from .receipt import DomainReceipt, decode_receipt
-from .schema import schema_sets, schema_status, schema_version
+from .schema import checkpoint_status, schema_sets, schema_status, schema_version
 
 
 class ProbeArgs(argparse.Namespace):
@@ -77,17 +77,22 @@ def _domain(args: ProbeArgs, command: CommandRuntime, target: str) -> int:
         verify_live=not stage,
     )
     print(f"domain schema: target {target}, config {generation}", flush=True)
-    required, applied = schema_sets(
-        command.config.view.data_plane.db_url, command.checkout / "migrations"
-    )
-    checks = {"config": "ready", "schema": schema_status(required, applied, allow_pending=stage)}
+    db_url = command.config.view.data_plane.db_url
+    required, applied = schema_sets(db_url, command.checkout / "migrations")
+    schema = schema_status(required, applied, allow_pending=stage)
+    pending = required - applied if schema == "migration-pending" else set[str]()
+    checks = {
+        "config": "ready",
+        "schema": schema,
+        "checkpoint": checkpoint_status(db_url, required, pending=pending),
+    }
     if "agent-runner" in roles:
         checks.update(harness_readiness(env, user_home=command.session.user_home))
     roster = _roster(args, command)
     if stage:
         checks.update({spec.session: "selected" for spec in roster if spec.identity_probe})
     else:
-        checks.update(service_readiness(roster))
+        checks.update(service_readiness(roster, target=target))
     receipt = DomainReceipt(
         target,
         "runner" if pure_runner else "local",

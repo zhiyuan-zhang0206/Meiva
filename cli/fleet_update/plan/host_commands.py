@@ -35,7 +35,7 @@ INCOMPLETE = 'cat "$HOME/.meiva/state/converge-incomplete.json" 2>/dev/null'
 # meiva-root still holds its instance lock. One `key=value` per line.
 PROBE = f"""{HOME}
 printf '%s\\n' "head=$(git rev-parse HEAD)"
-printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
+printf '%s\\n' "dirty=$(git --no-optional-locks status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
 grep -q -- --no-message "$S/cli/parsers/host.py" 2>/dev/null && echo stop_message=yes || echo stop_message=no

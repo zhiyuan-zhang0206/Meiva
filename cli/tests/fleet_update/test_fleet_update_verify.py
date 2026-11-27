@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -10,6 +11,7 @@ from typing import cast
 
 import pytest
 
+from base.db import connect_url
 from base.host.env.boot_policy import MIRROR_HOST_PARAM, MirrorRejectedError, issue_config_mirror
 from base.host.env.bootstrap import read_config_mirror
 from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
@@ -219,7 +221,8 @@ def test_prestage_requests_and_atomically_publishes_only_authorized_mirrors(
 
 
 def _domain_line(target: str, *, config: str, applied: str, components: dict[str, str]) -> str:
-    return DomainReceipt(target, "runner", config, "e" * 64, applied, components).line()
+    checks = {"checkpoint": "ready", **components}
+    return DomainReceipt(target, "runner", config, "e" * 64, applied, checks).line()
 
 
 def test_down_waits_for_every_target_receipt_before_first_stop(
@@ -242,6 +245,7 @@ def test_down_waits_for_every_target_receipt_before_first_stop(
     [
         ("expired", "expired mirror"),
         ("legacy", "domain receipt version"),
+        ("checkpoint", "checkpoint schema is not current"),
         ("config", "runner config generation"),
         ("schema", "schema version"),
         ("harness", "harness/codex"),
@@ -261,12 +265,13 @@ def test_invalid_compatibility_evidence_refuses_the_entire_stop_wave(
         components={
             "config": "ready",
             "schema": "migration-pending" if fault == "schema" else "ready",
+            "checkpoint": "checkpoint schema is not current" if fault == "checkpoint" else "ready",
             "harness/codex": "version is incompatible" if fault == "harness" else "ready",
         },
     )
     cluster.probe_replies[("prepare", "lin")] = {
         "expired": (1, "domain config: expired mirror"),
-        "legacy": (0, 'FLEET_DOMAIN={"version":0}'),
+        "legacy": (0, receipt.replace('"version": 2', '"version": 1')),
     }.get(fault, (0, receipt))
 
     assert run("run") == 2
@@ -316,9 +321,7 @@ def test_up_only_reports_an_explicit_legacy_degradation(
     assert "mac: domain readiness unavailable on this legacy checkout" in output
 
 
-def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metadata(
-    tmp_path: Path, db_url: str, redis_url: str
-) -> None:
+def _probe_home(tmp_path: Path, db_url: str, redis_url: str) -> Path:
     home = tmp_path / ".meiva"
     home.mkdir()
     _ = (home / ".env").write_text(
@@ -328,19 +331,32 @@ def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metada
         f"MEIVA_DB_URL={db_url}\n"
         f"MEIVA_REDIS_URL={redis_url}\n"
     )
+    return home
+
+
+def _target_probe(
+    home: Path, phase: str, target: str, *selection: str
+) -> subprocess.CompletedProcess[str]:
     repo = repo_root()
-    target = git(repo, "rev-parse", "HEAD")
-    result = run_host_shell(
-        [sys.executable, "-m", "cli.fleet_update.probes", "prepare", target, "--all-services"],
+    return run_host_shell(
+        [sys.executable, "-m", "cli.fleet_update.probes", phase, target, *selection],
         cwd=repo,
         env={
-            "HOME": str(tmp_path),
+            "HOME": str(home.parent),
             "PATH": os.environ["PATH"],
             "MEIVA_HOME": str(home),
             "MEIVA_CONFIG_FETCH": "skip",
         },
         timeout=30,
     )
+
+
+def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metadata(
+    tmp_path: Path, db_url: str, redis_url: str
+) -> None:
+    home = _probe_home(tmp_path, db_url, redis_url)
+    target = git(repo_root(), "rev-parse", "HEAD")
+    result = _target_probe(home, "prepare", target, "--all-services")
 
     assert result.returncode == 0, (result.stdout, result.stderr)
     receipt = receipt_from_output(result.stdout, target=target)
@@ -349,8 +365,59 @@ def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metada
     assert receipt.components["schedule-manager"] == "selected"
     path = home / "updates" / "fleet-domain-receipt.json"
     assert path.stat().st_mode & 0o777 == 0o600
+    assert receipt.components["checkpoint"] == "ready"
     assert path.read_text() == receipt.encode()
     assert db_url not in result.stdout and db_url not in path.read_text()
+
+
+@pytest.mark.parametrize("phase", ["prepare", "ready"])
+def test_target_probe_rejects_a_gap_in_real_checkpoint_migrations(
+    tmp_path: Path, db_url: str, redis_url: str, phase: str
+) -> None:
+    home = _probe_home(tmp_path, db_url, redis_url)
+    target = git(repo_root(), "rev-parse", "HEAD")
+    with connect_url(db_url) as conn:
+        deleted = conn.execute("DELETE FROM checkpoint_migrations WHERE v = 0").rowcount
+    assert deleted == 1
+    try:
+        result = _target_probe(home, phase, target, "--only-service", "schedule-manager")
+    finally:
+        with connect_url(db_url) as conn:
+            _ = conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    receipt = receipt_from_output(result.stdout, target=target)
+    assert receipt.components["schema"] == "ready"
+    assert "missing=[0]" in receipt.components["checkpoint"]
+
+
+@pytest.mark.parametrize("version", ["target", "stale", "missing"])
+def test_target_readiness_requires_the_full_sha_from_the_live_service(
+    tmp_path: Path, db_url: str, redis_url: str, version: str
+) -> None:
+    home = _probe_home(tmp_path, db_url, redis_url)
+    target = git(repo_root(), "rev-parse", "HEAD")
+    stale = target[:7] + ("a" if target[7] != "a" else "b") + target[8:]
+    sha = {"target": target, "stale": stale, "missing": None}[version]
+    pidfile = home / "run" / "schedule_manager.pid"
+    pidfile.parent.mkdir()
+    _ = pidfile.write_text("1234")
+    with serve_json(
+        {"name": "schedule_manager", "home": str(home), "pid": 1234, "sha": sha}
+    ) as server:
+        with (home / ".env").open("a") as env_file:
+            _ = env_file.write(
+                f"MEIVA_SCHEDULE_MANAGER_HEALTH_PORT={server.url.rsplit(':', 1)[1]}\n"
+            )
+        result = _target_probe(home, "ready", target, "--only-service", "schedule-manager")
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    receipt = receipt_from_output(result.stdout, target=target)
+    state = receipt.components["schedule-manager"]
+    if version == "target":
+        assert state == "ready"
+    else:
+        assert state == f"running SHA {sha or 'unavailable'} differs from target {target}"
 
 
 def test_pending_schema_migration_recovers_stopped_runners_when_one_stop_fails(
@@ -364,7 +431,7 @@ def test_pending_schema_migration_recovers_stopped_runners_when_one_stop_fails(
             "c" * 64,
             "e" * 64,
             "d" * 64,
-            {"config": "ready", "schema": "migration-pending"},
+            {"config": "ready", "schema": "migration-pending", "checkpoint": "ready"},
         )
         cluster.probe_replies[("prepare", alias)] = (0, receipt.line())
     cluster.stop_fails["lin"] = 1
