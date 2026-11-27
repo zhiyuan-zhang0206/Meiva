@@ -16,7 +16,8 @@ from base.lm.catalog import ModelCatalog
 from base.lm.harness import HarnessTurnFaultedError, Usage
 from base.lm.harness.engine import HarnessTurn
 from base.lm.pricing.cache_writes import cache_write_tokens, default_write_ttl
-from base.lm.usage import UsageFields, log_usage_fields
+from base.lm.usage import UsageFields
+from base.lm.usage.receipt import log_receipted_usage_fields
 from base.log import logger
 
 
@@ -83,7 +84,7 @@ def log_turn_usage(
     model: str | None,
     turn: HarnessTurn,
     *,
-    receipts: ScheduledUsageReceipt | None = None,
+    receipts: UsageReceiptSubmitter | ScheduledUsageReceipt | None = None,
 ) -> None:
     entries = _reported_units(turn)
     if not entries:
@@ -119,7 +120,7 @@ def log_turn_usage(
                 call_id=f"{identity}:{index}",
                 unpriced_already_reported=index > 0,
             )
-            _ = log_usage_fields(
+            _ = log_receipted_usage_fields(
                 pricing_model,
                 fields,
                 usage_kind="agent",

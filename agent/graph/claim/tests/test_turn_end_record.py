@@ -5,7 +5,6 @@
 # meiva:link agent/graph/llm/docs/turn-records.md
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
@@ -33,6 +32,7 @@ from agent.graph.claim.tests.harness_support import (
     publications,
     runtime,
     silent_engine,
+    wait_until,
 )
 from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
@@ -45,13 +45,13 @@ from base.agents.history.transcript_timeline.record.harness import session_file
 from base.agents.tests.langgraph_views import command_update
 from base.agents.to_user.delivery.store import publish
 from base.api_contracts.agent_contract import Harness
-from base.api_contracts.usage import UsageLedgerWriteError
+from base.api_contracts.usage import UsageLedgerEntry
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.usage_ledger import bind_usage_ledger, usage_writer
+from base.db.usage_ledger import bind_usage_ledger
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
@@ -71,6 +71,7 @@ from base.lm.harness import (
 )
 from base.lm.harness.antigravity.tests.support import seed_replay_history, start
 from base.lm.harness.base_session import BaseHarnessSession, SessionBinding
+from base.lm.usage.receipt import UsageReceiptRuntime, UsageReceiptStore, decode_receipt
 from base.log.tests.log_records import LogRecords
 
 
@@ -376,7 +377,7 @@ class _UsageSessionConfig:
 
 
 @pytest.mark.parametrize("harness", (Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY))
-def test_restored_harness_generation_books_new_reports_once(
+async def test_restored_harness_generation_books_new_reports_once(
     harness: Harness, database: Database, tmp_path: Path
 ) -> None:
     source = harness.value
@@ -396,39 +397,44 @@ def test_restored_harness_generation_books_new_reports_once(
     ctx = replace(
         ctx, harness=harness, catalog=replace(ctx.require_catalog(), usage_ledger=lambda: ledger)
     )
-    for _ in range(2):
-        registry = FileSessionRegistry(tmp_path / "sessions")
-        session = Session(
-            _UsageSessionConfig(tmp_path), binding=SessionBinding(7, registry), clock=system_clock()
-        )
-        provider_session = session._resume_from_registry() or "resumed-session"
-        event = session.first_report(provider_session)
-        assert event.turn_id == "turn-1"
-        log_turn_usage(ctx, 7, session.model, completed_turn(event, ""))
-        log_turn_usage(ctx, 7, session.model, completed_turn(event, ""))
+    store = UsageReceiptStore(tmp_path, ledger.cluster)
+    receipts = UsageReceiptRuntime(store, ledger)
+    receipts.start()
+    try:
+        for _ in range(2):
+            registry = FileSessionRegistry(tmp_path / "sessions")
+            session = Session(
+                _UsageSessionConfig(tmp_path),
+                binding=SessionBinding(7, registry),
+                clock=system_clock(),
+            )
+            provider_session = session._resume_from_registry() or "resumed-session"
+            event = session.first_report(provider_session)
+            assert event.turn_id == "turn-1"
+            log_turn_usage(
+                ctx, 7, session.model, completed_turn(event, ""), receipts=receipts.submit
+            )
+            log_turn_usage(
+                ctx, 7, session.model, completed_turn(event, ""), receipts=receipts.submit
+            )
+        await wait_until(lambda: store.backlog().pending == 0, "ledger delivery")
+    finally:
+        await receipts.aclose(staging_timeout=1.0, delivery_timeout=5.0)
     with database.connect() as conn:
         rows = conn.execute("SELECT source, tokens_in FROM llm_usage_ledger").fetchall()
     assert rows == [(source, 100), (source, 100)]
 
 
-async def test_locked_ledger_preserves_every_report_and_finishes_the_turn(
+async def test_missing_receipt_runtime_logs_recoverable_usage_and_finishes_the_turn(
     database: Database,
-    db_url: str,
     db_conn: psycopg.Connection,
     tmp_path: Path,
     loguru_records: LogRecords,
     live_events: LiveEvents,
     harness_runtime: RuntimeFixture,
 ) -> None:
-    attempts = 0
-    writing = asyncio.Event()
-    loop = asyncio.get_running_loop()
-
-    def connect() -> psycopg.Connection:
-        nonlocal attempts
-        attempts += 1
-        _ = loop.call_soon_threadsafe(writing.set)
-        return psycopg.connect(db_url, options="-c statement_timeout=80")
+    def write(_entry: UsageLedgerEntry) -> bool:
+        pytest.fail("the harness attempted to write the ledger directly")
 
     reply = "MEIVA_DISPLAY_TO_USER\npaid reply"
 
@@ -443,27 +449,21 @@ async def test_locked_ledger_preserves_every_report_and_finishes_the_turn(
     engine = FakeEngine(script=lambda inputs: turn(tuple(inputs)))
     ctx = harness_runtime(engine, agent_id=agent_id, publisher=live_events.publisher).context
     ledger = bind_usage_ledger(lambda: database, lambda: "test", tmp_path)
-    ledger = replace(ledger, write=usage_writer(connect))
+    ledger = replace(ledger, write_usage_row=write)
     ctx = replace(ctx, catalog=replace(ctx.require_catalog(), usage_ledger=lambda: ledger))
     state = AgentState(harness_inputs=[{"key": "test-input", "prompt": "do it"}])
-    with psycopg.connect(db_url) as blocker:
-        blocker.execute("LOCK TABLE llm_usage_ledger IN ACCESS EXCLUSIVE MODE")
-        task = asyncio.create_task(harness_turn_node(state, Runtime(context=ctx), config(agent_id)))
-        await asyncio.wait_for(writing.wait(), timeout=10)
-        assert not task.done()
-        with pytest.raises(UsageLedgerWriteError) as failure:
-            await task
-        assert isinstance(failure.value.__cause__, psycopg.errors.QueryCanceled)
-    assert attempts == 4
+
+    _ = await harness_turn_node(state, Runtime(context=ctx), config(agent_id))
+
     assert [event["role"] for event in await live_events.object_events()].count("llm_done") == 1
-    observations = loguru_records.events("llm_usage")
-    assert [record["extra"]["in_total"] for record in observations] == [100, 200]
-    failed = loguru_records.events("llm_usage_ledger_write_failed")
-    assert [record["extra"]["call_id"] for record in observations] == [
-        record["extra"]["call_id"] for record in failed
-    ]
-    with psycopg.connect(db_url) as conn:
-        assert conn.execute("SELECT count(*) FROM llm_usage_ledger").fetchone() == (0,)
+    receipts: list[UsageLedgerEntry] = []
+    for extra in loguru_records.extras(message="recover receipt_json="):
+        data = extra.get("receipt_json")
+        if isinstance(data, str):
+            assert extra["receipt_status"] == "fallback_logged"
+            receipts.append(decode_receipt(data.encode()))
+    assert [entry.tokens_in for entry in receipts] == [100, 200]
+    assert len({entry.call_id for entry in receipts}) == 2
 
 
 _MARKED = "MEIVA_HIDE_FROM_USER\nWorking on it."

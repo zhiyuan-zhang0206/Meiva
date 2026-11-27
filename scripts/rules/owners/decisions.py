@@ -12,11 +12,15 @@ from dataclasses import dataclass, field
 
 from meizel.api import allowances
 
+from scripts.rules.owners import runtime_boundaries
+from scripts.rules.owners.runtime_boundaries import import_errors as import_errors
+
 __all__ = [
     "Decision",
     "Sites",
     "allowlist_errors",
     "decision_table",
+    "import_errors",
     "missing_allowlist_errors",
     "owner_bypasses",
     "site_message",
@@ -155,6 +159,7 @@ _POSTGRES_DIAL_WHY = (
 def decision_table(policy: allowances.Policy) -> dict[str, Decision]:
     owners = frozenset(policy.names("single-owner", "postgres-dial-owners"))
     return {
+        **_runtime_state_decisions(policy),
         "postgres-dial": Decision(
             owners=owners,
             find=_postgres_dials,
@@ -165,6 +170,41 @@ def decision_table(policy: allowances.Policy) -> dict[str, Decision]:
             ),
             why=_POSTGRES_DIAL_WHY,
             allowed=policy.reasons("single-owner", "postgres-dial"),
+        ),
+    }
+
+
+def _state_owners(policy: allowances.Policy, section: str) -> frozenset[str]:
+    if policy.section_shape("single-owner", section) != "names":
+        return frozenset()
+    return frozenset(policy.names("single-owner", section))
+
+
+def _runtime_state_decisions(policy: allowances.Policy) -> dict[str, Decision]:
+    return {
+        "usage-ledger-insert": Decision(
+            owners=_state_owners(policy, "usage-ledger-insert-owners"),
+            find=runtime_boundaries.ledger_inserts,
+            fix="append through base/db/usage_ledger.py and submit usage receipts on request paths",
+            why="one append owner enforces call identity and replay conflict handling",
+        ),
+        "usage-ledger-reprice": Decision(
+            owners=_state_owners(policy, "usage-ledger-reprice-owners"),
+            find=runtime_boundaries.ledger_updates,
+            fix="reprice through services/upkeep/events_maintenance/ledger_repricing.py",
+            why="historical price repair owns in-place ledger changes",
+        ),
+        "usage-ledger-writer": Decision(
+            owners=_state_owners(policy, "usage-ledger-writer-owners"),
+            find=runtime_boundaries.ledger_writer_access,
+            fix="submit usage receipts through the service-owned staging runtime",
+            why="the native accounting emitter and the receipt delivery worker own ledger writes",
+        ),
+        "bootstrap-mirror": Decision(
+            owners=_state_owners(policy, "bootstrap-mirror-owners"),
+            find=runtime_boundaries.mirror_paths,
+            fix="use stage_config_mirror or read_config_mirror in base/host/env/bootstrap.py",
+            why="one owner verifies the signed, host-bound envelope before changing local state",
         ),
     }
 

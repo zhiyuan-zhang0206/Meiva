@@ -379,12 +379,13 @@ class _TypeContext:
     def errors(self, rel: str, tree: ast.Module) -> list[str]:
         walrus = any(isinstance(n, ast.NamedExpr) for n in ast.walk(tree))
         scan = scan_tree(self.universe, rel, tree, self.sources, walrus=walrus, policy=self.policy)
-        return [
+        errors = [
             f"{rel}:{line}: {message}"
             for line, message in type_checking_violations(
                 type_checking_lines(scan), rel, self.allowed, self.packages
             )
         ]
+        return errors + decisions.import_errors(scan.facts)
 
 
 def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext | None, list[str]]:

@@ -444,7 +444,7 @@ def _dispatch_booking(
         if submit_receipt is not None:
             _ = submit_receipt(entry)
             return True
-        return ledger.write(entry)
+        return ledger.write_usage_row(entry)
     except UsageLedgerConflictError:
         raise
     except UsageLedgerWriteError:

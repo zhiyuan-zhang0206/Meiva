@@ -51,7 +51,7 @@ class UsageLedgerRejectedError(UsageLedgerWriteError):
 
 @dataclass(frozen=True, slots=True)
 class UsageLedger:
-    write: Callable[[UsageLedgerEntry], bool]
+    write_usage_row: Callable[[UsageLedgerEntry], bool]
     machine: Callable[[], str]
     cluster: str
     new_call_id: Callable[[], str]

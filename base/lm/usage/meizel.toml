@@ -3,7 +3,7 @@ exports = ["__init__.py", "metering.py", "receipt.py", "reporting.py"]
 [uses]
 "__init__.py" = []
 "metering.py" = ["__init__.py", "reporting.py"]
-"receipt.py" = []
+"receipt.py" = ["__init__.py"]
 "reporting.py" = []
 
 [purity]

@@ -1,5 +1,10 @@
 exports = ["embeddinggemma", "insights", "labeler", "memory_indexer", "memory_search"]
 
 [uses]
-"memory_indexer" = ["embeddinggemma"]
-"memory_search" = ["memory_indexer"]
+"memory_indexer/embeddings/factory.py" = ["embeddinggemma/contract.py", "embeddinggemma/placement.py"]
+"memory_indexer/tests" = ["embeddinggemma/contract.py"]
+"memory_search/app.py" = ["memory_indexer/backends/base.py"]
+"memory_search/daemon.py" = ["memory_indexer/embeddings/factory.py"]
+"memory_search/snapshot.py" = ["memory_indexer/backends/base.py"]
+"memory_search/store.py" = ["memory_indexer/backends/base.py"]
+"memory_search/tests" = ["memory_indexer"]

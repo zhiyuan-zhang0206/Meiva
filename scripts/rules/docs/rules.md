@@ -10,6 +10,23 @@ policy reader. They read their exemptions from tables in `meizel.policy.toml`, a
 `[sections]` table there declares the shape of each table (see the checker's policy document), so
 `policy diff` and the policy-removal gate review them the same way as the checker's own tables.
 
+## Runtime boundaries
+
+The structure gate checks meizel's resolved imports. Claim execution composes
+its timeline through `ReadTimelineSink`. Completed-record settlement uses
+record location helpers. Quote admission consumes canonical source identities.
+The legacy cursor module owns the remaining display-based lookup.
+
+Gateway and claim request paths stage external accounting through service-owned
+receipts. The direct native provider emitters and the receipt delivery worker
+hold the row-write capability. The database adapter owns ledger appends and
+replay. The repricing service owns historical price updates. Raw ledger
+mutations and the row-write capability have explicit owners in `[single-owner]`.
+
+The authorized bootstrap mirror and enrollment-marker filenames belong to the
+bootstrap module. Other modules use its mirror APIs, which validate the signed,
+host-bound envelope before staging.
+
 ## Contents
 
 - `owners/`: one owner per external capability. `decisions.py` holds Rule 5: each design
