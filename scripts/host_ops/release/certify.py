@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # meiva:note
 # Precheck and mint Git-native `meiva-release/v1` release certificates and advance `channel/latest`
-# on `main` Release Train certifications without opening reverse pull requests.
+# on `main` Release Train certifications. Report packaging needs from each platform's manifest
+# so the downstream jobs can update the client feeds and publish the installer release.
 # meiva:link docs/conventions/engineering/host-versioning.md
 
 from __future__ import annotations

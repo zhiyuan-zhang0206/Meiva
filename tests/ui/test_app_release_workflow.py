@@ -21,7 +21,7 @@ def test_tauri_cli_is_exactly_pinned() -> None:
 
 def test_tag_releases_fail_closed_without_every_platform_signature() -> None:
     text = _workflow()
-    assert 'if [ "$EVENT_NAME" = "push" ]; then' in text
+    assert 'if [ "$PUBLISH_RELEASE" = true ]; then' in text
     assert "Release tags require updater signing" in text
     assert "Release tags require Apple signing and notarization" in text
 
@@ -45,15 +45,16 @@ def test_android_latest_publishes_the_manifest_with_the_apk() -> None:
     text = _android_workflow()
     assert "build_android_release.py manifest" in text
     assert "--out release-assets/android-latest.json" in text
-    assert "assets=(release-assets/*.apk)" in text
-    assert 'gh release upload "$TAG" "${assets[@]}" --clobber' in text
+    assert '"$apk" release-assets/android-latest.json' in text
+    assert "publish_feed.py --tag android-latest" in text
 
 
 def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
     text = _android_workflow()
     assert "dry_run:" in text
     assert "default: true" in text
-    assert "github.event_name != 'workflow_dispatch' || inputs.dry_run != true" in text
+    assert "toJSON(inputs.dry_run) == 'false'" in text
+    assert "if: needs.prepare.outputs.publish == 'true'" in text
 
 
 def test_android_publish_refuses_to_roll_the_channel_back() -> None:

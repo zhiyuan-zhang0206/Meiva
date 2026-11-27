@@ -6,16 +6,15 @@
 # Dispatch with `verify_only=true` to run the matrix on the workflow's exact commit without
 # publishing. Pull requests editing this workflow exercise the same read-only path.
 #
-# Products on success (all Git-native, zero reverse pull requests to `main`):
+# Cluster certification products on success (Git-native):
 #   - immutable annotated tag `vYYYY.MM.DD.HHMMSS` (or `vYYYY.MM.DD.HHMMSS-hf<N>`) carrying a
 #     `meiva-release/v1` JSON certificate bound to the peeled commit SHA;
 #   - moving annotated tag `channel/latest` carrying a `meiva-channel/v1` JSON pointer when
 #     certifying `refs/heads/main` (non-hotfix).
 #
-# Nothing is published to the GitHub Releases page. A certified cluster release is a Git tag plus
-# channel pointers, nothing in this repository reads a `v*` Release object, and a repository has a
-# single `Latest` badge that belongs to the artifact release (`android-v*`). `promote-release.yml`
-# promotes to `channel/stable` the same way.
+# Cluster certification and promotion use the Git refs above. The downstream client packaging
+# jobs update the platform feeds, and a train that packages clients publishes the unified
+# `client-v<version>` installer release as the repository's GitHub Latest.
 #
 # A cron slot GitHub never started is backfilled with `main-typecheck.yml` (`workflow_dispatch`),
 # which runs the full-tree type check and publishes nothing.
@@ -745,3 +744,108 @@ jobs:
       target_sha: ${{ needs.certify.outputs.sha }}
       publish: true
     secrets: inherit
+
+  publish-client-release:
+    name: Publish unified client downloads
+    needs: [certify, release-app, release-android]
+    if: >-
+      !cancelled() && !failure() &&
+      github.event_name != 'pull_request' &&
+      inputs.verify_only != true &&
+      (needs.release-app.result == 'success' || needs.release-android.result == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Stage the current installers
+        id: installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.certify.outputs.sha }}
+          APP_VERSION: ${{ needs.release-app.outputs.version }}
+          ANDROID_VERSION: ${{ needs.release-android.outputs.version }}
+        run: |
+          mkdir installers
+          gh release download app-latest --pattern latest.json --dir "$RUNNER_TEMP"
+          gh release download android-latest --pattern android-latest.json --dir "$RUNNER_TEMP"
+          macos="$(jq -er '.version' "$RUNNER_TEMP/latest.json")"
+          android="$(jq -er '.versionName' "$RUNNER_TEMP/android-latest.json")"
+
+          check_feed() {
+            local current="$1" expected="$2" manifest="$3"
+            if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid client version in $manifest"
+              return 1
+            fi
+            if [ -n "$expected" ]; then
+              if [ "$current" != "$expected" ] ||
+                  [ "$(jq -er '.commit' "$manifest")" != "$TARGET_SHA" ]; then
+                echo "::error::Updater feed $manifest no longer advertises this build"
+                return 1
+              fi
+            fi
+          }
+          check_feed "$macos" "$APP_VERSION" "$RUNNER_TEMP/latest.json"
+          check_feed "$android" "$ANDROID_VERSION" "$RUNNER_TEMP/android-latest.json"
+          if [ -n "$APP_VERSION" ] && [ -n "$ANDROID_VERSION" ] && [ "$APP_VERSION" != "$ANDROID_VERSION" ]; then
+            echo "::error::The two builds disagree on the client version"
+            exit 1
+          fi
+
+          dmg="Meiva_${macos}_universal.dmg"
+          apk="meiva-app-$android.apk"
+          gh release download app-latest --pattern "$dmg" --dir installers
+          gh release download android-latest --pattern "$apk" --dir installers
+          checksum="$(jq -er '.sha256' "$RUNNER_TEMP/android-latest.json")"
+          printf '%s  installers/%s\n' "$checksum" "$apk" | sha256sum --check
+
+          version="${APP_VERSION:-$ANDROID_VERSION}"
+          test -n "$version"
+          printf 'version=%s\ndmg=%s\napk=%s\n' "$version" "$dmg" "$apk" >> "$GITHUB_OUTPUT"
+          printf 'macOS Universal %s and Android %s.\n\nRelease train commit: `%s`\n' \
+            "$macos" "$android" "$TARGET_SHA" > "$RUNNER_TEMP/client-release-notes.md"
+
+      - name: Ensure the client tag identifies the certified commit
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          TARGET_SHA: ${{ needs.certify.outputs.sha }}
+          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
+        run: |
+          tag="client-v$CLIENT_VERSION"
+          ref="refs/tags/$tag"
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+            --jq ".[] | select(.ref == \"$ref\") | .object.sha")"
+          if [ -z "$actual" ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="$ref" -f sha="$TARGET_SHA" >/dev/null
+          elif [ "$actual" != "$TARGET_SHA" ]; then
+            peeled="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+            if [ "$peeled" != "$TARGET_SHA" ]; then
+              echo "::error::$tag already identifies $peeled instead of $TARGET_SHA"
+              exit 1
+            fi
+          fi
+
+      - name: Publish the client Latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
+          DMG: ${{ steps.installers.outputs.dmg }}
+          APK: ${{ steps.installers.outputs.apk }}
+        run: |
+          tag="client-v$CLIENT_VERSION"
+          title="Meiva App $CLIENT_VERSION"
+          notes="$RUNNER_TEMP/client-release-notes.md"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "installers/$DMG" "installers/$APK" --clobber
+            gh release edit "$tag" --draft=false --prerelease=false --latest \
+              --title "$title" --notes-file "$notes"
+          else
+            gh release create "$tag" "installers/$DMG" "installers/$APK" --verify-tag --latest \
+              --title "$title" --notes-file "$notes"
+          fi

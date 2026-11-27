@@ -26,6 +26,10 @@ on:
     tags:
       - 'android-v[0-9]+.[0-9]+.[0-9]+'
   workflow_call:
+    outputs:
+      version:
+        description: 'Version published to the updater feed'
+        value: ${{ jobs.publish.outputs.version }}
     inputs:
       release_tag:
         description: 'Certified cluster release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
@@ -79,7 +83,10 @@ jobs:
     name: Resolve app version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    env:
+      PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish == true || (github.event_name == 'workflow_dispatch' && toJSON(inputs.dry_run) == 'false') }}
     outputs:
+      publish: ${{ steps.version.outputs.publish }}
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.build.outputs.build_number }}
       target_sha: ${{ steps.version.outputs.target_sha }}
@@ -93,7 +100,7 @@ jobs:
         id: version
         env:
           REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
+          EVENT_NAME: ${{ github.event_name }}
           RUN_NUMBER: ${{ github.run_number }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -103,7 +110,7 @@ jobs:
 
           cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
           cargo_version = cargo["package"]["version"]
-          if os.environ["REF_TYPE"] == "tag":
+          if os.environ["EVENT_NAME"] == "push":
               match = re.fullmatch(r"android-v(\d+\.\d+\.\d+)", os.environ["REF_NAME"])
               if match is None:
                   raise SystemExit(f"invalid Android release tag: {os.environ['REF_NAME']}")
@@ -134,6 +141,7 @@ jobs:
               output.write(f"release_tag={os.environ.get('RELEASE_TAG', '')}\n")
           PY
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Compute the build number
         id: build
@@ -148,13 +156,15 @@ jobs:
   android:
     name: Android (APK)
     needs: prepare
+    outputs:
+      built_at: ${{ steps.collect.outputs.built_at }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      EVENT_NAME: ${{ github.event_name }}
+      PUBLISH_RELEASE: ${{ needs.prepare.outputs.publish }}
       NDK_VERSION: 27.2.12479018
       BUILD_TOOLS_VERSION: '36.0.0'
       APP_VERSION: ${{ needs.prepare.outputs.version }}
@@ -224,7 +234,7 @@ jobs:
             echo "Android signing secrets are only partially configured" >&2
             exit 1
           fi
-          if { [ "$EVENT_NAME" = "push" ] || [ "$EVENT_NAME" = "workflow_call" ]; } && [ "$missing" -gt 0 ]; then
+          if [ "$PUBLISH_RELEASE" = true ] && [ "$missing" -gt 0 ]; then
             echo "Release tags require Android signing" >&2
             exit 1
           fi
@@ -269,14 +279,17 @@ jobs:
           fi
 
       - name: Collect artifacts
+        id: collect
         run: |
           mkdir -p dist
-          find ui/app/src-tauri/gen/android -name '*.apk' -exec cp {} dist/ \;
+          apk="$(find ui/app/src-tauri/gen/android -name '*.apk' -print -quit)"
+          cp "$apk" "dist/meiva-app-$APP_VERSION.apk"
           ls -l dist
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: app-android
+          name: android-app
           path: dist/
           if-no-files-found: error
 
@@ -289,52 +302,40 @@ jobs:
       contents: write # create the release and upload its assets
     # A manual dispatch may build and inspect the APK without touching the
     # channel phones update from; release-gate workflow_call and tag runs publish.
-    if: >-
-      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true) &&
-      (github.event_name != 'workflow_call' || inputs.publish != false)
+    if: needs.prepare.outputs.publish == 'true'
+    outputs:
+      version: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.target_sha }}
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Stage the release APK
-        env:
-          APP_VERSION: ${{ needs.prepare.outputs.version }}
-        shell: bash
-        run: |
-          shopt -s nullglob
-          apks=(artifacts/*.apk)
-          if [ "${#apks[@]}" -ne 1 ]; then
-            echo "expected exactly one APK artifact, found ${#apks[@]}" >&2
-            exit 1
-          fi
-          mkdir -p release-assets
-          cp "${apks[0]}" "release-assets/meiva-app-$APP_VERSION.apk"
+          name: android-app
+          path: release-assets
 
       - name: Build the update manifest
         # Only the mutable channel carries the manifest; a tag release is an
         # immutable milestone the app does not consult.
-        if: github.ref_type != 'tag'
+        if: github.event_name != 'push'
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          BUILT_AT: ${{ needs.android.outputs.built_at }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
           python3 scripts/codegen/build_android_release.py manifest \
             --version-code "$BUILD_NUMBER" \
             --version-name "$APP_VERSION" \
             --apk "release-assets/meiva-app-$APP_VERSION.apk" \
-            --commit "$TARGET_SHA" \
+            --commit "$TARGET_SHA" --built-at "$BUILT_AT" \
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/android-latest.json
 
       - name: Refuse to move the channel backwards
-        if: github.ref_type != 'tag'
+        if: github.event_name != 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
@@ -343,42 +344,40 @@ jobs:
           mkdir -p "$previous"
           if gh release download android-latest --pattern android-latest.json \
               --dir "$previous" 2>/dev/null; then
-            python3 scripts/codegen/build_android_release.py assert-advances \
-              --current "$previous/android-latest.json" \
-              --version-code "$BUILD_NUMBER"
+            if ! cmp -s "release-assets/android-latest.json" "$previous/android-latest.json"; then
+              python3 scripts/codegen/build_android_release.py assert-advances \
+                --current "$previous/android-latest.json" \
+                --version-code "$BUILD_NUMBER"
+            fi
           else
             echo "android-latest carries no manifest yet; this run publishes the first one"
           fi
 
-      - name: Create the release and upload its assets
+      - name: Publish the Android release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          REF_TYPE: ${{ github.ref_type }}
+          EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          BUILT_AT: ${{ needs.android.outputs.built_at }}
         run: |
-          if [ "$REF_TYPE" = "tag" ]; then
-            # Formal release: one tag, one release, history preserved.
-            TAG="$REF_NAME"
-          else
-            # main-branch build (or manual dispatch): keep a single mutable
-            # android-latest prerelease asset; users always download the newest.
-            TAG="android-latest"
-          fi
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            if [ "$REF_TYPE" = "tag" ]; then
-              gh release create "$TAG" --title "Meiva App Android $TAG" \
-                --notes "Meiva App Android APK release."
-            else
-              gh release create "$TAG" --title "Meiva App Android latest" \
-                --notes "Latest APK built from main." --prerelease
+          apk="release-assets/meiva-app-$APP_VERSION.apk"
+          if [ "$EVENT_NAME" = "push" ]; then
+            if ! gh release view "$REF_NAME" >/dev/null 2>&1; then
+              gh release create "$REF_NAME" --verify-tag --latest=false \
+                --title "Meiva App Android $REF_NAME" --notes "Meiva App Android APK release."
             fi
+            gh release upload "$REF_NAME" "$apk" --clobber
+          else
+            notes="$(printf 'Version: %s\n\nVersion code: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' \
+              "$APP_VERSION" "$BUILD_NUMBER" "$TARGET_SHA" "$BUILT_AT")"
+            if ! gh release view android-latest >/dev/null 2>&1; then
+              gh release create android-latest --target "$TARGET_SHA" --prerelease --latest=false \
+                --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes"
+            fi
+            python3 scripts/host_ops/release/publish_feed.py --tag android-latest \
+              --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes" \
+              "$apk" release-assets/android-latest.json
           fi
-          # Upload the APK before the manifest: while the APK is being
-          # replaced, the old manifest's sha256 no longer matches, so a client
-          # refuses the half-updated channel instead of installing it. A tag
-          # release has no manifest to upload.
-          assets=(release-assets/*.apk)
-          if [ -f release-assets/android-latest.json ]; then
-            assets+=(release-assets/android-latest.json)
-          fi
-          gh release upload "$TAG" "${assets[@]}" --clobber

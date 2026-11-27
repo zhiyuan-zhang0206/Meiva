@@ -61,7 +61,14 @@ def test_preflight_checks_its_dispatch_commit_and_cannot_publish() -> None:
 
 def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train() -> None:
     jobs = _yaml(_RELEASE_GATE)["jobs"]
-    assert set(jobs) == {"precheck", "certify", "release-app", "release-android", *_CHECKS}
+    assert set(jobs) == {
+        "precheck",
+        "certify",
+        "release-app",
+        "release-android",
+        "publish-client-release",
+        *_CHECKS,
+    }
     for name in _CHECKS:
         job = jobs[name]
         assert job["needs"] == "precheck"
@@ -166,16 +173,44 @@ def test_cluster_release_workflows_publish_no_github_release() -> None:
     # meiva:note
     # A certified cluster release is a Git tag plus channel pointers; no consumer in this
     # repository reads a `v*` Release object, and re-creating one per train leaves empty shells
-    # and takes the single `Latest` badge away from the `android-v*` artifact release.
+    # and takes the single `Latest` badge away from the unified client release.
     # meiva:link docs/decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md
-    for path in (_RELEASE_GATE, _PROMOTE_RELEASE):
-        scripts = [
-            step["run"]
-            for job in _yaml(path)["jobs"].values()
-            for step in job.get("steps", [])
-            if "run" in step
+    for path, job_name in ((_RELEASE_GATE, "certify"), (_PROMOTE_RELEASE, "promote")):
+        steps = _yaml(path)["jobs"][job_name]["steps"]
+        assert all("gh release" not in step.get("run", "") for step in steps), path
+
+
+def test_unified_release_waits_for_successful_client_builds() -> None:
+    job = _yaml(_RELEASE_GATE)["jobs"]["publish-client-release"]
+    assert set(job["needs"]) == {"certify", "release-app", "release-android"}
+    assert "!cancelled() && !failure()" in job["if"]
+    assert (
+        "needs.release-app.result == 'success' || needs.release-android.result == 'success'"
+        in job["if"]
+    )
+    assert "github.event_name != 'pull_request'" in job["if"]
+    assert "inputs.verify_only != true" in job["if"]
+
+
+def test_client_artifact_download_is_scoped_and_tag_namespaces_are_disjoint() -> None:
+    workflows = _REPO_ROOT / ".github" / "workflows"
+    app = _yaml(workflows / "release-app.yml")
+    android = _yaml(workflows / "release-android.yml")
+    assert app[True]["push"]["tags"] == ["app-v[0-9]+.[0-9]+.[0-9]+"]
+    assert android[True]["push"]["tags"] == ["android-v[0-9]+.[0-9]+.[0-9]+"]
+    for workflow, expected in (
+        (app, {"pattern": "app-*"}),
+        (android, {"name": "android-app"}),
+    ):
+        downloads = [
+            step["with"]
+            for step in workflow["jobs"]["publish"]["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
         ]
-        assert all("gh release" not in script for script in scripts), path
+        assert len(downloads) == 1
+        assert {
+            key: downloads[0][key] for key in ("pattern", "name") if key in downloads[0]
+        } == expected
 
 
 def test_promote_workflow_verifies_certificate_and_updates_channel_stable() -> None:

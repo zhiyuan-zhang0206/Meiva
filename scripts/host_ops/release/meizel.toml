@@ -1,4 +1,4 @@
-exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "publish_feed.py", "tag.py"]
 
 [uses]
 "base.py" = ["git_tags.py"]
@@ -7,7 +7,7 @@ exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.
 "evidence.py" = ["git_tags.py"]
 "promote.py" = ["git_tags.py"]
 "tag.py" = ["git_tags.py"]
-"tests" = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+"tests" = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "publish_feed.py", "tag.py"]
 
 [roots]
 "base.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
@@ -17,3 +17,4 @@ exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.
 "nightly.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "promote.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "tag.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"publish_feed.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
