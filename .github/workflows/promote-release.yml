@@ -1,8 +1,8 @@
 # Promote an already-certified CalVer release tag (`vYYYY.MM.DD.HHMMSS` or `-hf<N>`) to
 # `channel/stable` without re-running tests or opening reverse pull requests.
 #
-# Promotion moves a Git tag and nothing else: the GitHub Releases page stays reserved for artifact
-# releases (`android-v*`, `app-v*`), whose `Latest` badge a cluster release must not take.
+# Promotion moves the cluster's Git channel tag. The unified `client-v*` installer release
+# owns the GitHub Latest badge.
 
 name: Promote release to stable
 

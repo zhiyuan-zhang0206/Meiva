@@ -1,10 +1,11 @@
-# Build and publish the Meiva App (`ui/app`) for an `app-v*` tag.
+# Build the Meiva App (`ui/app`) for macOS and publish via a version tag,
+# a publishing reusable call, or a dispatch with dry_run=false.
 #
 # App versions move independently of the cluster, so the app has its own tag
 # namespace and its own release.
 #
 # A manual dispatch may omit signing secrets and produces unsigned validation
-# artifacts. A release tag fails closed unless updater signing and Apple
+# artifacts. Publication fails closed unless updater signing and Apple
 # signing and notarization credentials are all present: unsigned binaries must
 # never become public release assets.
 #

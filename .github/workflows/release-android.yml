@@ -11,9 +11,9 @@
 # An `android-v*` tag publishes one immutable release. Every other run replaces
 # the APK and `android-latest.json` in the mutable `android-latest` prerelease;
 # the manifest's fields (versionCode, versionName, apkUrl, sha256, commit,
-# builtAt) are the client update contract. Only a push or a dispatch with
-# dry_run=false publishes, and a publish refuses to move the channel backwards:
-# the upload guard compares the new versionCode with the manifest already
+# builtAt) are the client update contract. A version tag, a publishing reusable
+# call, or a dispatch with dry_run=false can publish. The versionCode guard
+# compares the new versionCode with the manifest already
 # advertised, so a late re-run of an older run cannot roll phones back.
 #
 # This workflow is deliberately independent of release-app.yml: Android signing
