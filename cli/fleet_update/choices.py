@@ -43,7 +43,12 @@ def _service_problems(
     if not named:
         return problems
     with scratch.make(prefix="meiva-update-roster-") as home:
-        roster_env = {**env, "MEIVA_HOME": str(home), "MEIVA_CONFIG_FETCH": "skip"}
+        roster_env = {
+            **env,
+            "MEIVA_HOME": str(home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
         run = [python, "-m", "services.supervision.roster"]
         done = subprocess.run(
             run, cwd=CODE_ROOT, env=roster_env, capture_output=True, text=True, check=False

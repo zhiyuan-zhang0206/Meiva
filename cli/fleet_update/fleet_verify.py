@@ -25,6 +25,7 @@ from .plan.roster import (
     unlisted_lines,
 )
 from .plan.verify_steps import drift_checks, duplicate_names, machine_name
+from .probes.collect import verify_receipts
 from .session import FailedError, Session
 
 
@@ -64,6 +65,7 @@ def roster(
     gateway_stdin: str,
     *,
     expect_offline: frozenset[str],
+    target: str | None = None,
 ) -> tuple[tuple[RosterRow, ...], str]:
     timeout = args.roster_timeout
     if timeout is None:
@@ -80,6 +82,8 @@ def roster(
             raise FailedError(f"no roster row for {list(missing)} (host aliases to names: {names})")
         seen = snapshot(rows, wanted, expect_offline)
         if seen.settled and seen.commit is not None:
+            if target is not None and seen.commit != target:
+                raise FailedError(f"roster is serving {seen.commit}, expected target {target}")
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
             return seen.listed, seen.commit
@@ -124,6 +128,7 @@ def verify(
     *,
     hosts: tuple[str, ...],
     started: frozenset[str],
+    target: str | None,
     gateway_stdin: str,
 ) -> tuple[list[HostFailure], dict[str, str], str]:
     # meiva:note
@@ -141,13 +146,16 @@ def verify(
             absent = readable_names(s, tuple(a for a in hosts if a not in started))
             failed_names = frozenset(absent.values())
             names = {**names, **absent}
-            _rows, commit = roster(s, args, names, gateway_stdin, expect_offline=failed_names)
+            _rows, commit = roster(
+                s, args, names, gateway_stdin, expect_offline=failed_names, target=target
+            )
         except FailedError as exc:
             failures += [HostFailure(alias, "roster", str(exc)) for alias in hosts]
         else:
-            for alias in hosts:
-                if alias not in started:
-                    skipped.setdefault(alias, "start failed")
+            skipped.update(dict.fromkeys(set(hosts) - started, "start failed"))
+        failures += verify_receipts(
+            s, args, tuple(alias for alias in hosts if alias in started), target or commit or None
+        )
     failures += refresh(s, hosts)
     failures += run_drift_checks(s, args.gateway, hosts)
     return failures, skipped, commit

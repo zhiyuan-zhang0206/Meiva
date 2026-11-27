@@ -1,8 +1,10 @@
 # The failed-stop recovery
 
-A *runner's* failed stop is not recovered: that runner is deferred and the window goes on without
-it ([One runner never strands the cluster](../fleet-update.md#one-runner-never-strands-the-cluster)).
-This page is what a failed *gateway* stop, or a failed gateway switch, does.
+The stop phase begins after all required pre-stop checks pass. A failed runner
+stop in a schema-changing window aborts before stopping the gateway and recovers
+runners already stopped. In a window with no pending schema migrations, a
+runner's failed stop defers that runner and the window continues. A failed
+gateway stop or switch also triggers recovery.
 
 Runners stop in parallel before the gateway stops, so a failure in the stop phase
 leaves the machines that already finished stopping serving nothing — and the window's
@@ -54,6 +56,12 @@ serving gateway first (runners are not started when the gateway could not be put
 
 ## Contract
 
-down's stop phase stops runners in parallel and then the gateway, so a failure in it waits for in-flight stops to settle and recovers what it took down: a host that was serving at preflight and is down now is started again when its stop completed here or its run/lifecycle-op.json records a failed or unfinished stop; a host still running, one already stopped before the window, and one this run never took down are never started; the recovery uses up's two-phase start shape (gateway first when needed, then runners in parallel; macOS through the one-shot LaunchAgent), rolls no code back, leaves the silence open, prints recovered: and needs manual:, and the half still fails with its usual exit code.
+When a failed stop aborts `down`, it waits for in-flight stops to finish. It
+starts a host again only when the host was serving at preflight, is now down,
+and completed a stop in this window or recorded a failed or unfinished stop
+in `run/lifecycle-op.json`. Recovery starts the gateway first when needed,
+then the runners in parallel, with the one-shot LaunchAgent on macOS. It
+leaves the code on OLD and the silence open, reports `recovered:` and
+`needs manual:`, and exits with the stop failure.
 
 Parent: [Fleet update window guarantees](fleet-update-window.md).

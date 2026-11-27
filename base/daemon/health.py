@@ -335,6 +335,7 @@ class DaemonProbe:
 
     verdict: ProbeVerdict
     detail: str
+    source_sha: str | None = None
 
     @property
     def alive(self) -> bool:
@@ -364,8 +365,8 @@ class DaemonProbe:
         return self.verdict in (ProbeVerdict.UNAVAILABLE, ProbeVerdict.INCONCLUSIVE)
 
     @classmethod
-    def up(cls, detail: str) -> DaemonProbe:
-        return cls(verdict=ProbeVerdict.ALIVE, detail=detail)
+    def up(cls, detail: str, *, source_sha: str | None = None) -> DaemonProbe:
+        return cls(verdict=ProbeVerdict.ALIVE, detail=detail, source_sha=source_sha)
 
     @classmethod
     def down(cls, detail: str) -> DaemonProbe:
@@ -684,13 +685,13 @@ def probe_daemon_identity(
             f"identity mismatch on {url}: healthz pid={got_pid!r} != pidfile pid={recorded} — "
             "a stray process holds this port"
         )
-    # The commit rides along in the detail, never in the verdict: a daemon on
+    # The commit is evidence separate from the liveness verdict: a daemon on
     # stale code is *alive*, and failing it here would have every watchdog
     # respawn its daemon the moment a rollout advances the checkout, racing the
     # orchestrated restart. Surfacing it is the job; acting on it is not.
     got_sha = payload.get("sha")
     if isinstance(got_sha, str) and got_sha:
-        return DaemonProbe.up(f"pid {recorded}, code {got_sha[:7]}")
+        return DaemonProbe.up(f"pid {recorded}, code {got_sha[:7]}", source_sha=got_sha)
     return DaemonProbe.up(f"pid {recorded}")
 
 

@@ -190,6 +190,7 @@ class Cluster:
         self.outside: set[str] = set()
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (0, [])
+        self.probe_replies: dict[tuple[str, str], tuple[int, str]] = {}
         self.root_checks: dict[str, tuple[int, str]] = {}
         self.roster_lag = 0
         self.roster_reply: str | None = None
@@ -259,6 +260,10 @@ class Cluster:
             "output": self.output,
             "stored_schedules": list(self.stored_schedules),
             "root_checks": {alias: list(answer) for alias, answer in self.root_checks.items()},
+            "probe_replies": {
+                f"{phase}|{alias}": list(answer)
+                for (phase, alias), answer in self.probe_replies.items()
+            },
             "roster_lag": self.roster_lag,
             "roster_reply": self.roster_reply,
             "incomplete": self.incomplete,

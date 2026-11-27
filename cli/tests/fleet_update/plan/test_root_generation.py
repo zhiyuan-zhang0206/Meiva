@@ -1,13 +1,13 @@
 # meiva:note
 # What the window concludes from NEW's answer about the root a host keeps: when the root is kept at
 # all, the command each host runs, and whether a changed generation refuses, a check that could
-# not run warns, or the host passes.
+# not run refuses, or the host passes.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 from __future__ import annotations
 
 import pytest
 
-from cli.fleet_update.plan.root_generation import root_check, root_check_script, root_is_kept
+from cli.fleet_update.plan.root_generation import root_check_script, root_is_kept, root_refusal
 
 NEW = "b" * 40
 
@@ -36,9 +36,9 @@ def test_the_command_names_new_the_hosts_checkout_and_the_quoted_selection() -> 
 
 @pytest.mark.parametrize("verdict", ["same", "none"])
 def test_a_root_that_serves_new_or_no_root_passes(verdict: str) -> None:
-    check = root_check("gw", f"ROOT_GENERATION={verdict}\nROOT_CHECK_RC=0", new=NEW)
+    refusal = root_refusal("gw", f"ROOT_GENERATION={verdict}\nROOT_CHECK_RC=0", new=NEW)
 
-    assert check.refusal is None and check.notes == ()
+    assert refusal is None
 
 
 def test_a_changed_generation_refuses_and_says_what_to_choose() -> None:
@@ -48,25 +48,21 @@ def test_a_changed_generation_refuses_and_says_what_to_choose() -> None:
         "configuration\nROOT_CHECK_RC=0"
     )
 
-    check = root_check("gw", output, new=NEW)
+    refusal = root_refusal("gw", output, new=NEW)
 
-    assert check.refusal is not None
-    assert check.refusal.startswith(
-        "gw: the meiva-root this window keeps cannot serve bbbbbbbbbbbb"
-    )
-    assert "root launch inputs" in check.refusal
-    assert "--close-shell-sessions with --keep-no-services" in check.refusal
+    assert refusal is not None
+    assert refusal.startswith("gw: the meiva-root this window keeps cannot serve bbbbbbbbbbbb")
+    assert "root launch inputs" in refusal
+    assert "--close-shell-sessions with --keep-no-services" in refusal
 
 
-def test_a_check_that_could_not_run_warns_and_does_not_refuse() -> None:
-    check = root_check("lin", "Traceback (most recent call last)\nROOT_CHECK_RC=1", new=NEW)
+def test_a_check_that_could_not_run_refuses() -> None:
+    refusal = root_refusal("lin", "Traceback (most recent call last)\nROOT_CHECK_RC=1", new=NEW)
 
-    assert check.refusal is None
-    assert len(check.notes) == 1 and "could not tell" in check.notes[0]
-    assert "check exited 1" in check.notes[0]
+    assert refusal is not None and "check exited 1" in refusal
 
 
-def test_a_host_that_could_not_fetch_new_is_reported_not_checked() -> None:
-    check = root_check("mac", f"SKIPPED: {NEW} cannot be fetched on this host", new=NEW)
+def test_a_live_root_is_not_absent_when_an_old_envelope_cannot_be_read() -> None:
+    refusal = root_refusal("gw", "ROOT_GENERATION=none\nROOT_CHECK_RC=0", new=NEW, was_running=True)
 
-    assert check.refusal is None and "not checked" in check.notes[0]
+    assert refusal is not None and "cannot prove the kept meiva-root" in refusal

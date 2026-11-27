@@ -1,8 +1,8 @@
 # meiva:note
 # The down half of a window: refuse what cannot work, name what the stops would end, stop every
-# runner and then the gateway, and switch every checkout to NEW. Only the gateway is essential: a
-# runner whose command fails at any step is deferred (left out, named in the summary) and the
-# window carries on with the healthy hosts. A failed gateway stop or switch ends the window and
+# runner and then the gateway, and switch every checkout to NEW. Every selected host must pass
+# preparation. Once the stop wave starts, a runner with a command failure can be deferred.
+# A failed gateway stop or switch ends the window and
 # brings every host this run stopped back on the commit it ran before. Each question a step asks
 # of a host is decided in `plan/`; this module reads the hosts, runs the commands and says the
 # lines those decisions return.
@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .choices import DownChoices, FleetArgs, forwarded_flags, message_flag, start_flags
 from .fleet_gate import baselines, git_in_repo, probe_helper, probe_host, resolve_target
@@ -34,11 +34,12 @@ from .plan.old_target import (
     unfetched_old_reason,
 )
 from .plan.recovery import Recovery, recovery_action, recovery_report
-from .plan.root_generation import root_check, root_check_script, root_is_kept
+from .plan.root_generation import root_check_script, root_is_kept, root_refusal
 from .plan.stop_wave import StopChoices, StopStep, stop_steps
 from .plan.stored_schedules import schedule_check
 from .plan.wave_order import start_order
 from .prestage import prestage_command
+from .probes.collect import prepare_receipts
 from .programs import (
     CHECK_ROWS_SCRIPT,
     VERIFY_SCRIPTS,
@@ -99,11 +100,17 @@ class _Preflight:
     rebuilding: frozenset[str] = frozenset()
     legacy_stop: frozenset[str] = frozenset()
     heads: Mapping[str, str] = field(default_factory=dict[str, str])
+    running_roots: frozenset[str] = frozenset()
+    schema_changes: bool = False
 
 
 def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
     s.run(alias, fetch_command(new))
     return probe_helper(s, alias, new)
+
+
+def _selected_hosts(args: FleetArgs) -> tuple[str, ...]:
+    return start_order(args.gateway, args.runner)
 
 
 def _hosts(s: Session, args: FleetArgs) -> tuple[str, ...]:
@@ -116,24 +123,19 @@ class _Verdict:
     legacy_stop: bool
 
 
-def _probe_verdict(
-    s: Session, args: FleetArgs, alias: str, facts: Mapping[str, str]
-) -> _Verdict | None:
+def _probe_verdict(alias: str, facts: Mapping[str, str]) -> _Verdict:
     try:
         reasons = host_refusals(alias, facts)
         legacy = not reasons and not supports_stop_message(alias, facts)
     except ValueError as exc:
         raise RefusedError(f"invalid host probe: {exc}") from exc
-    if reasons and alias != args.gateway:
-        s.defer(HostFailure(alias, "preflight", "; ".join(reasons)))
-        return None
     return _Verdict(reasons, legacy)
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     probed = s.gather_hosts(
-        _hosts(s, args),
+        _selected_hosts(args),
         gateway=args.gateway,
         step="preflight",
         work=lambda alias: probe_host(s, alias),
@@ -142,14 +144,15 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     heads: dict[str, str] = {}
     serving: list[str] = []
     legacy_stop: list[str] = []
+    running_roots: set[str] = set()
     for alias, (facts, was_serving) in probed.items():
-        verdict = _probe_verdict(s, args, alias, facts)
-        if verdict is None:
-            continue
+        verdict = _probe_verdict(alias, facts)
         reasons += verdict.reasons
         heads[alias] = facts.get("head", "")
         if verdict.legacy_stop:
             legacy_stop.append(alias)
+        if facts.get("root") == "up":
+            running_roots.add(alias)
         if was_serving:
             serving.append(alias)
     old = _old_target(s, args, heads, new)
@@ -166,6 +169,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
             frozenset(serving),
             legacy_stop=frozenset(legacy_stop),
             heads=heads,
+            running_roots=frozenset(running_roots),
         )
     probes = _fetch_gateway_first(s, args, new)
     rebuild = args.rebuild_extras
@@ -181,6 +185,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
         rebuilding=rebuilding,
         legacy_stop=frozenset(legacy_stop),
         heads=heads,
+        running_roots=frozenset(running_roots),
     )
 
 
@@ -188,7 +193,7 @@ def _fetch_gateway_first(s: Session, args: FleetArgs, new: str) -> dict[str, dic
     probes = {args.gateway: _fetch_and_probe(s, args.gateway, new)}
     probes.update(
         s.gather_hosts(
-            s.live(args.runner),
+            args.runner,
             gateway=args.gateway,
             step="fetch",
             work=lambda alias: _fetch_and_probe(s, alias, new),
@@ -198,7 +203,10 @@ def _fetch_gateway_first(s: Session, args: FleetArgs, new: str) -> dict[str, dic
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
-def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
+def _stored_schedules(s: Session, args: FleetArgs, new: str) -> str:
+    if args.dry_run:
+        s.say("stored-schedule verify: skipped (dry run does not stage a target worktree)")
+        return "skipped"
     out = s.run(
         args.gateway,
         pre_verify_script(
@@ -208,23 +216,25 @@ def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
             check_rows=program_text(CHECK_ROWS_SCRIPT),
             max_age_min=int(_chosen(args).silence_hours * 60),
         ),
-        effect=False,
     )
     check = schedule_check(out, allow_red=_chosen(args).red == "--allow-red-schedules", new=new)
     for note in check.notes:
         s.say(note)
     if check.refusal is not None:
         raise RefusedError(check.refusal)
+    return check.status
 
 
 # meiva:note
 # Before anything stops: could the root each host keeps serve NEW? A start over a live root of
 # another generation is refused, and `up` only meets that refusal after every service stopped.
-# Runs under `--dry-run` too (the check fetches NEW's objects and nothing else, to answer it).
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
-def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
+def _kept_roots(s: Session, args: FleetArgs, new: str, pre: _Preflight) -> None:
     chosen = _chosen(args)
     if not root_is_kept(shell=chosen.shell, kept=chosen.kept):
+        return
+    if args.dry_run:
+        s.say("kept-root check: skipped (dry run does not stage a target worktree)")
         return
     script = root_check_script(
         program_text(VERIFY_SCRIPTS / "fleet_pre_root_check.sh"),
@@ -233,18 +243,21 @@ def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
         names=args.named.get(args.selection, ()),
     )
     outputs = s.gather_hosts(
-        _hosts(s, args),
+        _selected_hosts(args),
         gateway=args.gateway,
         step="root check",
-        work=lambda alias: s.run(alias, script, effect=False),
+        work=lambda alias: s.run(alias, script),
     )
     refusals: list[str] = []
     for alias, output in outputs.items():
-        check = root_check(alias, output, new=new)
-        for note in check.notes:
-            s.say(note)
-        if check.refusal is not None:
-            refusals.append(check.refusal)
+        refusal = root_refusal(
+            alias,
+            output,
+            new=new,
+            was_running=alias in pre.running_roots,
+        )
+        if refusal is not None:
+            refusals.append(refusal)
     if refusals:
         raise RefusedError("refused: " + "; ".join(refusals))
 
@@ -352,13 +365,24 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
     )
     runner_steps, gateway_step = steps[:-1], steps[-1]
     stopped: list[str] = []
+    failed: list[HostFailure] = []
     for step, outcome in zip(
         runner_steps, s.gather(runner_steps, lambda step: _stop_one(s, step)), strict=True
     ):
         if isinstance(outcome, FailedError):
-            s.defer(HostFailure(step.alias, "stop", str(outcome)))
+            failed.append(HostFailure(step.alias, "stop", str(outcome)))
         else:
             stopped.append(step.alias)
+    if failed and pre.schema_changes:
+        _recover_after_failed_stop(
+            s, args, pre.serving, frozenset(stopped), frozenset(item.alias for item in failed)
+        )
+        raise FailedError(
+            "schema-changing rollout stopped before gateway: "
+            + "; ".join(item.line() for item in failed)
+        )
+    for failure in failed:
+        s.defer(failure)
     try:
         _stop_one(s, gateway_step)
     except FailedError as exc:
@@ -421,17 +445,20 @@ def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
     with s.timed("kept-root check"):
-        _kept_roots(s, args, new)
+        _kept_roots(s, args, new, pre)
     with s.timed("stored-schedule verify"):
-        _stored_schedules(s, args, new)
+        schedules = _stored_schedules(s, args, new)
+    hosts = _selected_hosts(args)
     with s.timed("prestage"):
-        s.gather_hosts(
-            _hosts(s, args),
+        _ = s.gather_hosts(
+            hosts,
             gateway=args.gateway,
             step="prestage",
             work=lambda alias: s.run(alias, prestage_command(new)),
         )
-    return pre
+    with s.timed("domain compatibility"):
+        schema_changes = prepare_receipts(s, args, hosts, new, schedules=schedules)
+    return replace(pre, schema_changes=schema_changes)
 
 
 def down(

@@ -2,7 +2,7 @@
 # The window's one connection to its hosts and the one log it keeps. Every command goes to a host
 # through the operator's own `ssh`, found on the PATH the process was started with; every line
 # the hosts print, and every line the window says, is redacted and written to both the console
-# and a log only its owner can read.
+# and an owner-only log for an executed window.
 # meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
 from threading import Lock
-from typing import IO, Protocol
+from typing import IO, Protocol, TextIO
 
 from .plan.host_commands import login_shell
 from .plan.host_failures import HostFailure
@@ -109,17 +109,24 @@ class Session:
         self.os: dict[str, str] = {}
         self.deferred: dict[str, HostFailure] = {}
         self._lock = Lock()
-        log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path = log_dir / f"{now:%Y%m%dT%H%M%S.%fZ}-{half}.log"
-        self.log = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
-        self.say(f"log: {path}")
+        self._log: TextIO | None = None
+        if not dry_run:
+            log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path = log_dir / f"{now:%Y%m%dT%H%M%S.%fZ}-{half}.log"
+            self._log = os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
+            self.say(f"log: {path}")
+
+    def close(self) -> None:
+        if self._log is not None:
+            self._log.close()
 
     def say(self, line: str) -> None:
         line = redact(line)
         with self._lock:
             print(line, flush=True)
-            self.log.write(line + "\n")
-            self.log.flush()
+            if self._log is not None:
+                _ = self._log.write(line + "\n")
+                self._log.flush()
 
     # meiva:note
     # Run one wave of independent host work concurrently, waiting for every task in the wave to
@@ -152,17 +159,28 @@ class Session:
         return tuple(alias for alias in runners if alias not in self.deferred)
 
     def gather_hosts[R](
-        self, hosts: Sequence[str], *, gateway: str, step: str, work: Callable[[str], R]
+        self,
+        hosts: Sequence[str],
+        *,
+        gateway: str,
+        step: str,
+        work: Callable[[str], R],
+        require_all: bool = True,
     ) -> dict[str, R]:
         answers: dict[str, R] = {}
+        refusals: list[str] = []
         gateway_error: FailedError | None = None
         for alias, outcome in zip(hosts, self.gather(hosts, work), strict=True):
             if not isinstance(outcome, FailedError):
                 answers[alias] = outcome
+            elif require_all:
+                refusals.append(str(outcome))
             elif alias == gateway:
                 gateway_error = outcome
             else:
                 self.defer(HostFailure(alias, step, str(outcome)))
+        if refusals:
+            raise RefusedError(f"refused before stop: {step}: " + "; ".join(refusals))
         if gateway_error is not None:
             raise gateway_error
         return answers

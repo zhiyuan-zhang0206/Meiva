@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -25,7 +26,9 @@ from base.paths import repo_root
 from cli.fleet_update.plan.gateway_commands import pre_verify_script
 from cli.fleet_update.programs import CHECK_ROWS_SCRIPT, VERIFY_SCRIPTS, program_text
 from cli.tests.fleet_update.fleet_update_cluster import (
+    Cluster,
     assert_isolated_home,
+    certify_commit,
     run_host_shell,
     write_executable,
 )
@@ -379,7 +382,18 @@ def host(tmp_path: Path) -> tuple[Path, str]:
     _tree(source, _OLD_CHECKOUT)
     _git(source, "add", "-A")
     _git(source, "commit", "-qm", "old")
-    _tree(source, {"cli/main.py": _NEW_MAIN})
+    _tree(
+        source,
+        {
+            "cli/main.py": _NEW_MAIN,
+            "base/__init__.py": "",
+            "base/paths/__init__.py": "import os\ndef meiva_home(): return os.environ['MEIVA_HOME']\n",
+            "cli/commands/lifecycle/__init__.py": "",
+            "cli/commands/lifecycle/live_generation.py": (
+                "def main(argv, *, home):\n    print('ROOT_GENERATION=none')\n    return 0\n"
+            ),
+        },
+    )
     _git(source, "add", "-A")
     _git(source, "commit", "-qm", "new")
     new = _git(source, "rev-parse", "HEAD")
@@ -391,6 +405,39 @@ def host(tmp_path: Path) -> tuple[Path, str]:
     )
     _git(source, "config", "status.showUntrackedFiles", "no")
     return tmp_path, new
+
+
+def test_dry_run_does_not_touch_gateway_receipts_or_kept_root_worktrees(
+    host: tuple[Path, str], env: tuple[Cluster, Callable[..., int]]
+) -> None:
+    host_home, target = host
+    home = host_home / ".meiva"
+    source = home / "source"
+    staged_root = home / "pre-update-root-check"
+    _ = _git(source, "worktree", "add", "-q", "--detach", str(staged_root), target)
+    worktrees = _git(source, "worktree", "list", "--porcelain")
+    index = (source / ".git" / "index").stat().st_mtime_ns
+    cluster, run = env
+    cluster.repo = source
+    _ = certify_commit(source, target)
+    cluster.environ.update(
+        FLEET_LOCAL_HOME=str(host_home),
+        FLEET_LOCAL_SHELL="sh",
+        REAL_HOME=str(home),
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    adapter = Path(__file__).with_name("local_ssh.py")
+    write_executable(
+        cluster.bin_dir / "ssh", f'#!/bin/sh\nexec "{sys.executable}" "{adapter}" "$@"\n'
+    )
+
+    assert run("down", "--no-runners", "--dry-run") == 0
+
+    assert not (home / "updates" / "schedules-verified").exists()
+    assert staged_root.is_dir()
+    assert _git(source, "worktree", "list", "--porcelain") == worktrees
+    assert (source / ".git" / "index").stat().st_mtime_ns == index
+    assert not (source / ".git" / "FETCH_HEAD").exists()
 
 
 def _run_script(

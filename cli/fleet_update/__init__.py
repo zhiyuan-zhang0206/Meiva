@@ -48,6 +48,13 @@ def _new_target(s: Session, args: choices.FleetArgs, pinned: str | None) -> str 
     return resolved.sha
 
 
+def _host_os(s: Session, host: str) -> str:
+    output = s.run(host, "uname -s", effect=False).split()
+    if not output:
+        raise FailedError(f"{host}: uname returned no operating system")
+    return output[-1]
+
+
 def _partial(s: Session, args: choices.FleetArgs, failures: list[HostFailure]) -> tuple[str, ...]:
     return partial_summary(tuple(s.deferred.values()), tuple(failures), gateway=args.gateway)
 
@@ -126,7 +133,8 @@ def run_window(
             hosts,
             gateway=args.gateway,
             step="preflight",
-            work=lambda host: s.run(host, "uname -s", effect=False).split()[-1],
+            work=lambda host: _host_os(s, host),
+            require_all=args.half != "up",
         )
         if args.at is not None:
             from .scheduling import prepare_submit
@@ -148,11 +156,11 @@ def run_window(
                             s, args.gateway, initiator, operation_id, delivered_to=delivered_to
                         )
                     )
-                    if strict
+                    if strict and not args.dry_run
                     else None,
                 )
                 continue
-            failures = up(s, args)
+            failures = up(s, args, target=resolved_new)
         summary = _partial(s, args, failures)
         for line in summary:
             s.say(line)
@@ -163,7 +171,7 @@ def run_window(
             s.say(line)
         return 2 if isinstance(exc, RefusedError) else 1
     finally:
-        s.log.close()
+        s.close()
 
 
 def run_parsed(args: argparse.Namespace, inputs: UpdateWindowInputs) -> int:

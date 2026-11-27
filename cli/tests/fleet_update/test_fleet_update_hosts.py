@@ -191,7 +191,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
     try:
         names = fleet_verify.machine_names(session, ("mac",))
     finally:
-        session.log.close()
+        session.close()
 
     assert names == {"mac": "mac-mini"}
 

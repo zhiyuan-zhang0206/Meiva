@@ -79,7 +79,7 @@ def _check_gateway_bootstrap(s: Session, gateway: str) -> HostFailure | None:
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
-def up(s: Session, args: FleetArgs) -> list[HostFailure]:
+def up(s: Session, args: FleetArgs, *, target: str | None) -> list[HostFailure]:
     # meiva:note
     # Start the gateway first and then all runners in parallel, then verify every host: one
     # failure never erases what the window learned about the others, and each listed host ends
@@ -118,6 +118,7 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
             s,
             args,
             hosts=hosts,
+            target=target,
             started=frozenset(started),
             gateway_stdin=program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
         )

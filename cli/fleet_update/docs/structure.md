@@ -7,11 +7,11 @@ and the one-shot job names are stamped with, the pacing of its waits, and the cl
 are spent on. The synchronous window receives those facts as inputs. The separate scheduled worker is an OS-owned process entry and captures its own environment and clock.
 
 - `session.py` owns the connection to the hosts: the operator's own `ssh`, found on the `PATH` the
-  process was started with, and the one redacted log. `FailedError` is a step that cannot
+  process was started with, and the executed window's redacted log. `FailedError` is a step that cannot
   complete; `RefusedError` is a window that refused before touching anything (exit 2). It also
   declares the `Timers` port and carries the clock the window's waits are spent on, and the
-  `deferred` ledger of runners left out of the window (`defer`, `live`, `gather_hosts`): only the
-  gateway's failure ends a wave, a runner's is recorded there.
+  `deferred` ledger of runners left out after the stop wave starts. A standalone recovery
+  `up` may also defer unreachable runners. The down-half preparation requires every selected host.
 - `timers.py` is the process clock behind that port: the entry point builds one and hands it to
   the session, so the roster wait reads `Session.timers` and no module here reads `time` for
   itself.
@@ -38,3 +38,59 @@ are spent on. The synchronous window receives those facts as inputs. The separat
 The synchronous update window receives its ambient facts from the CLI entry: main receives the repository, the environment, the stamp time, the pacing and the clock as values, every host command goes through the ssh found on the PATH main was given, and each decision the window makes is a pure function in plan/ of the text a host printed.
 
 Parent: [Fleet update over SSH](../../docs/fleet-update.md).
+
+## Fleet rollout evidence
+
+After dependency pre-stage and before opening the silence or calling any stop, the
+coordinator runs the target checkout's compatibility probe on each participating
+host. Pure runners request a signed mirror using their installed runner API
+authority and enrolled address. The target authenticates the claims, confirms that
+the authorization covers the stop and start budgets, then publishes through the
+bootstrap mirror writer. Only receipt metadata travels back over SSH. The gateway
+uses its authoritative local startup configuration. The probe validates the target
+settings and selected service roster, checks the installed harness CLIs, and reads
+the applied database migration set through the host's normal credentials. It
+uses startup's checkpoint dependency and exact version-set validators. During
+preparation, a missing checkpoint version is allowed only if its registered
+Meiva migration is pending for the same target. Readiness requires the complete
+applied set.
+
+A domain receipt has a wire version, full target SHA, configuration generation
+(the runner mirror generation or the local startup configuration digest), required
+and applied schema versions (digests of the migration-name sets), and observations
+keyed by component. A preflight receipt is stored owner-only in the host's
+`updates/` directory. The fleet refuses unknown or incompatible receipts before
+stop, including a mixed config generation on pure runners or a database ahead of
+the target. Pending migrations require the full listed fleet with no kept named
+services. A runner stop failure on such a window aborts before the gateway stop
+and recovers the runners that already stopped. Stored-script verification retains
+its advisory policy and logs its verdict alongside the gateway's target, config,
+and schema. The schedule-manager protocol is checked independently after startup.
+
+After start, two probes run separately. The supervision probe uses the root's
+authenticated status and compares it with the launch digest and unit manifest
+digests computed from the target in preflight. That expectation is bound to the
+target SHA and service selection and stored owner-only on the host. Supervision
+checks the running unit state from the same snapshot. A recovery `up` without
+a matching preflight reports authenticated root status and names the unavailable
+target proof. Mirror authorization and expiry belong to domain readiness.
+The roster still checks live source SHA, pinned to the requested target for
+`update run`. The domain probe compares the installed and serving runner config
+projections, verifies the applied schema matches the target, and reads component
+protocol readiness and harness CLI versions. Standard `/healthz` daemons must
+report the full target SHA in the response that passed their identity check. The probe loads host-local settings
+before applying the verified runner projection so roster composition sees the same
+settings as target boot. It compares its observations with the
+staged expectations. Harnesses absent at preflight remain optional. Process-only
+units contribute to supervision. Readiness evidence identifies a service and its
+configuration and schema context. The domain probe makes read-only observations
+and uses the existing per-service identity probes, whose readiness semantics
+belong to those services.
+
+A retained root with an unavailable compatibility verdict refuses the window.
+Full stops replace the root. Targets without the receipt program and gateways
+without signed runner mirrors refuse before stop. A standalone recovery `up` can
+still start a legacy checkout and reports the unavailable proofs explicitly. A dry
+run prints the plan to the console and reports which checks it skipped. It
+leaves the update log, Git targets and worktrees, schedule verdict, and other
+durable update state untouched.
