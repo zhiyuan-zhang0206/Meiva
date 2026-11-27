@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import { QuestionsForm } from "@/components/notifications/questions-form";
 import type { QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { dropOpenQuestions, replaceAgentQuestions } from "@/lib/notifications/use-questions";
 import { useStore } from "@/lib/state/store";
 
@@ -34,10 +34,13 @@ export function PendingQuestions({ agentId, questions, failed, maxWidthCss }: {
       data-testid="pending-questions"
       data-question-panel={expanded && questions.length > 0 ? "open" : "closed"}
       aria-label={label}
-      className="pointer-events-auto relative z-30 mx-auto h-11 w-full bg-background"
+      className="pointer-events-auto relative z-30 mx-auto h-[54px] w-full bg-background"
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
     >
-      <div className="absolute inset-x-4 bottom-1 rounded-xl border border-border/80 bg-background">
+      <div className={cn(
+          "absolute inset-x-4 bottom-2 rounded-xl border border-border/80 bg-background shadow-md dark:shadow-black/30",
+          OVERFLOW_HIDDEN,
+        )}>
         {failed && <p role="status" className="px-4 py-2.5 text-xs text-muted-foreground">{t("questionsUnavailable")}</p>}
         {questions.length > 0 && (
           <>
@@ -57,7 +60,7 @@ export function PendingQuestions({ agentId, questions, failed, maxWidthCss }: {
               aria-controls={contentId}
               onClick={() => toggleQuestionPanel(agentId)}
               className={cn(
-                "absolute bottom-1 left-4 h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
+                "absolute bottom-1.5 left-1.5 h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
                 FLEX,
               )}
             >

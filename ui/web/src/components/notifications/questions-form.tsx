@@ -127,7 +127,11 @@ export function QuestionsForm({
   return (
     <div ref={rootRef} className={cn("text-[13px]", className)}>
       <div hidden={!expanded}>
-        <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+        <ScrollArea
+          key={question.id}
+          viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}
+          scrollbarClassName="py-2"
+        >
           <QuestionRow
             question={question}
             draft={draft}
@@ -139,7 +143,7 @@ export function QuestionsForm({
         {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
       </div>
-      <div className={cn("min-h-10 items-center gap-2 px-4 py-1", expanded ? "pl-12" : "justify-end", FLEX)}>
+      <div className={cn("min-h-11 items-center gap-2 py-1.5", expanded ? "pl-11 pr-1.5" : "pl-11 pr-4 justify-end", FLEX)}>
         <time
           dateTime={question.created_at}
           title={askedAt}
@@ -148,7 +152,7 @@ export function QuestionsForm({
           <span className="sr-only">{askedAt}</span>
           <span aria-hidden="true">{formatShort(question.created_at)}</span>
         </time>
-        <div hidden={!expanded} className={cn("ml-auto items-center gap-0.5", expanded && FLEX)}>
+        <div hidden={!expanded} className={cn("ml-auto items-center gap-1", expanded && FLEX)}>
           {ordered.length > 1 && (
             <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
               <Button
@@ -182,8 +186,8 @@ export function QuestionsForm({
             </nav>
           )}
           <Button
-            size="sm"
-            className="relative px-1.5 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+            size="default"
+            className="relative rounded-md px-3 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             disabled={pending || Boolean(nextQuestion)}
             aria-busy={pending}
             aria-label={t("submit")}
@@ -212,7 +216,7 @@ function QuestionRow({
   onEnter: () => void;
 }) {
   return (
-    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
+    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-4">
       <div className="space-y-1.5">
         <h4 className="text-[15px] font-medium leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
         {question.content && (
