@@ -192,6 +192,20 @@ def test_unified_release_waits_for_successful_client_builds() -> None:
     assert "inputs.verify_only != true" in job["if"]
 
 
+def test_unified_release_checks_latest_and_creates_an_immutable_release() -> None:
+    steps = _yaml(_RELEASE_GATE)["jobs"]["publish-client-release"]["steps"]
+    check = _step(steps, "Check that the client release can become Latest")
+    tag = _step(steps, "Ensure the client tag identifies the certified commit")
+    publish = _step(steps, "Publish the client Latest release")
+    assert "if" not in check
+    assert 'scripts.host_ops.release.check_client_release "$CLIENT_VERSION"' in check["run"]
+    assert steps.index(check) < steps.index(tag) < steps.index(publish)
+    assert "gh release create " in publish["run"]
+    assert "--verify-tag --latest" in publish["run"]
+    assert "gh release upload" not in publish["run"]
+    assert "gh release edit" not in publish["run"]
+
+
 def test_client_artifact_download_is_scoped_and_tag_namespaces_are_disjoint() -> None:
     workflows = _REPO_ROOT / ".github" / "workflows"
     app = _yaml(workflows / "release-app.yml")

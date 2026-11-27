@@ -2,90 +2,168 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 import pytest
 
+from scripts.codegen.build_android_release import assert_version_code_advances
+from scripts.codegen.build_app_update_manifest import assert_version_advances
 from scripts.host_ops.release.publish_feed import publish_feed
 
 
-@pytest.mark.parametrize(
-    ("tag", "names", "stale"),
-    [
-        (
-            "app-latest",
-            (
-                "Meiva_1.0.2_universal.dmg",
-                "Meiva.app.tar.gz",
-                "Meiva.app.tar.gz.sig",
-                "latest.json",
-            ),
-            ("Meiva_1.0.1_universal.dmg", "app-universal-release.apk", "junit-e2e-shard-1.xml"),
-        ),
-        (
-            "android-latest",
-            ("meiva-app-1.0.2.apk", "android-latest.json"),
-            ("meiva-app-1.0.1.apk",),
-        ),
-    ],
-)
-@pytest.mark.parametrize("failure", ["none", "upload", "missing", "wrong-digest"])
-def test_feed_prunes_only_after_verified_upload(
-    tmp_path: Path, tag: str, names: tuple[str, ...], stale: tuple[str, ...], failure: str
-) -> None:
-    files = tuple(tmp_path / name for name in names)
-    for file in files:
-        _ = file.write_bytes(b"release asset")
-    digest = "sha256:" + hashlib.sha256(b"release asset").hexdigest()
-    calls: list[tuple[str, ...]] = []
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
-    def gh(*args: str) -> str:
-        calls.append(args)
+
+@dataclass
+class _Release:
+    assets: dict[str, bytes]
+    calls: list[tuple[str, ...]] = field(default_factory=list)
+    fail_binary: bool = False
+    fail_download: bool = False
+    manifest_failures: int = 0
+    corrupt_binary: bool = False
+    corrupt_manifest: bool = False
+
+    def gh(self, *args: str) -> str:
+        self.calls.append(args)
         match args[:2]:
-            case ("release", "view"):
-                return "123\n"
-            case ("release", "upload"):
-                if failure == "upload" and args[3] == str(files[-1]):
-                    raise subprocess.CalledProcessError(1, args)
-                return ""
+            case ("api", "--include"):
+                return "HTTP/2.0 200 OK\n\n123\n"
             case ("api", "--paginate"):
-                visible = names[:-1] if failure == "missing" else names
-                rows = [
-                    (name, "sha256:wrong" if failure == "wrong-digest" else digest)
-                    for name in visible
-                ]
-                rows.extend((name, "sha256:stale") for name in stale)
-                return "\n".join(f"{name}\t{value}" for name, value in rows)
-            case ("release", "edit" | "delete-asset"):
-                return ""
+                return "\n".join(f"{name}\t{_digest(data)}" for name, data in self.assets.items())
+            case ("release", "download"):
+                if self.fail_download:
+                    raise subprocess.CalledProcessError(1, args)
+                _ = Path(args[6]).write_bytes(self.assets[args[4]])
+            case ("release", "upload"):
+                self._upload(args[3:])
+            case ("release", "delete-asset"):
+                del self.assets[args[3]]
+            case ("release", "edit"):
+                pass
             case _:
                 pytest.fail(f"unexpected GitHub command {args}")
+        return ""
 
-    if failure == "none":
-        publish_feed(gh, tag=tag, files=files, title="Version 1.0.2", notes="Build metadata")
-        assert calls[-1] == (
-            "release",
-            "edit",
-            tag,
-            "--prerelease",
-            "--latest=false",
-            "--title",
-            "Version 1.0.2",
-            "--notes",
-            "Build metadata",
+    def _upload(self, args: tuple[str, ...]) -> None:
+        clobber = args[-1] == "--clobber"
+        for path in map(Path, args[:-1] if clobber else args):
+            if path.name.endswith(".json"):
+                assert clobber
+                _ = self.assets.pop(path.name, None)
+                if self.manifest_failures:
+                    self.manifest_failures -= 1
+                    raise subprocess.CalledProcessError(1, args)
+                corrupt = self.corrupt_manifest
+            else:
+                assert not clobber
+                assert path.name not in self.assets
+                if self.fail_binary:
+                    raise subprocess.CalledProcessError(1, args)
+                corrupt = self.corrupt_binary
+            self.assets[path.name] = b"corrupt bytes" if corrupt else path.read_bytes()
+
+
+@pytest.mark.parametrize("tag", ["app-latest", "android-latest"])
+@pytest.mark.parametrize(
+    "failure", ["none", "transient", "binary", "download", "manifest", "bad-binary", "bad-manifest"]
+)
+def test_feed_keeps_previous_binaries_until_remote_manifest_is_verified(
+    tmp_path: Path, tag: str, failure: str
+) -> None:
+    if tag == "app-latest":
+        archives = (
+            "Meiva_1.0.2_universal.dmg",
+            "Meiva_1.0.2.app.tar.gz",
+            "Meiva_1.0.2.app.tar.gz.sig",
         )
-        assert [call[3] for call in calls if call[:2] == ("release", "delete-asset")] == sorted(
-            stale
+        stale = ("Meiva_1.0.1_universal.dmg", "Meiva.app.tar.gz", "Meiva.app.tar.gz.sig")
+        manifest = "latest.json"
+        previous = b'{"version":"1.0.1"}'
+        candidate = b'{"version":"1.0.2"}'
+        assert_advances = partial(assert_version_advances, version="1.0.2")
+    else:
+        archives = ("meiva-app-1.0.2.apk",)
+        stale = ("meiva-app-1.0.1.apk",)
+        manifest = "android-latest.json"
+        previous = b'{"versionCode":1000001}'
+        candidate = b'{"versionCode":1000002}'
+        assert_advances = partial(assert_version_code_advances, version_code=1000002)
+    old_binaries = dict.fromkeys(stale, b"previous binary")
+    release = _Release(
+        assets={**old_binaries, manifest: previous},
+        fail_binary=failure == "binary",
+        fail_download=failure == "download",
+        manifest_failures={"transient": 1, "manifest": 3}.get(failure, 0),
+        corrupt_binary=failure == "bad-binary",
+        corrupt_manifest=failure == "bad-manifest",
+    )
+    payloads = {**dict.fromkeys(archives, b"new binary"), manifest: candidate}
+    files = tuple(tmp_path / name for name in payloads)
+    for file in files:
+        _ = file.write_bytes(payloads[file.name])
+    waits: list[float] = []
+
+    def publish() -> None:
+        publish_feed(
+            release.gh,
+            tag=tag,
+            files=files,
+            title="Version 1.0.2",
+            notes="Build metadata",
+            target="a" * 40,
+            manifest_attempts=3,
+            wait=waits.append,
+            assert_advances=lambda path: assert_advances(current=path),
         )
+
+    if failure in {"none", "transient"}:
+        publish()
+        assert release.assets == payloads
+        assert release.calls[-1][:3] == ("release", "edit", tag)
     else:
         with pytest.raises((subprocess.CalledProcessError, ValueError)):
-            publish_feed(gh, tag=tag, files=files, title="Version 1.0.2", notes="Build metadata")
-        assert all(
-            call[:2] not in {("release", "delete-asset"), ("release", "edit")} for call in calls
+            publish()
+        assert old_binaries.items() <= release.assets.items()
+        assert not any(
+            call[:2] in {("release", "delete-asset"), ("release", "edit")} for call in release.calls
+        )
+    if failure in {"binary", "download", "bad-binary"}:
+        assert release.assets[manifest] == previous
+        assert not any("--clobber" in call for call in release.calls)
+    assert waits == {"transient": [1], "manifest": [1, 2]}.get(failure, [])
+
+
+def test_stale_app_version_fails_before_any_write(tmp_path: Path) -> None:
+    old_archive = tmp_path / "Meiva_1.0.2.app.tar.gz"
+    manifest = tmp_path / "latest.json"
+    _ = old_archive.write_bytes(b"old package")
+    _ = manifest.write_text('{"version":"1.0.2"}')
+    assets = {
+        "Meiva_1.0.161.app.tar.gz": b"current package",
+        manifest.name: b'{"version":"1.0.161"}',
+    }
+    release = _Release(assets=dict(assets))
+
+    with pytest.raises(ValueError, match=r"already advertises 1\.0\.161"):
+        publish_feed(
+            release.gh,
+            tag="app-latest",
+            files=(old_archive, manifest),
+            title="Old tag",
+            notes="",
+            target="a" * 40,
+            manifest_attempts=3,
+            wait=lambda _: None,
+            assert_advances=lambda path: assert_version_advances(current=path, version="1.0.2"),
         )
 
-    uploads = [command for command in calls if command[:2] == ("release", "upload")]
-    assert uploads == [
-        ("release", "upload", tag, *(str(path) for path in files[:-1]), "--clobber"),
-        ("release", "upload", tag, str(files[-1]), "--clobber"),
+    assert release.assets == assets
+    assert [command[:2] for command in release.calls] == [
+        ("api", "--include"),
+        ("api", "--paginate"),
+        ("release", "download"),
     ]

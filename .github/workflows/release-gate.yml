@@ -811,6 +811,12 @@ jobs:
           printf 'macOS Universal %s and Android %s.\n\nRelease train commit: `%s`\n' \
             "$macos" "$android" "$TARGET_SHA" > "$RUNNER_TEMP/client-release-notes.md"
 
+      - name: Check that the client release can become Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
+        run: python3 -m scripts.host_ops.release.check_client_release "$CLIENT_VERSION"
+
       - name: Ensure the client tag identifies the certified commit
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
@@ -841,11 +847,5 @@ jobs:
           tag="client-v$CLIENT_VERSION"
           title="Meiva App $CLIENT_VERSION"
           notes="$RUNNER_TEMP/client-release-notes.md"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "installers/$DMG" "installers/$APK" --clobber
-            gh release edit "$tag" --draft=false --prerelease=false --latest \
-              --title "$title" --notes-file "$notes"
-          else
-            gh release create "$tag" "installers/$DMG" "installers/$APK" --verify-tag --latest \
-              --title "$title" --notes-file "$notes"
-          fi
+          gh release create "$tag" "installers/$DMG" "installers/$APK" --verify-tag --latest \
+            --title "$title" --notes-file "$notes"

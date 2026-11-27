@@ -334,25 +334,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/android-latest.json
 
-      - name: Refuse to move the channel backwards
-        if: github.event_name != 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
-        run: |
-          previous="$RUNNER_TEMP/previous-android-latest"
-          mkdir -p "$previous"
-          if gh release download android-latest --pattern android-latest.json \
-              --dir "$previous" 2>/dev/null; then
-            if ! cmp -s "release-assets/android-latest.json" "$previous/android-latest.json"; then
-              python3 scripts/codegen/build_android_release.py assert-advances \
-                --current "$previous/android-latest.json" \
-                --version-code "$BUILD_NUMBER"
-            fi
-          else
-            echo "android-latest carries no manifest yet; this run publishes the first one"
-          fi
-
       - name: Publish the Android release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -362,6 +343,8 @@ jobs:
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
           BUILT_AT: ${{ needs.android.outputs.built_at }}
+          # Two retries give GitHub time to recover while bounding the replacement window.
+          MANIFEST_UPLOAD_ATTEMPTS: 3
         run: |
           apk="release-assets/meiva-app-$APP_VERSION.apk"
           if [ "$EVENT_NAME" = "push" ]; then
@@ -373,11 +356,9 @@ jobs:
           else
             notes="$(printf 'Version: %s\n\nVersion code: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' \
               "$APP_VERSION" "$BUILD_NUMBER" "$TARGET_SHA" "$BUILT_AT")"
-            if ! gh release view android-latest >/dev/null 2>&1; then
-              gh release create android-latest --target "$TARGET_SHA" --prerelease --latest=false \
-                --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes"
-            fi
-            python3 scripts/host_ops/release/publish_feed.py --tag android-latest \
+            python3 -m scripts.host_ops.release.publish_feed --tag android-latest \
+              --version-code "$BUILD_NUMBER" --target "$TARGET_SHA" \
+              --manifest-attempts "$MANIFEST_UPLOAD_ATTEMPTS" \
               --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes" \
               "$apk" release-assets/android-latest.json
           fi

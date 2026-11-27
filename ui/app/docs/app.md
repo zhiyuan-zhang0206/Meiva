@@ -74,10 +74,13 @@ Publishing requires platform signing credentials. A build-only manual dispatch c
 produce unsigned validation artifacts.
 
 The desktop updater reads `latest.json` from `app-latest`. The Android updater reads
-`android-latest.json` from `android-latest`. The workflows upload each binary before its
-manifest, then verify the uploaded files and remove older assets. A train that packages
-either client publishes both current installers as `client-v<version>`, the repository's
-GitHub Latest release. If one platform was skipped, the release carries the installer from
+`android-latest.json` from `android-latest`. The manifests point to versioned binaries.
+Rolling publications check the advertised version, upload and verify the new binaries,
+then replace the manifest at its stable URL with bounded retries. Old assets are removed
+after GitHub reports the expected digests for both the binaries and the new manifest.
+A train that packages either client publishes both current installers as the immutable
+`client-v<version>` GitHub Latest release. Publication refuses to overwrite an existing
+client release or replace a newer client Latest. If one platform was skipped, the release carries the installer from
 that platform's current updater feed and names its actual version in the release notes.
 
 `release-android.yml` injects `versionCode = 1_000_000 + github.run_number`

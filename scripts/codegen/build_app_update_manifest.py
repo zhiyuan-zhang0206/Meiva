@@ -25,7 +25,7 @@ _SEMVER = re.compile(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 
-def _semver_tuple(version: str) -> tuple[int, int, int]:
+def semver_tuple(version: str) -> tuple[int, int, int]:
     match = _SEMVER.fullmatch(version)
     if match is None:
         raise ValueError(f"'{version}' is not a <major>.<minor>.<patch> version")
@@ -39,7 +39,7 @@ def _semver_tuple(version: str) -> tuple[int, int, int]:
 def build_version_name(cargo_version: str, run_number: int) -> str:
     if run_number < 1:
         raise ValueError(f"run number must be positive, got {run_number}")
-    major, minor, patch = _semver_tuple(cargo_version)
+    major, minor, patch = semver_tuple(cargo_version)
     return f"{major}.{minor}.{patch + run_number}"
 
 
@@ -56,14 +56,14 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 
 def assert_version_advances(*, current: Path, version: str) -> None:
-    candidate = _semver_tuple(version)
+    candidate = semver_tuple(version)
     body = _decoded(json.loads, current.read_text(encoding="utf-8"))
     if not _is_str_object_dict(body):
         raise TypeError(f"{current} is not a manifest object")
     previous_raw = body.get("version")
     if not isinstance(previous_raw, str):
         raise TypeError(f"{current} has no string version")
-    previous = _semver_tuple(previous_raw)
+    previous = semver_tuple(previous_raw)
     if candidate <= previous:
         raise ValueError(
             f"refusing version {version}: {LATEST_RELEASE_TAG} already advertises {previous_raw}"
@@ -123,7 +123,7 @@ def _resolve_manifest_version(tag: str, version: str | None) -> str:
     if tag == LATEST_RELEASE_TAG:
         if version is None:
             raise ValueError(f"--version is required when --tag is '{LATEST_RELEASE_TAG}'")
-        _semver_tuple(version)
+        semver_tuple(version)
         return version
     match = _TAG.fullmatch(tag)
     if match is None:

@@ -301,52 +301,25 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # The updater reads latest.json to decide whether to update and which
-      # archive to fetch; without it the desktop feed is dead even though the
-      # bundles uploaded fine.
-      - name: Build latest.json
+      - name: Build the app-latest manifest
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
-          if [ "$EVENT_NAME" = "push" ]; then
-            TAG="$REF_NAME"
-          else
-            TAG="app-latest"
-          fi
           mkdir release-assets
-          cp "artifacts/Meiva_${APP_VERSION}_universal.dmg" \
-            artifacts/Meiva.app.tar.gz artifacts/Meiva.app.tar.gz.sig release-assets/
-          test -s release-assets/Meiva.app.tar.gz.sig
+          cp "artifacts/Meiva_${APP_VERSION}_universal.dmg" release-assets/
+          archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"
+          cp artifacts/Meiva.app.tar.gz "$archive"
+          cp artifacts/Meiva.app.tar.gz.sig "$archive.sig"
+          test -s "$archive.sig"
           python3 scripts/codegen/build_app_update_manifest.py \
-            --tag "$TAG" \
+            --tag app-latest \
             --version "$APP_VERSION" \
             --commit "$TARGET_SHA" \
             --artifacts release-assets \
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/latest.json
           cat release-assets/latest.json
-
-      - name: Refuse to move the channel backwards
-        if: github.event_name != 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APP_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          previous="$RUNNER_TEMP/previous-app-latest"
-          mkdir -p "$previous"
-          if gh release download app-latest --pattern latest.json \
-              --dir "$previous" 2>/dev/null; then
-            if ! cmp -s "release-assets/latest.json" "$previous/latest.json"; then
-              python3 scripts/codegen/build_app_update_manifest.py assert-advances \
-                --current "$previous/latest.json" \
-                --version "$APP_VERSION"
-            fi
-          else
-            echo "app-latest carries no manifest yet; this run publishes the first one"
-          fi
 
       - name: Publish the macOS release assets
         env:
@@ -356,25 +329,30 @@ jobs:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
           BUILT_AT: ${{ needs.desktop.outputs.built_at }}
+          # Two retries give GitHub time to recover while bounding the replacement window.
+          MANIFEST_UPLOAD_ATTEMPTS: 3
         run: |
-          binaries=("release-assets/Meiva_${APP_VERSION}_universal.dmg"
-            release-assets/Meiva.app.tar.gz release-assets/Meiva.app.tar.gz.sig)
+          archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"
+          binaries=("release-assets/Meiva_${APP_VERSION}_universal.dmg" "$archive" "$archive.sig")
           manifest=release-assets/latest.json
           jq -e '.platforms | length == 2' "$manifest" >/dev/null
           notes="$(printf 'Version: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' "$APP_VERSION" "$TARGET_SHA" "$BUILT_AT")"
 
+          python3 -m scripts.host_ops.release.publish_feed --tag app-latest \
+            --version "$APP_VERSION" --target "$TARGET_SHA" \
+            --manifest-attempts "$MANIFEST_UPLOAD_ATTEMPTS" \
+            --title "Meiva Desktop Updater Feed ($APP_VERSION)" --notes "$notes" \
+            "${binaries[@]}" "$manifest"
           if [ "$EVENT_NAME" = "push" ]; then
+            mkdir -p "$RUNNER_TEMP/tag-release"
+            tag_manifest="$RUNNER_TEMP/tag-release/latest.json"
+            python3 scripts/codegen/build_app_update_manifest.py \
+              --tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA" \
+              --artifacts release-assets --repo "$GITHUB_REPOSITORY" --out "$tag_manifest"
             if ! gh release view "$REF_NAME" >/dev/null 2>&1; then
               gh release create "$REF_NAME" --verify-tag --latest=false \
                 --title "Meiva App $REF_NAME" --generate-notes
             fi
             gh release upload "$REF_NAME" "${binaries[@]}" --clobber
-            gh release upload "$REF_NAME" "$manifest" --clobber
+            gh release upload "$REF_NAME" "$tag_manifest" --clobber
           fi
-          if ! gh release view app-latest >/dev/null 2>&1; then
-            gh release create app-latest --target "$TARGET_SHA" --prerelease --latest=false \
-              --title "Meiva Desktop Updater Feed ($APP_VERSION)" --notes "$notes"
-          fi
-          python3 scripts/host_ops/release/publish_feed.py --tag app-latest \
-            --title "Meiva Desktop Updater Feed ($APP_VERSION)" --notes "$notes" \
-            "${binaries[@]}" "$manifest"

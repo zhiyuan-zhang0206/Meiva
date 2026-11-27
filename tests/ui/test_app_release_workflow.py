@@ -46,7 +46,7 @@ def test_android_latest_publishes_the_manifest_with_the_apk() -> None:
     assert "build_android_release.py manifest" in text
     assert "--out release-assets/android-latest.json" in text
     assert '"$apk" release-assets/android-latest.json' in text
-    assert "publish_feed.py --tag android-latest" in text
+    assert "scripts.host_ops.release.publish_feed --tag android-latest" in text
 
 
 def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
@@ -59,8 +59,8 @@ def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
 
 def test_android_publish_refuses_to_roll_the_channel_back() -> None:
     text = _android_workflow()
-    assert "gh release download android-latest --pattern android-latest.json" in text
-    assert "build_android_release.py assert-advances" in text
+    assert "publish_feed --tag android-latest" in text
+    assert '--version-code "$BUILD_NUMBER" --target "$TARGET_SHA"' in text
 
 
 def test_manual_dispatch_keeps_the_explicit_unsigned_build_path() -> None:
@@ -79,6 +79,12 @@ def test_merging_to_main_does_not_trigger_client_release_builds() -> None:
 
 def test_desktop_publish_guards_app_latest_and_stamps_commit() -> None:
     text = _workflow()
-    assert "gh release download app-latest --pattern latest.json" in text
-    assert "build_app_update_manifest.py assert-advances" in text
-    assert '--commit "$TARGET_SHA"' in text
+    assert 'archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"' in text
+    assert 'cp artifacts/Meiva.app.tar.gz.sig "$archive.sig"' in text
+    _, publish = text.split("      - name: Publish the macOS release assets", maxsplit=1)
+    step, _ = publish.split("        run: |", maxsplit=1)
+    assert "if:" not in step
+    feed, tag = publish.split('if [ "$EVENT_NAME" = "push" ]; then', maxsplit=1)
+    assert "scripts.host_ops.release.publish_feed --tag app-latest" in feed
+    assert '--version "$APP_VERSION" --target "$TARGET_SHA"' in feed
+    assert '--tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA"' in tag
