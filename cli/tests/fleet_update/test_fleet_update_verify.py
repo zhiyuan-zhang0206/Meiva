@@ -7,23 +7,32 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from tempfile import TemporaryDirectory
+from typing import TypedDict, cast
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
 from base.db import connect_url
+from base.host.db_authority.unit import GenerationRef, UnitApi, UnitCapability, UnitIdentity
 from base.host.env.boot_policy import MIRROR_HOST_PARAM, MirrorRejectedError, issue_config_mirror
 from base.host.env.bootstrap import read_config_mirror
 from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 from base.host.net.tests.local_http import serve_json
+from base.host.private_storage import write_private_bytes
+from base.native_process.root_control.tests.status_root import serve
 from base.paths import repo_root
 from base.paths.tests.fake_scratch import FakeScratch
 from cli.fleet_update.choices import parse
 from cli.fleet_update.fleet_verify import roster
 from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
 from cli.fleet_update.probes.config import authorize_mirror, fetch_mirror
-from cli.fleet_update.probes.receipt import DomainReceipt, receipt_from_output
+from cli.fleet_update.probes.receipt import (
+    DomainReceipt,
+    receipt_from_output,
+    require_process_proof,
+)
 from cli.fleet_update.session import FailedError, Pacing, Session
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git, run_host_shell
 
@@ -324,12 +333,14 @@ def test_up_only_reports_an_explicit_legacy_degradation(
 def _probe_home(tmp_path: Path, db_url: str, redis_url: str) -> Path:
     home = tmp_path / ".meiva"
     home.mkdir()
+    redis = urlsplit(redis_url)
+    remote_redis = urlunsplit(redis._replace(netloc=f"redis.fixture:{redis.port}"))
     _ = (home / ".env").write_text(
         "MEIVA_MACHINE_NAME=fixture-gateway\n"
         "MEIVA_MACHINE_HOST=127.0.0.1\n"
         "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
         f"MEIVA_DB_URL={db_url}\n"
-        f"MEIVA_REDIS_URL={redis_url}\n"
+        f"MEIVA_REDIS_URL={remote_redis}\n"
     )
     return home
 
@@ -337,18 +348,21 @@ def _probe_home(tmp_path: Path, db_url: str, redis_url: str) -> Path:
 def _target_probe(
     home: Path, phase: str, target: str, *selection: str
 ) -> subprocess.CompletedProcess[str]:
-    repo = repo_root()
     return run_host_shell(
         [sys.executable, "-m", "cli.fleet_update.probes", phase, target, *selection],
-        cwd=repo,
-        env={
-            "HOME": str(home.parent),
-            "PATH": os.environ["PATH"],
-            "MEIVA_HOME": str(home),
-            "MEIVA_CONFIG_FETCH": "skip",
-        },
+        cwd=repo_root(),
+        env=_probe_env(home),
         timeout=30,
     )
+
+
+def _probe_env(home: Path) -> dict[str, str]:
+    return {
+        "HOME": str(home.parent),
+        "PATH": os.environ["PATH"],
+        "MEIVA_HOME": str(home),
+        "MEIVA_CONFIG_FETCH": "skip",
+    }
 
 
 def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metadata(
@@ -358,7 +372,7 @@ def test_target_probe_reads_real_applied_schema_and_persists_only_receipt_metada
     target = git(repo_root(), "rev-parse", "HEAD")
     result = _target_probe(home, "prepare", target, "--all-services")
 
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
     receipt = receipt_from_output(result.stdout, target=target)
     assert receipt.applied == receipt.schema
     assert receipt.components["schema"] == "ready"
@@ -385,7 +399,7 @@ def test_target_probe_rejects_a_gap_in_real_checkpoint_migrations(
         with connect_url(db_url) as conn:
             _ = conn.execute("INSERT INTO checkpoint_migrations (v) VALUES (0)")
 
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
     receipt = receipt_from_output(result.stdout, target=target)
     assert receipt.components["schema"] == "ready"
     assert "missing=[0]" in receipt.components["checkpoint"]
@@ -411,13 +425,133 @@ def test_target_readiness_requires_the_full_sha_from_the_live_service(
             )
         result = _target_probe(home, "ready", target, "--only-service", "schedule-manager")
 
-    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
     receipt = receipt_from_output(result.stdout, target=target)
     state = receipt.components["schedule-manager"]
     if version == "target":
         assert state == "ready"
     else:
         assert state == f"running SHA {sha or 'unavailable'} differs from target {target}"
+
+
+def _runner_probe_home(home: Path, db_url: str, gateway_url: str, bearer: str) -> None:
+    parsed = urlsplit(db_url)
+    endpoint = urlunsplit(parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1]))
+    assert parsed.username is not None
+    capability = UnitCapability(
+        version=1,
+        unit=UnitIdentity(machine="lin", home=str(home)),
+        endpoint=endpoint,
+        generation=GenerationRef(number=1, credential_digest="a" * 64),
+        role=parsed.username,
+        password=parsed.password or "fixture-password-meiva-fleet-probe",
+        bundle="0" * 32,
+        api=UnitApi(token=bearer, gateway="b" * 64, telemetry="c" * 40),
+    )
+    home.mkdir()
+    _ = (home / ".env").write_text(
+        "MEIVA_MACHINE_NAME=lin\n"
+        "MEIVA_MACHINE_HOST=lin.fixture\n"
+        "MEIVA_MACHINE_SERVE_GATEWAY=false\n"
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        f"MEIVA_GATEWAY_URL={gateway_url}\n"
+    )
+    authority = home / "db-authority" / "unit.json"
+    authority.parent.mkdir()
+    write_private_bytes(authority, capability.model_dump_json().encode())
+
+
+class _ExpectedLaunch(TypedDict):
+    launch_digest: str
+    selection: list[str]
+    target: str
+    units: dict[str, str]
+
+
+def _expected_launch(path: Path) -> _ExpectedLaunch:
+    return cast(_ExpectedLaunch, json.loads(path.read_text()))
+
+
+def _stage_runner_launch(
+    home: Path, target: str, selection: tuple[str, ...], bearer: str
+) -> _ExpectedLaunch:
+    stage_path = home / "updates" / "fleet-supervision-expectation.json"
+    staged = _target_probe(home, "prepare", target, *selection)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    worktree_launch = _expected_launch(stage_path)
+
+    launch_repo = home / "source"
+    launch_repo.mkdir()
+    staged = _target_probe(home, "prepare", target, "--launch-repo", str(launch_repo), *selection)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    assert stage_path.stat().st_mode & 0o777 == 0o600
+    assert bearer not in stage_path.read_text()
+    expected = _expected_launch(stage_path)
+    assert expected["target"] == target and expected["selection"] == list(selection)
+    assert set(expected["units"]) == {"schedule-manager"}
+    assert expected["units"] != worktree_launch["units"]
+    return expected
+
+
+def test_expired_mirror_preserves_the_authenticated_supervision_proof(
+    db_url: str, redis_url: str
+) -> None:
+    target = git(repo_root(), "rev-parse", "HEAD")
+    selection = ("--only-service", "schedule-manager")
+    bearer = "fixture-bearer-meiva-fleet-supervision"
+    parsed = urlsplit(db_url)
+    endpoint = urlunsplit(parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1]))
+    values = {
+        "MEIVA_DB_URL": endpoint,
+        "MEIVA_REDIS_URL": redis_url,
+        PLUGIN_CLUSTER_CONFIG_ENV: json.dumps(
+            {
+                plugin: dict.fromkeys(fields)
+                for plugin, fields in BUILTIN_CLUSTER_CONFIG_FIELDS.items()
+            }
+        ),
+    }
+    instant = time.time()
+    fresh = issue_config_mirror(values, bearer=bearer, machine_host="lin.fixture", now=instant)
+    expired = issue_config_mirror(
+        values, bearer=bearer, machine_host="lin.fixture", now=instant - 90_000
+    )
+    assert fresh["generation"] == expired["generation"]
+    with TemporaryDirectory(prefix="fleet-ipc-") as scratch, serve_json(fresh) as gateway:
+        home = Path(scratch).resolve() / ".meiva"
+        _runner_probe_home(home, db_url, gateway.url, bearer)
+        expected = _stage_runner_launch(home, target, selection, bearer)
+
+        with serve(home=home) as answer:
+            answer["root"]["launch_digest"] = expected["launch_digest"]
+            answer["units"] = [
+                {"id": name, "state": "running", "manifest_digest": digest}
+                for name, digest in expected["units"].items()
+            ]
+            fresh_proof = _target_probe(
+                home, "supervision", target, "--require-preflight", *selection
+            )
+            assert fresh_proof.returncode == 0, (fresh_proof.stdout, fresh_proof.stderr)
+            require_process_proof(fresh_proof.stdout, target=target)
+
+            _ = (home / "run" / "bootstrap-mirror.json").write_text(json.dumps(expired))
+            proof = _target_probe(home, "supervision", target, "--require-preflight", *selection)
+            domain = _target_probe(home, "ready", target, "--require-preflight", *selection)
+
+            wrong_selection = _target_probe(
+                home, "supervision", target, "--require-preflight", "--all-services"
+            )
+            assert wrong_selection.returncode == 1
+            assert "no staged launch expectation" in wrong_selection.stdout
+
+            answer["root"]["launch_digest"] = "0" * 64
+            changed = _target_probe(home, "supervision", target, "--require-preflight", *selection)
+            assert changed.returncode == 1
+            assert "differs from expected" in changed.stdout
+
+    assert proof.returncode == 0, (proof.stdout, proof.stderr)
+    require_process_proof(proof.stdout, target=target)
+    assert domain.returncode == 1 and "expired mirror" in domain.stdout
 
 
 def test_pending_schema_migration_recovers_stopped_runners_when_one_stop_fails(

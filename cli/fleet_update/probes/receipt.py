@@ -9,6 +9,8 @@ from typing import Literal, TypeGuard
 
 from ..untyped import object_of
 
+SUPERVISION_UNBOUND = "FLEET_SUPERVISION_UNBOUND"
+
 _PREFIX = "FLEET_DOMAIN="
 _VERSION = 2
 _SHA = re.compile(r"[0-9a-f]{40}")

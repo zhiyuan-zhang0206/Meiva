@@ -8,7 +8,7 @@ from ..choices import FleetArgs, start_flags
 from ..plan.host_commands import HOME
 from ..plan.host_failures import HostFailure
 from ..session import FailedError, RefusedError, Session
-from .receipt import DomainReceipt, receipt_from_output, require_process_proof
+from .receipt import SUPERVISION_UNBOUND, DomainReceipt, receipt_from_output, require_process_proof
 
 
 def _prepare_command(args: FleetArgs, target: str) -> str:
@@ -31,7 +31,7 @@ def _prepare_command(args: FleetArgs, target: str) -> str:
         "fi\n"
         'MEIVA_HOME="$H" MEIVA_CONFIG_FETCH=skip env -u PYTHONPATH "$py" '
         f"-m cli.fleet_update.probes prepare {quoted_target} "
-        f"--start-budget {budget} {start_flags(args)}"
+        f'--start-budget {budget} --launch-repo "$S" {start_flags(args)}'
     )
 
 
@@ -153,7 +153,12 @@ def verify_receipts(
                 s.say(f"WARNING: {alias}: {step} unavailable on this legacy checkout")
                 continue
             if phase == "supervision":
-                require_process_proof(output, target=target)
+                if SUPERVISION_UNBOUND in output.splitlines() and args.half == "up":
+                    s.say(
+                        f"WARNING: {alias}: process supervision has no matching preflight expectation"
+                    )
+                else:
+                    require_process_proof(output, target=target)
             else:
                 receipt = receipt_from_output(output, target=target)
                 failures.extend(

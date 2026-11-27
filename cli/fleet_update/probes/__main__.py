@@ -23,12 +23,14 @@ from .config import config_generation
 from .readiness import harness_readiness, service_readiness
 from .receipt import DomainReceipt, decode_receipt
 from .schema import checkpoint_status, schema_sets, schema_status, schema_version
+from .supervision import process_proof, stage_expected_launch
 
 
 class ProbeArgs(argparse.Namespace):
     phase: str
     target: str
     start_budget: int
+    launch_repo: Path | None
     require_preflight: bool
     all_services: bool
     only_service: list[str]
@@ -57,6 +59,28 @@ def _roster(args: ProbeArgs, command: CommandRuntime) -> tuple[ServiceSpec, ...]
         machine=command.machine,
         host=command.host,
         home=command.home,
+    )
+
+
+def _selection_key(args: ProbeArgs) -> tuple[str, ...]:
+    if args.all_services:
+        return ("--all-services",)
+    if args.only_service:
+        return ("--only-service", *sorted(set(args.only_service)))
+    return ("--disable-service", *sorted(set(args.disable_service)))
+
+
+def _stage_launch(
+    args: ProbeArgs, command: CommandRuntime, target: str, roster: tuple[ServiceSpec, ...]
+) -> None:
+    repo = command.checkout if args.launch_repo is None else args.launch_repo.resolve(strict=True)
+    inputs = read_launch_inputs(command, read_start_config(command.config))
+    env = managed_service_env(inputs.service_path, environ=inputs.environment, venv=repo / ".venv")
+    manifest = root_driver.launch_manifest(
+        roster, repo, roles=command.machine.role(), env=env, inputs=inputs
+    )
+    stage_expected_launch(
+        command.home, target=target, selection=_selection_key(args), manifest=manifest
     )
 
 
@@ -103,6 +127,7 @@ def _domain(args: ProbeArgs, command: CommandRuntime, target: str) -> int:
     )
     expected_path = command.home / "updates" / "fleet-domain-receipt.json"
     if stage:
+        _stage_launch(args, command, target, roster)
         expected_path.parent.mkdir(parents=True, exist_ok=True)
         write_bytes_atomic(expected_path, receipt.encode().encode(), mode=0o600)
     else:
@@ -138,67 +163,31 @@ def _compare_preflight(
                 receipt.components[component] = "was installed during preflight; now absent"
 
 
-def _process_proof(args: ProbeArgs, command: CommandRuntime, target: str) -> int:
-    roles = command.machine.role()
-    env = command.config.process_environment()
-    client = root_driver.root_client(command.home, environ=env, pid=command.pid)
-    snapshot = root_driver.root_status(client)
-    if snapshot is None:
-        print(f"meiva-root: no readable live process status for target {target}")
-        return 1
-    generation = snapshot["root"]["launch_digest"]
-    print(f"meiva-root: observed launch generation {generation} for target {target}", flush=True)
-    _ = config_generation(
-        command.config,
-        env,
-        home=command.home,
-        runner="agent-runner" in roles and "gateway" not in roles,
-        stage=False,
-        now=time.time,
-        minimum_lifetime=0,
-    )
-    config = read_start_config(command.config)
-    inputs = read_launch_inputs(command, config)
-    roster = _roster(args, command)
-    env = managed_service_env(inputs.service_path, environ=inputs.environment)
-    manifest = root_driver.launch_manifest(
-        roster, command.checkout, roles=roles, env=env, inputs=inputs
-    )
-    try:
-        root_driver.require_same_generation(manifest, snapshot, reconcile=True)
-    except root_driver.RootDriverError as exc:
-        print(f"meiva-root: target {target}, launch generation {generation}: {exc}")
-        return 1
-    units = {unit["id"]: unit["state"] for unit in snapshot["units"]}
-    unready = [
-        f"{spec.session}={units.get(spec.session, 'absent')}"
-        for spec in roster
-        if units.get(spec.session) != "running"
-    ]
-    if unready:
-        print(f"meiva-root: target {target}, launch generation {generation}: " + ", ".join(unready))
-        return 1
-    print(f"FLEET_SUPERVISION={target} {generation} {len(roster)} running units")
-    return 0
-
-
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     _ = parser.add_argument("phase", choices=("prepare", "ready", "supervision"))
     _ = parser.add_argument("target")
     _ = parser.add_argument("--start-budget", type=int, default=0)
+    _ = parser.add_argument("--launch-repo", type=Path)
     _ = parser.add_argument("--require-preflight", action="store_true")
     _selection(parser)
     args = parser.parse_args(argv, namespace=ProbeArgs())
     try:
         command = CommandRuntime.create(resolve_meiva_home().resolve())
-        _ = get_field("machine_host")
         actual = _target(command.checkout)
         if actual != args.target:
             print(f"fleet {args.phase}: checkout SHA {actual} differs from target {args.target}")
             return 1
         if args.phase == "supervision":
-            return _process_proof(args, command, actual)
+            return process_proof(
+                command.home,
+                environ=command.config.process_environment(),
+                pid=command.pid,
+                target=actual,
+                selection=_selection_key(args),
+                require_preflight=args.require_preflight,
+            )
+        _ = get_field("machine_host")
         return _domain(args, command, actual)
     except MirrorRejectedError as exc:
         print(f"domain config: target {args.target}: {exc.state} mirror ({exc})")

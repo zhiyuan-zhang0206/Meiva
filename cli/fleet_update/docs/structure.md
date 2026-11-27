@@ -68,7 +68,12 @@ its advisory policy and logs its verdict alongside the gateway's target, config,
 and schema. The schedule-manager protocol is checked independently after startup.
 
 After start, two probes run separately. The supervision probe uses the root's
-authenticated status and checks requested unit process state and launch generation.
+authenticated status and compares it with the launch digest and unit manifest
+digests computed from the target in preflight. That expectation is bound to the
+target SHA and service selection and stored owner-only on the host. Supervision
+checks the running unit state from the same snapshot. A recovery `up` without
+a matching preflight reports authenticated root status and names the unavailable
+target proof. Mirror authorization and expiry belong to domain readiness.
 The roster still checks live source SHA, pinned to the requested target for
 `update run`. The domain probe compares the installed and serving runner config
 projections, verifies the applied schema matches the target, and reads component
