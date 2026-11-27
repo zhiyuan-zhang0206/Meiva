@@ -164,5 +164,8 @@ comparisons for a still-unbound input. The ledger cap is a normal record
 block and the comparison cap prevents a dense batch of repeated inputs from
 turning a small segment into unbounded matching work. A confirmed binding or
 a legacy prompt marker can be read without scanning the transcript region.
+If an unstored binding needs an earlier range than the budget permits,
+the point read reports a budget refusal. The same row remains readable
+once its binding has been persisted.
 Claude input quotes use the main record's parsed wire ID and exact persisted
 inbox binding, including registered inputs with unfamiliar origin tags.

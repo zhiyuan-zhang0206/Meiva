@@ -48,18 +48,11 @@ def apply_native_slice(
 
 
 def effective_native_stamps(values: Sequence[str | None]) -> list[datetime | None]:
-    own = [moment_of(value) for value in values]
     stamps: list[datetime | None] = []
     previous: datetime | None = None
-    for stamp in own:
-        previous = stamp or previous
+    for value in values:
+        previous = moment_of(value) or previous
         stamps.append(previous)
-    following: datetime | None = None
-    for index in range(len(stamps) - 1, -1, -1):
-        if own[index] is not None:
-            following = own[index]
-        elif stamps[index] is None:
-            stamps[index] = following
     return stamps
 
 

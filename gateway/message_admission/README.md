@@ -10,8 +10,8 @@ Native quotes with a stable message or inbox ID and block number resolve against
 committed checkpoint messages, including retained compact boundaries. The native
 block coordinates come from the same source parser the renderer uses. The
 current harness epoch uses the same effective timestamps as the timeline,
-including the nearest earlier stamped message or the first later stamp for
-an unstamped prefix. The timeline cursor and its configured history depth
+including the nearest earlier stamped message. An unstamped prefix carries
+no evidence of membership in a later epoch. The timeline cursor and its configured history depth
 do not select the source. The [checkpoint source budget](../../base/agents/history/docs/checkpoint-replay.md#quote-source-reads)
 bounds searches through retained segments.
 

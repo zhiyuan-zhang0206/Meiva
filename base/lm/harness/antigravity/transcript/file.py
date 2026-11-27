@@ -14,6 +14,7 @@ from base.lm.harness.antigravity.transcript.input_store import (
     answers,
     inputs_path,
     load_ledger,
+    matching_pending_inputs,
     resolve_unbound,
     unbound_inputs,
 )
@@ -24,6 +25,7 @@ from base.lm.harness.session.transcript.record_file import (
     FileRow,
     QuoteRow,
     RecordFile,
+    RecordReadBudgetError,
 )
 
 # meiva:link base/lm/harness/docs/transcript-projection.md
@@ -142,13 +144,30 @@ class AntigravityRecordFile(RecordFile):
             return ledger.bound[file.offset]
         if legacy_marker_digest(content) is not None:
             return None
+        unbound = unbound_inputs(ledger)
+        candidates = matching_pending_inputs(file, unbound)
+        if not candidates:
+            return None
+        return self._quote_reconcile(file, ledger, unbound, candidates)
+
+    def _quote_reconcile(
+        self,
+        file: FileRow,
+        ledger: Ledger,
+        unbound: Sequence[SentInput],
+        candidates: Sequence[SentInput],
+    ) -> str | None:
         scan_bytes = min(self._scan_bytes, MAX_SCAN_BYTES)
         floor = self.size() - scan_bytes
-        near = [sent for sent in unbound_inputs(ledger) if sent.min_offset >= floor]
-        if not near or file.offset < floor:
-            return None
+        if any(sent.min_offset < floor for sent in candidates):
+            raise RecordReadBudgetError(
+                "The relevant input predates the quote reconciliation window"
+            )
+        near = [sent for sent in unbound if sent.min_offset >= floor]
         start = min(sent.min_offset for sent in near)
-        raw = RecordFile(self._record).rows_forward(start, scan_bytes)
+        raw = RecordFile(self._record).rows_forward(start, min(scan_bytes, file.end - start))
+        if raw.end < file.end:
+            raise RecordReadBudgetError("The target row exceeds the quote reconciliation window")
         rows = [(row.offset, row.row) for row in raw.rows]
         return resolve_unbound(rows, ledger.bound, near, max_checks=_QUOTE_MATCH_CHECKS).get(
             file.offset

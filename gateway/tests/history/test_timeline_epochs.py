@@ -128,15 +128,17 @@ class TestTimelineEpochs(CompactHistoryCases):
         )
         return agent
 
+    @pytest.mark.parametrize("prior_stamp", [True, False], ids=["prior-anchor", "unstamped-prefix"])
     def test_a_canonical_quote_uses_native_epoch_membership(
-        self, db_conn: psycopg.Connection, client: GatewayTestClient
+        self, db_conn: psycopg.Connection, client: GatewayTestClient, prior_stamp: bool
     ) -> None:
         agent = self._meiva_cli_meiva(db_conn)
         earlier = _reply("old", 2).model_copy(update={"id": "earlier-reply"})
         current = _reply("current", 6).model_copy(update={"id": "current-reply"})
         old_untimed = AIMessage(id="earlier-untimed", content="old untimed")
         new_untimed = AIMessage(id="current-untimed", content="current untimed")
-        self._put_checkpoint(agent, [earlier, old_untimed, current, new_untimed], version="2")
+        prefix = [earlier, old_untimed] if prior_stamp else [old_untimed]
+        self._put_checkpoint(agent, [*prefix, current, new_untimed], version="2")
         timeline = client.get(f"/api/agents/{agent}/timeline").json()
         [shown] = [
             item for item in timeline["items"] if item["source_message_id"] == "current-untimed"

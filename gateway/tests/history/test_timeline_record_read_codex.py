@@ -19,6 +19,13 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline import record_identity
 from base.db import create_agent
+from base.lm.harness.antigravity.transcript.input_store import (
+    MAX_SCAN_BYTES,
+    inputs_path,
+    record_bound_inputs,
+    record_sent_input,
+    text_sha256,
+)
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.paths import harness_sessions_dir
@@ -386,6 +393,106 @@ def test_quote_record_activity_parity(
     assert row is not None and row[0] == int(accepted)
 
 
+def _antigravity_record(tmp_path: Path, agent: int, session: str) -> tuple[Path, Path]:
+    home = tmp_path / "home"
+    FileSessionRegistry(harness_sessions_dir(home=home)).save(
+        SessionRecord(
+            agent_id=agent,
+            harness="antigravity",
+            session_id=session,
+            cwd=str(tmp_path),
+            model="m",
+            created_at="2026-11-18T00:00:00Z",
+            updated_at="2026-11-18T00:00:00Z",
+            generation=1,
+        )
+    )
+    record = (
+        tmp_path
+        / f".gemini/antigravity-cli/brain/{session}/.system_generated/logs/transcript_full.jsonl"
+    )
+    record.parent.mkdir(parents=True)
+    return home, record
+
+
+def test_antigravity_quote_reports_a_clipped_reconciliation_as_unavailable(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    db_url: str,
+    tmp_path: Path,
+) -> None:
+    agent = _codex_agent(db_conn)
+    _ = db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (agent,))
+    saved = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at, claimed_at, payload) "
+        "VALUES (%s, 'selected', 'chat', 'user', 'done', %s, %s, %s::jsonb) RETURNING id",
+        (
+            agent,
+            "2026-11-17T23:59:49Z",
+            "2026-11-17T23:59:59Z",
+            json.dumps({"harness_input_key": "selected-key"}),
+        ),
+    ).fetchone()
+    db_conn.commit()
+    assert saved is not None
+    inbound_id = int(saved[0])
+    home, record = _antigravity_record(tmp_path, agent, "quote-budget")
+    row: dict[str, object] = {
+        "status": "DONE",
+        "created_at": "2026-11-18T00:00:00Z",
+        "tool_calls": [],
+    }
+    _ = record.write_text(
+        json.dumps(
+            {**row, "type": "USER_INPUT", "content": "<USER_REQUEST>selected</USER_REQUEST>"}
+        )
+        + "\n"
+    )
+    ledger = inputs_path(record)
+    record_sent_input(
+        ledger, key="selected-key", min_offset=0, text_sha256=text_sha256("selected"), image_count=0
+    )
+    pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
+    with pool:
+        client.app.state.rpc = RecordOperationRunner(
+            home, {"HOME": str(tmp_path)}, pool, expected_timeout_s=READ_TIMEOUT_S
+        )
+        response = client.get(f"/api/agents/{agent}/timeline")
+        assert response.status_code == 200, response.text
+        [item] = [
+            item
+            for item in TimelineResponse.model_validate_json(response.text).items
+            if item.inbound_id == inbound_id
+        ]
+        assert item.source_message_id is not None
+        body = {
+            "content": "Explain",
+            "source": "user",
+            "quote": {
+                "source_agent_id": agent,
+                "source_item_id": item.item_id,
+                "source_message_id": item.source_message_id,
+                "source_inbound_id": inbound_id,
+                "author": "User",
+                "text": "selected",
+            },
+        }
+        url = f"/api/agents/{agent}/messages"
+        accepted = client.post(url, json=body)
+        assert accepted.status_code == 201, accepted.text
+
+        with record.open("a") as handle:
+            line = json.dumps({**row, "type": "PLANNER_RESPONSE", "content": "x" * 1024}) + "\n"
+            _ = handle.write(line * (MAX_SCAN_BYTES // len(line) + 1))
+        assert record.stat().st_size > MAX_SCAN_BYTES
+        clipped = client.post(url, json=body)
+        assert clipped.status_code == 503, clipped.text
+
+        record_bound_inputs(ledger, {0: "selected-key"})
+        proven = client.post(url, json=body)
+        assert proven.status_code == 201, proven.text
+
+
 @pytest.mark.parametrize("agent_status", ["idling", "terminated"])
 @pytest.mark.parametrize("step_status", ["GENERATING", "RUNNING", "DONE"])
 def test_quote_rejects_incomplete_antigravity_planner_text(
@@ -401,24 +508,7 @@ def test_quote_rejects_incomplete_antigravity_planner_text(
         "UPDATE agents_meta SET harness='antigravity', status=%s WHERE id=%s", (agent_status, agent)
     )
     db_conn.commit()
-    home = tmp_path / "home"
-    FileSessionRegistry(harness_sessions_dir(home=home)).save(
-        SessionRecord(
-            agent_id=agent,
-            harness="antigravity",
-            session_id="planner",
-            cwd=str(tmp_path),
-            model="m",
-            created_at="2026-11-18T00:00:00Z",
-            updated_at="2026-11-18T00:00:00Z",
-            generation=1,
-        )
-    )
-    record = (
-        tmp_path
-        / ".gemini/antigravity-cli/brain/planner/.system_generated/logs/transcript_full.jsonl"
-    )
-    record.parent.mkdir(parents=True)
+    home, record = _antigravity_record(tmp_path, agent, "planner")
     _ = record.write_text(
         json.dumps(
             {

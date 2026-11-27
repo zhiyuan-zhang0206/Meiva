@@ -245,6 +245,15 @@ def answers(row: Mapping[str, object], sent: SentInput) -> bool:
     return _matches_answer(_answer_signature(row), sent)
 
 
+def matching_pending_inputs(row: FileRow, unbound: Sequence[SentInput]) -> list[SentInput]:
+    signature = _answer_signature(row.row)
+    return [
+        sent
+        for sent in unbound
+        if sent.min_offset <= row.offset and _matches_answer(signature, sent)
+    ]
+
+
 def _matches_answer(signature: tuple[str, int | None] | None, sent: SentInput) -> bool:
     if signature is None:
         return False
