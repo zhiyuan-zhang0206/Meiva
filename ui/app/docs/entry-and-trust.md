@@ -19,6 +19,15 @@ optional `gatewayUrl` override keeps its existing custom-port capability (and
 maps a bare host or `:3000` to `:8000`). Desktop shares the one-field page but
 preserves its existing arbitrary entry and gateway URLs for worktree clusters.
 
+Tauri merges `src-tauri/Info.plist` into `Meiva.app/Contents/Info.plist`. Its
+`NSAllowsArbitraryLoadsInWebContent` setting permits WKWebView to load the
+HTTP console and reach its gateway over HTTP, including over the Tailscale
+`100.64.0.0/10` range. ATS continues to apply to native `URLSession` requests.
+Cross-origin `fetch` and `EventSource` still follow browser CORS rules. The
+desktop app relies on operator-configured origins. Use HTTP on trusted private
+networks and HTTPS for public targets. Android checks that HTTP endpoints
+resolve only to loopback, link-local, private LAN, or `100.64.0.0/10` addresses.
+
 The bundled onboarding page (in the device locale from the webview language) immediately changes to a 30-second
 connecting state while saving. `app_save_settings` persists Android-normalized
 settings, then defers the window change until the asynchronous IPC reply flushes.
@@ -30,6 +39,8 @@ timeout recovery until it becomes visible. `window.rs` probes the console root
 with a four-second HTTP GET rather than TCP, treats
 2xx/3xx/401/403 as healthy, and sends a final `reason=unreachable|http|update-window`
 query into the bundled failure screen within the retry budget.
+A successful native probe establishes HTTP reachability. WKWebView can still
+fail its own provisional navigation, which is outside this probe's visibility.
 
 `src-tauri/src/window.rs` builds one webview, matches the native window
 background color (`#F0F2F4` Moonlight White in light mode, `#292824` Coal Black
