@@ -1,5 +1,6 @@
 import plistlib
 from pathlib import Path
+from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-app.yml"
@@ -17,7 +18,9 @@ def _android_workflow() -> str:
 
 def test_macos_bundle_allows_cleartext_in_web_content_only() -> None:
     with _MACOS_INFO_PLIST.open("rb") as source:
-        ats = plistlib.load(source, fmt=plistlib.FMT_XML)["NSAppTransportSecurity"]
+        plist = cast("dict[str, object]", plistlib.load(source, fmt=plistlib.FMT_XML))
+    ats = plist["NSAppTransportSecurity"]
+    assert isinstance(ats, dict)
     assert ats["NSAllowsArbitraryLoadsInWebContent"] is True
     assert "NSAllowsArbitraryLoads" not in ats
 
