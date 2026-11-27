@@ -2416,6 +2416,19 @@ export interface components {
         Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post: {
             file: string;
         };
+        BootstrapEnvelope: {
+            schema_version: number;
+            generation: string;
+            issuer: string;
+            machine_host: string;
+            role: string;
+            issued_at: number;
+            expires_at: number;
+            values: {
+                [key: string]: string;
+            };
+            integrity: string;
+        };
         BornChainResponse: {
             ancestors: components["schemas"]["BornChainRow"][];
         };
@@ -4043,7 +4056,9 @@ export interface operations {
     };
     get_bootstrap_api_bootstrap_get: {
         parameters: {
-            query?: never;
+            query?: {
+                mirror_machine_host?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -4059,8 +4074,20 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: string;
-                    };
+                    } | components["schemas"]["BootstrapEnvelope"];
                 };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             422: {
                 headers: {

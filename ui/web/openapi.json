@@ -228,9 +228,25 @@
     "/api/bootstrap": {
       "get": {
         "summary": "Get Bootstrap",
-        "description": "Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an\nagent-runner to load into its environment.\n\n`MEIVA_DB_URL` is the credential-free endpoint; no database credential is\nserved. The admin credentials remain gateway-local (see\nbase.config.bootstrap_config_values).\n\nRaises:\n    HTTPException: 401 when the request carries neither the active write\n        generation's machine API token nor the cluster secret as its bearer;\n        400 when the gateway configuration has no database\n        endpoint.",
+        "description": "Return unmasked cluster configuration for enrollment and runner boot. Requests without mirror_machine_host receive a flat map of environment aliases. A runner API token with mirror_machine_host receives a signed, host-bound configuration envelope with an expiration time. MEIVA_DB_URL is the credential-free endpoint in both representations.",
         "operationId": "get_bootstrap_api_bootstrap_get",
         "parameters": [
+          {
+            "name": "mirror_machine_host",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mirror Machine Host"
+            }
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -254,14 +270,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/BootstrapEnvelope"
+                    }
+                  ],
                   "title": "Response Get Bootstrap Api Bootstrap Get"
                 }
               }
             }
+          },
+          "401": {
+            "description": "A valid cluster bearer is required."
+          },
+          "403": {
+            "description": "Signed mirror issuance requires a runner API token."
           },
           "422": {
             "description": "Validation Error",
@@ -9116,6 +9145,62 @@
           "file"
         ],
         "title": "Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post"
+      },
+      "BootstrapEnvelope": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "generation": {
+            "type": "string",
+            "title": "Generation"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "machine_host": {
+            "type": "string",
+            "title": "Machine Host"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "issued_at": {
+            "type": "integer",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "integer",
+            "title": "Expires At"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Values"
+          },
+          "integrity": {
+            "type": "string",
+            "title": "Integrity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_version",
+          "generation",
+          "issuer",
+          "machine_host",
+          "role",
+          "issued_at",
+          "expires_at",
+          "values",
+          "integrity"
+        ],
+        "title": "BootstrapEnvelope"
       },
       "BornChainResponse": {
         "properties": {

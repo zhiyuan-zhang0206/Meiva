@@ -158,7 +158,8 @@ def test_enrolled_runner_with_unreachable_gateway_fails_fast(tmp_path: Path) -> 
     env["MEIVA_CLUSTER_SECRET"] = "test-cluster-secret"  # noqa: S105 — the suite's fixture value
     result = _import_settings(env)
     assert result.returncode != 0
-    assert "127.0.0.1:1" in result.stderr
+    assert "Check MEIVA_GATEWAY_URL and gateway reachability" in result.stderr
+    assert "127.0.0.1:1" not in result.stderr
 
 
 def test_gateway_unit_never_fetches(tmp_path: Path) -> None:

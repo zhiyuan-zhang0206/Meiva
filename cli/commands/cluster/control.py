@@ -33,6 +33,7 @@ from base.host.env.bootstrap import BootstrapFetchError, config_source_is_local
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.http_dial import get as dial_get
 from base.host.net.http_dial import post as dial_post
+from base.host.net.http_dial import stream_get
 from base.paths.expand import expand_home
 from cli.boundary.json_body import response_object
 from cli.commands.cluster.plans.db_authority_replies import (
@@ -231,9 +232,12 @@ def cmd_cluster_status(
 # HTTP error rather than masking an unreachable gateway.
 def fetch_gateway_cluster_status(access: GatewayAccess) -> dict[str, JsonValue]:
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/status"
-    resp = dial_get(url, timeout=_STATUS_READ_TIMEOUT_S, headers=gateway_auth_headers(access))
-    resp.raise_for_status()
-    return response_object(resp)
+    with stream_get(
+        url, timeout=_STATUS_READ_TIMEOUT_S, headers=gateway_auth_headers(access)
+    ) as resp:
+        _ = resp.raise_for_status()
+        _ = resp.read()
+        return response_object(resp)
 
 
 # meiva:note

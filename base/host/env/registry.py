@@ -49,6 +49,9 @@ from base.host.env.agent_env import (
 from base.host.env.agent_env import (
     session_child_env_keys as session_child_env_keys,
 )
+
+# Cluster policy travels through the existing authenticated bootstrap snapshot.
+from base.host.env.boot_policy import PLUGIN_CLUSTER_CONFIG_ENV as PLUGIN_CLUSTER_CONFIG_ENV
 from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -115,8 +118,6 @@ def network_proxy_configured(environ: Mapping[str, str]) -> bool:
 
 # Service birth snapshots are delivered per unit, never inherited by its parent.
 SERVICE_PLUGIN_CONFIG_ENV = "MEIVA_SERVICE_PLUGIN_CONFIG"
-# Cluster policy travels through the existing authenticated bootstrap snapshot.
-PLUGIN_CLUSTER_CONFIG_ENV = "MEIVA_PLUGIN_CLUSTER_CONFIG"
 # The Redis ACL runtime password is a file-only data-plane credential like the
 # runner database password. derive_env emits it and process isolation strips it.
 REDIS_PASSWORD_ENV = "MEIVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential

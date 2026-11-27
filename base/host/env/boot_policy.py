@@ -8,15 +8,29 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeGuard
+from typing import Literal, TypedDict, TypeGuard
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 __all__ = [
+    "MIRROR_HOST_PARAM",
     "PLACEHOLDER_DB_URL",
+    "PLUGIN_CLUSTER_CONFIG_ENV",
+    "BootstrapEnvelope",
     "BootstrapFetch",
+    "MirrorRejectedError",
     "fetch_backoff",
+    "issue_config_mirror",
     "serve_flag",
+    "validate_config_mirror",
+    "validated_bootstrap_config",
     "validated_bootstrap_payload",
 ]
 
@@ -27,6 +41,8 @@ __all__ = [
 # fails loudly instead of silently hitting a database a host `.env` points at.
 # base/db.connect() detects it and raises an actionable error.
 PLACEHOLDER_DB_URL = "postgresql://no-cluster@127.0.0.1:1/run-meiva-start-first"
+
+PLUGIN_CLUSTER_CONFIG_ENV = "MEIVA_PLUGIN_CLUSTER_CONFIG"
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
@@ -108,3 +124,130 @@ def validated_bootstrap_payload(payload: object) -> dict[str, str]:
             )
         out[key] = value
     return out
+
+
+def validated_bootstrap_config(
+    payload: object, *, require_plugin_config: bool = False
+) -> dict[str, str]:
+    from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
+
+    values = validated_bootstrap_payload(payload)
+    packet = values.get(PLUGIN_CLUSTER_CONFIG_ENV)
+    if packet is None and not require_plugin_config:
+        return values
+    raw = None if packet is None else object_of(json.loads, packet)
+    if not is_object_dict(raw):
+        raise TypeError("bootstrap plugin cluster config must be a JSON object")
+    for plugin, fields in BUILTIN_CLUSTER_CONFIG_FIELDS.items():
+        projection = raw.get(plugin)
+        if not is_object_dict(projection) or projection.keys() != fields:
+            raise ValueError(
+                f"bootstrap cluster fields for plugin {plugin!r} differ from declaration"
+            )
+    return values
+
+
+# meiva:link base/host/env/docs/bootstrap-mirror.md
+MIRROR_HOST_PARAM = "mirror_machine_host"
+_SCHEMA_VERSION = 1
+_ROLE = "agent-runner"
+_LIFETIME_S = 24 * 60 * 60
+_CLOCK_SKEW_S = 30
+_MAC_DOMAIN = b"meiva/bootstrap-mirror/v1\0"
+
+
+class _Claims(TypedDict):
+    schema_version: int
+    generation: str
+    issuer: str
+    machine_host: str
+    role: str
+    issued_at: int
+    expires_at: int
+    values: dict[str, str]
+
+
+class BootstrapEnvelope(_Claims):
+    integrity: str
+
+
+class MirrorRejectedError(ValueError):
+    def __init__(self, reason: str, *, state: Literal["invalid", "expired"] = "invalid") -> None:
+        self.state: Literal["invalid", "expired"] = state
+        super().__init__(reason)
+
+
+def _json(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def _mac(bearer: str, purpose: bytes, body: bytes) -> str:
+    return hmac.digest(bearer.encode(), _MAC_DOMAIN + purpose + body, "sha256").hex()
+
+
+def _claims(values: dict[str, str], *, bearer: str, machine_host: str, issued_at: int) -> _Claims:
+    return _Claims(
+        schema_version=_SCHEMA_VERSION,
+        generation=hashlib.sha256(_json(values)).hexdigest(),
+        issuer=_mac(bearer, b"issuer", b""),
+        machine_host=machine_host,
+        role=_ROLE,
+        issued_at=issued_at,
+        expires_at=issued_at + _LIFETIME_S,
+        values=values,
+    )
+
+
+def issue_config_mirror(
+    values: dict[str, str], *, bearer: str, machine_host: str, now: float
+) -> BootstrapEnvelope:
+    if not bearer or not machine_host.strip():
+        raise MirrorRejectedError(
+            "mirror signing requires an enrolled runner token and machine host"
+        )
+    claims = _claims(values, bearer=bearer, machine_host=machine_host, issued_at=int(now))
+    return BootstrapEnvelope(**claims, integrity=_mac(bearer, b"claims", _json(claims)))
+
+
+def validate_config_mirror(
+    payload: object, *, bearer: str, machine_host: str, now: float
+) -> BootstrapEnvelope:
+    if not is_object_dict(payload) or type(payload.get("schema_version")) is not int:
+        raise MirrorRejectedError("missing or malformed mirror schema")
+    expected = _validate_mirror_claims(payload, bearer=bearer, machine_host=machine_host, now=now)
+    integrity = payload.get("integrity")
+    if not bearer or not isinstance(integrity, str) or not integrity.isascii():
+        raise MirrorRejectedError("missing or malformed mirror integrity proof")
+    if not hmac.compare_digest(integrity, _mac(bearer, b"claims", _json(expected))):
+        raise MirrorRejectedError("mirror integrity check failed")
+    envelope = BootstrapEnvelope(**expected, integrity=integrity)
+    if payload != envelope or type(payload.get("expires_at")) is not int:
+        raise MirrorRejectedError("mirror claims do not match the authenticated projection")
+    if now >= envelope["expires_at"]:
+        raise MirrorRejectedError("mirror authorization has expired", state="expired")
+    return envelope
+
+
+def _validate_mirror_claims(
+    payload: dict[str, object], *, bearer: str, machine_host: str, now: float
+) -> _Claims:
+    if payload["schema_version"] != _SCHEMA_VERSION:
+        raise MirrorRejectedError("unsupported mirror schema")
+    if (
+        not machine_host
+        or payload.get("machine_host") != machine_host
+        or payload.get("role") != _ROLE
+    ):
+        raise MirrorRejectedError("mirror host or role does not match this runner")
+    issued_at = payload.get("issued_at")
+    if (
+        type(issued_at) is not int
+        or not math.isfinite(now)
+        or not 0 <= issued_at <= now + _CLOCK_SKEW_S
+    ):
+        raise MirrorRejectedError("invalid mirror issue time")
+    try:
+        values = validated_bootstrap_config(payload.get("values"), require_plugin_config=True)
+    except (TypeError, ValueError, RecursionError):
+        raise MirrorRejectedError("invalid mirror configuration projection") from None
+    return _claims(values, bearer=bearer, machine_host=machine_host, issued_at=issued_at)

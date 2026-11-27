@@ -35,5 +35,7 @@ rows that duplicate Settings aliases are rejected.
 
 ## Related owners
 
+- [Runner bootstrap configuration mirror](bootstrap-mirror.md) — signed delivery of the cluster projection.
+
 - [Configuration and Bootstrap](../../../docs/configuration/configuration.md) — Settings composition and configuration fields.
 - [Host primitives](../../docs/host.md) — host primitives.

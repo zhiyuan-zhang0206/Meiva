@@ -628,3 +628,59 @@ def test_embedded_command_releases_sinks_before_its_stderr_closes(
         assert "closed file" not in capsys.readouterr().err
     finally:
         logger.remove(caller_sink)
+
+
+@pytest.mark.parametrize("malformed_header", [False, True], ids=["raw-url", "invalid-token"])
+def test_bootstrap_failure_keeps_credentials_and_gateway_url_out_of_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], malformed_header: bool
+) -> None:
+    from base.host.env.boot_policy import BootstrapFetch
+    from base.host.env.bootstrap import resolve_bootstrap_config
+    from base.host.net.tests.local_http import closed_port_url, serve_json
+
+    args = _main.parse_command_args(["restart"])
+    sensitive_marker = "synthetic-header-marker"
+    url_marker = "synthetic-url-marker"
+    with serve_json({}) as gateway:
+        url = (
+            gateway.url
+            if malformed_header
+            else closed_port_url().replace("://", f"://user:{url_marker}@")
+        )
+
+        def dispatch(_args: argparse.Namespace) -> int:
+            _ = resolve_bootstrap_config(
+                {
+                    "MEIVA_GATEWAY_URL": url,
+                    "MEIVA_API_TOKEN": f"{sensitive_marker}\ninvalid",
+                },
+                home=tmp_path,
+                now=0.0,
+                tuning=BootstrapFetch(attempts=1),
+            )
+            pytest.fail("expected bootstrap to reject the request")
+
+        args.func = dispatch
+        assert (
+            _main.dispatch_parsed(
+                args,
+                ["restart"],
+                declared=tmp_path,
+                checkout=_REPO_ROOT,
+                producer_factory=lambda machine, home, command: OperatorEventPipeline.recording(
+                    machine=machine,
+                    home=home,
+                    now=system_clock().now,
+                    log_sinks=[],
+                    otlp_enabled=command.otlp_enabled,
+                    otlp_endpoint=command.otlp_endpoint,
+                    rng=command.rng,
+                ),
+                open_database=open_operator_database,
+            )
+            == 1
+        )
+
+    err = capsys.readouterr().err
+    assert ("LocalProtocolError" if malformed_header else "no snapshot") in err
+    assert sensitive_marker not in err and url_marker not in err

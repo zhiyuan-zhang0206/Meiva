@@ -12,10 +12,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+from starlette.types import Receive, Scope, Send
 
 from base.host.env import bootstrap
 from base.host.env.boot_policy import BootstrapFetch, fetch_backoff, serve_flag
-from base.host.net.tests.local_http import closed_port_url, serve_json
+from base.host.net.tests.local_http import closed_port_url, serve_asgi, serve_json
 
 _NOW = 1_000_000.0
 # meiva:note
@@ -57,6 +58,7 @@ def _write_snapshot(
         ),
         encoding="utf-8",
     )
+    snap.chmod(0o600)
     return snap
 
 
@@ -143,10 +145,9 @@ def test_inject_without_gateway_url_fails_fast(home: Path) -> None:
 
 
 def test_inject_wraps_fetch_failure(home: Path) -> None:
-    # The raw httpx error is wrapped with the operator's remedy; the process
-    # must not start with no config.
+    # Startup failure includes the operator's remedy without printing the raw URL.
     url = closed_port_url()
-    with pytest.raises(bootstrap.BootstrapFetchError, match=url.removeprefix("http://")):
+    with pytest.raises(bootstrap.BootstrapFetchError, match="Check MEIVA_GATEWAY_URL"):
         _inject({"MEIVA_GATEWAY_URL": url}, home)
 
 
@@ -342,7 +343,7 @@ def test_rejects_a_fleet_projection_with_retired_fields_before_writing(home: Pat
 
     with (
         serve_json({PLUGIN_CLUSTER_CONFIG_ENV: _fleet_projection(legacy=True)}) as gateway,
-        pytest.raises(bootstrap.BootstrapFetchError, match="meiva_fleet"),
+        pytest.raises(bootstrap.BootstrapFetchError, match="invalid bootstrap configuration"),
     ):
         _resolve({"MEIVA_GATEWAY_URL": gateway.url}, home)
     assert not bootstrap.snapshot_path(home).exists()
@@ -411,7 +412,8 @@ def test_inject_falls_back_to_stale_snapshot_on_transport_failure(home: Path) ->
         home, base_url=url, age_s=10_000.0, values={"MEIVA_DB_URL": "postgresql://last-known/x"}
     )
     env = {"MEIVA_GATEWAY_URL": url}
-    _inject(env, home)  # must not raise
+    result = _inject(env, home)  # must not raise
+    assert result.bootstrap_source == "legacy_fallback"
     assert env["MEIVA_DB_URL"] == "postgresql://last-known/x"
 
 
@@ -545,3 +547,23 @@ def test_service_plugin_config_packet_is_the_launchers_env_value() -> None:
 
     assert bootstrap.service_plugin_config_packet({SERVICE_PLUGIN_CONFIG_ENV: "{}"}) == "{}"
     assert bootstrap.service_plugin_config_packet({}) is None
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_bootstrap_refusal_does_not_read_a_corrupt_gzip_body(status: int) -> None:
+    async def respond(_scope: Scope, _receive: Receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-encoding", b"gzip")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"not a gzip stream"})
+
+    with serve_asgi(respond) as url, pytest.raises(httpx.HTTPStatusError) as rejected:
+        _ = bootstrap.fetch_bootstrap_config(url, bearer=None, tuning=_QUICK)
+
+    assert rejected.value.response.status_code == status
+    assert rejected.value.response.is_closed
+    assert not rejected.value.response.is_stream_consumed

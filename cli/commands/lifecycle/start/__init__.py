@@ -366,6 +366,9 @@ def _register_and_probe(start: _Start) -> int | None:
                 start.resolved["gateway_url"],
                 access=gateway_access_from_boot(start.command.config),
                 timers=start.command.timers,
+                allow_unavailable=(
+                    start.command.config.view.env_boot.bootstrap_source == "authorized_mirror"
+                ),
             )
         if rc != 0:
             return rc

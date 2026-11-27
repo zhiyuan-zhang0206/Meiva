@@ -14,7 +14,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal
 
 from pydantic import JsonValue
 
@@ -280,44 +280,39 @@ def assert_schema_current_or_die(db_url: str) -> int:
 GATEWAY_PROBE_PATH = "/api/cluster/status"
 
 
-class GatewayProbe(NamedTuple):
-    """One dial of the gateway's probe endpoint, classified but not judged.
-
-    `status` is the HTTP status, or None when the dial got no answer at all
-    (connection refused / timeout — nothing is listening). `detail` is the exception
-    text in that case, else the truncated response body.
-
-    The agent-runner preflight (`probe_gateway_or_die`) uses this result to
-    distinguish an unavailable gateway from a rejected request.
-    """
-
-    status: int | None
-    detail: str
+type _GatewayProbe = int | Literal["unreachable", "invalid_request"]
 
 
-def probe_gateway_once(
-    gateway_url: str, *, access: GatewayAccess, timeout_s: float = 10.0
-) -> GatewayProbe:
-    """Dial `GATEWAY_PROBE_PATH` on `gateway_url` once, with this cluster's auth.
-
-    Classifies rather than decides: no printing, no retrying, no exit code. The
-    callers differ entirely in what they do with a non-answer (the preflight gives up,
-    the readiness gate keeps waiting), and only in that.
-    """
+def _probe_gateway_once(gateway_url: str, *, access: GatewayAccess) -> _GatewayProbe:
+    """Read only the response status and distinguish local request errors from outages."""
     import httpx
 
-    from base.cluster.machine import gateway_auth_headers
-    from base.host.net.http_dial import get as dial_get
+    from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
+    from base.host.net.http_dial import stream_get
 
     try:
-        resp = dial_get(
-            f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}",
-            timeout=timeout_s,
-            headers=gateway_auth_headers(access),
-        )
-    except httpx.HTTPError as e:
-        return GatewayProbe(None, str(e))
-    return GatewayProbe(resp.status_code, resp.text[:200])
+        url = httpx.URL(gateway_url)
+        if url.scheme not in {"http", "https"} or not url.host:
+            return "invalid_request"
+        if url.port is not None and not 1 <= url.port <= 65535:
+            return "invalid_request"
+        headers = gateway_auth_headers(access)
+        bearer = headers["Authorization"]
+        # Validate locally so a refused dial cannot hide an invalid header.
+        if not bearer.isascii() or not bearer.isprintable() or bearer != bearer.strip():
+            return "invalid_request"
+        endpoint = f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}"
+        with stream_get(endpoint, timeout=10.0, headers=headers) as response:
+            return response.status_code
+    except (
+        httpx.NetworkError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError,
+        httpx.DecodingError,
+    ):
+        return "unreachable"
+    except (httpx.HTTPError, httpx.InvalidURL, GatewayApiTokenMissing, ValueError):
+        return "invalid_request"
 
 
 # Gap between preflight dials. Small relative to the budget so a hole a few seconds
@@ -334,61 +329,49 @@ def probe_gateway_or_die(
     timers: Timers,
     budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S,
     retry_interval_s: float = _PREFLIGHT_RETRY_INTERVAL_S,
+    allow_unavailable: bool = False,
 ) -> int:
-    """Probe the gateway from an agent-runner over the private network.
+    """Probe the gateway with the startup or pre-update policy.
 
-    The agent-runner's ops server is dialed *by* the gateway, but the host
-    still reaches the gateway for watchdog self-heal updates and
-    cluster status. Probe at `meiva start` time so a broken private-network path
-    fails on stdout instead of only surfacing later during a self-heal.
-
-    **Both transient shapes get the same bounded budget**: a 5xx (the gateway
-    answered but is not ready) and no answer at all (nothing is listening on that
-    address *yet*). A brief gateway restart can refuse a connection before
-    serving returns; one refused packet is not evidence of a terminal failure.
-
-    The budget buys nothing on the healthy path: a reachable gateway answers on the
-    first dial and returns immediately. A gateway that is genuinely down still fails —
-    `budget_s` is deliberately too short to outlast a real death, which needs the
-    watchdog's own round to fix (`base.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S`).
-
-    A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
-    as before: a credential or route mismatch is not a timing problem.
+    A runner with signed config can start on a transport failure or HTTP 5xx
+    after one dial. Other starts and pre-update checks spend the retry budget
+    on the same transient results. Request errors and other HTTP responses
+    are terminal under both policies.
     """
     deadline = timers.monotonic() + budget_s
     attempt = 0
     while True:
         attempt += 1
-        probe = probe_gateway_once(gateway_url, access=access)
-        if probe.status == 200:
-            print(f"  ✓ gateway reachable ({gateway_url})")
+        probe = _probe_gateway_once(gateway_url, access=access)
+        if probe == 200:
+            print("  ✓ gateway reachable")
             return 0
-        if probe.status is not None and probe.status < 500:
+        if probe == "invalid_request":
             print(
-                f"  ✗ unexpected status {probe.status} from gateway: {probe.detail}.",
+                "  ✗ invalid gateway probe request. Check MEIVA_GATEWAY_URL and the gateway credential.",
                 file=sys.stderr,
             )
             return 1
+        if isinstance(probe, int) and not 500 <= probe < 600:
+            print(f"  ✗ unexpected status {probe} from gateway.", file=sys.stderr)
+            return 1
+
+        shape = "unreachable" if probe == "unreachable" else f"returned HTTP {probe}"
+        if allow_unavailable:
+            print(
+                f"  ⚠ gateway {shape}; continuing with the authorized configuration mirror",
+                file=sys.stderr,
+            )
+            return 0
         remaining = deadline - timers.monotonic()
         if remaining <= 0:
-            if probe.status is None:
-                print(
-                    f"  ✗ gateway unreachable at {gateway_url} after {attempt} attempt(s) "
-                    f"over {budget_s:.0f}s: {probe.detail}.\n"
-                    f"    Check `MEIVA_GATEWAY_URL` in ~/.meiva/.env and that this host can "
-                    f"reach the gateway over the cluster's private network.",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"  ✗ gateway returned {probe.status} at {GATEWAY_PROBE_PATH} after "
-                    f"{attempt} attempt(s) over {budget_s:.0f}s: {probe.detail}.\n"
-                    f"    Gateway may be mid-restart; retry later.",
-                    file=sys.stderr,
-                )
+            print(
+                f"  ✗ gateway {shape} after {attempt} attempt(s) over {budget_s:.0f}s.\n"
+                "    Check MEIVA_GATEWAY_URL and gateway reachability, then retry.",
+                file=sys.stderr,
+            )
             return 1
         wait_s = min(retry_interval_s, remaining)
-        shape = "unreachable" if probe.status is None else f"returned {probe.status}"
         print(
             f"  ⚠ gateway {shape} (attempt {attempt}, {remaining:.0f}s of budget left); "
             f"retrying in {wait_s:.0f}s…",
@@ -505,7 +488,9 @@ def preflight_probes(db: Database, *, command: CommandRuntime) -> int:
             timers=command.timers,
         )
         if rc != 0:
-            print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
+            print(
+                "  ✗ preflight failed: gateway check failed — host still serving", file=sys.stderr
+            )
             return rc
 
     return 0

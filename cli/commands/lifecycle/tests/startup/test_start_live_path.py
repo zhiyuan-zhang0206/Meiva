@@ -12,22 +12,37 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from collections.abc import Iterator
+from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 
 import psycopg
 import pytest
+from starlette.types import Receive, Scope, Send
 
 from base import paths
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
 from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_serving
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
+from base.host.env.boot_policy import BootstrapFetch, issue_config_mirror
+from base.host.env.bootstrap import stage_config_mirror
+from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
+from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.host.net.tests.local_http import closed_port_url, serve_asgi
+from base.host.net.url_secret import credential_free, url_host, url_with_host, url_with_query_param
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.lifecycle.live_generation import (
     ROOT_NONE,
     ROOT_SAME,
     main,
     root_generation_verdict,
 )
+from cli.commands.lifecycle.start import cmd_start
 from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import (
     STATUS_PATH,
@@ -98,6 +113,147 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     out = capsys.readouterr().out
     assert "roles = agent-runner, machine = start-test" in out
     assert "probe gateway" in out
+
+
+@pytest.fixture
+def cold_start_gateway(
+    gateway_response: str, bootstrap_status: int | None
+) -> Iterator[tuple[str, list[str]]]:
+    """Provide a real loopback response or an endpoint that cannot answer."""
+    requested_paths: list[str] = []
+    if gateway_response == "corrupt-gzip":
+
+        async def respond(scope: Scope, _receive: Receive, send: Send) -> None:
+            if scope["type"] != "http":
+                return
+            path = scope["path"]
+            requested_paths.append(path)
+            status = bootstrap_status if path == "/api/bootstrap" else 503
+            assert status is not None
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": [(b"content-encoding", b"gzip")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"not a gzip stream"})
+
+        with serve_asgi(respond) as url:
+            yield url, requested_paths
+        return
+    scheme = "ftp" if gateway_response == "invalid-scheme" else "http"
+    yield closed_port_url().replace("http://", f"{scheme}://"), requested_paths
+
+
+@pytest.mark.parametrize(
+    ("gateway_response", "bootstrap_status", "expected_rc", "diagnostic"),
+    [
+        (
+            "closed-port",
+            None,
+            0,
+            "gateway unreachable; continuing with the authorized configuration mirror",
+        ),
+        ("invalid-scheme", None, 1, "invalid gateway probe request"),
+        (
+            "corrupt-gzip",
+            None,
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+        (
+            "corrupt-gzip",
+            503,
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+        (
+            "corrupt-gzip",
+            200,
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+    ],
+    ids=["closed-port", "invalid-scheme", "corrupt-preflight", "stale-503", "stale-200"],
+)
+def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
+    start_run: StartRun,
+    db_url: str,
+    redis_url: str,
+    capsys: pytest.CaptureFixture[str],
+    cold_start_gateway: tuple[str, list[str]],
+    bootstrap_status: int | None,
+    expected_rc: int,
+    diagnostic: str,
+) -> None:
+    gateway_url, requested_paths = cold_start_gateway
+    home = start_run.home
+    host = "192.0.2.20"
+    bearer = "offline-start-fixture"
+    _ = (home / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
+        "MEIVA_MACHINE_NAME=offline-start\n"
+        f"MEIVA_MACHINE_HOST={host}\n"
+        f"MEIVA_GATEWAY_URL={gateway_url}\n"
+    )
+    now = time.time()
+    projection = {
+        "MEIVA_DB_URL": url_with_query_param(
+            url_with_host(credential_free(db_url), "db.test"), "hostaddr", url_host(db_url)
+        ),
+        "MEIVA_REDIS_URL": redis_url,
+        "MEIVA_TIMEZONE": "UTC",
+        PLUGIN_CLUSTER_CONFIG_ENV: json.dumps(
+            {
+                plugin: dict.fromkeys(fields, None)
+                for plugin, fields in BUILTIN_CLUSTER_CONFIG_FIELDS.items()
+            }
+        ),
+    }
+    age = BootstrapFetch().snapshot_fresh_s + 1 if bootstrap_status is not None else 0
+    signed = issue_config_mirror(projection, bearer=bearer, machine_host=host, now=now - age)
+    _ = stage_config_mirror(signed, home=home, bearer=bearer, machine_host=host, now=now)
+    mirror_path = home / "run" / "bootstrap-mirror.json"
+    installed = mirror_path.read_bytes()
+    boot = ConfigBoot(environment={"MEIVA_HOME": str(home), "MEIVA_API_TOKEN": bearer})
+    boot.prepare()
+    assert boot.view.env_boot.bootstrap_source == "authorized_mirror"
+    assert requested_paths == (["/api/bootstrap"] if bootstrap_status is not None else [])
+    assert mirror_path.read_bytes() == installed
+
+    command = replace(start_run.command, config=boot, machine=ConfiguredMachineIdentity(boot))
+    run = replace(start_run, command=command)
+    selected = ("pty-sessions",)
+    generation = run.generation(RUNNER, run.roster(RUNNER, only=selected))
+    row = _row(run, RUNNER, "pty-sessions", state="stopped", intent="stopped")
+
+    with ExitStack() as root_boundary:
+
+        def start_root_socket(_context: object) -> None:
+            _ = root_boundary.enter_context(run.root([row], launch_digest=generation.launch_digest))
+
+        assert (
+            cmd_start(
+                disabled_services=(),
+                only_services=selected,
+                all_services=False,
+                runtime=run.runtime,
+                retained_children=run.children,
+                database_factory=run.database_factory,
+                producer=run.producer,
+                command=run.command,
+                converge_steps=(ConvergeStep("test root socket", start_root_socket),),
+            )
+            == expected_rc
+        )
+
+    assert row.state == ("running" if expected_rc == 0 else "stopped")
+    assert run.serving_published is (expected_rc == 0)
+    output = capsys.readouterr()
+    assert diagnostic in output.err
+    if "/api/cluster/status" in requested_paths:
+        assert "gateway unreachable: HTTP 503" in output.out
 
 
 def _single_slot_record(home: Path, agent_id: int) -> Path:

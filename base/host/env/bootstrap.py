@@ -1,50 +1,34 @@
-# meiva:note
-# Fetch cluster-common config from the gateway at process start.
-#
-# Every process on a configured pure agent-runner (serve_agent_runner flag on,
-# enrolled with a gateway URL) fetches the cluster's config from the gateway at
-# startup and injects it into os.environ before Settings is built — there is no
-# materialized `.env` cache of cluster facts. The
-# one cache that does exist is a transient 0600 config snapshot under
-# `$MEIVA_HOME/run/`: a successful fetch writes it, and a later process skips the
-# fetch while it is fresh, falling back to it (with a warning) when the gateway
-# is unreachable — see the snapshot helpers below. A
-# gateway-capable unit keeps the cluster's config in its own `$MEIVA_HOME/.env` and
-# never fetches; which side a unit is on is derived from its serve flags (see
-# `config_source_is_local` / `should_fetch_from_gateway`), not from an env var. A bare checkout with no role flags (CI, lint
-# scripts) and a not-yet-enrolled runner resolve locally with no fetch — the preflight gate refuses an unenrolled
-# `meiva start`, not the Settings import. The
-# bytes travel the private network; an authenticated gateway requires a bearer,
-# which this presents from the unit's machine API token (`MEIVA_API_TOKEN`, from
-# its installed capability); a unit never holds the human cluster secret.
-# Intentionally imports nothing from base.config (it runs DURING base.config
-# import) — only stdlib and the settings-free EnvBootResult at import;
-# the httpx / base.host.net.auth / base.host.net.http_dial
-# pieces lazily at fetch time (all config-free, so they're safe this early in
-# boot).
-#
-# Nothing here reads the process environment, the clock or the home on its own: the
-# environment is the `env` mapping the caller passes (the config boot,
-# `base.config._lite.ConfigBoot`, hands in `os.environ`), the home is a `Path`, the
-# `.env` file is a mapping of its values (`base.host.env.dotenv_file.read_env_aliases`),
-# and the time is a `now` float. A test passes dicts and a `tmp_path`.
+"""Resolve cluster config before Settings exists.
 
+Gateway-capable units own their configuration in their local dotenv. Enrolled
+pure runners receive configuration from the authenticated bootstrap endpoint
+or the signed, host-bound local mirror. The environment, home and boot's
+wall-clock sample are supplied by the caller.
+"""
 
 from __future__ import annotations
 
 import json
+import stat
+import time
 from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TypeGuard
+from typing import Literal, TypeGuard
 
-from base.host.atomic_io import write_bytes_atomic
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter, write_bytes_atomic
 from base.host.boundary.untyped import object_of
 from base.host.env.boot_policy import (
+    MIRROR_HOST_PARAM,
+    BootstrapEnvelope,
     BootstrapFetch,
+    MirrorRejectedError,
     fetch_backoff,
     serve_flag,
-    validated_bootstrap_payload,
+    validate_config_mirror,
+)
+from base.host.env.boot_policy import (
+    validated_bootstrap_config as validated_bootstrap_config,
 )
 from base.host.env.process_profile import (
     MEIVA_PROCESS_PROFILE_ENV,
@@ -74,6 +58,10 @@ _API_TOKEN_ENV = "MEIVA_API_TOKEN"  # noqa: S105
 @dataclass(frozen=True, slots=True)
 class EnvBootResult:
     db_authority_refusal: str | None = None
+    bootstrap_source: Literal["live_bootstrap", "authorized_mirror", "legacy_fallback"] | None = (
+        None
+    )
+    bootstrap_generation: str | None = None
 
 
 # meiva:note
@@ -210,61 +198,24 @@ def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[st
     return values
 
 
-def validated_bootstrap_config(
-    payload: object, *, require_plugin_config: bool = False
-) -> dict[str, str]:
-    """Validate the bootstrap values before they can become a runner snapshot."""
-    from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
-    from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
-
-    values = validated_bootstrap_payload(payload)
-    packet = values.get(PLUGIN_CLUSTER_CONFIG_ENV)
-    if packet is None and not require_plugin_config:
-        return values
-    raw = None if packet is None else object_of(json.loads, packet)
-    if not _is_object_dict(raw):
-        raise TypeError("bootstrap plugin cluster config must be a JSON object")
-    for plugin, fields in BUILTIN_CLUSTER_CONFIG_FIELDS.items():
-        projection = raw.get(plugin)
-        if not _is_object_dict(projection) or projection.keys() != fields:
-            raise ValueError(
-                f"bootstrap cluster fields for plugin {plugin!r} differ from declaration"
-            )
-    return values
-
-
-# The parent config snapshot (P0 #2100): a successful fetch writes the payload
-# to `$MEIVA_HOME/run/bootstrap-snapshot.json` (0600). A later process on the same
-# unit — most importantly the exec child the agent process spawns per turn —
-# SKIPS the fetch while the snapshot is fresh, so a gateway that is down or
-# restarting is no longer a single point that silently kills every execute_code
-# call. When the snapshot is stale the process fetches as before; if that fetch
-# then fails on a transport error the process falls back to the snapshot anyway
-# (last-known cluster config — the same values its parent already runs on),
-# because during a gateway outage no cluster config edit can have happened
-# since the snapshot was written.
+# meiva:link base/host/env/docs/bootstrap-mirror.md
 _SNAPSHOT_NAME = "bootstrap-snapshot.json"
-# Snapshots carry no database credential (bootstrap serves the credential-free
-# endpoint). Version 4 invalidates runner caches with the retired Fleet task
-# configuration fields, which fail the current plugin projection validation.
+# Version 4 invalidates caches that contain retired Fleet task fields.
 SNAPSHOT_VERSION = 4
 
 
-# Transport-level httpx failures mean "gateway unreachable / mid-restart" —
-# the class that may fall back to a stale snapshot. Auth and status failures
-# (401 wrong secret, 400, 5xx) still fail loud: a runner the gateway rejects
-# must not keep running on old config.
+# Network, remote-protocol and content-decoding failures can use a local
+# snapshot. An HTTP 5xx can use an authorized mirror. Credential refusals and
+# invalid projections refuse startup.
 def _transport_failures() -> tuple[type[BaseException], ...]:
-    """Transport-level httpx failure classes (lazy import: httpx stays off the
-    settings-import path until an actual fetch is attempted)."""
+    """Failures reading the gateway response, imported lazily before the first fetch."""
     import httpx
 
     return (
-        httpx.ConnectError,
-        httpx.ConnectTimeout,
-        httpx.ReadTimeout,
+        httpx.NetworkError,
+        httpx.TimeoutException,
         httpx.RemoteProtocolError,
-        httpx.PoolTimeout,
+        httpx.DecodingError,
     )
 
 
@@ -328,44 +279,31 @@ def should_fetch_from_gateway(env: Mapping[str, str], *, env_file: Mapping[str, 
 
 
 class BootstrapFetchError(RuntimeError):
-    """A pure agent-runner could not fetch its cluster config from the gateway:
-    no gateway URL to fetch from, or every fetch attempt failed (unreachable /
-    401 / bad body).
+    """The runner cannot resolve cluster config for this boot invocation."""
 
-    The process must not start with no config. `meiva start` exits 1 with this
-    message (the boot policy retries it); a daemon dies at import and the OS
-    watchdog probe revives it until the gateway is reachable again — the
-    fetch's own retry plus that revive loop is what makes a gateway restart
-    self-heal on a runner.
-    """
+    def __init__(
+        self, reason: str, *, mirror_state: Literal["invalid", "expired"] | None = None
+    ) -> None:
+        self.mirror_state = mirror_state
+        super().__init__(reason)
 
 
-# meiva:note
-# GET {base_url}/api/bootstrap. Return {alias: value}.
-#
-# Retries with linear backoff (`fetch_backoff`) so a gateway that is briefly
-# unreachable as the agent boots doesn't strand it.
-#
-# Bootstrap serves the credential-free database endpoint and no cluster
-# secret. The runner's login comes only from its installed unit capability
-# (`base.host.db_authority.unit`).
-#
-# Presents `Authorization: Bearer <bearer>` when `bearer` is given: a joining
-# start holds its bundle's token, a booting process its delivered machine API
-# token (`base.host.net.auth.delivered_token(env)`); without one the gateway
-# answers 401. Never read from Settings — this runs during the Settings import.
-#
-# Raises:
-#     httpx.HTTPError: every attempt failed (gateway unreachable / non-2xx, e.g.
-#         401 when the machine token is missing, revoked or wrong).
-#     TypeError: the response body is not a flat ``{str: str}`` map.
 def fetch_bootstrap_config(
     base_url: str, *, bearer: str | None, tuning: BootstrapFetch
 ) -> dict[str, str]:
+    """Fetch the flat projection used by enrollment and older clients."""
+    return validated_bootstrap_config(
+        _fetch_bootstrap_payload(base_url, bearer=bearer, machine_host=None, tuning=tuning)
+    )
+
+
+def _fetch_bootstrap_payload(
+    base_url: str, *, bearer: str | None, machine_host: str | None, tuning: BootstrapFetch
+) -> object:
     import httpx
 
     from base.host.net.auth import bearer_header
-    from base.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import stream_get
     from base.host.net.resilience import Policy, retry
     from base.log import guard_default_logging
 
@@ -386,12 +324,78 @@ def fetch_bootstrap_config(
         on_final_failure=None,
     )
 
-    def _fetch_once() -> dict[str, str]:
-        resp = dial_get(url, timeout=tuning.timeout_s, headers=headers)
-        resp.raise_for_status()
-        return validated_bootstrap_config(object_of(resp.json))
+    params = {MIRROR_HOST_PARAM: machine_host} if machine_host else None
+
+    def _fetch_once() -> object:
+        with stream_get(url, timeout=tuning.timeout_s, headers=headers, params=params) as resp:
+            _ = resp.raise_for_status()
+            _ = resp.read()
+            return object_of(resp.json)
 
     return retry(policy)(_fetch_once)
+
+
+# meiva:link base/host/env/docs/bootstrap-mirror.md
+def _mirror_path(home: Path) -> Path:
+    return home / "run" / "bootstrap-mirror.json"
+
+
+def _mirror_enrollment_path(home: Path) -> Path:
+    return home / "bootstrap-mirror-enrolled"
+
+
+def _mirror_enrollment_recorded(home: Path) -> bool:
+    try:
+        _ = _mirror_enrollment_path(home).lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def read_config_mirror(
+    *, home: Path, bearer: str, machine_host: str, now: float
+) -> BootstrapEnvelope | None:
+    """Read and authenticate the installed mirror, or return None when absent."""
+    path = _mirror_path(home)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        if _mirror_enrollment_recorded(home):
+            raise MirrorRejectedError(
+                "installed mirror is missing after mirror enrollment"
+            ) from None
+        return None
+    except OSError:
+        raise MirrorRejectedError("could not inspect the installed mirror") from None
+    if not stat.S_ISREG(mode) or stat.S_IMODE(mode) != 0o600:
+        raise MirrorRejectedError("installed mirror must be a regular 0600 file")
+    try:
+        payload = object_of(json.loads, path.read_bytes())
+    except (OSError, ValueError, RecursionError):
+        raise MirrorRejectedError("could not read the installed mirror JSON") from None
+    return validate_config_mirror(payload, bearer=bearer, machine_host=machine_host, now=now)
+
+
+def stage_config_mirror(
+    payload: object,
+    *,
+    home: Path,
+    bearer: str,
+    machine_host: str,
+    now: float,
+    writer: AtomicWriter | None = None,
+) -> BootstrapEnvelope:
+    """Verify a gateway response and publish it atomically, including during pre-stage."""
+    envelope = validate_config_mirror(payload, bearer=bearer, machine_host=machine_host, now=now)
+    path = _mirror_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = AtomicWriter(SYSTEM_FS) if writer is None else writer
+    if not _mirror_enrollment_recorded(home):
+        writer.write_bytes(_mirror_enrollment_path(home), b"1\n", mode=0o600, sync_parent=True)
+    writer.write_bytes(path, json.dumps(envelope, sort_keys=True).encode(), mode=0o600)
+    return envelope
 
 
 def snapshot_path(home: Path) -> Path:
@@ -410,8 +414,11 @@ def read_config_snapshot(
 ) -> tuple[dict[str, str], float] | None:
     path = snapshot_path(home)
     try:
-        raw = object_of(json.loads, path.read_text())
-    except (OSError, ValueError):
+        mode = path.lstat().st_mode
+        if not stat.S_ISREG(mode):
+            return None
+        raw = object_of(json.loads, path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
         return None
     if not _is_object_dict(raw):
         return None
@@ -420,13 +427,17 @@ def read_config_snapshot(
     if raw.get("base_url") != base_url:
         return None
     written_at = raw.get("written_at")
-    if not isinstance(written_at, (int, float)):
+    if (
+        isinstance(written_at, bool)
+        or not isinstance(written_at, (int, float))
+        or not 0 <= written_at <= now
+    ):
         return None
     try:
         values = validated_bootstrap_config(raw.get("values"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return None
-    return values, max(0.0, now - float(written_at))
+    return values, now - written_at
 
 
 def _write_config_snapshot(
@@ -495,102 +506,193 @@ def _gateway_base_url(env: Mapping[str, str]) -> str:
     return base_url
 
 
-# meiva:note
-# The cluster config values this process would run on — the boot resolution, read-only.
-#
-# The one resolution shared by `inject_config_from_gateway` (which applies
-# the result to the environment) and callers that must ask "would this host boot
-# against resolvable config right now?" without mutating their process — the
-# hold watchdog's pre-attempt gate (task #4080). The contract is the boot
-# contract, unchanged:
-#
-# - a fresh snapshot (`tuning.snapshot_fresh_s`) is authoritative and skips the
-#   fetch entirely (P0 #2100);
-# - otherwise a live fetch, refreshing the snapshot on success;
-# - a transport failure falls back to the snapshot whatever its age — no
-#   cluster edit can have landed while the gateway was unreachable — with a
-#   logged warning; a non-transport failure (401/5xx) still fails loud.
-#
-# Raises:
-#     BootstrapFetchError: no gateway URL, or every fetch attempt failed — the
-#         process must not start with no config.
-def resolve_bootstrap_values(
+@dataclass(frozen=True, slots=True)
+class BootstrapResolution:
+    values: dict[str, str] = field(repr=False)
+    source: Literal["live_bootstrap", "authorized_mirror", "legacy_fallback"]
+    generation: str | None = None
+
+
+def _mirror_resolution(envelope: BootstrapEnvelope) -> BootstrapResolution:
+    return BootstrapResolution(envelope["values"], "authorized_mirror", envelope["generation"])
+
+
+def _read_mirror(
+    *, home: Path, bearer: str, machine_host: str, now: float
+) -> BootstrapEnvelope | MirrorRejectedError | None:
+    try:
+        return read_config_mirror(home=home, bearer=bearer, machine_host=machine_host, now=now)
+    except MirrorRejectedError as exc:
+        return exc
+
+
+def _offline_resolution(
+    mirror: BootstrapEnvelope | MirrorRejectedError | None,
+    legacy: tuple[dict[str, str], float] | None,
+    *,
+    now: float,
+) -> BootstrapResolution:
+    from base.log import logger
+
+    if isinstance(mirror, MirrorRejectedError):
+        raise BootstrapFetchError(
+            f"cannot boot offline: {mirror.state} configuration mirror ({mirror})",
+            mirror_state=mirror.state,
+        ) from None
+    if mirror is not None:
+        if now >= mirror["expires_at"]:
+            raise BootstrapFetchError(
+                "cannot boot offline: configuration mirror expired during refresh",
+                mirror_state="expired",
+            ) from None
+        return _mirror_resolution(mirror)
+    if legacy is not None:
+        logger.warning(
+            "[bootstrap] gateway unreachable; continuing on the last-known cluster config "
+            "snapshot (legacy fallback, age {age:.0f}s)",
+            age=legacy[1],
+        )
+        return BootstrapResolution(legacy[0], "legacy_fallback")
+    raise BootstrapFetchError(
+        "could not fetch cluster config. This runner has no snapshot or authorized mirror. "
+        "Check MEIVA_GATEWAY_URL and gateway reachability, then retry."
+    ) from None
+
+
+def _accept_live(
+    payload: object,
+    *,
+    home: Path,
+    env: Mapping[str, str],
+    now: float,
+    started: float,
+    allow_legacy: bool,
+) -> BootstrapResolution:
+    from base.host.net.auth import delivered_token
+    from base.log import logger
+
+    # Legacy responses contain only environment aliases. Any envelope-shaped
+    # response must satisfy the signed contract before its values can be used.
+    if _is_object_dict(payload) and not {"schema_version", "values", "integrity"} & payload.keys():
+        if not allow_legacy:
+            raise MirrorRejectedError(
+                "gateway returned an unsigned response after mirror enrollment"
+            )
+        values = validated_bootstrap_config(payload)
+        _write_config_snapshot(_gateway_base_url(env), values, home=home, now=now)
+        return BootstrapResolution(values, "live_bootstrap")
+
+    bearer = delivered_token(env) or ""
+    machine_host = env.get("MEIVA_MACHINE_HOST", "")
+    now += time.monotonic() - started
+    try:
+        envelope = stage_config_mirror(
+            payload, home=home, bearer=bearer, machine_host=machine_host, now=now
+        )
+    except OSError as exc:
+        # The authenticated live values can still boot this process. Publication
+        # failed before rename, so the previously installed mirror stays in place.
+        logger.warning(
+            "[bootstrap] could not persist configuration mirror ({kind})", kind=type(exc).__name__
+        )
+        envelope = validate_config_mirror(
+            payload, bearer=bearer, machine_host=machine_host, now=now
+        )
+    return BootstrapResolution(envelope["values"], "live_bootstrap", envelope["generation"])
+
+
+def _refresh_bootstrap(
+    env: Mapping[str, str],
+    mirror: BootstrapEnvelope | MirrorRejectedError | None,
+    legacy: tuple[dict[str, str], float] | None,
+    *,
+    home: Path,
+    now: float,
+    tuning: BootstrapFetch,
+) -> BootstrapResolution:
+    import httpx
+
+    from base.host.net.auth import delivered_token
+
+    bearer = delivered_token(env)
+    started = time.monotonic()
+    try:
+        payload = _fetch_bootstrap_payload(
+            _gateway_base_url(env),
+            bearer=bearer,
+            machine_host=env.get("MEIVA_MACHINE_HOST") if bearer else None,
+            tuning=tuning,
+        )
+        return _accept_live(
+            payload,
+            home=home,
+            env=env,
+            now=now,
+            started=started,
+            allow_legacy=mirror is None,
+        )
+    except _transport_failures():
+        return _offline_resolution(mirror, legacy, now=now + (time.monotonic() - started))
+    except MirrorRejectedError as exc:
+        raise BootstrapFetchError(
+            f"gateway bootstrap rejected: {exc}", mirror_state=exc.state
+        ) from None
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 500 <= status < 600 and mirror is not None:
+            return _offline_resolution(mirror, None, now=now + (time.monotonic() - started))
+        raise BootstrapFetchError(f"gateway bootstrap failed with HTTP {status}") from None
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise BootstrapFetchError(
+            f"invalid bootstrap configuration ({type(exc).__name__})"
+        ) from None
+    except Exception as exc:
+        raise BootstrapFetchError(
+            f"could not use gateway bootstrap ({type(exc).__name__}). "
+            "Check MEIVA_GATEWAY_URL and the runner API token."
+        ) from None
+
+
+def resolve_bootstrap_config(
     env: Mapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
-) -> dict[str, str]:
+) -> BootstrapResolution:
+    """Resolve the boot projection and expose which source authorized it."""
     from base.host.net.auth import delivered_token
     from base.log import guard_default_logging
 
     guard_default_logging()
     base_url = _gateway_base_url(env)
-    snapshot = read_config_snapshot(base_url, home=home, now=now)
-    if snapshot is not None and snapshot[1] <= tuning.snapshot_fresh_s:
-        # Fresh parent snapshot: the authoritative values this unit fetched
-        # moments ago. Skip the fetch — a gateway that is down or restarting
-        # must not block this process (P0 #2100).
-        return snapshot[0]
-    try:
-        # The gateway itself never fetches (config_source_is_local), so every
-        # fetch this module makes is a runner fetch; it carries no database
-        # login (the unit capability does).
-        values = fetch_bootstrap_config(base_url, bearer=delivered_token(env), tuning=tuning)
-    except _transport_failures() as exc:
-        if snapshot is not None:
-            # Gateway unreachable: continue on the last-known cluster config
-            # (the same values the parent process already holds). A gateway
-            # outage is exactly when exec children must keep running, and no
-            # cluster edit can have landed since the gateway went down.
-            from base.log import logger
+    bearer = delivered_token(env) or ""
+    machine_host = env.get("MEIVA_MACHINE_HOST", "")
+    mirror = _read_mirror(home=home, bearer=bearer, machine_host=machine_host, now=now)
+    if (
+        mirror is not None
+        and not isinstance(mirror, MirrorRejectedError)
+        and now - mirror["issued_at"] <= tuning.snapshot_fresh_s
+    ):
+        return _mirror_resolution(mirror)
+    legacy = read_config_snapshot(base_url, home=home, now=now) if mirror is None else None
+    if legacy is not None and legacy[1] <= tuning.snapshot_fresh_s:
+        return BootstrapResolution(legacy[0], "legacy_fallback")
 
-            logger.warning(
-                "[bootstrap] gateway unreachable ({exc}) — continuing on the "
-                "last-known cluster config snapshot (age {age:.0f}s)",
-                exc=type(exc).__name__,
-                age=snapshot[1],
-            )
-            return snapshot[0]
-        raise BootstrapFetchError(
-            f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
-            "    A pure agent-runner fetches GET /api/bootstrap at every process start "
-            "(a fresh parent snapshot skips the fetch); this host has no snapshot to "
-            "fall back on. Bring the gateway up (or check MEIVA_GATEWAY_URL / the "
-            "unit capability's API token / private-network reachability), then retry."
-        ) from exc
-    except Exception as exc:
-        raise BootstrapFetchError(
-            f"could not fetch cluster config from the gateway at {base_url} ({exc}).\n"
-            "    A pure agent-runner fetches GET /api/bootstrap at every process start "
-            "(a fresh parent snapshot skips the fetch). Bring the gateway up (or check "
-            "MEIVA_GATEWAY_URL / the unit capability's API token / private-network "
-            "reachability), then retry."
-        ) from exc
-    _write_config_snapshot(base_url, values, home=home, now=now)
-    return values
+    return _refresh_bootstrap(env, mirror, legacy, home=home, now=now, tuning=tuning)
 
 
-# meiva:note
-# Fetch the cluster's config from the gateway and inject it into `env`.
-#
-# Runs at Settings construction on a pure agent-runner (see
-# `config_source_is_local`); the config boot passes `os.environ`. The fetched
-# values are AUTHORITATIVE: every key the gateway serves overwrites `env`,
-# including a stale value a `.env` still carries (`_enforce_cluster_env_authority`
-# forces file values in at `load_meiva_env`, and this runs after it) and a
-# forwarded copy from a spawning process. The gateway's `.env` is the single
-# cluster-wide copy.
-#
-# The values come from `resolve_bootstrap_values` (fresh snapshot / fetch /
-# last-known-snapshot fallback); this wrapper applies them, including the
-# derived `MEIVA_GATEWAY_HEALTH_URL` for a runner enrolled without an explicit
-# override. The database login is the one exception to "fetched values are
-# authoritative": a delivered unit login is kept, and a process without one
-# receives the installed capability only when it runs the admitted runtime
-# (`deliver_unit_authority`). That delivery runs first: it also supplies the
-# machine API token the fetch authenticates with.
+def resolve_bootstrap_values(
+    env: Mapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
+) -> dict[str, str]:
+    """Resolve the same projection as runner boot without mutating the environment."""
+    return resolve_bootstrap_config(env, home=home, now=now, tuning=tuning).values
+
+
 def inject_config_from_gateway(
     env: MutableMapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
 ) -> EnvBootResult:
+    """Deliver the unit login and apply the resolved cluster projection to a runner."""
     base_url = _gateway_base_url(env)
     result = deliver_unit_authority(env, home=home)
-    values = resolve_bootstrap_values(env, home=home, now=now, tuning=tuning)
-    apply_bootstrap_values(env, base_url, values, home=home)
-    return result
+    resolved = resolve_bootstrap_config(env, home=home, now=now, tuning=tuning)
+    apply_bootstrap_values(env, base_url, resolved.values, home=home)
+    return replace(
+        result, bootstrap_source=resolved.source, bootstrap_generation=resolved.generation
+    )
