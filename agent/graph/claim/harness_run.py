@@ -11,7 +11,7 @@ from psycopg_pool import PoolTimeout
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
-from agent.graph.claim.harness_activity import log_turn_usage
+from agent.graph.claim.harness_activity import stage_turn_usage
 from agent.graph.claim.harness_foreground import (
     Commit,
     Foreground,
@@ -450,9 +450,7 @@ class ForegroundRun:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
         self.protocol.completed(turn)
         try:
-            await asyncio.to_thread(
-                log_turn_usage, self._ctx, self._agent_id, self._bridge.model, turn
-            )
+            await stage_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
         finally:
             self._projector.post(
                 partial(

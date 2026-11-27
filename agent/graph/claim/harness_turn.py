@@ -10,7 +10,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.graph.claim.harness_activity import log_turn_usage
+from agent.graph.claim.harness_activity import stage_turn_usage
 from agent.graph.claim.harness_inbox import restart_owed, settle_stale_interrupts
 from agent.graph.claim.harness_interrupt import (
     HarnessTimeline,
@@ -205,7 +205,7 @@ async def _handle_harness_abort(
 ) -> HarnessTurnHaltedError | None:
     try:
         if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
-            await asyncio.to_thread(log_turn_usage, ctx, agent_id, bridge.model, exc.outcome)
+            await stage_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
     finally:
         halted = await _finish_harness_abort(ctx, agent_id, bridge, projector, run, exc)
     return halted

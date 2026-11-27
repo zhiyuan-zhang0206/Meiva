@@ -3389,7 +3389,7 @@
   "scripts/verify/tests/test_tart_run.py": 13,
   "scripts/verify/understanding_replay.py": 2,
   "services/agent_runner/agent_host/__init__.py": 2,
-  "services/agent_runner/agent_host/daemon.py": 29,
+  "services/agent_runner/agent_host/daemon.py": 26,
   "services/agent_runner/agent_host/db_recovery.py": 2,
   "services/agent_runner/agent_host/dispatcher.py": 39,
   "services/agent_runner/agent_host/exec_memory_guard.py": 10,
