@@ -284,11 +284,11 @@ type _GatewayProbe = int | Literal["unreachable", "invalid_request"]
 
 
 def _probe_gateway_once(gateway_url: str, *, access: GatewayAccess) -> _GatewayProbe:
-    """Keep request errors distinct from outages and carry only safe diagnostics."""
+    """Read only the response status and distinguish local request errors from outages."""
     import httpx
 
     from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
-    from base.host.net.http_dial import get as dial_get
+    from base.host.net.http_dial import transport_for_url
 
     try:
         url = httpx.URL(gateway_url)
@@ -301,14 +301,21 @@ def _probe_gateway_once(gateway_url: str, *, access: GatewayAccess) -> _GatewayP
         # Validate locally so a refused dial cannot hide an invalid header.
         if not bearer.isascii() or not bearer.isprintable() or bearer != bearer.strip():
             return "invalid_request"
-        response = dial_get(
-            f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}", timeout=10.0, headers=headers
-        )
-    except (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError):
+        endpoint = f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}"
+        with (
+            httpx.Client(transport=transport_for_url(endpoint)) as client,
+            client.stream("GET", endpoint, timeout=10.0, headers=headers) as response,
+        ):
+            return response.status_code
+    except (
+        httpx.NetworkError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError,
+        httpx.DecodingError,
+    ):
         return "unreachable"
     except (httpx.HTTPError, httpx.InvalidURL, GatewayApiTokenMissing, ValueError):
         return "invalid_request"
-    return response.status_code
 
 
 # Gap between preflight dials. Small relative to the budget so a hole a few seconds

@@ -13,12 +13,14 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 
 import psycopg
 import pytest
+from starlette.types import Receive, Scope, Send
 
 from base import paths
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -31,7 +33,7 @@ from base.host.env.bootstrap import stage_config_mirror
 from base.host.env.config_lite_table import BUILTIN_CLUSTER_CONFIG_FIELDS
 from base.host.env.registry import PLUGIN_CLUSTER_CONFIG_ENV
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
-from base.host.net.tests.local_http import closed_port_url
+from base.host.net.tests.local_http import closed_port_url, serve_asgi
 from base.host.net.url_secret import credential_free, url_host, url_with_host, url_with_query_param
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.lifecycle.live_generation import (
@@ -113,24 +115,61 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert "probe gateway" in out
 
 
-@pytest.mark.parametrize(("scheme", "expected_rc"), [("http", 0), ("ftp", 1)])
+@pytest.fixture
+def cold_start_gateway_url(gateway_response: str) -> Iterator[str]:
+    """Provide a real loopback response or an endpoint that cannot answer."""
+    if gateway_response == "corrupt-gzip":
+
+        async def respond(_scope: Scope, _receive: Receive, send: Send) -> None:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [(b"content-encoding", b"gzip")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"not a gzip stream"})
+
+        with serve_asgi(respond) as url:
+            yield url
+        return
+    scheme = "ftp" if gateway_response == "invalid-scheme" else "http"
+    yield closed_port_url().replace("http://", f"{scheme}://")
+
+
+@pytest.mark.parametrize(
+    ("gateway_response", "expected_rc", "diagnostic"),
+    [
+        (
+            "closed-port",
+            0,
+            "gateway unreachable; continuing with the authorized configuration mirror",
+        ),
+        ("invalid-scheme", 1, "invalid gateway probe request"),
+        (
+            "corrupt-gzip",
+            0,
+            "gateway returned HTTP 503; continuing with the authorized configuration mirror",
+        ),
+    ],
+)
 def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
     start_run: StartRun,
     db_url: str,
     redis_url: str,
     capsys: pytest.CaptureFixture[str],
-    scheme: str,
+    cold_start_gateway_url: str,
     expected_rc: int,
+    diagnostic: str,
 ) -> None:
     home = start_run.home
     host = "192.0.2.20"
     bearer = "offline-start-fixture"
-    gateway_url = closed_port_url().replace("http://", f"{scheme}://")
     _ = (home / ".env").write_text(
         "MEIVA_MACHINE_SERVE_AGENT_RUNNER=true\n"
         "MEIVA_MACHINE_NAME=offline-start\n"
         f"MEIVA_MACHINE_HOST={host}\n"
-        f"MEIVA_GATEWAY_URL={gateway_url}\n"
+        f"MEIVA_GATEWAY_URL={cold_start_gateway_url}\n"
     )
     now = time.time()
     projection = {
@@ -180,13 +219,7 @@ def test_cold_start_distinguishes_an_outage_from_invalid_gateway_configuration(
 
     assert row.state == ("running" if expected_rc == 0 else "stopped")
     assert run.serving_published is (expected_rc == 0)
-    message = capsys.readouterr().err
-    diagnostic = (
-        "continuing with the authorized configuration mirror"
-        if expected_rc == 0
-        else "invalid gateway probe request"
-    )
-    assert diagnostic in message
+    assert diagnostic in capsys.readouterr().err
 
 
 def _single_slot_record(home: Path, agent_id: int) -> Path:
