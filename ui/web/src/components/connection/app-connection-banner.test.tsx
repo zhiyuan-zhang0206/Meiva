@@ -10,7 +10,7 @@ import { act, cleanup, render as rtlRender } from "@testing-library/react";
 import { StrictMode, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AuthProvider } from "@/lib/auth/auth-context";
+import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { fakeBrowser } from "@/lib/browser/testing";
 import type { ConnectionState } from "@/lib/contracts/types";
@@ -30,14 +30,28 @@ function ApiWrapper({ children }: { children: ReactNode }) {
   return <ApiProvider api={rig.api}>{children}</ApiProvider>;
 }
 
-import "@/lib/layout/use-document-visible";
-import { EventStreamProvider } from "@/lib/transport/useEventStream";
+import { useDocumentVisible } from "@/lib/layout/use-document-visible";
+import { EventStreamProvider, SseRuntimeContext } from "@/lib/transport/useEventStream";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
 import { FakeNetwork, FakeTab, READY } from "@/lib/transport/stream/tests/fake-stream";
 
 import { AppConnectionBanner } from "./app-connection-banner";
 import { fakeStreamHub, resetStreamHandlers, streamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
 import { CONNECTION_ERROR_DELAY_MS } from "@/components/notifications/connection-notice";
+
+const noMergedChannels = [] as const;
+
+function LiveEventStream({ children }: { children: ReactNode }) {
+  const { status: authStatus } = useAuth();
+  const isVisible = useDocumentVisible();
+  const { activeId, reconnectNonce, bumpReconnect } = useStore();
+  const runtime = { authStatus, isVisible, activeId, reconnectNonce, bumpReconnect, mergedChannels: noMergedChannels };
+  return (
+    <SseRuntimeContext.Provider value={runtime}>
+      <EventStreamProvider>{children}</EventStreamProvider>
+    </SseRuntimeContext.Provider>
+  );
+}
 
 function render(ui: ReactElement, live = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -48,7 +62,7 @@ function render(ui: ReactElement, live = false) {
         <AuthProvider>
           <QueryClientProvider client={qc}>
             <StreamHubProvider hub={stream.hub}>
-              {live ? <EventStreamProvider>{ui}</EventStreamProvider> : <TestStreamProvider>{ui}</TestStreamProvider>}
+              {live ? <LiveEventStream>{ui}</LiveEventStream> : <TestStreamProvider>{ui}</TestStreamProvider>}
             </StreamHubProvider>
           </QueryClientProvider>
         </AuthProvider>

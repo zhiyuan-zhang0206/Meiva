@@ -9,7 +9,7 @@ import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
 import { ThemeColorSync } from "@/components/shell/theme-color-sync";
 import { ToastHost } from "@/components/notifications/toast";
 import { MessagesProvider } from "@/i18n/messages-provider";
-import { AuthProvider, notifySessionInvalid } from "@/lib/auth/auth-context";
+import { AuthProvider, notifySessionInvalid, useAuth } from "@/lib/auth/auth-context";
 import type { Browser } from "@/lib/browser/browser";
 import { BrowserProvider } from "@/lib/browser/browser-provider";
 import { browser as systemBrowser } from "@/lib/browser/system-browser";
@@ -19,13 +19,16 @@ import { SystemNavigationProvider } from "@/lib/browser/navigation/system-naviga
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
 import { normalizeThemeMode, type ThemeMode, type ThemeRuntime } from "@/lib/layout/theme-runtime";
 import type { Api } from "@/lib/transport/api";
+import { useDocumentVisible } from "@/lib/layout/use-document-visible";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
 import { systemStreamTransport } from "@/lib/transport/system-transport";
 import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
-import { EventStreamProvider } from "@/lib/transport/useEventStream";
+import { EventStreamProvider, SseRuntimeContext } from "@/lib/transport/useEventStream";
 import { initTelemetry } from "@/lib/telemetry/telemetry";
 import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
+import { SEPARATE_SSE_CHANNELS } from "@/lib/state/sse-merge";
+import { useStore } from "@/lib/state/store";
 import { SETTINGS_QUERY_KEY, useUserSettings } from "@/lib/state/use-user-settings";
 
 // meiva:note
@@ -185,7 +188,7 @@ export function Providers({
       <RootContexts nonce={nonce} client={client} hub={streamHub} browser={browser}>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <EventStreamProvider>
+            <RootEventStreams>
               <theme.Provider nonce={nonce}>
                 <MessagesProvider>
                   <ThemedSlots theme={theme} />
@@ -196,11 +199,32 @@ export function Providers({
                   <ToastHost />
                 </MessagesProvider>
               </theme.Provider>
-            </EventStreamProvider>
+            </RootEventStreams>
           </AuthProvider>
         </QueryClientProvider>
       </RootContexts>
     </NavigationRoot>
+  );
+}
+
+function RootEventStreams({ children }: { children: React.ReactNode }) {
+  const { status: authStatus } = useAuth();
+  const isVisible = useDocumentVisible();
+  const activeId = useStore((state) => state.activeId);
+  const reconnectNonce = useStore((state) => state.reconnectNonce);
+  const bumpReconnect = useStore((state) => state.bumpReconnect);
+  const runtime = {
+    authStatus,
+    isVisible,
+    activeId,
+    reconnectNonce,
+    bumpReconnect,
+    mergedChannels: SEPARATE_SSE_CHANNELS,
+  };
+  return (
+    <SseRuntimeContext.Provider value={runtime}>
+      <EventStreamProvider>{children}</EventStreamProvider>
+    </SseRuntimeContext.Provider>
   );
 }
 

@@ -21,7 +21,6 @@ import { ApiError } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 import {
   notifySessionInvalid,
-  registerSseRuntime,
   setSessionInvalidHandler,
 } from "../transport/sse-lifecycle";
 
@@ -133,5 +132,3 @@ export function useAuth(): AuthState {
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
   return ctx;
 }
-
-registerSseRuntime({ useAuthStatus: () => useAuth().status });

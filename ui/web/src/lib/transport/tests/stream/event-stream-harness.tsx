@@ -7,7 +7,7 @@ import { expect } from "vitest";
 import type { Api } from "../../gateway/api-factory";
 import { StreamHub } from "../../stream/stream-hub";
 import { ApiProvider, StreamHubProvider } from "../../transport-context";
-import { EventStreamProvider } from "../../useEventStream";
+import { EventStreamProvider, SseRuntimeContext, type SseRuntime } from "../../useEventStream";
 import { FakeNetwork, FakeTab, type FakeEventSource } from "../../stream/tests/fake-stream";
 
 export interface EventStreamHarnessConfig {
@@ -47,13 +47,23 @@ export function eventStreamHarness(config: EventStreamHarnessConfig): EventStrea
     if (!source) throw new Error("no EventSource constructed yet");
     return source;
   };
+  const runtime: SseRuntime = {
+    authStatus: "authenticated",
+    isVisible: true,
+    activeId: null,
+    reconnectNonce: 0,
+    bumpReconnect: () => undefined,
+    mergedChannels: [],
+  };
   return {
     tab,
     wrapper: ({ children }) => (
       <ApiProvider api={config.api}>
         <StreamHubProvider hub={hub}>
           <QueryClientProvider client={config.queryClient}>
-            <EventStreamProvider>{children}</EventStreamProvider>
+            <SseRuntimeContext.Provider value={runtime}>
+              <EventStreamProvider>{children}</EventStreamProvider>
+            </SseRuntimeContext.Provider>
           </QueryClientProvider>
         </StreamHubProvider>
       </ApiProvider>

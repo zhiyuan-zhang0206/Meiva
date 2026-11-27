@@ -10,7 +10,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 
 import { trackTransport } from "./api-base";
 import { useFoldOwner } from "../fold/owner";
-import { createSseTimers, reopenIfClosed, sseRuntime } from "./sse-lifecycle";
+import { createSseTimers, reopenIfClosed } from "./sse-lifecycle";
 import { classifySystemFrame, nextParseFailures, selectedAgentEvents } from "./sse-frames";
 import { readyStateKind, type SseChannel } from "./stream/sse-plan";
 import { useStreamHub } from "./transport-context";
@@ -38,6 +38,23 @@ const WATCHDOG_MS = 45_000;
 // backoff on a successful open.
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+
+export interface SseRuntime {
+  authStatus: "loading" | "authenticated" | "unauthenticated";
+  isVisible: boolean;
+  activeId: number | null;
+  reconnectNonce: number;
+  bumpReconnect: () => void;
+  mergedChannels: readonly SseChannel[];
+}
+
+export const SseRuntimeContext = createContext<SseRuntime | null>(null);
+
+function useSseRuntime(): SseRuntime {
+  const runtime = useContext(SseRuntimeContext);
+  if (!runtime) throw new Error("SSE providers require SseRuntimeContext");
+  return runtime;
+}
 
 interface Subscriber {
   system: (ev: SystemEvent) => void;
@@ -80,19 +97,15 @@ function useSseConnection(
   path: string | null,
   channel: SseChannel,
   activeId: number | null,
-  isVisible: boolean,
+  { authStatus, isVisible, reconnectNonce, bumpReconnect, mergedChannels }: SseRuntime,
 ): SseConnectionResult {
   const subscribersRef = useRef<Set<Subscriber>>(new Set());
   const [sseOpen, setSseOpen] = useState(false);
   const hub = useStreamHub();
-  const authStatus = sseRuntime.useAuthStatus();
-  const reconnectNonce = sseRuntime.useStore((s) => s.reconnectNonce);
-  const bumpReconnect = sseRuntime.useStore((s) => s.bumpReconnect);
   // Legacy-only CLOSED retry, separate from the global reconnect lever.
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
   const lastReconnectNonce = useRef(reconnectNonce);
-  const mergedChannels = sseRuntime.useMergedChannels();
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
@@ -292,12 +305,12 @@ export function EventStreamProvider({
   children: React.ReactNode;
 }) {
   // Reopening reconciles any events missed while the page was hidden.
-  const isVisible = sseRuntime.useDocumentVisible();
+  const runtime = useSseRuntime();
   const { subscribe, sseOpen } = useSseConnection(
-    isVisible ? "/api/system" : null,
+    runtime.isVisible ? "/api/system" : null,
     "system",
     null,
-    isVisible,
+    runtime,
   );
 
   // ── The fold (R4 layer 1): ONE subscriber owns every domain's snapshot×SSE
@@ -357,12 +370,12 @@ export const AgentEventStreamContext = createContext<EventStreamContextValue | n
 
 /** The detailed feed belongs exclusively to the selected, visible agent. */
 export function AgentEventStreamProvider({ children }: { children: React.ReactNode }) {
-  const activeId = sseRuntime.useStore((s) => s.activeId);
-  const isVisible = sseRuntime.useDocumentVisible();
+  const runtime = useSseRuntime();
+  const { activeId, isVisible } = runtime;
   const path = isVisible && activeId !== null
     ? `/api/system/all?agents=${activeId}`
     : null;
-  const { subscribe } = useSseConnection(path, "systemAll", activeId, isVisible);
+  const { subscribe } = useSseConnection(path, "systemAll", activeId, runtime);
 
   return (
     <AgentEventStreamContext.Provider value={{ subscribe }}>
