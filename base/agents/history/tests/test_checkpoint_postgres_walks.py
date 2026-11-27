@@ -39,6 +39,7 @@ from base.agents.history.checkpoint_postgres_walks import (
     surface_of,
     verify_private_surface,
 )
+from base.agents.history.checkpoint_segment import checkpoint_quote_exists
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
 from base.db import Database
@@ -104,6 +105,19 @@ def _write_steps(
         parent = _append_delta_checkpoint(saver, thread=thread, step=step, parent=parent)
         configs.append(parent)
     return configs
+
+
+def test_a_canonical_quote_finds_messages_written_by_delta_replay(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    thread = "6114"
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        _write_steps(saver, thread, 4, None)
+    assert checkpoint_quote_exists(
+        _db(database_gate),
+        int(thread),
+        lambda messages: any(msg.id == "write-2" for msg in messages),
+    )
 
 
 async def test_missing_delta_parent_fails_sync_async_and_public_reader(

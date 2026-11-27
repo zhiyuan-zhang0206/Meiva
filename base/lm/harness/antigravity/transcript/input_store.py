@@ -14,7 +14,11 @@ from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
 from base.lm.harness.antigravity.transcript.text import legacy_marker_digest, request_body
 from base.lm.harness.events import InputLost, InputRejected
-from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
+from base.lm.harness.session.transcript.record_file import (
+    FileRow,
+    RecordFile,
+    RecordReadBudgetError,
+)
 
 ROW_KEY = "meiva_input_key"
 LEDGER_NAME = "meiva-inputs.jsonl"
@@ -68,9 +72,9 @@ def prompt_image_count(blocks: Sequence[Mapping[str, str]]) -> int:
     return sum(1 for block in blocks if block["type"] == "image")
 
 
-def load_ledger(path: Path) -> Ledger:
+def load_ledger(path: Path, *, max_bytes: int | None = None) -> Ledger:
     try:
-        text = path.read_text()
+        text = _ledger_text(path, max_bytes)
     except FileNotFoundError:
         return Ledger()
     lines = text.split("\n")
@@ -89,6 +93,16 @@ def load_ledger(path: Path) -> Ledger:
             raise
         _read_line(path, number, row, sent, bound, dropped)
     return Ledger(tuple(sent), bound, tuple(dropped))
+
+
+def _ledger_text(path: Path, max_bytes: int | None) -> str:
+    if max_bytes is None:
+        return path.read_text()
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise RecordReadBudgetError("The input ledger exceeds the quote byte budget")
+    return data.decode()
 
 
 def _read_line(
@@ -204,33 +218,49 @@ def resolve_unbound(
     rows: Sequence[tuple[int, Mapping[str, object]]],
     bound: Mapping[int, str],
     unbound: Sequence[SentInput],
+    *,
+    max_checks: int | None = None,
 ) -> dict[int, str]:
     resolved = dict(bound)
+    if not unbound:
+        return resolved
+    checks = 0
+    signatures = [(offset, _answer_signature(row)) for offset, row in rows]
     for sent in unbound:
-        offset = next(
-            (
-                offset
-                for offset, row in rows
-                if offset >= sent.min_offset and offset not in resolved and answers(row, sent)
-            ),
-            None,
-        )
-        if offset is not None:
-            resolved[offset] = sent.key
+        for offset, signature in signatures:
+            checks += 1
+            if max_checks is not None and checks > max_checks:
+                raise RecordReadBudgetError("The input ledger exceeds the quote match budget")
+            if (
+                offset >= sent.min_offset
+                and offset not in resolved
+                and _matches_answer(signature, sent)
+            ):
+                resolved[offset] = sent.key
+                break
     return resolved
 
 
 def answers(row: Mapping[str, object], sent: SentInput) -> bool:
+    return _matches_answer(_answer_signature(row), sent)
+
+
+def _matches_answer(signature: tuple[str, int | None] | None, sent: SentInput) -> bool:
+    if signature is None:
+        return False
+    digest, images = signature
+    return digest == sent.text_sha256 and (images is None or images == sent.image_count)
+
+
+def _answer_signature(row: Mapping[str, object]) -> tuple[str, int | None] | None:
     content = row.get("content")
     if row.get("type") != "USER_INPUT" or not isinstance(content, str):
-        return False
+        return None
     body = request_body(content)
     if body is None or legacy_marker_digest(content) is not None:
-        return False
-    if text_sha256(body) != sent.text_sha256:
-        return False
+        return None
     media = row.get("media")
-    return bool(body) or (len(media) if is_object_list(media) else 0) == sent.image_count
+    return text_sha256(body), None if body else len(media) if is_object_list(media) else 0
 
 
 def bind_inputs(

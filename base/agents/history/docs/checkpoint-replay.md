@@ -41,3 +41,17 @@ Its fixture gives distinct message payloads distinct channel versions, because
 the blob key includes channel/version and reusing a version reuses its blob.
 The async case exercises the production stamp function; synchronous read cases
 seed the metadata directly with SQL.
+
+## Quote source reads
+
+Canonical quote admission checks the latest checkpoint first, followed by at
+most eight retained compact boundaries. Eight accommodates ordinary recent
+history while limiting repeated reconstruction on misses against permanent
+history. The same read-only, repeatable-read transaction has a five-second
+server-side lifetime and budgets 16 MiB of serialized payload and 4,096
+checkpoint or replay rows across all candidates. The byte ceiling gives
+checkpoint and transcript quote reads the same maximum payload scale. The row
+ceiling also bounds metadata work for small writes that would fit within the
+byte budget. The reader checks payload sizes before fetching checkpoint blobs
+and delta write bodies. Exhausting any budget means membership remains
+unverified. Admission returns HTTP 503.

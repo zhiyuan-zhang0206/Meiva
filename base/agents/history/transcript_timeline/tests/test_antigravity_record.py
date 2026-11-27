@@ -9,6 +9,12 @@ import pytest
 
 from base.agents.history.transcript_timeline.record.harness import reply_key
 from base.agents.history.transcript_timeline.tests.support import window, write
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
+from base.lm.harness.antigravity.transcript.input_store import (
+    inputs_path,
+    record_sent_input,
+    text_sha256,
+)
 from base.lm.harness.antigravity.transcript.window import EntryParser, input_wire_ids, wire_id
 from base.lm.harness.session.transcript.entries import (
     Failure,
@@ -19,7 +25,12 @@ from base.lm.harness.session.transcript.entries import (
     ToolResult,
     ToolStatus,
 )
-from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows
+from base.lm.harness.session.transcript.record_file import (
+    BLOCK_BYTES,
+    FileRow,
+    RecordReadBudgetError,
+    UnreadRows,
+)
 from base.log import logger
 
 STAMP = "2026-11-13T08:00:00Z"
@@ -238,3 +249,35 @@ def test_a_row_with_a_legacy_first_line_marker_is_named_in_the_same_namespace_as
         (wire_id("inbound-7"), "old"),
         (wire_id("inbound-8"), "new"),
     ]
+
+
+def test_antigravity_input_quote_resolves_the_first_matching_record_row(tmp_path: Path) -> None:
+    content = "<USER_REQUEST>selected</USER_REQUEST>"
+    line = json.dumps(row("USER_INPUT", content=content)) + "\n"
+    path = tmp_path / "transcript_full.jsonl"
+    _ = path.write_text(line + line)
+    record_sent_input(
+        inputs_path(path),
+        key="inbound-1",
+        min_offset=0,
+        text_sha256=text_sha256("selected"),
+        image_count=0,
+    )
+    file = AntigravityRecordFile(path)
+    with file.quote_row(0, inbound=True) as found:
+        assert found is not None and found.row.row["meiva_input_key"] == "inbound-1"
+    with file.quote_row(len(line), inbound=True) as repeated:
+        assert repeated is not None and "meiva_input_key" not in repeated.row.row
+
+
+def test_antigravity_quote_reads_the_ledger_only_for_inputs(tmp_path: Path) -> None:
+    message = json.dumps(row("PLANNER_RESPONSE", content="assistant")) + "\n"
+    inbound = json.dumps(row("USER_INPUT", content="<USER_REQUEST>selected</USER_REQUEST>")) + "\n"
+    path = tmp_path / "transcript_full.jsonl"
+    _ = path.write_text(message + inbound)
+    _ = inputs_path(path).write_bytes(b"x" * (BLOCK_BYTES + 1))
+    file = AntigravityRecordFile(path)
+    with file.quote_row(0, inbound=False) as assistant:
+        assert assistant is not None and assistant.row.row["content"] == "assistant"
+    with pytest.raises(RecordReadBudgetError), file.quote_row(len(message), inbound=True):
+        pytest.fail("the quote reader must refuse an over-budget input ledger")

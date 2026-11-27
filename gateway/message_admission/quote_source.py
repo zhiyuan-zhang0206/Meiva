@@ -12,15 +12,14 @@ from base.agents.epochs.chain import usable_epochs
 from base.agents.epochs.model import HarnessEpoch
 from base.agents.epochs.native_slice import NativeEpochSlice, moment_of, native_slice_of
 from base.agents.epochs.read import read_epochs
-from base.agents.history.checkpoint import (
-    CheckpointReadError,
-    list_compact_boundary_checkpoint_ids,
-    load_checkpoint_messages,
-    load_checkpoint_messages_segment,
+from base.agents.history.checkpoint import CheckpointReadError
+from base.agents.history.checkpoint_segment import checkpoint_quote_exists
+from base.agents.history.native_source import (
+    has_native_quote_block,
+    native_message_identity,
+    native_source_stamps,
 )
-from base.agents.history.native_source import has_native_quote_block, native_message_identity
 from base.agents.history.transcript_timeline import record_quote_coordinates
-from base.agents.messages.kwargs import message_read_time
 from base.agents.messages.quote import Quote
 from base.api_contracts.agent_contract import AgentStatus
 from base.db.rows import query_one
@@ -66,13 +65,14 @@ def _contains_native_source(
     block = quote.source_block_idx
     if block is None:
         return False
-    for message in messages:
+    stamps = native_source_stamps(messages) if epoch is not None else {}
+    for index, message in enumerate(messages):
         identity = native_message_identity(message)
         if quote.source_message_id is not None and identity.message_id != quote.source_message_id:
             continue
         if quote.source_inbound_id is not None and identity.inbound_id != quote.source_inbound_id:
             continue
-        if epoch is not None and not epoch.holds(moment_of(message_read_time(message))):
+        if epoch is not None and not epoch.holds(stamps.get(index)):
             continue
         if has_native_quote_block(message, block):
             return True
@@ -83,14 +83,10 @@ def _native_source_exists(
     request: Request, agent_id: int, quote: Quote, context: _AdmissionContext
 ) -> bool:
     epoch = native_slice_of(context.epochs, context.epochs[-1].seq) if context.epochs else None
-    db = gateway_state(request).db
-    if _contains_native_source(load_checkpoint_messages(db, agent_id), quote, epoch):
-        return True
-    return any(
-        _contains_native_source(
-            load_checkpoint_messages_segment(db, agent_id, boundary), quote, epoch
-        )
-        for boundary in list_compact_boundary_checkpoint_ids(db, agent_id)
+    return checkpoint_quote_exists(
+        gateway_state(request).db,
+        agent_id,
+        lambda messages: _contains_native_source(messages, quote, epoch),
     )
 
 

@@ -89,6 +89,43 @@ def _session(tmp_path: Path, agent: int, *, write_file: bool) -> Path:
     return home
 
 
+def test_quote_matches_a_confirmed_claude_input_with_an_unfamiliar_origin(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    inbound_id = _claimed(db_conn, agent, "Persisted inbound", "k1")
+    home = _session(tmp_path, agent, write_file=True)
+    [path] = (tmp_path / ".claude/projects").glob("*/*.jsonl")
+    row = {
+        "type": "user",
+        "uuid": key_uuid("k1"),
+        "timestamp": "2026-11-12T08:57:00.000Z",
+        "isSidechain": False,
+        "promptId": "p-1",
+        "origin": {"kind": "something-new"},
+        "message": {"role": "user", "content": "Persisted inbound"},
+    }
+    _ = path.write_text(
+        json.dumps(row) + "\n" + json.dumps({**row, "origin": {"kind": "human"}}) + "\n"
+    )
+    environ = {"HOME": str(tmp_path)}
+    unread = UnreadRows()
+    [item] = read_harness_timeline(
+        _request(agent), pool=pool, home=home, unread=unread, environ=environ
+    ).items
+    assert item.inbound_id == inbound_id and item.item_id == "h0.0"
+    assert item.source_message_id is not None
+    receipt = read_harness_timeline(
+        _request(agent, quote_identity=item.source_message_id, quote_inbound_id=inbound_id),
+        pool=pool,
+        home=home,
+        unread=unread,
+        environ=environ,
+    )
+    assert receipt.quote_applied and receipt.quote_evidence is not None
+    assert receipt.quote_evidence.inbound_id == inbound_id
+
+
 def _claimed(
     conn: psycopg.Connection,
     agent: int,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from base.lm.harness.antigravity.timing import timing_key
@@ -16,7 +17,18 @@ from base.lm.harness.antigravity.transcript.input_store import (
     resolve_unbound,
     unbound_inputs,
 )
-from base.lm.harness.session.transcript.record_file import BLOCK_BYTES, Block, FileRow, RecordFile
+from base.lm.harness.antigravity.transcript.text import legacy_marker_digest
+from base.lm.harness.session.transcript.record_file import (
+    BLOCK_BYTES,
+    Block,
+    FileRow,
+    QuoteRow,
+    RecordFile,
+)
+
+# meiva:link base/lm/harness/docs/transcript-projection.md
+_QUOTE_LEDGER_BYTES = BLOCK_BYTES
+_QUOTE_MATCH_CHECKS = 4096
 
 
 class AntigravityRecordFile(RecordFile):
@@ -108,6 +120,39 @@ class AntigravityRecordFile(RecordFile):
             self._data = load_timings(self._record, allow_growth=True)
             self._loaded = True
         return self._data
+
+    @contextmanager
+    def quote_row(self, offset: int, *, inbound: bool) -> Generator[QuoteRow | None]:
+        self.prepare_reading(offset)
+        row = super().row_at(offset)
+        if row is None:
+            yield None
+            return
+        key = self._quote_input_key(row) if inbound else None
+        if key is not None:
+            row = FileRow(row.offset, row.end, {**row.row, ROW_KEY: key})
+        yield QuoteRow(row, lambda: row.end == self.complete_record_end())
+
+    def _quote_input_key(self, file: FileRow) -> str | None:
+        content = file.row.get("content")
+        if file.row.get("type") != "USER_INPUT" or not isinstance(content, str):
+            return None
+        ledger = load_ledger(self._inputs, max_bytes=_QUOTE_LEDGER_BYTES)
+        if file.offset in ledger.bound:
+            return ledger.bound[file.offset]
+        if legacy_marker_digest(content) is not None:
+            return None
+        scan_bytes = min(self._scan_bytes, MAX_SCAN_BYTES)
+        floor = self.size() - scan_bytes
+        near = [sent for sent in unbound_inputs(ledger) if sent.min_offset >= floor]
+        if not near or file.offset < floor:
+            return None
+        start = min(sent.min_offset for sent in near)
+        raw = RecordFile(self._record).rows_forward(start, scan_bytes)
+        rows = [(row.offset, row.row) for row in raw.rows]
+        return resolve_unbound(rows, ledger.bound, near, max_checks=_QUOTE_MATCH_CHECKS).get(
+            file.offset
+        )
 
     def row_at(self, offset: int) -> FileRow | None:
         row = super().row_at(offset)

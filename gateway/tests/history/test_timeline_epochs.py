@@ -134,8 +134,19 @@ class TestTimelineEpochs(CompactHistoryCases):
         agent = self._meiva_cli_meiva(db_conn)
         earlier = _reply("old", 2).model_copy(update={"id": "earlier-reply"})
         current = _reply("current", 6).model_copy(update={"id": "current-reply"})
-        self._put_checkpoint(agent, [earlier, current], version="2")
-        for source, status in [("earlier-reply", 422), ("current-reply", 201)]:
+        old_untimed = AIMessage(id="earlier-untimed", content="old untimed")
+        new_untimed = AIMessage(id="current-untimed", content="current untimed")
+        self._put_checkpoint(agent, [earlier, old_untimed, current, new_untimed], version="2")
+        timeline = client.get(f"/api/agents/{agent}/timeline").json()
+        [shown] = [
+            item for item in timeline["items"] if item["source_message_id"] == "current-untimed"
+        ]
+        for source, status in [
+            ("earlier-reply", 422),
+            ("earlier-untimed", 422),
+            ("current-reply", 201),
+            ("current-untimed", 201),
+        ]:
             response = client.post(
                 f"/api/agents/{agent}/messages",
                 json={
@@ -143,7 +154,9 @@ class TestTimelineEpochs(CompactHistoryCases):
                     "source": "user",
                     "quote": {
                         "source_agent_id": agent,
-                        "source_item_id": "reordered",
+                        "source_item_id": shown["item_id"]
+                        if source == "current-untimed"
+                        else "reordered",
                         "source_message_id": source,
                         "source_block_idx": 0,
                         "author": "Agent",

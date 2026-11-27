@@ -409,6 +409,58 @@ def test_quote_admission_uses_the_persisted_native_block_after_reordering(
     assert len(_pending_rows(db_conn, agent)) == 1
 
 
+@pytest.mark.parametrize("checkpoint_budget", ["segments", "bytes"])
+def test_native_quote_budget_exhaustion_is_retryable(
+    db_conn: psycopg.Connection,
+    db_url: str,
+    checkpoint_budget: str,
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    agent = _seed_agent(db_conn, local_machine=machine_identity)
+    if checkpoint_budget == "segments":
+        for version in range(1, 11):
+            _ = put_checkpoint(
+                db_url,
+                agent,
+                [
+                    SystemMessage(content="start"),
+                    AIMessage(id=f"saved-{version}", content="history"),
+                ],
+                version=str(version),
+                boundary=True,
+            )
+    else:
+        _ = put_checkpoint(
+            db_url,
+            agent,
+            [AIMessage(id="oversized", content="x" * (16 * 1024 * 1024))],
+            version="1",
+        )
+    with gateway_test_client(machine=machine_identity) as client:
+        response = client.post(
+            f"/api/agents/{agent}/messages",
+            json={
+                "content": "Explain",
+                "source": "user",
+                "quote": {
+                    "source_agent_id": agent,
+                    "source_item_id": "any-cursor",
+                    "source_message_id": "missing",
+                    "source_block_idx": 0,
+                    "author": "Agent",
+                    "text": "selected text",
+                },
+            },
+        )
+    assert response.status_code == 503, response.text
+    assert _pending_rows(db_conn, agent) == []
+
+
 def test_quote_accepts_exact_retained_native_segment(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:

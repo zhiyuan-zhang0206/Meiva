@@ -147,3 +147,22 @@ not a total decompression-work or process-RSS bound; the archive is still consum
 to determine the real complete-record tail. A row larger than the retained cap
 is refused. A clipped buffer edge never proves source exhaustion, and a partial
 final line never becomes a qualified target.
+
+## Exact quote source reads
+
+Point lookup has a separate read scope from a timeline window. For a plain
+record it seeks its byte offset and reads a complete line. For Codex archives
+it streams only through the selected complete line and holds just that line
+plus a read chunk. Active tool calls check for a subsequent complete line.
+Both compressed and decompressed streams have a 16 MiB budget, aligned with
+the existing plain record quote cap. A clip at the cap is a budget refusal.
+
+Antigravity quotes of agent entries use the source row directly. Inbound
+quotes load at most 256 KiB of ledger data plus a one-byte overflow probe,
+then use at most the existing 4 MiB reconciliation region and 4,096 matching
+comparisons for a still-unbound input. The ledger cap is a normal record
+block and the comparison cap prevents a dense batch of repeated inputs from
+turning a small segment into unbounded matching work. A confirmed binding or
+a legacy prompt marker can be read without scanning the transcript region.
+Claude input quotes use the main record's parsed wire ID and exact persisted
+inbox binding, including registered inputs with unfamiliar origin tags.

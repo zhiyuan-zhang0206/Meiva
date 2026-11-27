@@ -7,16 +7,18 @@ from base.agents.history.transcript_timeline.identity import (
     record_identity,
     record_quote_coordinates,
 )
-from base.agents.history.transcript_timeline.record.harness import entry_reader, input_wire_ids
+from base.agents.history.transcript_timeline.record.harness import entry_reader
 from base.lm.harness.session.transcript.entries import (
+    MAIN_RECORD,
     AgentText,
     AnyEntry,
+    HumanInput,
     Reasoning,
     ToolCall,
     ToolResult,
 )
 from base.lm.harness.session.transcript.projection import Projector
-from base.lm.harness.session.transcript.record_file import FileRow, RecordFile, UnreadRows
+from base.lm.harness.session.transcript.record_file import QuoteRow, RecordFile, UnreadRows
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,23 +47,33 @@ def read_record_quote(
     if coordinates is None or coordinates.session != query.session:
         return None
     offset = coordinates.offset
-    file.prepare_reading(offset)
-    row = file.row_at(offset)
-    if row is None:
-        return None
-    if query.inbound_id is not None:
-        return _inbound_match(query, query.inbound_id, row, inbound_matches)
-    reader = entry_reader(query.harness, unread)
-    entries = reader.entries([row])
+    inbound_id = query.inbound_id
+    with file.quote_row(offset, inbound=inbound_id is not None) as result:
+        if result is None:
+            return None
+        reader = entry_reader(query.harness, unread)
+        entries = reader.entries([result.row])
+        if inbound_id is not None:
+            return _inbound_match(query, inbound_id, offset, entries, inbound_matches)
+        return _record_match(query, result, entries, pending_calls=reader.pending_calls)
+
+
+def _record_match(
+    query: RecordQuoteQuery,
+    result: QuoteRow,
+    entries: tuple[AnyEntry, ...],
+    *,
+    pending_calls: bool,
+) -> RecordQuoteMatch | None:
     for entry in entries:
-        if _quoteable(entry) and _matches(query, offset, entry.key):
+        if _quoteable(entry) and _matches(query, result.row.offset, entry.key):
             return RecordQuoteMatch(
                 created_at=entry.at,
                 activity_pending=(
                     isinstance(entry, ToolCall)
-                    and reader.pending_calls
-                    and row.end == file.complete_record_end()
+                    and pending_calls
                     and _is_unanswered(entry, entries)
+                    and result.is_tail()
                 ),
             )
     return None
@@ -70,18 +82,20 @@ def read_record_quote(
 def _inbound_match(
     query: RecordQuoteQuery,
     inbound_id: int,
-    row: FileRow,
+    offset: int,
+    entries: tuple[AnyEntry, ...],
     inbound_matches: Callable[[int, frozenset[str]], bool],
 ) -> RecordQuoteMatch | None:
-    wanted = input_wire_ids(query.harness, [row])
-    if (
-        wanted
-        and _matches(query, row.offset, inbound_id)
-        and inbound_matches(inbound_id, frozenset(wanted))
-    ):
-        return RecordQuoteMatch(
-            created_at=min(found.stamp for found in wanted.values()).isoformat()
-        )
+    if not _matches(query, offset, inbound_id):
+        return None
+    for entry in entries:
+        if (
+            isinstance(entry, HumanInput)
+            and entry.record == MAIN_RECORD
+            and entry.wire_id is not None
+            and inbound_matches(inbound_id, frozenset({entry.wire_id}))
+        ):
+            return RecordQuoteMatch(created_at=entry.at)
     return None
 
 
