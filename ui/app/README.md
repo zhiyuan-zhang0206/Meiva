@@ -95,9 +95,11 @@ Desktop keeps the native rebuild. If the page is hidden when that screen times
 out, it recovers as soon as the page is visible again. The entry watchdog makes
 an HTTP GET (four-second per-attempt timeout) rather than a TCP connect, accepting
 2xx/3xx/401/403 answers and ending with an unreachable, HTTP, or rollout-window
-recovery state within 30 seconds. Plain HTTP is accepted only when the resolved
-target is private (loopback, link-local, RFC1918, or `100.64.0.0/10`); public
-targets require HTTPS.
+recovery state within 30 seconds. Android allows plain HTTP only for private
+targets (loopback, link-local, private LAN, or `100.64.0.0/10`). The macOS bundle
+allows the webview to load HTTP on operator-configured origins, including
+Tailscale. Use HTTPS for public targets. See the
+[app entry and trust boundary](docs/entry-and-trust.md).
 
 ## Disk hygiene on shared hosts
 

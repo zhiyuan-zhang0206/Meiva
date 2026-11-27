@@ -251,6 +251,13 @@ jobs:
           cargo tauri build --target "${{ matrix.target }}" \
             --bundles "${{ matrix.bundles }}" "${EXTRA[@]}"
 
+      - name: Verify macOS bundle transport security
+        shell: bash
+        run: |
+          plist="ui/app/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Meiva.app/Contents/Info.plist"
+          web_content=$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoadsInWebContent raw -expect bool -o - "$plist")
+          test "$web_content" = true
+
       - name: Collect artifacts
         shell: bash
         run: |
