@@ -11,7 +11,7 @@ from psycopg_pool import PoolTimeout
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
-from agent.graph.claim.harness_activity import stage_turn_usage
+from agent.graph.claim.harness_activity import stage_fault_usage, stage_turn_usage
 from agent.graph.claim.harness_foreground import (
     Commit,
     Foreground,
@@ -426,6 +426,7 @@ class ForegroundRun:
             )
             return
         if (fault := fault_of_event(self._ctx.harness, event)) is not None:
+            await stage_fault_usage(self._ctx, self._agent_id, self._bridge.model, fault)
             raise fault
         settlements = self._advance_foreground(event)
         if self.protocol.observe(event):

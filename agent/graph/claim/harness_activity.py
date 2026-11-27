@@ -13,7 +13,7 @@ from base.api_contracts.usage import (
     UsageReceiptSubmitter,
 )
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import Usage
+from base.lm.harness import HarnessTurnFaultedError, Usage
 from base.lm.harness.engine import HarnessTurn
 from base.lm.pricing.cache_writes import cache_write_tokens, default_write_ttl
 from base.lm.usage import UsageFields, log_usage_fields
@@ -54,6 +54,26 @@ async def stage_turn_usage(
     if staged:
         _ = await asyncio.shield(
             asyncio.gather(*(asyncio.wrap_future(job) for job in staged), return_exceptions=True)
+        )
+
+
+async def stage_fault_usage(
+    ctx: MeivaContext, agent_id: int, model: str | None, fault: Exception
+) -> None:
+    if not isinstance(fault, HarnessTurnFaultedError) or fault.outcome is None:
+        return
+    try:
+        if ctx.usage_receipts is None:
+            await stage_turn_usage(ctx, agent_id, model, fault.outcome)
+        else:
+            log_turn_usage(ctx, agent_id, model, fault.outcome, receipts=ctx.usage_receipts)
+    except Exception as error:
+        logger.warning(
+            "Failed to record faulted harness usage ({error_type})",
+            event="harness_usage_log_failed",
+            error_type=type(error).__name__,
+            agent_id=agent_id,
+            turn_id=fault.outcome.turn_id,
         )
 
 

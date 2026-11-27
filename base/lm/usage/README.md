@@ -107,11 +107,12 @@ observation.
 The agent host stages external harness usage from each terminal provider
 report, including faulted and interrupted turns that carry usage. It freezes
 and queues every step or turn total before awaiting staging. The host owns
-that work through turn cancellation. Turn settlement depends on local staging
-or a recoverable fallback record, and Postgres delivery runs independently.
-If all staging slots are occupied when an external harness has already
-reported usage, the runtime records `fallback_logged` with stage
-`staging_admission`.
+that work through turn cancellation. Successful turn settlement awaits local
+staging or a recoverable fallback record. The event reader hands off usage
+from a faulted terminal report before raising the provider fault. Postgres
+delivery runs independently. If all staging slots are occupied when an
+external harness has already reported usage, the runtime records
+`fallback_logged` with stage `staging_admission`.
 
 The SQLite spool lives at `$MEIVA_HOME/usage-receipts.v1.sqlite3` under the
 same service home used to bind the ledger. The producer limits admission to
