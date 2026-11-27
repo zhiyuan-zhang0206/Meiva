@@ -224,3 +224,154 @@ def test_derived_service_uses_are_enforced_by_meizel(
 
     assert any(fact.src == prefix + src for fact in result.facts)
     assert any(d.code == "undeclared-edge" for d in result.verdict) == violation
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'query = sql.SQL("UPDATE {} SET cost_usd = NULL").format(sql.Identifier("llm_usage_ledger"))\n'
+        "conn.execute(query)",
+        'conn.execute("UPDATE llm_usage_ledger SET cost_usd = NULL")',
+        'query = "UPDATE llm_usage_ledger SET cost_usd = NULL"\nconn.execute(query)',
+        "from psycopg import sql as pg\n"
+        'conn.execute(pg.SQL("UPDATE {table} SET cost_usd = NULL").format('
+        'table=pg.Identifier("public", "llm_usage_ledger")))',
+    ],
+)
+def test_ledger_repricing_requires_the_owner(statement: str) -> None:
+    path = "gateway/agents/history/inbound.py"
+    assert f"{path}::usage-ledger-reprice" in decisions.owner_bypasses(
+        ast.parse(statement), path, (), _TABLE
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "INSERT INTO {} VALUES (1)",
+        "DELETE FROM {} WHERE call_id = %s",
+        "MERGE INTO {} USING other ON false WHEN NOT MATCHED THEN INSERT VALUES (1)",
+        "TRUNCATE TABLE {}",
+        "COPY {} FROM STDIN",
+    ],
+)
+def test_composed_ledger_mutations_require_the_owner(statement: str) -> None:
+    path = "gateway/agents/history/inbound.py"
+    source = f"cursor.execute(sql.SQL({statement!r}).format(sql.Identifier('llm_usage_ledger')))"
+    assert decisions.owner_bypasses(ast.parse(source), path, (), _TABLE) == {
+        f"{path}::usage-ledger-insert": [1]
+    }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def ledger_owner_message():\n"
+        '    return "Only the owner may run UPDATE llm_usage_ledger SET cost_usd = NULL"',
+        'record_prompt("UPDATE llm_usage_ledger SET cost_usd = NULL")',
+        'cursor.execute("INSERT INTO prompts VALUES (%s)", ("DELETE FROM llm_usage_ledger",))',
+        'cursor.execute(sql.SQL("SELECT * FROM {}").format(sql.Identifier("llm_usage_ledger")))',
+        'cursor.execute(sql.SQL("UPDATE other SET message = {}").format('
+        'sql.Literal("UPDATE llm_usage_ledger SET cost_usd = NULL")))',
+        'cursor.execute(sql.SQL("INSERT INTO {} SELECT * FROM {}").format('
+        'sql.Identifier("archive"), sql.Identifier("llm_usage_ledger")))',
+    ],
+)
+def test_inert_text_and_readonly_ledger_access_pass(source: str) -> None:
+    path = "gateway/agents/history/inbound.py"
+    assert decisions.owner_bypasses(ast.parse(source), path, (), _TABLE) == {}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '(home / "run" / "bootstrap-mirror").with_suffix(".json").write_bytes(data)',
+        'STEM = "bootstrap-mirror"\ntarget = home.joinpath("run", STEM).with_suffix(".json")\n'
+        "os.replace(temp, target)",
+        'STEM = "bootstrap-mirror"\nopen(home / "run" / (STEM + ".json"), "wb")',
+        'STEM = "bootstrap-mirror"\n(home / f"{STEM}-enrolled").touch()',
+    ],
+)
+def test_composed_mirror_paths_require_the_bootstrap_owner(source: str) -> None:
+    path = "cli/commands/lifecycle/converge_host.py"
+    tree = ast.parse(source)
+    assert f"{path}::bootstrap-mirror" in decisions.owner_bypasses(tree, path, (), _TABLE)
+    assert decisions.owner_bypasses(tree, "base/host/env/bootstrap.py", (), _TABLE) == {}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'log.info("bootstrap-mirror")',
+        '(home / "bootstrap-mirror-backup.json").write_bytes(data)',
+        '(home / "bootstrap-mirror").with_suffix(".bak").write_bytes(data)',
+    ],
+)
+def test_unrelated_mirror_paths_and_text_pass(source: str) -> None:
+    assert (
+        decisions.owner_bypasses(
+            ast.parse(source), "cli/commands/lifecycle/converge_host.py", (), _TABLE
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "sink = ReadTimelineSink()\nif isinstance(sink, ReadTimelineSink):\n    sink._overlay.retire_all()",
+        "from agent.graph.claim.harness_read_sink import ReadTimelineSink as Sink\n"
+        "alias = sink = Sink()\nalias._overlay.retire_all()",
+        "projector.sink._projector.reset()",
+        "sink = ReadTimelineSink(); sink._overlay.retire_all()",
+        'getattr(projector.sink, "_overlay").retire_all()',
+        'vars(projector.sink)["_overlay"].retire_all()',
+    ],
+)
+def test_claim_cannot_reach_sink_private_state(source: str) -> None:
+    path = _CLAIM + "harness_turn.py"
+    assert runtime_boundaries.access_errors(path, ast.parse(source))
+
+
+def test_claim_can_send_public_sink_notifications() -> None:
+    path = _CLAIM + "harness_turn.py"
+    source = (
+        "sink = ReadTimelineSink()\nsink.on_event(event)\nprojector.sink.finish()\nother._overlay"
+    )
+    assert runtime_boundaries.access_errors(path, ast.parse(source)) == []
+    assert (
+        runtime_boundaries.access_errors(
+            _CLAIM + "harness_read_sink.py", ast.parse("self._overlay.retire_all()")
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("names", [(), ("build_timeline_items",), ("display_item_count",)])
+def test_quote_cannot_import_legacy_display(names: tuple[str, ...]) -> None:
+    fact = Fact(
+        _ADMISSION + "quote_source.py",
+        _ADMISSION + "legacy_quote.py",
+        1,
+        FactKind.IMPORT,
+        names,
+    )
+    assert runtime_boundaries.import_errors([fact])
+
+
+def test_legacy_validator_is_only_available_at_the_fallback() -> None:
+    path = _ADMISSION + "quote_source.py"
+    fact = Fact(
+        path, _ADMISSION + "legacy_quote.py", 1, FactKind.IMPORT, ("validate_legacy_quote",)
+    )
+    assert runtime_boundaries.import_errors([fact]) == []
+    entry = "from gateway.message_admission.legacy_quote import validate_legacy_quote as validate\n"
+    assert (
+        runtime_boundaries.access_errors(
+            path, ast.parse(entry + "async def validate_quote_source():\n    await validate()")
+        )
+        == []
+    )
+    assert runtime_boundaries.access_errors(
+        path, ast.parse(entry + "async def _contains_native_source():\n    await validate()")
+    )

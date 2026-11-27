@@ -385,7 +385,7 @@ class _TypeContext:
                 type_checking_lines(scan), rel, self.allowed, self.packages
             )
         ]
-        return errors + decisions.import_errors(scan.facts)
+        return errors + decisions.import_errors(scan.facts) + decisions.access_errors(rel, tree)
 
 
 def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext | None, list[str]]:

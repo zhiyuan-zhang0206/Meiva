@@ -2,12 +2,17 @@
 
 import ast
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Mapping
+from pathlib import PurePosixPath
+from string import Formatter
 
 from meizel.api import Fact, lint_common
 
 _CLAIM = "agent/graph/claim/"
 _ADMISSION = "gateway/message_admission/"
+_QUOTE_SOURCE = _ADMISSION + "quote_source.py"
+_LEGACY_QUOTE = _ADMISSION + "legacy_quote.py"
+_LEGACY_VALIDATOR = "validate_legacy_quote"
 _HISTORY = "base/agents/history/"
 _TRANSCRIPT = _HISTORY + "transcript_timeline/"
 _SINK = _CLAIM + "harness_read_sink.py"
@@ -36,7 +41,9 @@ def _claim_projection(fact: Fact) -> bool:
 
 
 def _admission_projection(fact: Fact) -> bool:
-    if fact.src == _ADMISSION + "legacy_quote.py" and fact.dst in _TIMELINE:
+    if fact.dst == _LEGACY_QUOTE:
+        return fact.src != _QUOTE_SOURCE or fact.names != (_LEGACY_VALIDATOR,)
+    if fact.src == _LEGACY_QUOTE and fact.dst in _TIMELINE:
         return False
     if fact.dst == _TRANSCRIPT + "__init__.py":
         return fact.names != ("record_quote_coordinates",)
@@ -63,9 +70,11 @@ def _direct_usage(fact: Fact) -> bool:
 def _repair(fact: Fact) -> str | None:
     if lint_common.is_test_path(fact.src):
         return None
-    if fact.src.startswith(_CLAIM) and _claim_projection(fact):
+    if (fact.src.startswith(_CLAIM) or fact.dst == _SINK) and _claim_projection(fact):
         return "keep timeline projection in the notification-only ReadTimelineSink"
-    if fact.src.startswith(_ADMISSION) and _admission_projection(fact):
+    if (fact.src.startswith(_ADMISSION) or fact.dst == _LEGACY_QUOTE) and _admission_projection(
+        fact
+    ):
         return "verify quote membership through the canonical source identity contracts in quote_source.py"
     if fact.dst == _LEDGER and {"insert_usage", "usage_writer"}.intersection(fact.names):
         return "keep ledger inserts in base/db/usage_ledger.py and submit usage receipts on request paths"
@@ -86,7 +95,7 @@ def import_errors(facts: Iterable[Fact]) -> list[str]:
 
 _SQL_LEDGER = r'(?:["\w]+\s*\.\s*)?"?llm_usage_ledger"?(?![\w"])'
 _LEDGER_INSERT = re.compile(
-    rf"\b(?:INSERT\s+INTO|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE\s+(?:TABLE\s+)?)\s+"
+    rf"\b(?:INSERT\s+INTO\s+|DELETE\s+FROM\s+|MERGE\s+INTO\s+|TRUNCATE\s+(?:TABLE\s+)?)"
     rf"(?:ONLY\s+)?{_SQL_LEDGER}(?=\s|\(|;|$)"
     rf"|\bCOPY\s+{_SQL_LEDGER}(?:\s*\([^)]*\))?\s+FROM\b",
     re.IGNORECASE,
@@ -97,22 +106,297 @@ _LEDGER_REPRICE = re.compile(
 )
 
 
-def _matching_strings(tree: ast.Module, pattern: re.Pattern[str]) -> list[int]:
-    return sorted(
+_SCOPE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+type _Bindings = Mapping[str, ast.expr | None]
+
+
+def _scope_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPE):
+            yield from _scope_nodes(child)
+
+
+def _assigned_values(node: ast.AST) -> Iterator[tuple[str, ast.expr | None]]:
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                yield target.id, node.value
+    if isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and isinstance(node.target, ast.Name):
+        yield node.target.id, node.value
+    if isinstance(node, ast.arg):
+        yield node.arg, None
+
+
+def _scoped_nodes(scope: ast.AST, inherited: _Bindings) -> Iterator[tuple[ast.AST, _Bindings]]:
+    nodes = tuple(_scope_nodes(scope))
+    local: dict[str, ast.expr | None] = {}
+    for node in nodes:
+        for name, value in _assigned_values(node):
+            local[name] = None if name in local else value
+    bindings = {**inherited, **local}
+    for node in nodes:
+        yield node, bindings
+        if isinstance(node, _SCOPE):
+            yield from _scoped_nodes(node, bindings)
+
+
+def _bound_value(node: ast.expr, bindings: _Bindings) -> ast.expr:
+    while isinstance(node, ast.Name):
+        value = bindings.get(node.id)
+        if value is None or (value.lineno, value.col_offset) >= (node.lineno, node.col_offset):
+            break
+        node = value
+    return node
+
+
+def _call_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _dotted_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return f"{_dotted_name(node.value)}.{node.attr}"
+    return ""
+
+
+def _text(node: ast.expr, bindings: _Bindings) -> str | None:
+    node = _bound_value(node, bindings)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _text(node.left, bindings), _text(node.right, bindings)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_text(part, bindings) or "?" for part in node.values)
+    if isinstance(node, ast.FormattedValue) and node.conversion == -1 and node.format_spec is None:
+        return _text(node.value, bindings)
+    return None
+
+
+def _names_from(nodes: Iterable[ast.AST], module: str, symbol: str) -> set[str]:
+    return {
+        name.asname or name.name
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and node.module == module
+        for name in node.names
+        if name.name == symbol
+    }
+
+
+def _sink_expression(node: ast.expr, bindings: _Bindings, constructors: set[str]) -> bool:
+    node = _bound_value(node, bindings)
+    if isinstance(node, ast.Call):
+        return isinstance(node.func, ast.Name) and node.func.id in constructors
+    if isinstance(node, ast.IfExp):
+        return _sink_expression(node.body, bindings, constructors) or _sink_expression(
+            node.orelse, bindings, constructors
+        )
+    return isinstance(node, ast.Attribute) and node.attr == "sink"
+
+
+def _private_receiver(node: ast.AST, bindings: _Bindings) -> ast.expr | None:
+    if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+        return node.value
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id == "vars" and node.args:
+            return node.args[0]
+        if node.func.id in {"getattr", "setattr", "delattr", "hasattr"} and len(node.args) >= 2:
+            attr = _text(node.args[1], bindings)
+            if attr and attr.startswith("_"):
+                return node.args[0]
+    return None
+
+
+def _sink_lines(tree: ast.Module) -> set[int]:
+    nodes = tuple(ast.walk(tree))
+    constructors = (
+        _names_from(nodes, "agent.graph.claim.harness_read_sink", "ReadTimelineSink")
+        | _names_from(nodes, "harness_read_sink", "ReadTimelineSink")
+        | {"ReadTimelineSink"}
+    )
+    constructed = {id(node.func) for node in nodes if isinstance(node, ast.Call)}
+    return {
+        node.lineno
+        for node, bindings in _scoped_nodes(tree, {})
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in constructors
+            and id(node) not in constructed
+        )
+        or (
+            isinstance(node, (ast.Attribute, ast.Call))
+            and (receiver := _private_receiver(node, bindings)) is not None
+            and _sink_expression(receiver, bindings, constructors)
+        )
+    }
+
+
+def _legacy_quote_lines(tree: ast.Module) -> set[int]:
+    nodes = tuple(ast.walk(tree))
+    aliases = _names_from(nodes, "gateway.message_admission.legacy_quote", _LEGACY_VALIDATOR)
+    aliases |= _names_from(nodes, "legacy_quote", _LEGACY_VALIDATOR)
+    allowed = {
+        id(stmt.value.value.func)
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "validate_quote_source"
+        and isinstance(stmt := node.body[-1], ast.Expr)
+        and isinstance(stmt.value, ast.Await)
+        and isinstance(stmt.value.value, ast.Call)
+    }
+    return {
         node.lineno
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and pattern.search(node.value)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in aliases
+        and id(node) not in allowed
+    }
+
+
+def access_errors(rel: str, tree: ast.Module) -> list[str]:
+    if lint_common.is_test_path(rel):
+        return []
+    if rel.startswith(_CLAIM) and rel != _SINK:
+        return [
+            f"{rel}:{line}: use only the public notification methods of ReadTimelineSink."
+            for line in sorted(_sink_lines(tree))
+        ]
+    if rel == _QUOTE_SOURCE:
+        return [
+            f"{rel}:{line}: call validate_legacy_quote only at the legacy cursor fallback."
+            for line in sorted(_legacy_quote_lines(tree))
+        ]
+    return []
+
+
+_SQL_EXECUTION = frozenset({"execute", "executemany", "copy"})
+_SQL_COMMENTS_AND_LITERALS = re.compile(
+    r"""--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'""",
+    re.DOTALL,
+)
+
+
+def _sql_names(tree: ast.Module, symbol: str) -> set[str]:
+    nodes = tuple(ast.walk(tree))
+    modules = {"sql", "psycopg.sql"} | _names_from(nodes, "psycopg", "sql")
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "psycopg.sql"
+            )
+            modules.update(
+                f"{alias.asname}.sql"
+                for alias in node.names
+                if alias.name == "psycopg" and alias.asname
+            )
+    return {f"{module}.{symbol}" for module in modules} | _names_from(nodes, "psycopg.sql", symbol)
+
+
+def _sql_field(node: ast.expr, bindings: _Bindings, identifiers: set[str]) -> str:
+    value = _bound_value(node, bindings)
+    if not isinstance(value, ast.Call) or _dotted_name(value.func) not in identifiers:
+        return "?"
+    parts = [_text(arg, bindings) for arg in value.args]
+    return ".".join(
+        '"' + part.replace('"', '""') + '"' if part is not None else '"?"' for part in parts
     )
 
 
+def _sql_format(template: str, call: ast.Call, bindings: _Bindings, identifiers: set[str]) -> str:
+    fields = {
+        str(index): _sql_field(arg, bindings, identifiers) for index, arg in enumerate(call.args)
+    }
+    fields.update(
+        {
+            kw.arg: _sql_field(kw.value, bindings, identifiers)
+            for kw in call.keywords
+            if kw.arg is not None
+        }
+    )
+    parts: list[str] = []
+    position = 0
+    for literal, field, _, _ in Formatter().parse(template):
+        parts.append(literal)
+        if field == "":
+            parts.append(fields.get(str(position), "?"))
+            position += 1
+        elif field is not None:
+            parts.append(fields.get(field, "?"))
+    return "".join(parts)
+
+
+def _query_argument(call: ast.Call) -> ast.expr | None:
+    if call.args:
+        return call.args[0]
+    return next((kw.value for kw in call.keywords if kw.arg in {"query", "statement", "sql"}), None)
+
+
+def _sql_call(
+    call: ast.Call, bindings: _Bindings, sql: set[str], identifiers: set[str]
+) -> tuple[str, int] | None:
+    if _dotted_name(call.func) in sql and call.args:
+        text = _text(call.args[0], bindings)
+        return (text, call.lineno) if text is not None else None
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "format"):
+        return None
+    receiver = _bound_value(call.func.value, bindings)
+    if isinstance(receiver, ast.Call) and (base := _sql_call(receiver, bindings, sql, identifiers)):
+        template, line = base
+        try:
+            return _sql_format(template, call, bindings, identifiers), line
+        except ValueError:
+            return None
+    return None
+
+
+def _executed_sql(
+    call: ast.Call, bindings: _Bindings, sql: set[str], identifiers: set[str]
+) -> tuple[str, int] | None:
+    if _call_name(call.func) not in _SQL_EXECUTION or (arg := _query_argument(call)) is None:
+        return None
+    value = _bound_value(arg, bindings)
+    if isinstance(value, ast.Call):
+        return _sql_call(value, bindings, sql, identifiers)
+    text = _text(value, bindings)
+    return (text, value.lineno) if text is not None else None
+
+
+def _sql_sites(tree: ast.Module, pattern: re.Pattern[str]) -> list[int]:
+    if not any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "llm_usage_ledger" in node.value.lower()
+        for node in ast.walk(tree)
+    ):
+        return []
+    sql, identifiers = _sql_names(tree, "SQL"), _sql_names(tree, "Identifier")
+    lines: set[int] = set()
+    for node, bindings in _scoped_nodes(tree, {}):
+        if isinstance(node, ast.Call) and (
+            statement := _sql_call(node, bindings, sql, identifiers)
+            or _executed_sql(node, bindings, sql, identifiers)
+        ):
+            text, line = statement
+            if pattern.search(_SQL_COMMENTS_AND_LITERALS.sub(" ", text)):
+                lines.add(line)
+    return sorted(lines)
+
+
 def ledger_inserts(tree: ast.Module, _roots: tuple[str, ...]) -> list[int]:
-    return _matching_strings(tree, _LEDGER_INSERT)
+    return _sql_sites(tree, _LEDGER_INSERT)
 
 
 def ledger_updates(tree: ast.Module, _roots: tuple[str, ...]) -> list[int]:
-    return _matching_strings(tree, _LEDGER_REPRICE)
+    return _sql_sites(tree, _LEDGER_REPRICE)
 
 
 def ledger_writer_access(tree: ast.Module, _roots: tuple[str, ...]) -> list[int]:
@@ -123,8 +407,40 @@ def ledger_writer_access(tree: ast.Module, _roots: tuple[str, ...]) -> list[int]
     )
 
 
-_MIRROR_PATH = re.compile(r"(?:^|/)bootstrap-mirror(?:\.json|-enrolled)$")
+_MIRROR_NAMES = frozenset({"bootstrap-mirror.json", "bootstrap-mirror-enrolled"})
+
+
+def _path_tail(node: ast.expr, bindings: _Bindings) -> str | None:
+    node = _bound_value(node, bindings)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _path_tail(node.right, bindings)
+    if isinstance(node, ast.Call) and node.args:
+        name = _call_name(node.func)
+        if name in {"Path", "PurePath", "join", "joinpath", "with_name"}:
+            return _path_tail(node.args[-1], bindings)
+        if name == "with_suffix" and isinstance(node.func, ast.Attribute):
+            stem = _path_tail(node.func.value, bindings)
+            suffix = _text(node.args[0], bindings)
+            if stem and suffix == ".json":
+                return PurePosixPath(stem).with_suffix(suffix).name
+    text = _text(node, bindings)
+    return PurePosixPath(text).name if text else None
 
 
 def mirror_paths(tree: ast.Module, _roots: tuple[str, ...]) -> list[int]:
-    return _matching_strings(tree, _MIRROR_PATH)
+    literals = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "bootstrap-mirror" in node.value
+    ]
+    lines = {node.lineno for node in literals if _path_tail(node, {}) in _MIRROR_NAMES}
+    if literals and not lines:
+        lines.update(
+            node.lineno
+            for node, bindings in _scoped_nodes(tree, {})
+            if isinstance(node, (ast.BinOp, ast.JoinedStr, ast.Call))
+            and _path_tail(node, bindings) in _MIRROR_NAMES
+        )
+    return sorted(lines)

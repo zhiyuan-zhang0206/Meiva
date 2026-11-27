@@ -12,20 +12,27 @@ policy reader. They read their exemptions from tables in `meizel.policy.toml`, a
 
 ## Runtime boundaries
 
-The structure gate checks meizel's resolved imports. Claim execution composes
-its timeline through `ReadTimelineSink`. Completed-record settlement uses
-record location helpers. Quote admission consumes canonical source identities.
-The legacy cursor module owns the remaining display-based lookup.
+The structure gate checks meizel's resolved imports and Python AST. Claim
+execution constructs `ReadTimelineSink` and uses its public notification
+methods. Completed-record settlement uses record location helpers. Quote
+admission consumes canonical source identities and calls
+`validate_legacy_quote` only at its terminal legacy cursor fallback. The
+legacy cursor module owns the display-based lookup.
 
 Gateway and claim request paths stage external accounting through service-owned
 receipts. The direct native provider emitters and the receipt delivery worker
 hold the row-write capability. The database adapter owns ledger appends and
 replay. The repricing service owns historical price updates. Raw ledger
 mutations and the row-write capability have explicit owners in `[single-owner]`.
+The gate checks SQL passed to execution methods and composed with
+`psycopg.sql.SQL` and `Identifier`. Prompt text and SQL parameter values are
+outside that check. The gate resolves single-assignment names in their
+lexical scope to recognize locally assembled queries and paths.
 
 The authorized bootstrap mirror and enrollment-marker filenames belong to the
-bootstrap module. Other modules use its mirror APIs, which validate the signed,
-host-bound envelope before staging.
+bootstrap module, including names assembled from a stem and suffix. Other
+modules use its mirror APIs, which validate the signed, host-bound envelope
+before staging.
 
 ## Contents
 

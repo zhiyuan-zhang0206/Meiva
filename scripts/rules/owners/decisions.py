@@ -13,11 +13,13 @@ from dataclasses import dataclass, field
 from meizel.api import allowances
 
 from scripts.rules.owners import runtime_boundaries
+from scripts.rules.owners.runtime_boundaries import access_errors as access_errors
 from scripts.rules.owners.runtime_boundaries import import_errors as import_errors
 
 __all__ = [
     "Decision",
     "Sites",
+    "access_errors",
     "allowlist_errors",
     "decision_table",
     "import_errors",
