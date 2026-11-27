@@ -1,8 +1,12 @@
 # meiva:link base/lm/usage/README.md
 from collections.abc import Callable
+from concurrent.futures import Future
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,9 +45,47 @@ class UsageLedgerConflictError(UsageLedgerWriteError):
     pass
 
 
+class UsageLedgerRejectedError(UsageLedgerWriteError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class UsageLedger:
     write: Callable[[UsageLedgerEntry], bool]
     machine: Callable[[], str]
     cluster: str
     new_call_id: Callable[[], str]
+
+
+class ReceiptSubmission(StrEnum):
+    STAGED = "staged"
+    FALLBACK_LOGGED = "fallback_logged"
+
+
+type ReceiptFallbackReporter = Callable[[Callable[[], None]], bool]
+
+
+class UsageReceiptSubmitter(Protocol):
+    def __call__(
+        self,
+        entry: UsageLedgerEntry,
+        /,
+        *,
+        report_fallback: ReceiptFallbackReporter | None = None,
+    ) -> ReceiptSubmission: ...
+
+
+type ScheduleUsageReceipt = Callable[
+    [UsageLedgerEntry, UsageReceiptSubmitter, Callable[[], None]], Future[None]
+]
+type ReserveUsageReceipt = Callable[[], AbstractContextManager[ScheduleUsageReceipt]]
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledUsageReceipt:
+    write: UsageReceiptSubmitter
+    schedule: ScheduleUsageReceipt
+
+
+class ReceiptStagingUnavailableError(RuntimeError):
+    pass

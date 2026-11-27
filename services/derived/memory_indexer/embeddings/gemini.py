@@ -18,8 +18,7 @@
 # and `langchain-google-genai` (LLM factory), but nothing on the
 # indexer / gateway path imports it now.
 #
-# Billing imports are also lazy: they pull LangChain and OpenTelemetry into the
-# always-on indexer only after a successful provider call, never at module load.
+# The usage receipt boundary is loaded only by a configured billing path.
 #
 # The API key, the per-attempt timeout and the endpoint are values the caller passes in: the
 # service root reads `GEMINI_API_KEY` (prod injects it via `~/.meiva/.env`) and
@@ -41,12 +40,22 @@ import asyncio
 import json
 import random
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Future
+from contextlib import nullcontext
 from datetime import datetime
 
 import httpx
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError
 
+from base.api_contracts.usage import (
+    ReceiptStagingUnavailableError,
+    ReserveUsageReceipt,
+    ScheduledUsageReceipt,
+    ScheduleUsageReceipt,
+    UsageLedgerEntry,
+    UsageReceiptSubmitter,
+)
 from base.host.boundary.untyped import object_of
 from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
@@ -176,26 +185,31 @@ def _vectors_from_body(body: object, texts: list[str]) -> np.ndarray:
     return vectors
 
 
-def _emit_billing(body: object, *, catalog: ModelCatalog, now: datetime) -> None:
-    """Account for a completed request before validating its vectors.
-
-    Gemini bills malformed-but-successful responses too. Accounting failures
-    propagate to the operation owner after the successful network request;
-    this stage never retries that request.
-    """
-    from base.lm.usage import UsageFields, log_usage_fields
-
+def _billing_tokens(body: object) -> int:
     try:
         usage = _BillingView.model_validate(body).usage
     except ValidationError as exc:
         raise EmbeddingAPIError(f"malformed embed response: {exc!r}") from exc
-    tok_in = (usage.prompt_tokens if usage is not None else None) or 0
-    log_usage_fields(
+    return (usage.prompt_tokens if usage is not None else None) or 0
+
+
+def _emit_billing(
+    tok_in: int,
+    *,
+    catalog: ModelCatalog,
+    now: datetime,
+    submit_receipt: UsageReceiptSubmitter | ScheduledUsageReceipt | None,
+) -> None:
+    """Stage usage for a completed request before validating its vectors."""
+    from base.lm.usage import UsageFields, log_usage_fields
+
+    _ = log_usage_fields(
         model=MODEL_ID,
         fields=UsageFields(tok_in=tok_in, tok_out=0),
         usage_kind="embedding",
         catalog=catalog,
         now=now,
+        submit_receipt=submit_receipt,
     )
 
 
@@ -205,8 +219,10 @@ async def post_attempt_once(
     timeout_s: float,
     headers: dict[str, str],
     payload: dict[str, object],
+    on_success: Callable[[object], None],
 ) -> object:
     """Run one HTTP attempt under the shared cancellation deadline."""
+    received = False
     try:
         async with asyncio.timeout(timeout_s):
             async with client.stream("POST", endpoint, json=payload, headers=headers) as response:
@@ -218,8 +234,17 @@ async def post_attempt_once(
                         request=response.request,
                         response=response,
                     )
-                return object_of(json.loads, await response.aread())
-    except TimeoutError as exc:
+                body = object_of(json.loads, await response.aread())
+                received = True
+                on_success(body)
+                return body
+    except (TimeoutError, httpx.HTTPError) as exc:
+        if received:
+            raise EmbeddingAPIError(
+                "Gemini response received before local completion failed"
+            ) from exc
+        if isinstance(exc, httpx.HTTPError):
+            raise
         # The HTTP classifier retries transport errors, not builtin TimeoutError.
         raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
 
@@ -229,6 +254,7 @@ def embed(
     task_type: str,
     *,
     catalog: ModelCatalog,
+    submit_receipt: UsageReceiptSubmitter | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -260,9 +286,14 @@ def embed(
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
 
+    def bill(body: object) -> None:
+        _emit_billing(
+            _billing_tokens(body), catalog=catalog, now=now(), submit_receipt=submit_receipt
+        )
+
     async def _attempt() -> object:
         async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
-            return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
+            return await post_attempt_once(client, endpoint, timeout_s, headers, payload, bill)
 
     def _call() -> object:
         return run_sync(_attempt)
@@ -273,7 +304,6 @@ def embed(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog, now=now())
     return _vectors_from_body(body, texts)
 
 
@@ -282,6 +312,8 @@ async def embed_async(
     task_type: str,
     *,
     catalog: ModelCatalog,
+    submit_receipt: UsageReceiptSubmitter | None = None,
+    reserve_receipt: ReserveUsageReceipt | None = None,
     timeout_s: float,
     api_key: str | None,
     endpoint: str = ENDPOINT,
@@ -300,8 +332,76 @@ async def embed_async(
     as ``embed``: query embeds pass ``QUERY_EMBED_POLICY``."""
     if not texts:
         return np.empty((0, DIM), dtype=np.float32)
+    if (submit_receipt is not None or catalog.usage_ledger is not None) and (
+        reserve_receipt is None or submit_receipt is None
+    ):
+        raise EmbeddingAPIError(
+            "async Gemini accounting requires a service-owned receipt staging slot"
+        )
+    try:
+        with reserve_receipt() if reserve_receipt is not None else nullcontext() as schedule:
+            return await _embed_async_reserved(
+                texts,
+                task_type,
+                catalog=catalog,
+                submit_receipt=submit_receipt,
+                schedule_receipt=schedule,
+                timeout_s=timeout_s,
+                api_key=api_key,
+                endpoint=endpoint,
+                policy=policy,
+                transport=transport,
+                asleep=asleep,
+                now=now,
+                rng=rng,
+            )
+    except ReceiptStagingUnavailableError as exc:
+        raise EmbeddingAPIError(str(exc)) from exc
+
+
+async def _embed_async_reserved(
+    texts: list[str],
+    task_type: str,
+    *,
+    catalog: ModelCatalog,
+    submit_receipt: UsageReceiptSubmitter | None,
+    schedule_receipt: ScheduleUsageReceipt | None,
+    timeout_s: float,
+    api_key: str | None,
+    endpoint: str,
+    policy: Policy,
+    transport: httpx.AsyncBaseTransport | None,
+    asleep: Callable[[float], Awaitable[None]],
+    now: Callable[[], datetime],
+    rng: random.Random,
+) -> np.ndarray:
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
+    staged: list[Future[None]] = []
+
+    def schedule(
+        entry: UsageLedgerEntry, write: UsageReceiptSubmitter, observe: Callable[[], None]
+    ) -> Future[None]:
+        if schedule_receipt is None:
+            raise RuntimeError("Gemini receipt staging was not reserved")
+        accepted = schedule_receipt(entry, write, observe)
+        staged.append(accepted)
+        return accepted
+
+    submission = (
+        ScheduledUsageReceipt(submit_receipt, schedule)
+        if schedule_receipt is not None and submit_receipt is not None
+        else submit_receipt
+    )
+
+    def bill(body: object) -> None:
+        _emit_billing(
+            _billing_tokens(body),
+            catalog=catalog,
+            now=now(),
+            submit_receipt=submission,
+        )
+
     try:
         client = httpx.AsyncClient(timeout=timeout_s, transport=transport)
     except httpx.HTTPError as exc:
@@ -312,7 +412,7 @@ async def embed_async(
         async with client:
 
             async def _call() -> object:
-                return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
+                return await post_attempt_once(client, endpoint, timeout_s, headers, payload, bill)
 
             body = await aretry_jittered(policy, rng=rng, asleep=asleep)(_call)
     except EmbeddingAPIError:
@@ -321,8 +421,16 @@ async def embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    await asyncio.to_thread(_emit_billing, body, catalog=catalog, now=now())
+    for accepted in staged:
+        waiting = asyncio.wrap_future(accepted)
+        waiting.add_done_callback(_observe_staging)
+        await asyncio.shield(waiting)
     return _vectors_from_body(body, texts)
+
+
+def _observe_staging(result: asyncio.Future[None]) -> None:
+    if not result.cancelled():
+        _ = result.exception()
 
 
 class GeminiEmbeddingProvider:
@@ -330,8 +438,8 @@ class GeminiEmbeddingProvider:
 
     Owns the endpoint, payload, auth, per-site network retry policies,
     dim and shape validation. The service
-    root supplies the catalog used by accounting; unknown setup, request
-    and accounting failures propagate to that operation owner.
+    root supplies the catalog used by accounting. Ledger delivery runs
+    independently after the usage receipt is staged.
     """
 
     name = "gemini"
@@ -346,6 +454,8 @@ class GeminiEmbeddingProvider:
         self,
         catalog: ModelCatalog,
         *,
+        submit_receipt: UsageReceiptSubmitter | None = None,
+        reserve_receipt: ReserveUsageReceipt | None = None,
         timeout_s: float,
         api_key: str | None,
         endpoint: str = ENDPOINT,
@@ -356,6 +466,8 @@ class GeminiEmbeddingProvider:
         rng: random.Random,
     ) -> None:
         self._catalog = catalog
+        self._submit_receipt = submit_receipt
+        self._reserve_receipt = reserve_receipt
         self._timeout_s = timeout_s
         self._api_key = api_key
         self._endpoint = endpoint
@@ -371,6 +483,7 @@ class GeminiEmbeddingProvider:
             texts,
             task_type="RETRIEVAL_DOCUMENT",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,
@@ -386,6 +499,7 @@ class GeminiEmbeddingProvider:
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,
@@ -403,6 +517,8 @@ class GeminiEmbeddingProvider:
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
+            submit_receipt=self._submit_receipt,
+            reserve_receipt=self._reserve_receipt,
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,

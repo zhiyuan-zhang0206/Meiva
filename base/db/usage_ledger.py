@@ -14,6 +14,7 @@ from base.api_contracts.usage import (
     UsageLedger,
     UsageLedgerConflictError,
     UsageLedgerEntry,
+    UsageLedgerRejectedError,
     UsageLedgerWriteError,
 )
 from base.db.handle import Database
@@ -136,6 +137,8 @@ def _write_usage(connect: Callable[[], psycopg.Connection], entry: UsageLedgerEn
         )
         if conflict:
             raise
+        if isinstance(exc, (psycopg.DataError, psycopg.IntegrityError)):
+            raise UsageLedgerRejectedError("LLM usage row rejected") from exc
         raise UsageLedgerWriteError("LLM usage commit failed") from exc
 
 

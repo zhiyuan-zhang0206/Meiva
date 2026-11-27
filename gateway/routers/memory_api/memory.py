@@ -12,6 +12,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from base.api_contracts.agent_contract import IndexerUnavailable
+from base.api_contracts.usage import ReserveUsageReceipt, UsageReceiptSubmitter
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
@@ -76,6 +77,8 @@ def build_embedder(
     *,
     now: Callable[[], datetime],
     rng: random.Random,
+    submit_receipt: UsageReceiptSubmitter | None = None,
+    reserve_receipt: ReserveUsageReceipt | None = None,
 ) -> EmbeddingProvider:
     from services.derived.memory_indexer.embeddings import factory
 
@@ -87,6 +90,8 @@ def build_embedder(
         embeddinggemma_config=settings.embeddinggemma_config,
         now=now,
         rng=rng,
+        submit_receipt=submit_receipt,
+        reserve_receipt=reserve_receipt,
     )
 
 

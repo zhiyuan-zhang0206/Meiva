@@ -1,13 +1,15 @@
-exports = ["__init__.py", "metering.py", "reporting.py"]
+exports = ["__init__.py", "metering.py", "receipt.py", "reporting.py"]
 
 [uses]
 "__init__.py" = []
 "metering.py" = ["__init__.py", "reporting.py"]
+"receipt.py" = []
 "reporting.py" = []
 
 [purity]
 "." = "ratchet"
 "reporting.py" = "strict"
+"receipt.py" = { mode = "off", why = "effect shell for the durable receipt handoff: it writes and replays explicit ledger entries in the directory supplied by the caller and owns the asynchronous delivery worker" }
 "metering.py" = { mode = "off", why = "the LangChain callback adapter: on a chat start it reads the interval clock and keeps the reading per run id, on the end it reads the clock again for latency_ms, and it emits one usage row per generation through the emitter the caller injected, reporting a failed row through the throttled best-effort channel; the row shape and UsageOptions.metered are decided in __init__.py and when a repeated failure is reported in reporting.should_report" }
 
 [debt.impure-edge]

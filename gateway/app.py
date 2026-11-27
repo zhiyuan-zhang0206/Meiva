@@ -34,6 +34,7 @@ from base.host.system.cron.health_job import register_os_cron
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.lm.catalog import ModelCatalog
+from base.lm.usage.receipt import UsageReceiptRuntime, UsageReceiptStore
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
 from base.paths.scratch import SYSTEM_SCRATCH
@@ -173,7 +174,7 @@ class GatewayServerState(
     AppointmentAppState,
     auth_router.AuthAppState,
 ):
-    pass
+    usage_receipts: UsageReceiptRuntime
 
 
 # meiva:note
@@ -247,6 +248,18 @@ def _build_request_resources(
     insights_client = insights_router.build_client(process.home)
     state.insights_client = insights_client
     releases.push_async_callback(insights_client.aclose)
+
+
+@asynccontextmanager
+async def _usage_receipt_lifetime(state: GatewayServerState) -> AsyncGenerator[None]:
+    async with startup_releases() as releases:
+        if hasattr(state, "usage_receipts"):
+            receipts = state.usage_receipts
+            receipts.start()
+            _ = releases.push_async_callback(
+                receipts.aclose, staging_timeout=8.0, delivery_timeout=1.0
+            )
+        yield
 
 
 @asynccontextmanager
@@ -370,11 +383,14 @@ async def lifespan(
             )
             state.upload_recovery = upload_recovery
 
-            async with _background_lifetime(
-                app,
-                upload_recovery,
-                outbox_interval_seconds=config.view.gateway.notification_outbox_interval_seconds,
-                outbox_batch=config.view.gateway.notification_outbox_batch,
+            async with (
+                _background_lifetime(
+                    app,
+                    upload_recovery,
+                    outbox_interval_seconds=config.view.gateway.notification_outbox_interval_seconds,
+                    outbox_batch=config.view.gateway.notification_outbox_batch,
+                ),
+                _usage_receipt_lifetime(state),
             ):
                 yield
 
@@ -455,6 +471,8 @@ def create_app(
 
     if process_ownership not in {"borrowed", "owned"}:
         raise ValueError("gateway process ownership must be borrowed or owned")
+    ledger = bind_usage_ledger(process.database, process.machine.name, process.home)
+    usage_receipts = UsageReceiptRuntime(UsageReceiptStore(process.home, ledger.cluster), ledger)
     application = TraceIngressApp if process.tracer_provider is not None else FastAPI
     app = application(
         title="Meiva",
@@ -479,6 +497,7 @@ def create_app(
             excluded_urls=r"/api/health(?:\?|$)",
         )
     state = GatewayServerState()
+    state.usage_receipts = usage_receipts
     app.state = state
     state.gateway_config = config
     state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
@@ -486,12 +505,15 @@ def create_app(
     if isinstance(catalog, ModelCatalog):
         catalog = replace(
             catalog,
-            usage_ledger=partial(
-                bind_usage_ledger, process.database, process.machine.name, process.home
-            ),
+            usage_ledger=lambda: ledger,
         )
         state.memory_embedder = memory_router.build_embedder(
-            config.memory_search, catalog, now=state.clock.now, rng=config.rng
+            config.memory_search,
+            catalog,
+            now=state.clock.now,
+            rng=config.rng,
+            submit_receipt=usage_receipts.submit,
+            reserve_receipt=usage_receipts.reserve,
         )
     state.catalog = catalog
     state.command_catalog = CommandCatalog.system(

@@ -24,6 +24,7 @@ from datetime import datetime
 
 import httpx
 
+from base.api_contracts.usage import ReserveUsageReceipt, UsageReceiptSubmitter
 from base.lm.catalog import ModelCatalog
 from services.derived.embeddinggemma.contract import DEFAULT_PORT
 from services.derived.embeddinggemma.placement import client_target
@@ -50,6 +51,8 @@ _ProviderEntry = tuple[
             embeddinggemma.EmbeddingGemmaConfig | None,
             Callable[[], datetime],
             random.Random,
+            UsageReceiptSubmitter | None,
+            ReserveUsageReceipt | None,
         ],
         EmbeddingProvider,
     ],
@@ -68,9 +71,16 @@ def _require_gemma(
 
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_s, api_key, transport, _config, now, rng: (
+        lambda catalog, timeout_s, api_key, transport, _config, now, rng, submit_receipt, reserve_receipt: (
             gemini.GeminiEmbeddingProvider(
-                catalog, timeout_s=timeout_s, api_key=api_key, transport=transport, now=now, rng=rng
+                catalog,
+                timeout_s=timeout_s,
+                api_key=api_key,
+                transport=transport,
+                now=now,
+                rng=rng,
+                submit_receipt=submit_receipt,
+                reserve_receipt=reserve_receipt,
             )
         ),
         gemini.worst_case_batch_seconds,
@@ -81,7 +91,7 @@ PROVIDERS: dict[str, _ProviderEntry] = {
         ),
     ),
     embeddinggemma.NAME: (
-        lambda _catalog, timeout_s, _api_key, transport, config, _now, _rng: (
+        lambda _catalog, timeout_s, _api_key, transport, config, _now, _rng, _receipt, _reserve: (
             embeddinggemma.EmbeddingGemmaProvider(
                 _require_gemma(config), timeout_s=timeout_s, transport=transport
             )
@@ -117,9 +127,21 @@ def get_provider(
     transport: httpx.AsyncBaseTransport | None = None,
     embeddinggemma_config: embeddinggemma.EmbeddingGemmaConfig | None = None,
     now: Callable[[], datetime],
+    submit_receipt: UsageReceiptSubmitter | None = None,
+    reserve_receipt: ReserveUsageReceipt | None = None,
 ) -> EmbeddingProvider:
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config, now, rng)
+    return ctor(
+        catalog,
+        timeout_s,
+        api_key,
+        transport,
+        embeddinggemma_config,
+        now,
+        rng,
+        submit_receipt,
+        reserve_receipt,
+    )
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:
