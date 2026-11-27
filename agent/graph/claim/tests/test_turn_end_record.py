@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Generator, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from os import DirEntry, scandir
 from pathlib import Path
 
 import psycopg
@@ -38,6 +41,7 @@ from agent.nodes import BEFORE_TURN, END
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.history.transcript_timeline.record.harness import session_file
 from base.agents.tests.langgraph_views import command_update
 from base.agents.to_user.delivery.store import publish
 from base.api_contracts.agent_contract import Harness
@@ -597,21 +601,42 @@ async def test_codex_start_distinguishes_denied_rollout_directory_from_new_rollo
         )
         db_conn.commit()
         day.chmod(0o000)
+    deny_directory = False
+
+    def find_session_file(
+        harness: str, environ: Mapping[str, str], workspace: Path, session_id: str
+    ) -> Path | None:
+        if deny_directory:
+            return None
+        return session_file(harness, environ, workspace, session_id)
+
+    @contextmanager
+    def scan_directory(directory: Path) -> Generator[Iterator[DirEntry[str]]]:
+        if deny_directory and directory == day:
+            raise PermissionError(str(directory))
+        with scandir(directory) as children:
+            yield children
+
     try:
         if parent_denied:
             try:
                 _ = path.stat()
             except PermissionError:
-                denied = True
+                deny_directory = False
             else:
-                denied = False
-            if not denied:
-                pytest.skip("the test process can search a directory with mode 000")
+                deny_directory = True
         sink = ReadTimelineSink(
-            ctx, agent_id, live_events.publisher, non_human_wake=False, session_id=lambda: session
+            ctx,
+            agent_id,
+            live_events.publisher,
+            non_human_wake=False,
+            session_id=lambda: session,
+            find_session_file=find_session_file,
+            scan_directory=scan_directory,
         )
     finally:
         day.chmod(0o700)
+        deny_directory = False
     if not parent_denied:
         _ = path.write_text(json.dumps(row) + "\n")
 

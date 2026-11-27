@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Generator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from os import scandir
+from os import DirEntry, scandir
 from pathlib import Path
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
@@ -106,15 +106,19 @@ class _PublicationKeyRow:
     source_key: str
 
 
-def _check_rollout_directories(directory: Path, levels: int) -> None:
+type SessionFileLookup = Callable[[str, Mapping[str, str], Path, str], Path | None]
+type ScanDirectory = Callable[[Path], AbstractContextManager[Iterator[DirEntry[str]]]]
+
+
+def _check_rollout_directories(directory: Path, levels: int, scan_directory: ScanDirectory) -> None:
     try:
-        with scandir(directory) as children:
+        with scan_directory(directory) as children:
             if levels == 0:
                 _ = next(children, None)
                 return
             for child in children:
                 if child.is_dir():
-                    _check_rollout_directories(Path(child.path), levels - 1)
+                    _check_rollout_directories(Path(child.path), levels - 1, scan_directory)
     except (FileNotFoundError, NotADirectoryError):
         return
 
@@ -131,12 +135,16 @@ class ReadTimelineSink:
         poll_seconds: float = RECORD_POLL_SECONDS,
         debounce_seconds: float = DEBOUNCE_SECONDS,
         request_timing_refresh: Callable[[], None] | None = None,
+        find_session_file: SessionFileLookup = session_file,
+        scan_directory: ScanDirectory = scandir,
     ) -> None:
         self._ctx = ctx
         self._agent_id = agent_id
         self._publisher = publisher
         self._non_human_wake = non_human_wake
         self._session_id = session_id
+        self._find_session_file = find_session_file
+        self._scan_directory = scan_directory
         self._poll_seconds = poll_seconds
         self._debounce_seconds = debounce_seconds
         if request_timing_refresh is None and isinstance(ctx.harness_bridge, TimingRefreshing):
@@ -433,7 +441,7 @@ class ReadTimelineSink:
         if sid is None:
             return None
         ctx = self._ctx
-        path = session_file(
+        path = self._find_session_file(
             self._harness,
             ctx.require_environ(),
             workspace_dir(self._agent_id, home=ctx.require_meiva_home()),
@@ -455,7 +463,7 @@ class ReadTimelineSink:
         if file is None and self._harness == Harness.CODEX.value and self._session_id() is not None:
             workspace = workspace_dir(self._agent_id, home=self._ctx.require_meiva_home())
             sessions = record_location(self._harness, self._ctx.require_environ(), workspace)
-            _check_rollout_directories(Path(sessions), levels=3)
+            _check_rollout_directories(Path(sessions), 3, self._scan_directory)
             file = self._resolve()
         if file is None:
             self._history_end = 0

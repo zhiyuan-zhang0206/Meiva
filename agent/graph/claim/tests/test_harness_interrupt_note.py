@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
+from os import stat_result
 from pathlib import Path
+from typing import override
 
 import psycopg
 import pytest
@@ -20,7 +22,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_interrupt import TimelineNotifications, announce_interrupt
-from agent.graph.claim.harness_read_sink import ReadTimelineSink
+from agent.graph.claim.harness_read_sink import ReadTimelineSink, SessionFileLookup
 from agent.graph.claim.harness_turn import harness_turn_node, run_harness_turn
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
@@ -41,7 +43,7 @@ from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted
 from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
-from base.agents.history.transcript_timeline.record.harness import reply_key
+from base.agents.history.transcript_timeline.record.harness import reply_key, session_file
 from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED
 from base.agents.tests.langgraph_views import command_update
 from base.agents.to_user.delivery.store import publish
@@ -564,20 +566,46 @@ def _seed_reply_history(
 
 
 @contextmanager
-def _unreadable(path: Path, denied_path: Path, mode: int) -> Generator[None]:
+def _unreadable(path: Path, denied_path: Path, mode: int) -> Generator[SessionFileLookup]:
     denied_path.chmod(0o000)
     try:
         try:
             _ = path.read_bytes()
         except PermissionError:
-            denied = True
+            yield session_file
         else:
-            denied = False
-        if not denied:
-            pytest.skip("the test process can read files with mode 000")
-        yield
+            yield _simulate_unreadable_transcript(
+                path, denied_path, stat_available=denied_path == path
+            )
     finally:
         denied_path.chmod(mode)
+
+
+def _simulate_unreadable_transcript(
+    path: Path, denied_path: Path, *, stat_available: bool
+) -> SessionFileLookup:
+    class DeniedTranscript(Path):
+        @override
+        def __fspath__(self) -> str:
+            if self == path and denied_path.stat().st_mode & 0o777 == 0:
+                raise PermissionError(str(self))
+            return super().__fspath__()
+
+        @override
+        def stat(self, *, follow_symlinks: bool = True) -> stat_result:
+            target = path if self == path and stat_available else self
+            return Path.stat(target, follow_symlinks=follow_symlinks)
+
+    def find_session_file(
+        harness: str, environ: Mapping[str, str], workspace: Path, session_id: str
+    ) -> Path | None:
+        found = session_file(harness, environ, workspace, session_id)
+        if found is None or found != path:
+            return found
+        candidate = DeniedTranscript(found)
+        return candidate if candidate.is_file() else None
+
+    return find_session_file
 
 
 @pytest.mark.parametrize("real_timeline", [False, True])
@@ -619,10 +647,20 @@ async def test_unreadable_transcript_preserves_execution_and_publication_floor(
     if not restore_readability:
         engine.record = None
     denied_path, mode = (path, 0o600) if stat_available else (path.parent, 0o700)
-    with _unreadable(path, denied_path, mode):
-        command = await run_harness_turn(
-            AgentState(), ctx, agent_id, publisher, timeline=None if real_timeline else NoTimeline()
+    with _unreadable(path, denied_path, mode) as find_session_file:
+        timeline = (
+            ReadTimelineSink(
+                ctx,
+                agent_id,
+                publisher,
+                non_human_wake=False,
+                session_id=lambda: record.session,
+                find_session_file=find_session_file,
+            )
+            if real_timeline
+            else NoTimeline()
         )
+        command = await run_harness_turn(AgentState(), ctx, agent_id, publisher, timeline=timeline)
 
     assert command.goto == "claim"
     assert [key for _, key in engine.submitted] == [input_key(row)]
