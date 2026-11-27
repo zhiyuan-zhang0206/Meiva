@@ -375,3 +375,55 @@ def test_legacy_validator_is_only_available_at_the_fallback() -> None:
     assert runtime_boundaries.access_errors(
         path, ast.parse(entry + "async def _contains_native_source():\n    await validate()")
     )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'query = sql.SQL("UPDATE ") + sql.Identifier("llm_usage_ledger") + '
+        'sql.SQL(" SET cost_usd = NULL WHERE call_id = %s")\nconn.execute(query, (call_id,))',
+        'table = sql.Identifier("public", "llm_usage_ledger")\n'
+        'parts = [sql.SQL("UPDATE "), table, sql.SQL(" SET cost_usd = NULL")]\n'
+        "query = sql.Composed(parts)\ncursor.execute(query)",
+        'parts = (sql.SQL("UPDATE"), sql.Identifier("llm_usage_ledger"), '
+        'sql.SQL("SET cost_usd = NULL"))\n'
+        'query = sql.SQL(" ").join(parts)\nconn.execute(query)',
+        "from psycopg.sql import Composed as Composition, Identifier, SQL\n"
+        'conn.execute(Composition([SQL("UPDATE "), Identifier("llm_usage_ledger"), '
+        'SQL(" SET cost_usd = NULL")]))',
+        'conn.execute(sql.SQL("{} {} SET cost_usd = NULL").format('
+        'sql.SQL("UPDATE"), sql.Identifier("llm_usage_ledger")))',
+        'conn.execute(sql.SQL("UPDATE ") + sql.SQL("") + '
+        'sql.Identifier("llm_usage_ledger") + sql.SQL(" SET cost_usd = NULL"))',
+    ],
+)
+def test_psycopg_composition_cannot_bypass_ledger_ownership(source: str) -> None:
+    path = "gateway/agents/history/inbound.py"
+    assert f"{path}::usage-ledger-reprice" in decisions.owner_bypasses(
+        ast.parse(source), path, (), _TABLE
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        '''SELECT 1 AS "How to UPDATE llm_usage_ledger SET cost_usd"''',
+        '''SELECT 1 AS "Examples ""DELETE FROM llm_usage_ledger"" here"''',
+        """SELECT 'UPDATE llm_usage_ledger SET cost_usd = NULL'""",
+        """SELECT $$UPDATE llm_usage_ledger SET cost_usd = NULL$$""",
+        """SELECT $example$DELETE FROM llm_usage_ledger$example$""",
+        """SELECT 1 AS "UPDATE" FROM llm_usage_ledger""",
+        """UPDATE "sample UPDATE llm_usage_ledger SET cost_usd" SET field = NULL""",
+    ],
+)
+def test_quoted_sql_text_cannot_trigger_ledger_ownership(query: str) -> None:
+    path = "gateway/agents/history/inbound.py"
+    assert decisions.owner_bypasses(ast.parse(f"conn.execute({query!r})"), path, (), _TABLE) == {}
+
+
+def test_quoted_ledger_target_and_alias_require_the_owner() -> None:
+    path = "gateway/agents/history/inbound.py"
+    query = 'UPDATE "public"."llm_usage_ledger" AS "ledger alias" SET cost_usd = NULL'
+    assert decisions.owner_bypasses(ast.parse(f"conn.execute({query!r})"), path, (), _TABLE) == {
+        f"{path}::usage-ledger-reprice": [1]
+    }

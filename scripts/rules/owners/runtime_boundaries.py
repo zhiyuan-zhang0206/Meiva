@@ -279,10 +279,21 @@ def access_errors(rel: str, tree: ast.Module) -> list[str]:
 
 
 _SQL_EXECUTION = frozenset({"execute", "executemany", "copy"})
-_SQL_COMMENTS_AND_LITERALS = re.compile(
-    r"""--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'""",
+_SQL_QUOTED = re.compile(
+    r"""(?P<identifier>"(?:[^"]|"")*")"""
+    r"""|(?i:e)'(?:[^'\\]|\\.|'')*'|'(?:''|[^'])*'"""
+    r"""|(?P<dollar>\$(?:[a-zA-Z_][a-zA-Z_0-9]*)?\$).*?(?P=dollar)"""
+    r"""|--[^\n]*|/\*.*?\*/""",
     re.DOTALL,
 )
+
+
+def _sql_token(match: re.Match[str]) -> str:
+    if match.group("identifier") is None:
+        return " "
+    if match[0] == '"llm_usage_ledger"':
+        return match[0]
+    return "quoted_identifier"
 
 
 def _sql_names(tree: ast.Module, symbol: str) -> set[str]:
@@ -301,37 +312,85 @@ def _sql_names(tree: ast.Module, symbol: str) -> set[str]:
     return {f"{module}.{symbol}" for module in modules} | _names_from(nodes, "psycopg.sql", symbol)
 
 
-def _sql_field(node: ast.expr, bindings: _Bindings, identifiers: set[str]) -> str:
-    value = _bound_value(node, bindings)
-    if not isinstance(value, ast.Call) or _dotted_name(value.func) not in identifiers:
-        return "?"
-    parts = [_text(arg, bindings) for arg in value.args]
-    return ".".join(
-        '"' + part.replace('"', '""') + '"' if part is not None else '"?"' for part in parts
-    )
-
-
-def _sql_format(template: str, call: ast.Call, bindings: _Bindings, identifiers: set[str]) -> str:
-    fields = {
-        str(index): _sql_field(arg, bindings, identifiers) for index, arg in enumerate(call.args)
-    }
-    fields.update(
-        {
-            kw.arg: _sql_field(kw.value, bindings, identifiers)
-            for kw in call.keywords
-            if kw.arg is not None
+class _SQLExpressions:
+    def __init__(self, tree: ast.Module) -> None:
+        self.constructors = {
+            name: symbol
+            for symbol in ("SQL", "Identifier", "Composed")
+            for name in _sql_names(tree, symbol)
         }
-    )
-    parts: list[str] = []
-    position = 0
-    for literal, field, _, _ in Formatter().parse(template):
-        parts.append(literal)
-        if field == "":
-            parts.append(fields.get(str(position), "?"))
-            position += 1
-        elif field is not None:
-            parts.append(fields.get(field, "?"))
-    return "".join(parts)
+
+    def render(self, node: ast.expr, bindings: _Bindings) -> str | None:
+        value = _bound_value(node, bindings)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+            left = self.render(value.left, bindings)
+            right = self.render(value.right, bindings)
+            if left is None and right is None:
+                return None
+            return (left if left is not None else "?") + (right if right is not None else "?")
+        if isinstance(value, ast.Call):
+            return self._call(value, bindings)
+        return None
+
+    def _call(self, node: ast.Call, bindings: _Bindings) -> str | None:
+        kind = self.constructors.get(_dotted_name(node.func))
+        if kind == "Identifier":
+            return ".".join(self._identifier(arg, bindings) for arg in node.args)
+        if kind == "SQL" and node.args:
+            return _text(node.args[0], bindings)
+        if kind == "Composed" and node.args:
+            return self._join("", node.args[0], bindings)
+        if isinstance(node.func, ast.Attribute):
+            return self._method(node, node.func, bindings)
+        return None
+
+    @staticmethod
+    def _identifier(node: ast.expr, bindings: _Bindings) -> str:
+        text = _text(node, bindings)
+        return '"' + (text if text is not None else "?").replace('"', '""') + '"'
+
+    def _method(self, node: ast.Call, method: ast.Attribute, bindings: _Bindings) -> str | None:
+        if method.attr not in {"format", "join"}:
+            return None
+        template = self.render(method.value, bindings)
+        if template is None:
+            return None
+        if method.attr == "format":
+            return self._format(template, node, bindings)
+        return self._join(template, node.args[0], bindings) if node.args else None
+
+    def _fragment(self, node: ast.expr, bindings: _Bindings) -> str:
+        text = self.render(node, bindings)
+        return text if text is not None else "?"
+
+    def _join(self, separator: str, node: ast.expr, bindings: _Bindings) -> str | None:
+        value = _bound_value(node, bindings)
+        if not isinstance(value, (ast.List, ast.Tuple)):
+            return None
+        return separator.join(self._fragment(element, bindings) for element in value.elts)
+
+    def _format(self, template: str, call: ast.Call, bindings: _Bindings) -> str | None:
+        fields = {str(index): self._fragment(arg, bindings) for index, arg in enumerate(call.args)}
+        fields.update(
+            {
+                kw.arg: self._fragment(kw.value, bindings)
+                for kw in call.keywords
+                if kw.arg is not None
+            }
+        )
+        parts: list[str] = []
+        position = 0
+        try:
+            for literal, field, _, _ in Formatter().parse(template):
+                parts.append(literal)
+                if field == "":
+                    parts.append(fields.get(str(position), "?"))
+                    position += 1
+                elif field is not None:
+                    parts.append(fields.get(field, "?"))
+        except ValueError:
+            return None
+        return "".join(parts)
 
 
 def _query_argument(call: ast.Call) -> ast.expr | None:
@@ -340,34 +399,18 @@ def _query_argument(call: ast.Call) -> ast.expr | None:
     return next((kw.value for kw in call.keywords if kw.arg in {"query", "statement", "sql"}), None)
 
 
-def _sql_call(
-    call: ast.Call, bindings: _Bindings, sql: set[str], identifiers: set[str]
+def _sql_statement(
+    node: ast.expr, bindings: _Bindings, expressions: _SQLExpressions
 ) -> tuple[str, int] | None:
-    if _dotted_name(call.func) in sql and call.args:
-        text = _text(call.args[0], bindings)
-        return (text, call.lineno) if text is not None else None
-    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "format"):
-        return None
-    receiver = _bound_value(call.func.value, bindings)
-    if isinstance(receiver, ast.Call) and (base := _sql_call(receiver, bindings, sql, identifiers)):
-        template, line = base
-        try:
-            return _sql_format(template, call, bindings, identifiers), line
-        except ValueError:
+    if isinstance(node, ast.Call) and _call_name(node.func) in _SQL_EXECUTION:
+        arg = _query_argument(node)
+        if arg is None:
             return None
-    return None
-
-
-def _executed_sql(
-    call: ast.Call, bindings: _Bindings, sql: set[str], identifiers: set[str]
-) -> tuple[str, int] | None:
-    if _call_name(call.func) not in _SQL_EXECUTION or (arg := _query_argument(call)) is None:
-        return None
-    value = _bound_value(arg, bindings)
-    if isinstance(value, ast.Call):
-        return _sql_call(value, bindings, sql, identifiers)
-    text = _text(value, bindings)
-    return (text, value.lineno) if text is not None else None
+        value = _bound_value(arg, bindings)
+        text = expressions.render(value, bindings) or _text(value, bindings)
+        return (text, value.lineno) if text is not None else None
+    text = expressions.render(node, bindings)
+    return (text, node.lineno) if text is not None else None
 
 
 def _sql_sites(tree: ast.Module, pattern: re.Pattern[str]) -> list[int]:
@@ -378,15 +421,14 @@ def _sql_sites(tree: ast.Module, pattern: re.Pattern[str]) -> list[int]:
         for node in ast.walk(tree)
     ):
         return []
-    sql, identifiers = _sql_names(tree, "SQL"), _sql_names(tree, "Identifier")
+    expressions = _SQLExpressions(tree)
     lines: set[int] = set()
     for node, bindings in _scoped_nodes(tree, {}):
-        if isinstance(node, ast.Call) and (
-            statement := _sql_call(node, bindings, sql, identifiers)
-            or _executed_sql(node, bindings, sql, identifiers)
+        if isinstance(node, (ast.Call, ast.BinOp)) and (
+            statement := _sql_statement(node, bindings, expressions)
         ):
             text, line = statement
-            if pattern.search(_SQL_COMMENTS_AND_LITERALS.sub(" ", text)):
+            if pattern.search(_SQL_QUOTED.sub(_sql_token, text)):
                 lines.add(line)
     return sorted(lines)
 

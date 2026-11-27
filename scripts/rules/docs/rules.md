@@ -25,9 +25,11 @@ hold the row-write capability. The database adapter owns ledger appends and
 replay. The repricing service owns historical price updates. Raw ledger
 mutations and the row-write capability have explicit owners in `[single-owner]`.
 The gate checks SQL passed to execution methods and composed with
-`psycopg.sql.SQL` and `Identifier`. Prompt text and SQL parameter values are
-outside that check. The gate resolves single-assignment names in their
-lexical scope to recognize locally assembled queries and paths.
+psycopg SQL templates, concatenation, `Composed`, and `join`. Prompt text,
+SQL parameter values, and SQL keywords inside quoted aliases or string
+literals pass. Quoted identifiers still identify the ledger as a write
+target. The gate resolves single-assignment names in their lexical scope to
+recognize locally assembled queries and paths.
 
 The authorized bootstrap mirror and enrollment-marker filenames belong to the
 bootstrap module, including names assembled from a stem and suffix. Other
