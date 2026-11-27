@@ -1,0 +1,7 @@
+exports = ["__main__.py", "collect.py", "config.py", "receipt.py"]
+[uses]
+"collect.py" = ["receipt.py"]
+"__main__.py" = ["config.py", "readiness.py", "receipt.py", "schema.py"]
+
+[roots]
+"__main__.py" = { kinds = ["home", "argv", "clock", "settings"], why = "Target-checkout SSH entry reads its home, args, configuration and authorization clock." }

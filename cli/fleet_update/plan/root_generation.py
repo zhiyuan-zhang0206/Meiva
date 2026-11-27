@@ -53,19 +53,17 @@ class RootCheck:
 
 # meiva:note
 # One host's answer: a root of another generation refuses the window (exit 2, nothing touched); a
-# check that could not run warns and goes on, as the stored-schedule check does, because it is a
-# prediction of the start that will say the same thing for real.
-def root_check(alias: str, output: str, *, new: str) -> RootCheck:
+# missing or unreadable verdict refuses a destructive window.
+def root_check(
+    alias: str, output: str, *, new: str, dry_run: bool = False, was_running: bool = False
+) -> RootCheck:
     lines = output.splitlines()
-    if any(line.startswith("SKIPPED") for line in lines):
+    if dry_run and any(line.startswith("SKIPPED") for line in lines):
         return RootCheck((f"{alias}: kept-root generation: not checked (see above)",), None)
-    code = next(
-        (line.partition("=")[2] for line in lines if line.startswith("ROOT_CHECK_RC=")), "?"
-    )
-    verdict = next(
-        (line.partition("=")[2] for line in lines if line.startswith("ROOT_GENERATION=")), None
-    )
-    if code == "0" and verdict in (_NO_ROOT, _SAME):
+    facts = {key: value for key, _, value in (line.partition("=") for line in lines)}
+    code = facts.get("ROOT_CHECK_RC", "?")
+    verdict = facts.get("ROOT_GENERATION")
+    if code == "0" and (verdict == _SAME or (verdict == _NO_ROOT and not was_running)):
         return RootCheck((), None)
     if code == "0" and verdict is not None and verdict.startswith(_CHANGED):
         detail = verdict.removeprefix(_CHANGED)
@@ -76,9 +74,8 @@ def root_check(alias: str, output: str, *, new: str) -> RootCheck:
             "--close-shell-sessions with --keep-no-services, so the root restarts on the new code",
         )
     return RootCheck(
-        (
-            f"WARNING: {alias}: could not tell whether its kept meiva-root can serve {new[:12]} "
-            f"(check exited {code}), continuing: see the output above",
-        ),
-        None,
+        (),
+        f"{alias}: cannot prove the kept meiva-root can serve {new[:12]} "
+        f"(check exited {code}, verdict {verdict!r}). Choose --close-shell-sessions with "
+        "--keep-no-services to replace an incompatible root",
     )

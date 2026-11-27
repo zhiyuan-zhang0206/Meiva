@@ -152,7 +152,7 @@ def run_window(
                     else None,
                 )
                 continue
-            failures = up(s, args)
+            failures = up(s, args, target=resolved_new)
         summary = _partial(s, args, failures)
         for line in summary:
             s.say(line)

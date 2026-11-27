@@ -1,7 +1,7 @@
 # meiva:note
 # What the window concludes from NEW's answer about the root a host keeps: when the root is kept at
 # all, the command each host runs, and whether a changed generation refuses, a check that could
-# not run warns, or the host passes.
+# not run refuses, or the host passes.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 from __future__ import annotations
 
@@ -58,15 +58,21 @@ def test_a_changed_generation_refuses_and_says_what_to_choose() -> None:
     assert "--close-shell-sessions with --keep-no-services" in check.refusal
 
 
-def test_a_check_that_could_not_run_warns_and_does_not_refuse() -> None:
+def test_a_check_that_could_not_run_refuses() -> None:
     check = root_check("lin", "Traceback (most recent call last)\nROOT_CHECK_RC=1", new=NEW)
 
-    assert check.refusal is None
-    assert len(check.notes) == 1 and "could not tell" in check.notes[0]
-    assert "check exited 1" in check.notes[0]
+    assert check.refusal is not None and "check exited 1" in check.refusal
 
 
 def test_a_host_that_could_not_fetch_new_is_reported_not_checked() -> None:
-    check = root_check("mac", f"SKIPPED: {NEW} cannot be fetched on this host", new=NEW)
+    check = root_check(
+        "mac", f"SKIPPED: {NEW} cannot be fetched on this host", new=NEW, dry_run=True
+    )
 
     assert check.refusal is None and "not checked" in check.notes[0]
+
+
+def test_a_live_root_is_not_absent_when_an_old_envelope_cannot_be_read() -> None:
+    check = root_check("gw", "ROOT_GENERATION=none\nROOT_CHECK_RC=0", new=NEW, was_running=True)
+
+    assert check.refusal is not None and "cannot prove the kept meiva-root" in check.refusal

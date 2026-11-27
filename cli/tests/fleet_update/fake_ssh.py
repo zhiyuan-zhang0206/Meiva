@@ -235,9 +235,42 @@ class Sim:
             return self._incomplete(alias, emit)
         if "pre-update-root-check" in command:
             return self._root_check(alias, command, emit)
+        return self._verify_or_effect(alias, host, command, emit)
+
+    def _verify_or_effect(self, alias: str, host: State, command: str, emit: list[str]) -> int:
+        if "-m cli.fleet_update.probes " in command:
+            return self._fleet_probe(alias, command, emit)
         if "verify" in command:
             return self._verify(alias, command, emit)
         return self._effect_for(alias, host, command, emit)
+
+    def _fleet_probe(self, alias: str, command: str, emit: list[str]) -> int:
+        phase = command.split("-m cli.fleet_update.probes ", 1)[1].split(maxsplit=1)[0]
+        override = self.s["probe_replies"].get(f"{phase}|{alias}")
+        if override is not None:
+            rc, reply = override
+            emit.append(reply)
+            return rc
+        host = self.s["hosts"][alias]
+        target = self.s["new"] if phase == "prepare" else host["head"]
+        if phase == "supervision":
+            emit.append(f"FLEET_SUPERVISION={target} {'d' * 64} 2 running units")
+        else:
+            emit.append(
+                "FLEET_DOMAIN="
+                + json.dumps(
+                    {
+                        "version": 1,
+                        "target": target,
+                        "scope": "local" if alias == "gw" else "runner",
+                        "config": "c" * 64,
+                        "schema": "e" * 64,
+                        "applied": "e" * 64,
+                        "components": {"config": "ready", "schema": "ready"},
+                    }
+                )
+            )
+        return 0
 
     def _agents(self, command: str, emit: list[str]) -> int:
         emit[:] = [line for line in emit if line]

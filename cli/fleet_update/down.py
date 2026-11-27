@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .choices import DownChoices, FleetArgs, forwarded_flags, message_flag, start_flags
 from .fleet_gate import baselines, git_in_repo, probe_helper, probe_host, resolve_target
@@ -39,6 +39,7 @@ from .plan.stop_wave import StopChoices, StopStep, stop_steps
 from .plan.stored_schedules import schedule_check
 from .plan.wave_order import start_order
 from .prestage import prestage_command
+from .probes.collect import prepare_receipts
 from .programs import (
     CHECK_ROWS_SCRIPT,
     VERIFY_SCRIPTS,
@@ -99,6 +100,8 @@ class _Preflight:
     rebuilding: frozenset[str] = frozenset()
     legacy_stop: frozenset[str] = frozenset()
     heads: Mapping[str, str] = field(default_factory=dict[str, str])
+    running_roots: frozenset[str] = frozenset()
+    schema_changes: bool = False
 
 
 def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
@@ -142,6 +145,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     heads: dict[str, str] = {}
     serving: list[str] = []
     legacy_stop: list[str] = []
+    running_roots: set[str] = set()
     for alias, (facts, was_serving) in probed.items():
         verdict = _probe_verdict(s, args, alias, facts)
         if verdict is None:
@@ -150,6 +154,8 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
         heads[alias] = facts.get("head", "")
         if verdict.legacy_stop:
             legacy_stop.append(alias)
+        if facts.get("root") == "up":
+            running_roots.add(alias)
         if was_serving:
             serving.append(alias)
     old = _old_target(s, args, heads, new)
@@ -166,6 +172,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
             frozenset(serving),
             legacy_stop=frozenset(legacy_stop),
             heads=heads,
+            running_roots=frozenset(running_roots),
         )
     probes = _fetch_gateway_first(s, args, new)
     rebuild = args.rebuild_extras
@@ -181,6 +188,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
         rebuilding=rebuilding,
         legacy_stop=frozenset(legacy_stop),
         heads=heads,
+        running_roots=frozenset(running_roots),
     )
 
 
@@ -198,7 +206,7 @@ def _fetch_gateway_first(s: Session, args: FleetArgs, new: str) -> dict[str, dic
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
-def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
+def _stored_schedules(s: Session, args: FleetArgs, new: str) -> str:
     out = s.run(
         args.gateway,
         pre_verify_script(
@@ -215,6 +223,7 @@ def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
         s.say(note)
     if check.refusal is not None:
         raise RefusedError(check.refusal)
+    return check.status
 
 
 # meiva:note
@@ -222,7 +231,7 @@ def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
 # another generation is refused, and `up` only meets that refusal after every service stopped.
 # Runs under `--dry-run` too (the check fetches NEW's objects and nothing else, to answer it).
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
-def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
+def _kept_roots(s: Session, args: FleetArgs, new: str, pre: _Preflight) -> None:
     chosen = _chosen(args)
     if not root_is_kept(shell=chosen.shell, kept=chosen.kept):
         return
@@ -240,7 +249,13 @@ def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
     )
     refusals: list[str] = []
     for alias, output in outputs.items():
-        check = root_check(alias, output, new=new)
+        check = root_check(
+            alias,
+            output,
+            new=new,
+            dry_run=args.dry_run,
+            was_running=alias in pre.running_roots,
+        )
         for note in check.notes:
             s.say(note)
         if check.refusal is not None:
@@ -352,13 +367,24 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
     )
     runner_steps, gateway_step = steps[:-1], steps[-1]
     stopped: list[str] = []
+    failed: list[HostFailure] = []
     for step, outcome in zip(
         runner_steps, s.gather(runner_steps, lambda step: _stop_one(s, step)), strict=True
     ):
         if isinstance(outcome, FailedError):
-            s.defer(HostFailure(step.alias, "stop", str(outcome)))
+            failed.append(HostFailure(step.alias, "stop", str(outcome)))
         else:
             stopped.append(step.alias)
+    if failed and pre.schema_changes:
+        _recover_after_failed_stop(
+            s, args, pre.serving, frozenset(stopped), frozenset(item.alias for item in failed)
+        )
+        raise FailedError(
+            "schema-changing rollout stopped before gateway: "
+            + "; ".join(item.line() for item in failed)
+        )
+    for failure in failed:
+        s.defer(failure)
     try:
         _stop_one(s, gateway_step)
     except FailedError as exc:
@@ -421,9 +447,9 @@ def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
     with s.timed("kept-root check"):
-        _kept_roots(s, args, new)
+        _kept_roots(s, args, new, pre)
     with s.timed("stored-schedule verify"):
-        _stored_schedules(s, args, new)
+        schedules = _stored_schedules(s, args, new)
     with s.timed("prestage"):
         s.gather_hosts(
             _hosts(s, args),
@@ -431,7 +457,9 @@ def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight
             step="prestage",
             work=lambda alias: s.run(alias, prestage_command(new)),
         )
-    return pre
+    with s.timed("domain compatibility"):
+        schema_changes = prepare_receipts(s, args, _hosts(s, args), new, schedules=schedules)
+    return replace(pre, schema_changes=schema_changes)
 
 
 def down(

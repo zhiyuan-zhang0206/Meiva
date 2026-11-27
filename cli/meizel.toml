@@ -4,6 +4,7 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "__main__.py" = ["main.py"]
 "commands" = ["boundary", "database", "start_identity.py", "start_runtime.py", "startup"]
 "conftest.py" = ["commands", "tests"]
+"fleet_update" = ["commands", "database"]
 "init_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup"]
 "main.py" = ["database", "fleet_update", "parsers", "preflight.py", "start_identity.py", "start_runtime.py", "startup"]
 "parsers" = ["commands", "database", "fleet_update", "init_intent.py", "start_intent.py", "start_runtime.py", "startup"]
