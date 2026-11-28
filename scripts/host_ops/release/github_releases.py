@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -50,15 +51,31 @@ def asset_digest(path: Path) -> str:
         return "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def uploaded_assets(gh: Callable[..., str], release_id: str) -> dict[str, str]:
+@dataclass(frozen=True)
+class ReleaseAsset:
+    id: str
+    state: str
+    digest: str
+
+
+def release_assets(gh: Callable[..., str], release_id: str) -> dict[str, ReleaseAsset]:
     rows = gh(
         "api",
         "--paginate",
         f"repos/{{owner}}/{{repo}}/releases/{release_id}/assets",
         "--jq",
-        '.[] | [.name, (if .state == "uploaded" then .digest else "" end)] | @tsv',
+        ".[] | [.name, .id, .state, .digest] | @tsv",
     )
-    return asset_rows(rows)
+    assets: dict[str, ReleaseAsset] = {}
+    for line in rows.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 4:
+            raise ValueError(f"invalid release asset row: {line!r}")
+        name, asset_id, state, digest = fields
+        if not name or name in assets or not asset_id.isascii() or not asset_id.isdecimal():
+            raise ValueError(f"invalid release asset row: {line!r}")
+        assets[name] = ReleaseAsset(asset_id, state, digest)
+    return assets
 
 
 def asset_rows(rows: str) -> dict[str, str]:

@@ -4,7 +4,7 @@ import argparse
 import json
 import shutil
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +65,19 @@ def _stage_asset(
         source.download(gh, path)
 
 
+def _check_carried_app_signature(
+    baseline: dict[str, object], targets: Iterable[str], signature: Path
+) -> None:
+    platforms = baseline.get("platforms")
+    downloaded = signature.read_bytes().decode("utf-8")
+    for target in targets:
+        entry = platforms.get(target) if is_object_dict(platforms) else None
+        if not is_object_dict(entry) or entry.get("signature") != downloaded:
+            raise ValueError(
+                f"{signature.name} does not match the prior macOS manifest for {target}"
+            )
+
+
 def _stage_app(
     gh: Callable[..., str],
     release: ReleaseTarget,
@@ -72,13 +85,15 @@ def _stage_app(
     previous: ReleaseAssets | None,
     baseline: Path,
     artifacts: Path,
+    tauri_config: Path,
 ) -> str:
     source = None
+    prior_manifest = None
     if not build.version:
         if previous is None:
             raise ValueError("macOS needs a fresh build because Latest has no macOS baseline")
-        body = _manifest(baseline)
-        build = Build(_text(body, "version"), _text(body, "commit"))
+        prior_manifest = _manifest(baseline)
+        build = Build(_text(prior_manifest, "version"), _text(prior_manifest, "commit"))
         source = previous
     elif previous is not None:
         build_app_update_manifest.assert_version_advances(current=baseline, version=build.version)
@@ -93,9 +108,14 @@ def _stage_app(
         commit=build.commit,
         artifacts=release.directory,
         repo=release.repo,
+        tauri_config=tauri_config,
     )
     if not manifest["platforms"]:
         raise ValueError("macOS build is missing its updater signature")
+    if prior_manifest is not None:
+        _check_carried_app_signature(
+            prior_manifest, manifest["platforms"], release.directory / f"{archive}.sig"
+        )
     _write_manifest(release.directory / APP_MANIFEST, manifest)
     return build.version
 
@@ -167,7 +187,12 @@ class StageOptions:
     github_output: Path
 
 
-def stage_client_release(gh: Callable[..., str], args: StageOptions) -> None:
+def stage_client_release(
+    gh: Callable[..., str],
+    args: StageOptions,
+    *,
+    tauri_config: Path = build_app_update_manifest.DEFAULT_TAURI_CONFIG,
+) -> None:
     version = args.app_version or args.android_version
     if args.app_version and args.android_version and args.app_version != args.android_version:
         raise ValueError("the two new builds disagree on the client version")
@@ -184,6 +209,7 @@ def stage_client_release(gh: Callable[..., str], args: StageOptions) -> None:
         baseline.app,
         inputs / APP_MANIFEST,
         args.artifacts,
+        tauri_config,
     )
     android_version = _stage_android(
         gh,

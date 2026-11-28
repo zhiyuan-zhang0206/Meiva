@@ -11,6 +11,8 @@ than being handed an unverifiable archive.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -18,6 +20,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard
 from urllib.parse import quote
+
+DEFAULT_TAURI_CONFIG = Path(__file__).resolve().parents[2] / "ui/app/src-tauri/tauri.conf.json"
 
 _TAG = re.compile(r"(?P<kind>app|client)-v(?P<version>\d+\.\d+\.\d+)\Z")
 _SEMVER = re.compile(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\Z")
@@ -82,6 +86,63 @@ def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, st
     return signed[0] if signed else None
 
 
+def _minisign_pubkey(config: Path) -> bytes:
+    entry = _decoded(json.loads, config.read_text(encoding="utf-8"))
+    for field in ("plugins", "updater", "pubkey"):
+        entry = entry.get(field) if _is_str_object_dict(entry) else None
+    if not isinstance(entry, str):
+        raise TypeError(f"{config} requires an updater public key")
+    lines = base64.b64decode(entry, validate=True).splitlines()
+    if len(lines) != 2 or not lines[0].startswith(b"untrusted comment: "):
+        raise ValueError(f"{config} contains an invalid minisign public key")
+    packet = base64.b64decode(lines[1], validate=True)
+    if len(packet) != 42 or packet[:2] != b"Ed":
+        raise ValueError(f"{config} contains an invalid minisign public key")
+    return packet
+
+
+def _verify_signature(archive: Path, signature: str, config: Path) -> None:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    trusted_prefix = b"trusted comment: "
+    try:
+        untrusted, encoded, trusted, encoded_global = base64.b64decode(
+            signature, validate=True
+        ).splitlines()
+        packet = base64.b64decode(encoded, validate=True)
+        global_signature = base64.b64decode(encoded_global, validate=True)
+    except ValueError as error:
+        raise ValueError(f"{archive.name} has an invalid minisign signature") from error
+
+    algorithm = packet[:2]
+    if (
+        not untrusted.startswith(b"untrusted comment: ")
+        or not trusted.startswith(trusted_prefix)
+        or len(packet) != 74
+        or algorithm not in {b"ED", b"Ed"}
+        or len(global_signature) != 64
+    ):
+        raise ValueError(f"{archive.name} has an invalid minisign signature")
+
+    public_key = _minisign_pubkey(config)
+    if packet[2:10] != public_key[2:10]:
+        raise ValueError(f"{archive.name} signature key ID does not match the updater public key")
+
+    key = Ed25519PublicKey.from_public_bytes(public_key[10:])
+    if algorithm == b"ED":
+        with archive.open("rb") as stream:
+            message = hashlib.file_digest(stream, hashlib.blake2b).digest()
+    else:
+        message = archive.read_bytes()
+    file_signature = packet[10:]
+    try:
+        key.verify(file_signature, message)
+        key.verify(global_signature, file_signature + trusted.removeprefix(trusted_prefix))
+    except InvalidSignature as error:
+        raise ValueError(f"{archive.name} minisign signature verification failed") from error
+
+
 def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[str, str]:
     asset = quote(archive.name, safe="")
     return {
@@ -100,9 +161,8 @@ class AppUpdateManifest(TypedDict):
 
 
 # meiva:note
-# The parsed flags as a typed namespace. The release workflow runs this file with the runner's bare
-# `python3`, so it takes no project import: the flags are read through the namespace's own
-# annotations, which argparse fills.
+# Version-only commands also run with the runner's bare `python3`. Argparse fills this typed
+# namespace directly, and the signing dependency is loaded only when verifying a signed archive.
 class _Arguments(argparse.Namespace):
     command: str | None
     cargo_version: str
@@ -138,6 +198,7 @@ def build_manifest(
     repo: str,
     version: str | None = None,
     commit: str | None = None,
+    tauri_config: Path = DEFAULT_TAURI_CONFIG,
 ) -> AppUpdateManifest:
     resolved_version = _resolve_manifest_version(tag, version)
     if commit is not None and _COMMIT.fullmatch(commit) is None:
@@ -151,6 +212,7 @@ def build_manifest(
     macos = _signed_archive(artifacts, "*.app.tar.gz", "macOS")
     if macos is not None:
         archive, signature = macos
+        _verify_signature(archive, signature, tauri_config)
         entry = _platform_entry(repo, tag, archive, signature)
         # The universal archive contains both slices; the updater identifies
         # the running slice, so both target keys point at the same asset.

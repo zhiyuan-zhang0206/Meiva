@@ -280,6 +280,14 @@ jobs:
           merge-multiple: true
           path: artifacts
 
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.1'
+          enable-cache: true
+
+      - name: Install locked release dependencies
+        run: uv sync --frozen --no-dev
+
       - name: Publish the macOS tag release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -287,7 +295,7 @@ jobs:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
-          python3 scripts/codegen/build_app_update_manifest.py manifest \
+          .venv/bin/python scripts/codegen/build_app_update_manifest.py manifest \
             --tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA" \
             --artifacts artifacts --repo "$GITHUB_REPOSITORY" --out artifacts/latest.json
           gh release create "$REF_NAME" artifacts/* --verify-tag --latest=false \

@@ -14,8 +14,8 @@ from scripts.host_ops.release.client_release_baseline import (
 from scripts.host_ops.release.github_releases import (
     asset_digest,
     read_release_field,
+    release_assets,
     run_gh,
-    uploaded_assets,
 )
 
 
@@ -58,6 +58,27 @@ def _expected_assets(directory: Path) -> dict[str, str]:
     return expected
 
 
+def _resume_draft(
+    gh: Callable[..., str], tag: str, release_id: str, expected: dict[str, str]
+) -> set[str]:
+    assets = release_assets(gh, release_id)
+    if any(
+        asset.state != "starter"
+        and (asset.state != "uploaded" or asset.digest != expected.get(name))
+        for name, asset in assets.items()
+    ):
+        raise ValueError(f"draft {tag} contains unexpected assets or digests")
+    starters = [asset.id for asset in assets.values() if asset.state == "starter"]
+    if starters:
+        if _draft_id(gh, tag) != release_id:
+            raise ValueError(f"draft {tag} changed before starter asset cleanup")
+        for asset_id in starters:
+            _ = gh(
+                "api", "--method", "DELETE", f"repos/{{owner}}/{{repo}}/releases/assets/{asset_id}"
+            )
+    return {name for name, asset in assets.items() if asset.state == "uploaded"}
+
+
 def publish_client_release(
     gh: Callable[..., str], *, version: str, directory: Path, latest: str, notes: str
 ) -> None:
@@ -82,13 +103,15 @@ def publish_client_release(
         if release_id is None:
             raise ValueError(f"created draft {tag} is missing")
 
-    uploaded = uploaded_assets(gh, release_id)
-    if any(expected.get(name) != digest for name, digest in uploaded.items()):
-        raise ValueError(f"draft {tag} contains unexpected assets or digests")
-    missing = [str(directory / name) for name in sorted(expected.keys() - uploaded.keys())]
+    uploaded = _resume_draft(gh, tag, release_id, expected)
+    missing = [str(directory / name) for name in sorted(expected.keys() - uploaded)]
     if missing:
         _ = gh("release", "upload", tag, *missing)
-    if uploaded_assets(gh, release_id) != expected:
+    remote = release_assets(gh, release_id)
+    if len(remote) != len(expected) or any(
+        asset.state != "uploaded" or asset.digest != expected.get(name)
+        for name, asset in remote.items()
+    ):
         raise ValueError(f"draft {tag} does not have the six expected remote SHA-256 digests")
 
     _check_latest_snapshot(gh, version, latest)
