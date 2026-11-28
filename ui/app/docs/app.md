@@ -90,10 +90,12 @@ builds and checks that the client tag advances GitHub Latest. Android gets the
 code `1_000_000 + github.run_number` through a Tauri config overlay. The build
 reads the code and version name back from the APK with `aapt2`.
 
-The publisher uploads the six assets to a draft, checks GitHub's SHA-256 digest
-for each asset, and publishes the draft as Latest in one operation. Published
-client tags are write-once in the workflow. Rerun a failed publication job to
-resume a draft with matching assets from the same build.
+The publisher verifies the existing client tag before creating a draft. Once it
+has the release ID and upload URL, it addresses that draft directly for uploads
+and publication. It checks all six GitHub SHA-256 digests and publishes the
+draft as Latest in one operation. Published client tags are write-once in the
+workflow. Rerun a failed publication job to resume a draft with matching assets
+from the same build.
 
 Notification delivery on both platforms is its own node:
 [notifications](notifications.md).
