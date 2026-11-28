@@ -279,6 +279,8 @@ def test_activity_pads_the_content_root_by_the_system_bar_insets() -> None:
     assert "WindowInsetsCompat.Type.systemBars()" in patched
     assert "WindowInsetsCompat.Type.displayCutout()" in patched
     assert "setPadding(bars.left, bars.top, bars.right, bars.bottom)" in patched
+    assert "      insets.inset(bars.left, bars.top, bars.right, bars.bottom)\n    }" in patched
+    assert "insets" not in {line.strip() for line in patched.splitlines()}
     assert "ViewCompat.requestApplyInsets(meivaContent)" in patched
     assert "enableEdgeToEdge()" in patched
     assert patched.count("import android.os.Bundle") == 1
