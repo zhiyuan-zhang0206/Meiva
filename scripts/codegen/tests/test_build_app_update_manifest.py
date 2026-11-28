@@ -72,12 +72,12 @@ def test_version_name_increments_patch_by_run_number() -> None:
         manifest_builder.build_version_name("1.0.0", 0)
 
 
-def test_builds_mutable_app_latest_manifest_with_commit(tmp_path: Path) -> None:
+def test_builds_client_release_manifest_for_a_carried_macos_build(tmp_path: Path) -> None:
     _artifact(tmp_path, "Meiva_1.0.15.app.tar.gz", "mac-signature\n")
     commit = "a" * 40
 
     manifest = manifest_builder.build_manifest(
-        tag="app-latest",
+        tag="client-v1.0.16",
         version="1.0.15",
         commit=commit,
         artifacts=tmp_path,
@@ -89,18 +89,18 @@ def test_builds_mutable_app_latest_manifest_with_commit(tmp_path: Path) -> None:
         "commit": commit,
         "platforms": {
             "darwin-aarch64": {
-                "url": "https://github.com/owner/Meiva/releases/download/app-latest/Meiva_1.0.15.app.tar.gz",
+                "url": "https://github.com/owner/Meiva/releases/download/client-v1.0.16/Meiva_1.0.15.app.tar.gz",
                 "signature": "mac-signature",
             },
             "darwin-x86_64": {
-                "url": "https://github.com/owner/Meiva/releases/download/app-latest/Meiva_1.0.15.app.tar.gz",
+                "url": "https://github.com/owner/Meiva/releases/download/client-v1.0.16/Meiva_1.0.15.app.tar.gz",
                 "signature": "mac-signature",
             },
         },
     }
 
 
-def test_assert_version_advances_guards_app_latest(tmp_path: Path) -> None:
+def test_assert_version_advances_guards_latest(tmp_path: Path) -> None:
     current = tmp_path / "latest.json"
     current.write_text('{"version": "1.0.10", "platforms": {}}\n', encoding="utf-8")
 

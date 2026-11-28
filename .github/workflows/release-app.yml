@@ -1,24 +1,15 @@
-# Build the Meiva App (`ui/app`) for macOS and publish via a version tag,
-# a publishing reusable call, or a dispatch with dry_run=false.
+# Build the Meiva App (`ui/app`) for macOS. The release train receives signed
+# updater artifacts, and manual dispatches build artifacts for inspection.
+# An app-v* push publishes a standalone milestone without moving GitHub Latest.
 #
-# App versions move independently of the cluster, so the app has its own tag
-# namespace and its own release.
+# Tag releases require Apple Developer ID signing and notarization. Release
+# train builds retain the existing ad-hoc signing path when Apple secrets are
+# absent. A validation-only dispatch may omit all signing secrets.
 #
-# Every publication requires a Tauri updater signature. An app-v* tag push
-# also requires Apple Developer ID signing and notarization. Reusable calls and
-# manual dispatches can publish ad-hoc signed macOS builds when Apple secrets
-# are absent. A validation-only dispatch may omit all signing secrets.
-#
-# The gating secrets are lifted into job-level `env` because a step's `if` is
-# evaluated against the job's environment, not the step's own.
-#
-# Secrets, all optional:
-#   TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]  updater signatures + latest.json
+# Secrets:
+#   TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]  updater signatures
 #   APPLE_CERTIFICATE[_PASSWORD], APPLE_SIGNING_IDENTITY,
 #     APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID    Developer ID + notarization
-# #
-# `uses:` is pinned to a commit SHA with the version in a trailing comment, for
-# the same supply-chain reason as ci.yml.
 
 name: Release App
 
@@ -29,34 +20,19 @@ on:
   workflow_call:
     outputs:
       version:
-        description: 'Version published to the updater feed'
-        value: ${{ jobs.publish.outputs.version }}
+        description: 'Version in the uploaded build artifacts'
+        value: ${{ jobs.prepare.outputs.version }}
     inputs:
-      release_tag:
-        description: 'Certified cluster release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
-        required: false
-        type: string
-        default: ''
       target_sha:
-        description: 'Commit SHA to build and publish'
-        required: false
+        description: 'Certified commit SHA to build'
+        required: true
         type: string
-        default: ''
-      publish:
-        description: 'Publish to the mutable app-latest updater channel'
-        required: false
+      require_signing:
+        description: 'Require signing credentials for release artifacts'
         type: boolean
         default: true
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Build only; set to false to publish to the app-latest channel'
-        type: boolean
-        default: true
-      release_tag:
-        description: 'Optional certified release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
-        required: false
-        default: ''
       target_sha:
         description: 'Optional commit SHA to build (defaults to workflow ref HEAD)'
         required: false
@@ -79,13 +55,9 @@ jobs:
     name: Resolve app version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    env:
-      PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish == true || (github.event_name == 'workflow_dispatch' && toJSON(inputs.dry_run) == 'false') }}
     outputs:
-      publish: ${{ steps.version.outputs.publish }}
       version: ${{ steps.version.outputs.version }}
       target_sha: ${{ steps.version.outputs.target_sha }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,10 +67,8 @@ jobs:
         id: version
         env:
           REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_NUMBER: ${{ github.run_number }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           target_sha="$(git rev-parse HEAD)"
           python3 - <<'PY'
@@ -134,16 +104,12 @@ jobs:
               ).strip()
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
-              output.write(f"release_tag={os.environ.get('RELEASE_TAG', '')}\n")
           PY
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
-          echo "publish=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
 
   desktop:
     name: ${{ matrix.label }}
     needs: prepare
-    outputs:
-      built_at: ${{ steps.collect.outputs.built_at }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -163,7 +129,7 @@ jobs:
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       EVENT_NAME: ${{ github.event_name }}
-      PUBLISH_RELEASE: ${{ needs.prepare.outputs.publish }}
+      REQUIRE_SIGNING: ${{ github.event_name == 'push' || inputs.require_signing == true }}
       APP_VERSION: ${{ needs.prepare.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -209,7 +175,7 @@ jobs:
             echo "Updater signing password is configured without a private key" >&2
             exit 1
           fi
-          if [ "$PUBLISH_RELEASE" = true ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+          if [ "$REQUIRE_SIGNING" = true ] && [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "Published macOS releases require updater signing" >&2
             exit 1
           fi
@@ -271,15 +237,22 @@ jobs:
           test "$web_content" = true
 
       - name: Collect artifacts
-        id: collect
         shell: bash
         run: |
           mkdir -p dist
-          find ui/app/src-tauri/target -path '*/release/bundle/*' \
-            \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) \
-            -exec cp {} dist/ \;
+          bundle="ui/app/src-tauri/target/${{ matrix.target }}/release/bundle"
+          dmg="Meiva_${APP_VERSION}_universal.dmg"
+          cp "$bundle/dmg/$dmg" "dist/$dmg"
+          archive="Meiva_${APP_VERSION}.app.tar.gz"
+          if [ -f "$bundle/macos/Meiva.app.tar.gz" ]; then
+            cp "$bundle/macos/Meiva.app.tar.gz" "dist/$archive"
+            cp "$bundle/macos/Meiva.app.tar.gz.sig" "dist/$archive.sig"
+          fi
+          if [ "$REQUIRE_SIGNING" = true ]; then
+            test -s "dist/$archive"
+            test -s "dist/$archive.sig"
+          fi
           ls -l dist
-          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -287,16 +260,14 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
-    name: Publish the release
+  publish-tag:
+    name: Publish the standalone tag release
     needs: [prepare, desktop]
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
-      contents: write # create the release and upload its assets
-    if: needs.prepare.outputs.publish == 'true'
-    outputs:
-      version: ${{ needs.prepare.outputs.version }}
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -306,61 +277,18 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: app-*
-          path: artifacts
           merge-multiple: true
+          path: artifacts
 
-      - name: Build the app-latest manifest
-        env:
-          APP_VERSION: ${{ needs.prepare.outputs.version }}
-          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
-        run: |
-          mkdir release-assets
-          cp "artifacts/Meiva_${APP_VERSION}_universal.dmg" release-assets/
-          archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"
-          cp artifacts/Meiva.app.tar.gz "$archive"
-          cp artifacts/Meiva.app.tar.gz.sig "$archive.sig"
-          test -s "$archive.sig"
-          python3 scripts/codegen/build_app_update_manifest.py \
-            --tag app-latest \
-            --version "$APP_VERSION" \
-            --commit "$TARGET_SHA" \
-            --artifacts release-assets \
-            --repo "$GITHUB_REPOSITORY" \
-            --out release-assets/latest.json
-          cat release-assets/latest.json
-
-      - name: Publish the macOS release assets
+      - name: Publish the macOS tag release
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
-          BUILT_AT: ${{ needs.desktop.outputs.built_at }}
-          # Two retries give GitHub time to recover while bounding the replacement window.
-          MANIFEST_UPLOAD_ATTEMPTS: 3
         run: |
-          archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"
-          binaries=("release-assets/Meiva_${APP_VERSION}_universal.dmg" "$archive" "$archive.sig")
-          manifest=release-assets/latest.json
-          jq -e '.platforms | length == 2' "$manifest" >/dev/null
-          notes="$(printf 'Version: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' "$APP_VERSION" "$TARGET_SHA" "$BUILT_AT")"
-
-          python3 -m scripts.host_ops.release.publish_feed --tag app-latest \
-            --version "$APP_VERSION" --target "$TARGET_SHA" \
-            --manifest-attempts "$MANIFEST_UPLOAD_ATTEMPTS" \
-            --title "Meiva Desktop Updater Feed ($APP_VERSION)" --notes "$notes" \
-            "${binaries[@]}" "$manifest"
-          if [ "$EVENT_NAME" = "push" ]; then
-            mkdir -p "$RUNNER_TEMP/tag-release"
-            tag_manifest="$RUNNER_TEMP/tag-release/latest.json"
-            python3 scripts/codegen/build_app_update_manifest.py \
-              --tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA" \
-              --artifacts release-assets --repo "$GITHUB_REPOSITORY" --out "$tag_manifest"
-            if ! gh release view "$REF_NAME" >/dev/null 2>&1; then
-              gh release create "$REF_NAME" --verify-tag --latest=false \
-                --title "Meiva App $REF_NAME" --generate-notes
-            fi
-            gh release upload "$REF_NAME" "${binaries[@]}" --clobber
-            gh release upload "$REF_NAME" "$tag_manifest" --clobber
-          fi
+          python3 scripts/codegen/build_app_update_manifest.py manifest \
+            --tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA" \
+            --artifacts artifacts --repo "$GITHUB_REPOSITORY" --out artifacts/latest.json
+          gh release create "$REF_NAME" artifacts/* --verify-tag --latest=false \
+            --title "Meiva App $REF_NAME" --generate-notes

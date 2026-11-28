@@ -89,7 +89,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 })();
 """
 
-_DOWNLOAD_PAGE = "https://github.com/zhiyuan-zhang0206/Meiva/releases/tag/android-latest"
+_DOWNLOAD_PAGE = "https://github.com/zhiyuan-zhang0206/Meiva/releases/latest"
 
 
 def _available(version_name: str = "1.0.0", version_code: int = 4003) -> dict[str, object]:

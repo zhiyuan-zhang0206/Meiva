@@ -28,8 +28,7 @@ pub struct AppConfig {
 
 /// Where the user is sent when the in-app update path cannot run. The release
 /// workflow keeps this page pointing at the newest rolling build.
-const UPDATE_DOWNLOAD_PAGE: &str =
-    "https://github.com/zhiyuan-zhang0206/Meiva/releases/tag/android-latest";
+const UPDATE_DOWNLOAD_PAGE: &str = "https://github.com/zhiyuan-zhang0206/Meiva/releases/latest";
 
 impl AppConfig {
     pub fn build<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Self {

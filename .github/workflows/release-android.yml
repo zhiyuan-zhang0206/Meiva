@@ -8,16 +8,9 @@
 # produced (0.4.2). Tauri's `autoIncrementVersionCode` stays off: it reads a
 # file the generated tree never keeps between CI builds.
 #
-# An `android-v*` tag publishes one immutable release. Every other run replaces
-# the APK and `android-latest.json` in the mutable `android-latest` prerelease;
-# the manifest's fields (versionCode, versionName, apkUrl, sha256, commit,
-# builtAt) are the client update contract. A version tag, a publishing reusable
-# call, or a dispatch with dry_run=false can publish. The versionCode guard
-# compares the new versionCode with the manifest already
-# advertised, so a late re-run of an older run cannot roll phones back.
-#
-# This workflow is deliberately independent of release-app.yml: Android signing
-# is sufficient for an APK release and must not depend on desktop credentials.
+# The release train receives a signed APK as a workflow artifact. Manual
+# dispatches build artifacts, while an android-v* push publishes a standalone
+# milestone without moving GitHub Latest.
 
 name: Release Android APK
 
@@ -28,36 +21,25 @@ on:
   workflow_call:
     outputs:
       version:
-        description: 'Version published to the updater feed'
-        value: ${{ jobs.publish.outputs.version }}
+        description: 'Version in the uploaded build artifacts'
+        value: ${{ jobs.prepare.outputs.version }}
+      version_code:
+        description: 'Version code verified in the APK'
+        value: ${{ jobs.prepare.outputs.build_number }}
+      built_at:
+        description: 'UTC timestamp of the built APK'
+        value: ${{ jobs.android.outputs.built_at }}
     inputs:
-      release_tag:
-        description: 'Certified cluster release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
-        required: false
-        type: string
-        default: ''
       target_sha:
-        description: 'Commit SHA to build and publish'
-        required: false
+        description: 'Certified commit SHA to build'
+        required: true
         type: string
-        default: ''
-      publish:
-        description: 'Publish to the mutable android-latest updater channel'
-        required: false
+      require_signing:
+        description: 'Require signing credentials for release artifacts'
         type: boolean
         default: true
   workflow_dispatch:
     inputs:
-      dry_run:
-        # Default true: a manual dispatch is a build, not a release. Pass
-        # dry_run=false to replace the android-latest channel deliberately.
-        description: 'Build only; set to false to publish to the android-latest channel'
-        type: boolean
-        default: true
-      release_tag:
-        description: 'Optional certified release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
-        required: false
-        default: ''
       target_sha:
         description: 'Optional commit SHA to build (defaults to workflow ref HEAD)'
         required: false
@@ -67,9 +49,6 @@ permissions:
   contents: read
 
 concurrency:
-  # Serialize builds feeding the mutable android-latest release: concurrent
-  # runs would race on the same asset (one 422, or an older build overwriting
-  # a newer one). Tag releases queue behind branch builds and vice versa.
   group: android-release
   cancel-in-progress: false
 
@@ -83,14 +62,10 @@ jobs:
     name: Resolve app version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    env:
-      PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish == true || (github.event_name == 'workflow_dispatch' && toJSON(inputs.dry_run) == 'false') }}
     outputs:
-      publish: ${{ steps.version.outputs.publish }}
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.build.outputs.build_number }}
       target_sha: ${{ steps.version.outputs.target_sha }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,7 +77,6 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_NUMBER: ${{ github.run_number }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           target_sha="$(git rev-parse HEAD)"
           python3 - <<'PY'
@@ -138,10 +112,8 @@ jobs:
               ).strip()
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
-              output.write(f"release_tag={os.environ.get('RELEASE_TAG', '')}\n")
           PY
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
-          echo "publish=$PUBLISH_RELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Compute the build number
         id: build
@@ -164,7 +136,7 @@ jobs:
       ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      PUBLISH_RELEASE: ${{ needs.prepare.outputs.publish }}
+      REQUIRE_SIGNING: ${{ github.event_name == 'push' || inputs.require_signing == true }}
       NDK_VERSION: 27.2.12479018
       BUILD_TOOLS_VERSION: '36.0.0'
       APP_VERSION: ${{ needs.prepare.outputs.version }}
@@ -234,7 +206,7 @@ jobs:
             echo "Android signing secrets are only partially configured" >&2
             exit 1
           fi
-          if [ "$PUBLISH_RELEASE" = true ] && [ "$missing" -gt 0 ]; then
+          if [ "$REQUIRE_SIGNING" = true ] && [ "$missing" -gt 0 ]; then
             echo "Release tags require Android signing" >&2
             exit 1
           fi
@@ -273,9 +245,10 @@ jobs:
           aapt2="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/aapt2"
           "$aapt2" dump badging "${apks[0]}" > "$RUNNER_TEMP/badging.txt"
           head -n 1 "$RUNNER_TEMP/badging.txt"
-          if ! grep -Fq "versionCode='$BUILD_NUMBER'" "$RUNNER_TEMP/badging.txt"; then
-            echo "APK versionCode does not match the injected $BUILD_NUMBER" >&2
-            exit 1
+          grep -F "versionCode='$BUILD_NUMBER'" "$RUNNER_TEMP/badging.txt"
+          grep -F "versionName='$APP_VERSION'" "$RUNNER_TEMP/badging.txt"
+          if [ "$REQUIRE_SIGNING" = true ]; then
+            "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify "${apks[0]}"
           fi
 
       - name: Collect artifacts
@@ -293,18 +266,14 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
-    name: Publish the Android release
+  publish-tag:
+    name: Publish the standalone tag release
     needs: [prepare, android]
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
-      contents: write # create the release and upload its assets
-    # A manual dispatch may build and inspect the APK without touching the
-    # channel phones update from; release-gate workflow_call and tag runs publish.
-    if: needs.prepare.outputs.publish == 'true'
-    outputs:
-      version: ${{ needs.prepare.outputs.version }}
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -314,51 +283,13 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: android-app
-          path: release-assets
+          path: artifacts
 
-      - name: Build the update manifest
-        # Only the mutable channel carries the manifest; a tag release is an
-        # immutable milestone the app does not consult.
-        if: github.event_name != 'push'
-        env:
-          APP_VERSION: ${{ needs.prepare.outputs.version }}
-          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
-          BUILT_AT: ${{ needs.android.outputs.built_at }}
-          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
-        run: |
-          python3 scripts/codegen/build_android_release.py manifest \
-            --version-code "$BUILD_NUMBER" \
-            --version-name "$APP_VERSION" \
-            --apk "release-assets/meiva-app-$APP_VERSION.apk" \
-            --commit "$TARGET_SHA" --built-at "$BUILT_AT" \
-            --repo "$GITHUB_REPOSITORY" \
-            --out release-assets/android-latest.json
-
-      - name: Publish the Android release assets
+      - name: Publish the Android tag release
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           APP_VERSION: ${{ needs.prepare.outputs.version }}
-          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
-          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
-          BUILT_AT: ${{ needs.android.outputs.built_at }}
-          # Two retries give GitHub time to recover while bounding the replacement window.
-          MANIFEST_UPLOAD_ATTEMPTS: 3
         run: |
-          apk="release-assets/meiva-app-$APP_VERSION.apk"
-          if [ "$EVENT_NAME" = "push" ]; then
-            if ! gh release view "$REF_NAME" >/dev/null 2>&1; then
-              gh release create "$REF_NAME" --verify-tag --latest=false \
-                --title "Meiva App Android $REF_NAME" --notes "Meiva App Android APK release."
-            fi
-            gh release upload "$REF_NAME" "$apk" --clobber
-          else
-            notes="$(printf 'Version: %s\n\nVersion code: %s\n\nCommit: `%s`\n\nBuilt at: %s\n' \
-              "$APP_VERSION" "$BUILD_NUMBER" "$TARGET_SHA" "$BUILT_AT")"
-            python3 -m scripts.host_ops.release.publish_feed --tag android-latest \
-              --version "$APP_VERSION" --version-code "$BUILD_NUMBER" --target "$TARGET_SHA" \
-              --manifest-attempts "$MANIFEST_UPLOAD_ATTEMPTS" \
-              --title "Meiva Android Updater Feed ($APP_VERSION)" --notes "$notes" \
-              "$apk" release-assets/android-latest.json
-          fi
+          gh release create "$REF_NAME" "artifacts/meiva-app-$APP_VERSION.apk" --verify-tag --latest=false \
+            --title "Meiva App Android $REF_NAME" --generate-notes

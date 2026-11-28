@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard
 from urllib.parse import quote
 
-LATEST_RELEASE_TAG = "app-latest"
-_TAG = re.compile(r"app-v(?P<version>\d+\.\d+\.\d+)\Z")
+_TAG = re.compile(r"(?P<kind>app|client)-v(?P<version>\d+\.\d+\.\d+)\Z")
 _SEMVER = re.compile(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -65,9 +64,7 @@ def assert_version_advances(*, current: Path, version: str) -> None:
         raise TypeError(f"{current} has no string version")
     previous = semver_tuple(previous_raw)
     if candidate <= previous:
-        raise ValueError(
-            f"refusing version {version}: {LATEST_RELEASE_TAG} already advertises {previous_raw}"
-        )
+        raise ValueError(f"refusing version {version}: Latest already advertises {previous_raw}")
 
 
 def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, str] | None:
@@ -95,7 +92,7 @@ def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[
 
 class AppUpdateManifest(TypedDict):
     # meiva:note
-    # Tauri's updater reads `version` and `platforms` from the manifest; `commit` records the Git SHA packaged into `app-latest` so the release train knows whether `ui/app` has changed since the last published desktop build.
+    # Tauri's updater reads `version` and `platforms` from the manifest; `commit` records the Git SHA packaged into the release so the release train knows whether `ui/app` has changed since the last published desktop build.
 
     version: str
     platforms: dict[str, dict[str, str]]
@@ -120,15 +117,15 @@ class _Arguments(argparse.Namespace):
 
 
 def _resolve_manifest_version(tag: str, version: str | None) -> str:
-    if tag == LATEST_RELEASE_TAG:
-        if version is None:
-            raise ValueError(f"--version is required when --tag is '{LATEST_RELEASE_TAG}'")
-        semver_tuple(version)
-        return version
     match = _TAG.fullmatch(tag)
     if match is None:
-        raise ValueError(f"'{tag}' is not an app-v<major>.<minor>.<patch> tag")
+        raise ValueError(f"'{tag}' is not an app-v or client-v SemVer tag")
     tag_version = match.group("version")
+    if match.group("kind") == "client":
+        if version is None:
+            raise ValueError("--version is required for a client-v tag")
+        semver_tuple(version)
+        return version
     if version is not None and version != tag_version:
         raise ValueError(f"--version '{version}' does not match tag '{tag}'")
     return tag_version
@@ -187,7 +184,7 @@ def main(argv: list[str]) -> int:
         version_parser.add_argument("--run-number", type=int, required=True)
 
         guard_parser = commands.add_parser(
-            "assert-advances", help="fail unless the version is newer than app-latest's manifest"
+            "assert-advances", help="fail unless the version is newer than Latest's macOS manifest"
         )
         guard_parser.add_argument("--current", type=Path, required=True)
         guard_parser.add_argument("--version", required=True)
@@ -203,7 +200,7 @@ def main(argv: list[str]) -> int:
             if args.version is None:
                 raise ValueError("--version is required")
             assert_version_advances(current=args.current, version=args.version)
-            print(f"version {args.version} advances {LATEST_RELEASE_TAG}")
+            print(f"version {args.version} advances Latest")
             return 0
     else:
         parser = argparse.ArgumentParser(description=__doc__)

@@ -12,9 +12,8 @@
 #   - moving annotated tag `channel/latest` carrying a `meiva-channel/v1` JSON pointer when
 #     certifying `refs/heads/main` (non-hotfix).
 #
-# Cluster certification and promotion use the Git refs above. The downstream client packaging
-# jobs update the platform feeds, and a train that packages clients publishes the unified
-# `client-v<version>` installer release as the repository's GitHub Latest.
+# Cluster certification and promotion use the Git refs above. When a client needs packaging,
+# the train publishes both installers and both updater manifests on one `client-v<version>` release.
 #
 # A cron slot GitHub never started is backfilled with `main-typecheck.yml` (`workflow_dispatch`),
 # which runs the full-tree type check and publishes nothing.
@@ -656,23 +655,20 @@ jobs:
             printf 'Verification for commit `%s` using the full verification jobs in this run.\n' "$SHA" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-tools
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/host_ops/release
+            scripts/codegen
+
       - name: Fetch current client release manifests
+        working-directory: release-tools
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/client-manifests"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/app-latest" \
-            --jq '.assets[] | select(.name == "latest.json") | .url' > "$RUNNER_TEMP/app_asset_url.txt" 2>/dev/null || true
-          if [ -s "$RUNNER_TEMP/app_asset_url.txt" ]; then
-            gh api "$(cat "$RUNNER_TEMP/app_asset_url.txt")" \
-              -H "Accept: application/octet-stream" > "$RUNNER_TEMP/client-manifests/app-latest.json" 2>/dev/null || rm -f "$RUNNER_TEMP/client-manifests/app-latest.json"
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/android-latest" \
-            --jq '.assets[] | select(.name == "android-latest.json") | .url' > "$RUNNER_TEMP/android_asset_url.txt" 2>/dev/null || true
-          if [ -s "$RUNNER_TEMP/android_asset_url.txt" ]; then
-            gh api "$(cat "$RUNNER_TEMP/android_asset_url.txt")" \
-              -H "Accept: application/octet-stream" > "$RUNNER_TEMP/client-manifests/android-latest.json" 2>/dev/null || rm -f "$RUNNER_TEMP/client-manifests/android-latest.json"
-          fi
+        run: python3 -m scripts.host_ops.release.client_release_baseline "$RUNNER_TEMP/client-manifests"
 
       - name: Mint annotated release certificate
         id: mint
@@ -695,7 +691,7 @@ jobs:
           --version "$EXPLICIT_VERSION"
           --hotfix-of "$HOTFIX_OF"
           --reason "$REASON"
-          --app-manifest "$RUNNER_TEMP/client-manifests/app-latest.json"
+          --app-manifest "$RUNNER_TEMP/client-manifests/latest.json"
           --android-manifest "$RUNNER_TEMP/client-manifests/android-latest.json"
           --github-output "$GITHUB_OUTPUT"
 
@@ -731,9 +727,8 @@ jobs:
       contents: write
     uses: ./.github/workflows/release-app.yml
     with:
-      release_tag: ${{ needs.certify.outputs.version }}
       target_sha: ${{ needs.certify.outputs.sha }}
-      publish: true
+      require_signing: true
     secrets: inherit
 
   release-android:
@@ -744,9 +739,8 @@ jobs:
       contents: write
     uses: ./.github/workflows/release-android.yml
     with:
-      release_tag: ${{ needs.certify.outputs.version }}
       target_sha: ${{ needs.certify.outputs.sha }}
-      publish: true
+      require_signing: true
     secrets: inherit
 
   publish-client-release:
@@ -767,65 +761,45 @@ jobs:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
 
-      - name: Stage the current installers
-        id: installers
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.release-app.result == 'success'
+        with:
+          pattern: app-*
+          path: artifacts
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.release-android.result == 'success'
+        with:
+          name: android-app
+          path: artifacts
+
+      - name: Stage the complete client release
+        id: stage
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ needs.certify.outputs.sha }}
           APP_VERSION: ${{ needs.release-app.outputs.version }}
           ANDROID_VERSION: ${{ needs.release-android.outputs.version }}
-        run: |
-          mkdir installers
-          gh release download app-latest --pattern latest.json --dir "$RUNNER_TEMP"
-          gh release download android-latest --pattern android-latest.json --dir "$RUNNER_TEMP"
-          macos="$(jq -er '.version' "$RUNNER_TEMP/latest.json")"
-          android="$(jq -er '.versionName' "$RUNNER_TEMP/android-latest.json")"
-
-          check_feed() {
-            local current="$1" expected="$2" manifest="$3"
-            if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Invalid client version in $manifest"
-              return 1
-            fi
-            if [ -n "$expected" ]; then
-              if [ "$current" != "$expected" ] ||
-                  [ "$(jq -er '.commit' "$manifest")" != "$TARGET_SHA" ]; then
-                echo "::error::Updater feed $manifest no longer advertises this build"
-                return 1
-              fi
-            fi
-          }
-          check_feed "$macos" "$APP_VERSION" "$RUNNER_TEMP/latest.json"
-          check_feed "$android" "$ANDROID_VERSION" "$RUNNER_TEMP/android-latest.json"
-          if [ -n "$APP_VERSION" ] && [ -n "$ANDROID_VERSION" ] && [ "$APP_VERSION" != "$ANDROID_VERSION" ]; then
-            echo "::error::The two builds disagree on the client version"
-            exit 1
-          fi
-
-          dmg="Meiva_${macos}_universal.dmg"
-          apk="meiva-app-$android.apk"
-          gh release download app-latest --pattern "$dmg" --dir installers
-          gh release download android-latest --pattern "$apk" --dir installers
-          checksum="$(jq -er '.sha256' "$RUNNER_TEMP/android-latest.json")"
-          printf '%s  installers/%s\n' "$checksum" "$apk" | sha256sum --check
-
-          version="${APP_VERSION:-$ANDROID_VERSION}"
-          test -n "$version"
-          printf 'version=%s\ndmg=%s\napk=%s\n' "$version" "$dmg" "$apk" >> "$GITHUB_OUTPUT"
-          printf 'macOS Universal %s and Android %s.\n\nRelease train commit: `%s`\n' \
-            "$macos" "$android" "$TARGET_SHA" > "$RUNNER_TEMP/client-release-notes.md"
-
-      - name: Check that the client release can become Latest
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
-        run: python3 -m scripts.host_ops.release.check_client_release "$CLIENT_VERSION"
+          ANDROID_CODE: ${{ needs.release-android.outputs.version_code }}
+          ANDROID_BUILT_AT: ${{ needs.release-android.outputs.built_at }}
+        run: >
+          python3 -m scripts.host_ops.release.stage_client_release
+          --app-version "$APP_VERSION"
+          --android-version "$ANDROID_VERSION"
+          --android-code "${ANDROID_CODE:-0}"
+          --android-built-at "$ANDROID_BUILT_AT"
+          --commit "$TARGET_SHA"
+          --repo "$GITHUB_REPOSITORY"
+          --artifacts artifacts
+          --workspace "$RUNNER_TEMP/client-release"
+          --github-output "$GITHUB_OUTPUT"
 
       - name: Ensure the client tag identifies the certified commit
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
           TARGET_SHA: ${{ needs.certify.outputs.sha }}
-          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
+          CLIENT_VERSION: ${{ steps.stage.outputs.version }}
         run: |
           tag="client-v$CLIENT_VERSION"
           ref="refs/tags/$tag"
@@ -844,12 +818,11 @@ jobs:
       - name: Publish the client Latest release
         env:
           GH_TOKEN: ${{ github.token }}
-          CLIENT_VERSION: ${{ steps.installers.outputs.version }}
-          DMG: ${{ steps.installers.outputs.dmg }}
-          APK: ${{ steps.installers.outputs.apk }}
-        run: |
-          tag="client-v$CLIENT_VERSION"
-          title="Meiva App $CLIENT_VERSION"
-          notes="$RUNNER_TEMP/client-release-notes.md"
-          gh release create "$tag" "installers/$DMG" "installers/$APK" --verify-tag --latest \
-            --title "$title" --notes-file "$notes"
+          CLIENT_VERSION: ${{ steps.stage.outputs.version }}
+          PREVIOUS_LATEST: ${{ steps.stage.outputs.latest }}
+        run: >
+          python3 -m scripts.host_ops.release.publish_client_release
+          --version "$CLIENT_VERSION"
+          --latest "$PREVIOUS_LATEST"
+          --directory "$RUNNER_TEMP/client-release/assets"
+          --notes "$RUNNER_TEMP/client-release/notes.md"

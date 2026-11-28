@@ -2,8 +2,8 @@
 //! describes a newer build than the installed one, and how a downloaded APK is
 //! proven to match it.
 //!
-//! The Android release workflow publishes `android-latest.json` beside the
-//! rolling APK. The rules live here, free of device APIs, so they run under
+//! The unified client release publishes `android-latest.json` beside the
+//! versioned APK. The rules live here, free of device APIs, so they run under
 //! `cargo test` on any host; `update_android` adds the manifest location, the
 //! network and the installer half behind `target_os = "android"`.
 
@@ -121,7 +121,7 @@ mod tests {
     fn valid() -> String {
         manifest(
             4003,
-            "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/android-latest/meiva-app-1.2.3.apk",
+            "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/client-v1.2.4/meiva-app-1.2.3.apk",
             DIGEST,
         )
     }
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(parsed.version_code, 4003);
         assert_eq!(parsed.version_name, "1.2.3");
         assert_eq!(parsed.sha256, DIGEST);
-        assert!(parsed.apk_url.starts_with("https://github.com/"));
+        assert_eq!(parsed.apk_url, "https://github.com/zhiyuan-zhang0206/Meiva/releases/download/client-v1.2.4/meiva-app-1.2.3.apk");
     }
 
     #[test]

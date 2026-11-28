@@ -1,9 +1,9 @@
 # Android updates
 
 The app never polls. One check runs per app session from the injected prompt
-(`src-tauri/scripts/update-check.js`) through `app_check_update`: Rust reads the
-rolling release's `android-latest.json` manifest (`versionCode`, `versionName`,
-`apkUrl`, `sha256`) and compares its build number with the installed one
+(`src-tauri/scripts/update-check.js`) through `app_check_update`: Rust reads
+`/releases/latest/download/android-latest.json` on GitHub (`versionCode`,
+`versionName`, `apkUrl`, `sha256`) and compares its build number with the installed one
 (`BuildConfig.VERSION_CODE`). A strictly greater `versionCode` is the only
 "newer" signal — `versionName` is a human milestone and may repeat across
 builds. A newer build publishes `window.__MEIVA_APP__.update` (rendered in normal
@@ -20,7 +20,7 @@ and signing-certificate set to equal the installed app's, opens the per-app
 declares that provider at `${applicationId}.fileprovider` with a cache path; the
 overlay adds `REQUEST_INSTALL_PACKAGES`. The user still confirms the install: a
 silent swap is not available to side-loaded apps. Every failure returns the
-manifest's download page, which both surfaces offer as the fallback.
+GitHub Latest download page, which both surfaces offer as the fallback.
 
 The settings screen carries the About block: `app_update_info` supplies the
 version name and build number without touching the network, and the manual

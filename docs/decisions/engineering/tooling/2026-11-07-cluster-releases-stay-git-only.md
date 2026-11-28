@@ -24,9 +24,9 @@ API: `scripts/host_ops/release/base.py:load_certified_releases` walks local tags
 `scripts/host_ops/release/git_tags.py:list_tag_names`; `cli/fleet_update/plan/release_target.py`
 resolves `refs/tags/<version>` and `refs/tags/channel/{latest,stable}`;
 `scripts/host_ops/release/{certify,promote}.py` mint and verify the `meiva-release/v1` certificate
-inside the annotated tag message. The repository's only `repos/*/releases/latest` call is
+inside the annotated tag message. Before the decision, the repository's only `repos/*/releases/latest` call is
 `scripts/ci/dependency_audit.py`, and it reads third-party vendors (wal-g, uv, pnpm, Grafana), not
-this repository. The app update chain uses fixed `app-latest` / `android-latest` asset endpoints
+this repository. The app update chain used fixed `app-latest` / `android-latest` asset endpoints
 precisely because dated cluster releases made `/releases/latest` unusable as an app channel
 (`.github/workflows/release-app.yml`).
 
@@ -34,9 +34,9 @@ precisely because dated cluster releases made `/releases/latest` unusable as an 
 
 A certified cluster release publishes Git only: the annotated `vYYYY.MM.DD.HHMMSS[-hfN]` tag, the
 `channel/latest` pointer, and on promotion the `channel/stable` pointer. The certify and promote
-jobs publish those Git refs. The downstream client packaging jobs update their updater feeds.
-When the train packages a client, it publishes the `client-v<version>` release with the current
-installers and marks it GitHub Latest.
+jobs publish those Git refs. When the train packages a client, it publishes the `client-v<version>` release with both
+installers and updater manifests, and marks it GitHub Latest. See the
+[client release flow](../../../../ui/app/docs/app.md#build-and-release).
 
 ## Alternatives rejected
 

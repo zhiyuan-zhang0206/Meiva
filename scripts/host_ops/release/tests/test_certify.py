@@ -288,7 +288,7 @@ def test_mint_reports_client_packaging_when_ui_app_changes_or_manifest_lags(
     _git(repo, "commit", "-q", "-m", "backend only")
     sha_backend = _git(repo, "rev-parse", "HEAD")
 
-    app_manifest = tmp_path / "app-latest.json"
+    app_manifest = tmp_path / "latest.json"
     app_manifest.write_text(json.dumps({"version": "1.0.1", "commit": sha_app1}), encoding="utf-8")
     missing_android_manifest = tmp_path / "missing-android-latest.json"
 
