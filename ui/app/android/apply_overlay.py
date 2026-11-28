@@ -67,7 +67,7 @@ _MAIN_ACTIVITY_INSETS = """
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
       )
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-      insets
+      insets.inset(bars.left, bars.top, bars.right, bars.bottom)
     }
     ViewCompat.requestApplyInsets(meivaContent)
 """

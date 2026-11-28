@@ -4,14 +4,21 @@
 
 Tauri's generated `MainActivity` calls `enableEdgeToEdge()`, so the webview's
 top edge is y=0 under the status bar and its bottom edge under the navigation
-bar. A plain Android WebView reports no CSS safe-area insets to the page, so
-the console cannot pad itself out of the system UI: the fix has to be native.
-The build-time overlay pads the generated activity's content root by the system
-bars plus the display cutout and re-requests the insets after installing the
-listener, so every page sits inside the usable area on edge-to-edge devices and
-the padding is zero where the window already fits. The patch is idempotent and
-refuses an unrecognised activity template rather than shipping an APK whose
-header hides under the status bar (`tests/ui/test_android_overlay.py`).
+bar. The build-time overlay pads `android.R.id.content` by the system bars and
+display cutout so both the hosted console and bundled pages sit inside the usable
+area, including on older WebViews.
+
+[Android WebView](https://developer.android.com/develop/ui/views/layout/webapps/understand-window-insets)
+maps delivered system bar and cutout insets to CSS `env(safe-area-inset-*)` on
+all WebViews starting with Chromium M144. After padding the content root,
+`MainActivity` returns `insets.inset(bars.left, bars.top, bars.right, bars.bottom)`.
+This subtracts the padding from the insets dispatched to the WebView, so the
+page avoids applying the same safe area twice. Inset updates still propagate,
+including the remaining IME (soft keyboard) inset for viewport resizing.
+
+The overlay requests inset dispatch after installing the listener. The patch
+is idempotent and rejects unrecognised activity templates
+(`tests/ui/test_android_overlay.py`).
 
 ## Host bridge and console chrome
 
