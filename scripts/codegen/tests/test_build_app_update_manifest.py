@@ -161,6 +161,8 @@ def test_assert_version_advances_guards_latest(tmp_path: Path) -> None:
     [
         ("garbage", "invalid minisign signature"),
         ("key id", "key ID"),
+        ("padding bits", "invalid minisign signature"),
+        ("non-UTF-8 comment", "invalid minisign signature"),
         ("archive", "signature verification failed"),
         ("trusted comment", "signature verification failed"),
     ],
@@ -173,6 +175,13 @@ def test_rejects_invalid_updater_signatures(
     if tamper == "key id":
         packet = base64.b64decode(lines[1])
         lines[1] = base64.b64encode(packet[:2] + b"fake-key" + packet[10:])
+    if tamper == "padding bits":
+        alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        global_signature = lines[3]
+        index = alphabet.index(global_signature[-3])
+        lines[3] = global_signature[:-3] + alphabet[index + 1 : index + 2] + b"=="
+    if tamper == "non-UTF-8 comment":
+        lines[0] += b"\xff"
     if tamper == "trusted comment":
         lines[2] += b" modified"
     signature = base64.b64encode(b"\n".join(lines) + b"\n").decode()

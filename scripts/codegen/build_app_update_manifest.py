@@ -86,16 +86,29 @@ def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, st
     return signed[0] if signed else None
 
 
+def _canonical_base64(encoded: bytes) -> bytes:
+    decoded = base64.b64decode(encoded, validate=True)
+    if base64.b64encode(decoded) != encoded:
+        raise ValueError("non-canonical base64")
+    return decoded
+
+
+def _minisign_lines(encoded: str) -> list[bytes]:
+    text = _canonical_base64(encoded.encode("ascii"))
+    _ = text.decode("utf-8")
+    return text.replace(b"\r\n", b"\n").removesuffix(b"\n").split(b"\n")
+
+
 def _minisign_pubkey(config: Path) -> bytes:
     entry = _decoded(json.loads, config.read_text(encoding="utf-8"))
     for field in ("plugins", "updater", "pubkey"):
         entry = entry.get(field) if _is_str_object_dict(entry) else None
     if not isinstance(entry, str):
         raise TypeError(f"{config} requires an updater public key")
-    lines = base64.b64decode(entry, validate=True).splitlines()
+    lines = _minisign_lines(entry)
     if len(lines) != 2 or not lines[0].startswith(b"untrusted comment: "):
         raise ValueError(f"{config} contains an invalid minisign public key")
-    packet = base64.b64decode(lines[1], validate=True)
+    packet = _canonical_base64(lines[1])
     if len(packet) != 42 or packet[:2] != b"Ed":
         raise ValueError(f"{config} contains an invalid minisign public key")
     return packet
@@ -107,11 +120,9 @@ def _verify_signature(archive: Path, signature: str, config: Path) -> None:
 
     trusted_prefix = b"trusted comment: "
     try:
-        untrusted, encoded, trusted, encoded_global = base64.b64decode(
-            signature, validate=True
-        ).splitlines()
-        packet = base64.b64decode(encoded, validate=True)
-        global_signature = base64.b64decode(encoded_global, validate=True)
+        untrusted, encoded, trusted, encoded_global = _minisign_lines(signature)
+        packet = _canonical_base64(encoded)
+        global_signature = _canonical_base64(encoded_global)
     except ValueError as error:
         raise ValueError(f"{archive.name} has an invalid minisign signature") from error
 
