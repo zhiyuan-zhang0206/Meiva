@@ -194,9 +194,8 @@ def test_certify_triggers_client_packaging_when_ui_app_needs_release() -> None:
     )
     assert app_job["uses"] == "./.github/workflows/release-app.yml"
     assert app_job["with"] == {
-        "release_tag": "${{ needs.certify.outputs.version }}",
         "target_sha": "${{ needs.certify.outputs.sha }}",
-        "publish": True,
+        "require_signing": True,
     }
     assert app_job["secrets"] == "inherit"
 
@@ -208,9 +207,8 @@ def test_certify_triggers_client_packaging_when_ui_app_needs_release() -> None:
     )
     assert android_job["uses"] == "./.github/workflows/release-android.yml"
     assert android_job["with"] == {
-        "release_tag": "${{ needs.certify.outputs.version }}",
         "target_sha": "${{ needs.certify.outputs.sha }}",
-        "publish": True,
+        "require_signing": True,
     }
     assert android_job["secrets"] == "inherit"
 
@@ -240,16 +238,15 @@ def test_unified_release_waits_for_successful_client_builds() -> None:
 
 def test_unified_release_checks_latest_and_creates_an_immutable_release() -> None:
     steps = _yaml(_RELEASE_GATE)["jobs"]["publish-client-release"]["steps"]
-    check = _step(steps, "Check that the client release can become Latest")
+    stage = _step(steps, "Stage the complete client release")
     tag = _step(steps, "Ensure the client tag identifies the certified commit")
     publish = _step(steps, "Publish the client Latest release")
-    assert "if" not in check
-    assert 'scripts.host_ops.release.check_client_release "$CLIENT_VERSION"' in check["run"]
-    assert steps.index(check) < steps.index(tag) < steps.index(publish)
-    assert "gh release create " in publish["run"]
-    assert "--verify-tag --latest" in publish["run"]
-    assert "gh release upload" not in publish["run"]
-    assert "gh release edit" not in publish["run"]
+    assert "scripts.host_ops.release.stage_client_release" in stage["run"]
+    assert "scripts.host_ops.release.publish_client_release" in publish["run"]
+    assert steps.index(stage) < steps.index(tag) < steps.index(publish)
+    assert tag["env"]["GH_TOKEN"] == "${{ secrets.RELEASE_PUSH_TOKEN }}"  # noqa: S105
+    assert publish["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105
+    assert publish["env"]["PREVIOUS_LATEST"] == "${{ steps.stage.outputs.latest }}"
 
 
 def test_client_artifact_download_is_scoped_and_tag_namespaces_are_disjoint() -> None:
@@ -264,13 +261,25 @@ def test_client_artifact_download_is_scoped_and_tag_namespaces_are_disjoint() ->
     ):
         downloads = [
             step["with"]
-            for step in workflow["jobs"]["publish"]["steps"]
+            for step in workflow["jobs"]["publish-tag"]["steps"]
             if step.get("uses", "").startswith("actions/download-artifact@")
         ]
         assert len(downloads) == 1
         assert {
             key: downloads[0][key] for key in ("pattern", "name") if key in downloads[0]
         } == expected
+
+    steps = _yaml(_RELEASE_GATE)["jobs"]["publish-client-release"]["steps"]
+    downloads = [
+        step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")
+    ]
+    assert [(step["if"], step["with"]) for step in downloads] == [
+        (
+            "needs.release-app.result == 'success'",
+            {"pattern": "app-*", "path": "artifacts", "merge-multiple": True},
+        ),
+        ("needs.release-android.result == 'success'", {"name": "android-app", "path": "artifacts"}),
+    ]
 
 
 def test_promote_workflow_verifies_certificate_and_updates_channel_stable() -> None:

@@ -48,9 +48,10 @@ it". The two never mix, and neither replaces the other; see the
 - **No GitHub Release per cluster version.** A certified release is the annotated tag and the
   channel pointers, both of which travel by `git fetch --tags`; nothing in this repository reads a
   `v*` Release object. When the train packages a client, the unified `client-v<version>`
-  installer release takes GitHub's `Latest` badge. The client auto-updaters read the dedicated
-  `app-latest` and `android-latest` feeds. See the
-  [decision](../../decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
+  release puts both installers and updater manifests under GitHub's `Latest` badge.
+  Both clients read manifests through `/releases/latest/download/` and fetch binaries
+  from the versioned release. See the [client release flow](../../../ui/app/docs/app.md#build-and-release)
+  and the [cluster release decision](../../decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
 - **Release verification.** Dispatch `release-gate.yml` on `main` with `verify_only=true` to run
   the full release suite early with read-only permissions. The release gate can reuse a successful first
   attempt started in the preceding 24 hours when GitHub identifies it as this repository's

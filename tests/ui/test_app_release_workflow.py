@@ -50,13 +50,11 @@ _APPLE_SECRETS = _APPLE_SIGNING | _APPLE_NOTARIZATION
 
 
 @pytest.mark.parametrize(
-    ("event", "publish", "secrets", "error"),
+    ("event", "require_signing", "secrets", "error"),
     [
         ("workflow_call", "true", _UPDATER_SIGNING, ""),
-        ("workflow_dispatch", "true", _UPDATER_SIGNING, ""),
         ("workflow_dispatch", "false", {}, ""),
         ("workflow_call", "true", {}, "Published macOS releases require updater signing"),
-        ("workflow_dispatch", "true", {}, "Published macOS releases require updater signing"),
         ("push", "true", _APPLE_SECRETS, "Published macOS releases require updater signing"),
         ("push", "true", _UPDATER_SIGNING, "Release tags require Apple signing and notarization"),
         (
@@ -75,18 +73,21 @@ _APPLE_SECRETS = _APPLE_SIGNING | _APPLE_NOTARIZATION
         ),
         (
             "workflow_dispatch",
-            "true",
+            "false",
             _UPDATER_SIGNING | {"APPLE_ID": "id"},
             "Apple notarization secrets are only partially configured",
         ),
     ],
 )
 def test_macos_release_signing_policy(
-    event: str, publish: str, secrets: dict[str, str], error: str
+    event: str, require_signing: str, secrets: dict[str, str], error: str
 ) -> None:
     desktop = yaml.safe_load(_workflow())["jobs"]["desktop"]
     assert desktop["env"]["EVENT_NAME"] == "${{ github.event_name }}"
-    assert desktop["env"]["PUBLISH_RELEASE"] == "${{ needs.prepare.outputs.publish }}"
+    assert (
+        desktop["env"]["REQUIRE_SIGNING"]
+        == "${{ github.event_name == 'push' || inputs.require_signing == true }}"
+    )
     [validate] = [
         step
         for step in desktop["steps"]
@@ -94,7 +95,7 @@ def test_macos_release_signing_policy(
     ]
     result = subprocess.run(  # noqa: S603 -- execute the checked-in signing validation step
         ["bash", "-eo", "pipefail", "-c", validate["run"]],
-        env={"EVENT_NAME": event, "PUBLISH_RELEASE": publish} | secrets,
+        env={"EVENT_NAME": event, "REQUIRE_SIGNING": require_signing} | secrets,
         capture_output=True,
         text=True,
         check=False,
@@ -117,26 +118,14 @@ def test_android_build_injects_the_run_number_as_version_code() -> None:
     assert "versionCode='$BUILD_NUMBER'" in text
 
 
-def test_android_latest_publishes_the_manifest_with_the_apk() -> None:
-    text = _android_workflow()
-    assert "build_android_release.py manifest" in text
-    assert "--out release-assets/android-latest.json" in text
-    assert '"$apk" release-assets/android-latest.json' in text
-    assert "scripts.host_ops.release.publish_feed --tag android-latest" in text
-
-
-def test_android_manual_dispatch_builds_without_publishing_by_default() -> None:
-    text = _android_workflow()
-    assert "dry_run:" in text
-    assert "default: true" in text
-    assert "toJSON(inputs.dry_run) == 'false'" in text
-    assert "if: needs.prepare.outputs.publish == 'true'" in text
-
-
-def test_android_publish_refuses_to_roll_the_channel_back() -> None:
-    text = _android_workflow()
-    assert "publish_feed --tag android-latest" in text
-    assert '--version "$APP_VERSION" --version-code "$BUILD_NUMBER" --target "$TARGET_SHA"' in text
+def test_client_builds_handoff_artifacts_and_publish_only_standalone_tags() -> None:
+    for text in (_workflow(), _android_workflow()):
+        workflow = yaml.safe_load(text)
+        assert set(workflow[True]["workflow_dispatch"]["inputs"]) == {"target_sha"}
+        assert workflow["jobs"]["publish-tag"]["if"] == "github.event_name == 'push'"
+        assert "--latest=false" in text
+        assert "--clobber" not in text
+    assert 'apksigner" verify' in _android_workflow()
 
 
 def test_manual_dispatch_keeps_the_explicit_unsigned_build_path() -> None:
@@ -153,14 +142,8 @@ def test_merging_to_main_does_not_trigger_client_release_builds() -> None:
         assert "version-name" in text
 
 
-def test_desktop_publish_guards_app_latest_and_stamps_commit() -> None:
+def test_standalone_desktop_tag_stamps_the_build_commit() -> None:
     text = _workflow()
-    assert 'archive="release-assets/Meiva_${APP_VERSION}.app.tar.gz"' in text
-    assert 'cp artifacts/Meiva.app.tar.gz.sig "$archive.sig"' in text
-    _, publish = text.split("      - name: Publish the macOS release assets", maxsplit=1)
-    step, _ = publish.split("        run: |", maxsplit=1)
-    assert "if:" not in step
-    feed, tag = publish.split('if [ "$EVENT_NAME" = "push" ]; then', maxsplit=1)
-    assert "scripts.host_ops.release.publish_feed --tag app-latest" in feed
-    assert '--version "$APP_VERSION" --target "$TARGET_SHA"' in feed
-    assert '--tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA"' in tag
+    assert 'archive="Meiva_${APP_VERSION}.app.tar.gz"' in text
+    assert 'test -s "dist/$archive.sig"' in text
+    assert '--tag "$REF_NAME" --version "$APP_VERSION" --commit "$TARGET_SHA"' in text

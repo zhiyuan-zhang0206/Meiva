@@ -127,19 +127,14 @@ cd ../../..
   scripts/codegen/tests/test_build_android_release.py -q
 ```
 
-Tags matching `app-v<major>.<minor>.<patch>` drive
-`.github/workflows/release-app.yml`. The macOS updater asset is listed
-in `latest.json` only when its Tauri signature exists. Publishing requires
-updater and Apple signing credentials. Manual dispatch defaults to build-only validation.
+The release train publishes macOS and Android together on GitHub Latest at
+`client-v<version>`. It distributes the universal macOS DMG, Android APK, signed
+macOS updater archive and signature, and one manifest per platform.
 
-Android builds from `.github/workflows/release-android.yml` inject
-`versionCode = 1_000_000 + run_number` (rule and manifest:
-`scripts/codegen/build_android_release.py`), read it back out of the APK, and
-publish `android-latest.json` beside the APK in the mutable `android-latest`
-prerelease. `workflow_dispatch` defaults to `dry_run=true` (build only); set it
-to false to replace the channel, and a publish fails unless its versionCode
-exceeds the one the channel already advertises.
+The standalone `app-v<version>` and `android-v<version>` tag workflows publish
+platform milestones. Manual dispatches build artifacts for inspection. The
+release train requires the Tauri updater key for macOS and a signing keystore for
+Android. Standalone macOS tag releases also require Apple Developer ID signing
+and notarization.
 
-The release train publishes a unified `client-v<version>` GitHub Latest release
-with the current macOS DMG and Android APK after it packages either client.
 See [the release flow](docs/app.md#build-and-release).

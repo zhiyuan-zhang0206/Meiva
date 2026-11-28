@@ -54,9 +54,8 @@ a `meiva-release/v1` JSON certificate and advances `channel/latest`, without
 reverse commits on `main` and without creating a GitHub Release.
 `promote-release.yml` (`workflow_dispatch`) verifies a certified release tag via
 `scripts/host_ops/release/promote.py` before advancing `channel/stable`. Both
-workflows publish Git tags only: the GitHub Releases page carries artifact
-deliverables (`android-*`, `app-*` and their `*-latest` feeds), whose `Latest`
-badge a cluster release must not take. See
+workflows publish cluster certification as Git tags. GitHub Latest carries the
+unified `client-v<version>` release for both native clients. See
 [host versioning](../docs/conventions/engineering/host-versioning.md) and the
 [Git-only cluster release decision](../docs/decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
 
@@ -66,17 +65,18 @@ backfill: `workflow_dispatch` only (optional `ref`, default `main`), `contents:
 read`, one hosted-runner job that runs the full `basedpyright` and the pyright
 test-environment drift check, and no step that tags, pushes or releases.
 
-### `workflows/release-app.yml` — macOS app release
+### Native client build and release
 
-Called by `release-gate.yml` when a certified release includes `ui/app` changes
-since `app-latest` (or triggered by an `app-v<major>.<minor>.<patch>` tag or
-manual `workflow_dispatch`), building a universal macOS DMG and updater archive
-with a monotonic run-number SemVer (`<major>.<minor>.<patch + run_number>`).
-Complete secret groups activate Apple and Tauri updater signing; missing groups retain unsigned
-build evidence. Signed updater archives become `latest.json` (recording the
-packaged `commit`), published to the mutable `app-latest` feed asset (and to the
-immutable version release for `app-v*` tags). Manual dispatch with `dry_run=true`
-builds without publishing.
+`release-app.yml` builds the macOS DMG and signed updater archive.
+`release-android.yml` builds the signed Android APK. The release train compares
+each current release manifest's packaged commit against the certified tree,
+builds the platforms that need an update, and downloads their workflow artifacts.
+
+The train carries the other platform forward when one build is skipped. The
+unified publisher verifies the six draft assets by SHA-256 before promoting the
+draft to Latest. Standalone `app-v*` and `android-v*` push workflows publish
+platform milestones and leave Latest with the unified release. Manual dispatches
+produce workflow artifacts for inspection.
 
 ### Action pinning
 

@@ -69,23 +69,31 @@ exactly — the release workflows fail on mismatch — so a release starts by
 bumping `pyproject.toml` and its `Cargo.toml` mirror.
 `.github/workflows/ci-app.yml` path-filters Rust format/clippy, Android-target
 checking, and overlay/manifest tests.
-`release-app.yml` builds the universal macOS DMG. `release-android.yml` builds the Android APK.
-Publishing requires platform signing credentials. A build-only manual dispatch can still
-produce unsigned validation artifacts.
+`release-app.yml` uploads the universal macOS DMG, updater archive and signature.
+`release-android.yml` uploads the signed APK and returns its verified build identity.
+Manual dispatches build artifacts for inspection. Standalone tag pushes publish
+platform milestones with `--latest=false`.
 
-The desktop updater reads `latest.json` from `app-latest`. The Android updater reads
-`android-latest.json` from `android-latest`. The manifests point to versioned binaries.
-Rolling publications check the advertised version, upload and verify the new binaries,
-then replace the manifest at its stable URL with bounded retries. Old assets are removed
-after GitHub reports the expected digests for both the binaries and the new manifest.
-A train that packages either client publishes both current installers as the immutable
-`client-v<version>` GitHub Latest release. Publication refuses to overwrite an existing
-client release or replace a newer client Latest. If one platform was skipped, the release carries the installer from
-that platform's current updater feed and names its actual version in the release notes.
+Both updaters fetch their manifests through GitHub's `/releases/latest/download/`
+URLs. macOS reads `latest.json` and Android reads `android-latest.json`. Each
+manifest points to a binary on the same `client-v<version>` release using its
+versioned download URL.
 
-`release-android.yml` injects `versionCode = 1_000_000 + github.run_number`
-through a Tauri `--config` overlay, reads it back from the APK with `aapt2`, and
-refuses a publish that would not advance the advertised code.
+When the train rebuilds either platform, it stages all six assets. For a skipped
+platform, it reuses the exact binaries from the current release and regenerates
+the manifest with their original build identity and the new release's asset URL.
+During migration, a missing manifest in Latest can use its old updater feed as a
+baseline. If neither source has that platform's manifest, the train rebuilds it.
+
+The train checks macOS SemVer and Android versionCode against the advertised
+builds and checks that the client tag advances GitHub Latest. Android gets the
+code `1_000_000 + github.run_number` through a Tauri config overlay. The build
+reads the code and version name back from the APK with `aapt2`.
+
+The publisher uploads the six assets to a draft, checks GitHub's SHA-256 digest
+for each asset, and publishes the draft as Latest in one operation. Published
+client tags are write-once in the workflow. Rerun a failed publication job to
+resume a draft with matching assets from the same build.
 
 Notification delivery on both platforms is its own node:
 [notifications](notifications.md).

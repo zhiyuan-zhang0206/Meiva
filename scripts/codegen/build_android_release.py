@@ -14,10 +14,10 @@ from urllib.parse import quote
 
 BUILD_NUMBER_BASE = 1_000_000
 LEGACY_VERSION_CODE = 4002
-LATEST_RELEASE_TAG = "android-latest"
 MANIFEST_NAME = "android-latest.json"
 
 _VERSION_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]*")
+_TAG = re.compile(r"client-v[0-9]+\.[0-9]+\.[0-9]+")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
@@ -65,6 +65,7 @@ class _Arguments(argparse.Namespace):
     version_code: int
     current: Path
     apk: Path
+    tag: str
     commit: str
     repo: str
     built_at: str | None
@@ -83,10 +84,13 @@ def build_manifest(
     version_code: int,
     version_name: str,
     apk: Path,
+    tag: str,
     commit: str,
     repo: str,
     built_at: str,
 ) -> AndroidManifest:
+    if _TAG.fullmatch(tag) is None:
+        raise ValueError(f"'{tag}' is not a client-v SemVer tag")
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError(f"'{commit}' is not a full commit SHA")
     parts = repo.split("/")
@@ -99,10 +103,7 @@ def build_manifest(
     return AndroidManifest(
         versionCode=_checked_version_code(version_code),
         versionName=_checked_version_name(version_name),
-        apkUrl=(
-            f"https://github.com/{repo}/releases/download/{LATEST_RELEASE_TAG}/"
-            f"{quote(apk.name, safe='')}"
-        ),
+        apkUrl=(f"https://github.com/{repo}/releases/download/{tag}/{quote(apk.name, safe='')}"),
         sha256=digest,
         commit=commit,
         builtAt=_utc_timestamp(built_at),
@@ -126,7 +127,7 @@ def assert_version_code_advances(*, current: Path, version_code: int) -> None:
         raise TypeError(f"{current} has no integer versionCode")
     if version_code <= previous:
         raise ValueError(
-            f"refusing versionCode {version_code}: android-latest already advertises {previous}"
+            f"refusing versionCode {version_code}: Latest already advertises {previous}"
         )
 
 
@@ -168,7 +169,7 @@ def main(argv: list[str]) -> int:
     config_parser.add_argument("--version-code", type=int, required=True)
 
     guard_parser = commands.add_parser(
-        "assert-advances", help="fail unless the code is newer than android-latest's manifest"
+        "assert-advances", help="fail unless the code is newer than Latest's Android manifest"
     )
     guard_parser.add_argument("--current", type=Path, required=True)
     guard_parser.add_argument("--version-code", type=int, required=True)
@@ -176,6 +177,7 @@ def main(argv: list[str]) -> int:
     manifest_parser = commands.add_parser("manifest", help=f"write {MANIFEST_NAME}")
     manifest_parser.add_argument("--version-code", type=int, required=True)
     manifest_parser.add_argument("--version-name", required=True)
+    manifest_parser.add_argument("--tag", required=True)
     manifest_parser.add_argument("--apk", type=Path, required=True)
     manifest_parser.add_argument("--commit", required=True)
     manifest_parser.add_argument("--repo", required=True)
@@ -191,7 +193,7 @@ def main(argv: list[str]) -> int:
         return 0
     if args.command == "assert-advances":
         assert_version_code_advances(current=args.current, version_code=args.version_code)
-        print(f"versionCode {args.version_code} advances android-latest")
+        print(f"versionCode {args.version_code} advances Latest")
         return 0
 
     built_at = (
@@ -203,6 +205,7 @@ def main(argv: list[str]) -> int:
         version_code=args.version_code,
         version_name=args.version_name,
         apk=args.apk,
+        tag=args.tag,
         commit=args.commit,
         repo=args.repo,
         built_at=built_at,

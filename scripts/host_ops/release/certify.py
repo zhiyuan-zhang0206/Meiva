@@ -234,12 +234,12 @@ def _manifest_commit(manifest_path: Path) -> str | None:
 
 def _client_needs_packaging(
     repository: Path,
-    previous_sha: str | None,
+    previous_certified_sha: str | None,
     target_sha: str,
     manifest_path: Path | None,
 ) -> bool:
     if manifest_path is None:
-        return tree_paths_changed(repository, previous_sha, target_sha, _CLIENT_APP_PATHS)
+        return tree_paths_changed(repository, previous_certified_sha, target_sha, _CLIENT_APP_PATHS)
     if not manifest_path.is_file():
         return tree_paths_changed(repository, None, target_sha, _CLIENT_APP_PATHS)
     manifest_sha = _manifest_commit(manifest_path)

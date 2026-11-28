@@ -11,6 +11,8 @@ than being handed an unverifiable archive.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -19,8 +21,9 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, TypeGuard
 from urllib.parse import quote
 
-LATEST_RELEASE_TAG = "app-latest"
-_TAG = re.compile(r"app-v(?P<version>\d+\.\d+\.\d+)\Z")
+DEFAULT_TAURI_CONFIG = Path(__file__).resolve().parents[2] / "ui/app/src-tauri/tauri.conf.json"
+
+_TAG = re.compile(r"(?P<kind>app|client)-v(?P<version>\d+\.\d+\.\d+)\Z")
 _SEMVER = re.compile(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -65,9 +68,7 @@ def assert_version_advances(*, current: Path, version: str) -> None:
         raise TypeError(f"{current} has no string version")
     previous = semver_tuple(previous_raw)
     if candidate <= previous:
-        raise ValueError(
-            f"refusing version {version}: {LATEST_RELEASE_TAG} already advertises {previous_raw}"
-        )
+        raise ValueError(f"refusing version {version}: Latest already advertises {previous_raw}")
 
 
 def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, str] | None:
@@ -85,6 +86,74 @@ def _signed_archive(artifacts: Path, pattern: str, label: str) -> tuple[Path, st
     return signed[0] if signed else None
 
 
+def _canonical_base64(encoded: bytes) -> bytes:
+    decoded = base64.b64decode(encoded, validate=True)
+    if base64.b64encode(decoded) != encoded:
+        raise ValueError("non-canonical base64")
+    return decoded
+
+
+def _minisign_lines(encoded: str) -> list[bytes]:
+    text = _canonical_base64(encoded.encode("ascii"))
+    _ = text.decode("utf-8")
+    return text.replace(b"\r\n", b"\n").removesuffix(b"\n").split(b"\n")
+
+
+def _minisign_pubkey(config: Path) -> bytes:
+    entry = _decoded(json.loads, config.read_text(encoding="utf-8"))
+    for field in ("plugins", "updater", "pubkey"):
+        entry = entry.get(field) if _is_str_object_dict(entry) else None
+    if not isinstance(entry, str):
+        raise TypeError(f"{config} requires an updater public key")
+    lines = _minisign_lines(entry)
+    if len(lines) != 2 or not lines[0].startswith(b"untrusted comment: "):
+        raise ValueError(f"{config} contains an invalid minisign public key")
+    packet = _canonical_base64(lines[1])
+    if len(packet) != 42 or packet[:2] != b"Ed":
+        raise ValueError(f"{config} contains an invalid minisign public key")
+    return packet
+
+
+def _verify_signature(archive: Path, signature: str, config: Path) -> None:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    trusted_prefix = b"trusted comment: "
+    try:
+        untrusted, encoded, trusted, encoded_global = _minisign_lines(signature)
+        packet = _canonical_base64(encoded)
+        global_signature = _canonical_base64(encoded_global)
+    except ValueError as error:
+        raise ValueError(f"{archive.name} has an invalid minisign signature") from error
+
+    algorithm = packet[:2]
+    if (
+        not untrusted.startswith(b"untrusted comment: ")
+        or not trusted.startswith(trusted_prefix)
+        or len(packet) != 74
+        or algorithm not in {b"ED", b"Ed"}
+        or len(global_signature) != 64
+    ):
+        raise ValueError(f"{archive.name} has an invalid minisign signature")
+
+    public_key = _minisign_pubkey(config)
+    if packet[2:10] != public_key[2:10]:
+        raise ValueError(f"{archive.name} signature key ID does not match the updater public key")
+
+    key = Ed25519PublicKey.from_public_bytes(public_key[10:])
+    if algorithm == b"ED":
+        with archive.open("rb") as stream:
+            message = hashlib.file_digest(stream, hashlib.blake2b).digest()
+    else:
+        message = archive.read_bytes()
+    file_signature = packet[10:]
+    try:
+        key.verify(file_signature, message)
+        key.verify(global_signature, file_signature + trusted.removeprefix(trusted_prefix))
+    except InvalidSignature as error:
+        raise ValueError(f"{archive.name} minisign signature verification failed") from error
+
+
 def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[str, str]:
     asset = quote(archive.name, safe="")
     return {
@@ -95,7 +164,7 @@ def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[
 
 class AppUpdateManifest(TypedDict):
     # meiva:note
-    # Tauri's updater reads `version` and `platforms` from the manifest; `commit` records the Git SHA packaged into `app-latest` so the release train knows whether `ui/app` has changed since the last published desktop build.
+    # Tauri's updater reads `version` and `platforms` from the manifest; `commit` records the Git SHA packaged into the release so the release train knows whether `ui/app` has changed since the last published desktop build.
 
     version: str
     platforms: dict[str, dict[str, str]]
@@ -103,9 +172,8 @@ class AppUpdateManifest(TypedDict):
 
 
 # meiva:note
-# The parsed flags as a typed namespace. The release workflow runs this file with the runner's bare
-# `python3`, so it takes no project import: the flags are read through the namespace's own
-# annotations, which argparse fills.
+# Version-only commands also run with the runner's bare `python3`. Argparse fills this typed
+# namespace directly, and the signing dependency is loaded only when verifying a signed archive.
 class _Arguments(argparse.Namespace):
     command: str | None
     cargo_version: str
@@ -120,15 +188,15 @@ class _Arguments(argparse.Namespace):
 
 
 def _resolve_manifest_version(tag: str, version: str | None) -> str:
-    if tag == LATEST_RELEASE_TAG:
-        if version is None:
-            raise ValueError(f"--version is required when --tag is '{LATEST_RELEASE_TAG}'")
-        semver_tuple(version)
-        return version
     match = _TAG.fullmatch(tag)
     if match is None:
-        raise ValueError(f"'{tag}' is not an app-v<major>.<minor>.<patch> tag")
+        raise ValueError(f"'{tag}' is not an app-v or client-v SemVer tag")
     tag_version = match.group("version")
+    if match.group("kind") == "client":
+        if version is None:
+            raise ValueError("--version is required for a client-v tag")
+        semver_tuple(version)
+        return version
     if version is not None and version != tag_version:
         raise ValueError(f"--version '{version}' does not match tag '{tag}'")
     return tag_version
@@ -141,6 +209,7 @@ def build_manifest(
     repo: str,
     version: str | None = None,
     commit: str | None = None,
+    tauri_config: Path = DEFAULT_TAURI_CONFIG,
 ) -> AppUpdateManifest:
     resolved_version = _resolve_manifest_version(tag, version)
     if commit is not None and _COMMIT.fullmatch(commit) is None:
@@ -154,6 +223,7 @@ def build_manifest(
     macos = _signed_archive(artifacts, "*.app.tar.gz", "macOS")
     if macos is not None:
         archive, signature = macos
+        _verify_signature(archive, signature, tauri_config)
         entry = _platform_entry(repo, tag, archive, signature)
         # The universal archive contains both slices; the updater identifies
         # the running slice, so both target keys point at the same asset.
@@ -187,7 +257,7 @@ def main(argv: list[str]) -> int:
         version_parser.add_argument("--run-number", type=int, required=True)
 
         guard_parser = commands.add_parser(
-            "assert-advances", help="fail unless the version is newer than app-latest's manifest"
+            "assert-advances", help="fail unless the version is newer than Latest's macOS manifest"
         )
         guard_parser.add_argument("--current", type=Path, required=True)
         guard_parser.add_argument("--version", required=True)
@@ -203,7 +273,7 @@ def main(argv: list[str]) -> int:
             if args.version is None:
                 raise ValueError("--version is required")
             assert_version_advances(current=args.current, version=args.version)
-            print(f"version {args.version} advances {LATEST_RELEASE_TAG}")
+            print(f"version {args.version} advances Latest")
             return 0
     else:
         parser = argparse.ArgumentParser(description=__doc__)
